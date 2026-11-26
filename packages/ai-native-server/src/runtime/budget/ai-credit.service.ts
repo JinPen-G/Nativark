@@ -15,6 +15,7 @@ import { CountCallHistoryReader, type CallHistoryAnchor } from './count-call-his
 import { getRequestIdentity } from '@rental-os/platform-server/request-identity';
 import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
 import { createTenantModelConfigurationTransactions } from '../tenant-model-config-transactions';
+import { beginPlatformAiManagementTransaction } from '../platform-management-transaction';
 
 const id = z.string().min(1).max(191), key = z.string().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/u);
 const currency = z.string().regex(/^[A-Z]{3}$/u);
@@ -197,28 +198,45 @@ export class AiCreditService {
       fail('AI_RESOURCE_UNAVAILABLE', 503);
     }
   }
-  private async write<T>(work: (tx: Tx) => Promise<T>, tenant?: {
+  private async write<T>(work: (tx: Tx) => Promise<T>, owner?: {
     actor: Awaited<ReturnType<AiCreditService['identity']>>;
     authorization: string | undefined;
     recheck(): Promise<void>;
+    target?: { tenantId: string; enabling: boolean };
   }): Promise<T> {
-    const selected = !!tenant && hasRentalBusinessTenantFence();
-    const participant = selected ? createTenantModelConfigurationTransactions({ transactions: { auth: this.auth },
+    const selected = !!owner && hasRentalBusinessTenantFence();
+    const participant = selected && !owner!.actor.platform ? createTenantModelConfigurationTransactions({ transactions: { auth: this.auth },
       credentials: { current: async () => {
-        await tenant!.recheck();
-        if (!tenant!.authorization) fail('AI_ACCESS_DENIED', 403);
-        return { authorization: tenant!.authorization, audience: 'operator', requestId: 'credit-settings' };
+        await owner!.recheck();
+        if (!owner!.authorization) fail('AI_ACCESS_DENIED', 403);
+        return { authorization: owner!.authorization, audience: 'operator', requestId: 'credit-settings' };
       } } }) : undefined;
     let completed = false;
     try { return await this.db.$transaction(async tx => {
-      if (selected && !tenant!.actor.workspaceId) fail('AI_ACCESS_DENIED', 403);
+      if (selected && !owner!.actor.platform && !owner!.actor.workspaceId) fail('AI_ACCESS_DENIED', 403);
+      const platformParents = async () => {
+        if (!selected || !owner!.actor.platform) return;
+        if (!owner!.target?.tenantId) fail('AI_ACCESS_DENIED', 403);
+        // Resolve the target from the original request row, then take both Tenant
+        // parents in the public principal's order before any identity/credit row.
+        for (const tenantId of [...new Set([owner!.actor.tenantId, owner!.target.tenantId])].sort()) {
+          const rows = await tx.$queryRaw<Array<{ id: string; status: string }>>(prismaRuntime.sql`
+            SELECT id, status FROM Tenant WHERE id = ${tenantId} FOR UPDATE`);
+          const status = rows.length === 1 && rows[0].id === tenantId ? rows[0].status.toLowerCase() : '';
+          if (!['active', 'frozen', 'disabled'].includes(status)
+            || (tenantId === owner!.actor.tenantId || owner!.target.enabling) && status !== 'active') fail('AI_ACCESS_DENIED', 403);
+        }
+      };
+      await platformParents();
       // The original allowance/request transaction owns Auth/Tenant/Core first.
       // Only a confirmed commit may publish its original operation receipt.
-      const lease = await participant?.begin(tx, { actorId: tenant!.actor.userId,
-        tenantId: tenant!.actor.tenantId, workspaceId: tenant!.actor.workspaceId! });
+      const lease = selected && owner!.actor.platform
+        ? await beginPlatformAiManagementTransaction(tx, owner!.actor.userId)
+        : await participant?.begin(tx, { actorId: owner!.actor.userId,
+          tenantId: owner!.actor.tenantId, workspaceId: owner!.actor.workspaceId! });
       try {
         const result = await work(tx);
-        if (selected) { await tenant!.recheck(); await lease!.revalidate(); }
+        if (selected) { await owner!.recheck(); await lease!.revalidate(); await platformParents(); }
         completed = true;
         return result;
       } finally { lease?.close(); }
@@ -463,14 +481,21 @@ export class AiCreditService {
     return this.call(authorization, true, async (actor, recheck) => {
       const input = command(), decisionHash = digest({ actorId: actor.userId, requestId: input.requestId,
         operationKey: input.operationKey, decision: input.decision, amount: input.amount?.toFixed(6) ?? null });
+      const target = await this.db.aiTenantAiCreditRequest.findUnique({ where: { id: input.requestId }, select: { tenantId: true } });
+      await recheck();
+      if (!target?.tenantId) fail('AI_RESOURCE_UNAVAILABLE', 404);
+      const targetAuthority = { tenantId: target.tenantId, enabling: false };
       return this.write(async tx => {
         const reused = await tx.aiTenantAiCreditRequest.findFirst({ where: { decidedBy: actor.userId, decisionOperationKey: input.operationKey }, select: { id: true } });
         if (reused && reused.id !== input.requestId) fail('AI_REVISION_CONFLICT');
         await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_tenant_ai_credit_requests WHERE id = ${input.requestId} FOR UPDATE`);
         const row = await tx.aiTenantAiCreditRequest.findUnique({ where: { id: input.requestId }, include: requestInclude });
-        if (!row) fail('AI_RESOURCE_UNAVAILABLE', 404);
+        if (!row || row.tenantId !== target.tenantId) fail('AI_RESOURCE_UNAVAILABLE', 404);
         if (row.state !== 'pending') { if (row.decisionHash !== decisionHash) fail('AI_REVISION_CONFLICT'); await recheck(); return present(row); }
         if (row.revision !== input.expectedRevision) fail('AI_REVISION_CONFLICT');
+        // A frozen target may still expose the same committed decision. Only a
+        // new grant requires an active target through the final transaction check.
+        targetAuthority.enabling = input.decision === 'approve';
         if (input.decision === 'approve') {
           if (row.tenant.status !== 'ACTIVE') fail('AI_ACCESS_DENIED', 403);
           if (input.amount!.gt(row.requestedAmount)) fail('AI_CREDIT_ALLOCATION_EXCEEDED');
@@ -489,7 +514,7 @@ export class AiCreditService {
         if (changed.count !== 1) fail('AI_REVISION_CONFLICT');
         const saved = await tx.aiTenantAiCreditRequest.findUniqueOrThrow({ where: { id: row.id }, include: requestInclude });
         return present(saved);
-      });
+      }, { actor, authorization, recheck, target: targetAuthority });
     }, true, true);
   }
 }

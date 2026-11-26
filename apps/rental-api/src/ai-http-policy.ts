@@ -23,8 +23,8 @@ import { AI_STAFF_INSPECTION_REQUESTS } from "@rental-os/ai-native-server/runtim
 import * as shared from "@rental-os/shared";
 import { RENTAL_HOST_CONTROLLERS } from "./http-policy";
 import { RentalWebsiteClientEntryController, RentalWechatClientEntryController } from "./ai-client-http";
-import { RentalTenantBudgetController } from "./ai-budget-http";
-import { RentalTenantCreditController } from "./ai-credit-http";
+import { RentalPlatformBudgetController, RentalTenantBudgetController } from "./ai-budget-http";
+import { RentalPlatformCreditController, RentalTenantCreditController } from "./ai-credit-http";
 import { AiPlatformModelSettingsController, AI_NATIVE_PLATFORM_MODEL_SETTINGS_REQUESTS }
   from "@rental-os/ai-native-server/runtime/platform-model-settings.application";
 import { AiGatewayPricingHistoryController, AI_BUDGET_MANAGEMENT, AI_GATEWAY_PRICING_HISTORY }
@@ -37,8 +37,8 @@ export const RENTAL_AI_INSPECTION_OPERATIONS = Object.freeze([
 ]);
 export const RENTAL_AI_CONTROLLERS = Object.freeze([
   AiPlatformModelSettingsController,
-  RentalTenantCreditController,
-  RentalTenantBudgetController, AiGatewayPricingHistoryController,
+  RentalTenantCreditController, RentalPlatformCreditController,
+  RentalTenantBudgetController, RentalPlatformBudgetController, AiGatewayPricingHistoryController,
   OperatorEntrySceneCatalogController, StaffEntrySceneCatalogController, RentalStaffInspectionAssistController,
   InspectionRecognitionTaskController, StaffInspectionAccountingController,
   AiOriginalScenesController, AiOriginalSceneRecoveryController, AiTaskCenterController, AiModelSettingsController,
@@ -69,7 +69,18 @@ const accounting = StaffInspectionAccountingController.prototype;
 const budget = RentalTenantBudgetController.prototype, pricing = AiGatewayPricingHistoryController.prototype;
 const credit = RentalTenantCreditController.prototype;
 const platformSettings = AiPlatformModelSettingsController.prototype;
+const platformBudget = RentalPlatformBudgetController.prototype;
+const platformCredit = RentalPlatformCreditController.prototype;
 const declarations: readonly RentalHttpAccessDeclaration[] = [
+  ...reviewed(RentalPlatformCreditController, [platformCredit.platformRead, platformCredit.platformReceipt], "buffered-read",
+  "original SaaS read permission observes bounded pending requests or the exact decision receipt; same selected identity and final principal recheck, no allowance increase or tenant content"),
+  ...reviewed(RentalPlatformCreditController, [platformCredit.platformDecide], "transactional-write",
+  "original SaaS principal and persisted request target lock ordered Tenant parents before request/allowance rows in the same decision transaction; final authority and target checks, original CAS and decision key prevent duplicate grants"),
+  ...reviewed(RentalPlatformBudgetController, [platformBudget.platformRead, platformBudget.platformReadOperation,
+    platformBudget.platformPriceReviewReceipt], "buffered-read",
+  "original SaaS read permission and platform Scope observe existing policies and author-bound operation/rate receipts; same selected identity and final principal recheck, no invocation or pricing publication"),
+  ...reviewed(RentalPlatformBudgetController, [platformBudget.platformSave, platformBudget.platformReviewPrice], "transactional-write",
+  "original policy CAS/receipt and immutable rate review acquire current SaaS principal and selected data in their owning transactions before policy/Profile writes, revalidate before commit and retain the original unknown operation"),
   ...reviewed(AiPlatformModelSettingsController, [platformSettings.list, platformSettings.read,
     platformSettings.operation, platformSettings.capabilities], "buffered-read",
   "original SaaS management permission, profile ownership and bounded catalog/capability/operation observations; same selected identity and final principal recheck, no probe, model dispatch or credential export"),
@@ -238,10 +249,14 @@ export function createRentalAiHttpPolicy(authorization = createRentalAuthorizati
 /** Global management is selected from the mounted reviewed handlers, not a
  * platform URL prefix. The Core layer still requires its original SaaS lease. */
 export function rentalAiPlatformManagementSelector(policy: ReturnType<typeof createRentalAiHttpPolicy>) {
-  const handlers: readonly Function[] = [platformSettings.list, platformSettings.read, platformSettings.operation,
-    platformSettings.capabilities, platformSettings.save];
-  const routes = policy.routes.filter(route => route.controller === AiPlatformModelSettingsController
-    && handlers.includes(route.handler))
+  const handlers = new Map<Function, readonly Function[]>([
+    [AiPlatformModelSettingsController, [platformSettings.list, platformSettings.read, platformSettings.operation,
+      platformSettings.capabilities, platformSettings.save]],
+    [RentalPlatformBudgetController, [platformBudget.platformRead, platformBudget.platformReadOperation,
+      platformBudget.platformPriceReviewReceipt, platformBudget.platformSave, platformBudget.platformReviewPrice]],
+    [RentalPlatformCreditController, [platformCredit.platformRead, platformCredit.platformDecide, platformCredit.platformReceipt]]
+  ]);
+  const routes = policy.routes.filter(route => handlers.get(route.controller)?.includes(route.handler))
     .map(route => ({ ...route, pattern: new RegExp(`^${route.path.split('/').map(segment => segment.startsWith(':')
       ? '[^/]+' : segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('/')}$`, 'u') }));
   return Object.freeze({ isRoute: (request: { method: string; url: string }) => routes.some(route =>

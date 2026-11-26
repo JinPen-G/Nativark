@@ -15,8 +15,8 @@
 | [ai-http-policy.ts](src/ai-http-policy.ts)、[ai-openapi.ts](src/ai-openapi.ts) | 对实际 AI 处理器逐条登记读取/审计/原事务边界；发布相同挂载范围和原成功状态，不以 provider 存在开放路由。 |
 | [ai-client-http.ts](src/ai-client-http.ts)、[ai-client-request.ts](src/ai-client-request.ts) | 网站和小程序各五十一个原客户操作的明确挂载，覆盖目标与候选、报价参数准备/明确确认/原收据、Booking草稿/选择/页面提交、订单导航、资料、Task、模型及取消收尾；仅接受同一 Guard/客户准入绑定的实际请求，保留原方法、收据、响应状态和中止语义。 |
 | [ai-inspection-http.ts](src/ai-inspection-http.ts) | 逐条挂载员工原检查的二十二个操作，复用原 Controller；识别 Task 的十四个操作及两类账务操作由原 Controller 承接，读取、保存候选、人工确认与履约提交分别核权。 |
-| [ai-budget-http.ts](src/ai-budget-http.ts) | 挂载原预算管理的十一个租户方法；初始化、修改、配置刷新和明确采用平台费率进入原 Auth/Tenant/Core 事务，保留政策 CAS 及原操作收据。价格与输入上限的三个历史读取由原只读 Controller 承接。 |
-| [ai-credit-http.ts](src/ai-credit-http.ts) | 当前租户 AI 服务设置的六个额度与调用记录操作；申请和空间上限分配复用原服务、账本与收据，并在同一事务内核 Auth/Tenant/Core。平台批准由平台管理入口单独办理。 |
+| [ai-budget-http.ts](src/ai-budget-http.ts) | 挂载原预算管理的十一个租户方法及五个平台方法；租户写入核 Auth/Tenant/Core，平台预算保存与费率审阅核原 SaaS 主体，分别进入原事务并保留 CAS 及操作收据。价格与输入上限的三个历史读取由原只读 Controller 承接。 |
+| [ai-credit-http.ts](src/ai-credit-http.ts) | 挂载六个租户额度与调用记录操作、三个平台额度审批操作。申请和空间分配核 Auth/Tenant/Core；平台批准按原申请锁定管理主体及目标租户，审批与增额在同一事务提交，重复操作读取原决定。 |
 | [database.ts](src/database.ts) | 当前公共 41 模型与 Rental 121 模型组成宿主 Client，公共数据库令牌使用同一连接池；生成物仅归本宿主。唯一请求入口将公共及 Core 适配使用的官方 JSON 空值映射为所选 Client 的同义单例，不另开连接或改动调用方事务。 |
 | [http-application-views.ts](src/http-application-views.ts) | 向 HTTP 注入原服务方法，隐藏 Nest 生命周期钩子，避免同一业务实例被多个模块重复启动。 |
 | [lifecycle.ts](src/lifecycle.ts) | 唯一初始化、预热、配货/到期/文件/限流作业与数据库退出负责人；停止新请求和作业，等待原 HTTP 处理器及四作业参加者完成，再断开连接，排空失败不提前断库。 |
@@ -61,6 +61,10 @@ AI 选装宿主通过 [原收据选择器](src/ai-http-policy.ts) 从实际处�
 租户 AI 服务设置中的[平台额度](../../packages/ai-native-admin/src/platform-model-settings/AiCreditSettings.tsx)和[调用记录](../../packages/ai-native-admin/src/tenant-model-settings/AiCallRecords.tsx)使用同一原租户额度服务。额度申请、空间分配在原 Serializable 事务中先锁当前 Auth/Tenant/Core，再核额度行、CAS 和操作键，提交前复验当前权威。提交应答丢失后沿原键读取收据。调用记录只返回当前租户有权查看的最少元数据，平台金额须有原账依据，BYOK 仅显示用量，缺用量保持未知。停新或 Core 停用仅保留申请收据、分配收据和调用记录，仍要求当前会话、租户管理员及成员分配有效。
 
 SaaS 平台模型设置复用[原五操作 Controller](../../packages/ai-native-server/src/runtime/platform-model-settings.application.ts)，包括目录、配置、保存、原操作收据及能力证据观察。[平台管理选择器](src/ai-http-policy.ts)从实际挂载处理器生成方法和路径闭集，经原 SaaS 会话权威及所选数据可用性核验，支持没有经营空间的当前平台管理员。[原事务参加者](../../packages/ai-native-server/src/runtime/platform-management-transaction.ts)在 Scope 初始化和 Vault/Profile/CAS 保存的各自事务内复核同一请求身份及权限；失应答按原操作键核对。能力观察返回已有证据，配置白名单和保存成功均不证明供应商能力已通过。宿主 OpenAPI 统一原合同与 Nest 的参数模板后，只发布实际挂载的方法。
+
+平台预算与费率审阅沿[原管理应用](../../packages/ai-native-server/src/runtime/budget/budget-management.application.ts)的五个操作，消费原[设置客户端](../../packages/ai-native-admin/src/platform-model-settings/aiBudgetSettings.ts)。预算政策与收据、费率审阅记录各自在原事务内锁定当前 SaaS 主体和所选数据，提交前复核权限及配置修订。当前平台查看权限可以读取政策与原键收据，写入要求平台管理权限；提交失应答保留原操作定位。
+
+平台额度页通过[原额度客户端](../../packages/ai-native-admin/src/platform-model-settings/aiCredit.ts)读取申请、明确批准或拒绝、核对原决定。[额度服务](../../packages/ai-native-server/src/runtime/budget/ai-credit.service.ts)从持久申请取得目标租户，按固定顺序锁定管理租户和目标租户，再锁原主体、申请和额度行。新增批准要求目标租户有效，并在提交前复验；同键已提交决定和冻结租户的拒绝仍按当前平台权限处理。审批 CAS 与金额增量同事务完成，失应答及重复请求只核原决定，沿用原币种与精度。
 
 ## 请求、事务与响应
 

@@ -57,6 +57,10 @@ Core 停用后的已有回答及模型结果核对，由宿主 [只读处理器�
 
 [平台模型设置](src/runtime/platform-model-settings.application.ts)保留所选宿主最初 Guard 的原请求身份，继续由原平台配置权威区分查看和管理权限。Scope 初始化及[加密配置保存](src/runtime/platform-model-connection.ts)的原事务通过[平台事务参加者](src/runtime/platform-management-transaction.ts)锁定当前 SaaS 主体、会话和所选数据依据，提交前再次复核。未选择独立宿主时沿原隔离请求作用域。目录和能力证据按有界查询读取，保存保留原 CAS、操作收据及未知结果语义；前端通过[同源客户端工厂](../ai-native-admin/src/platform-model-settings/platformAiSettings.ts)消费五个操作，写请求关闭认证刷新后的自动重发。
 
+[平台预算设置](src/runtime/budget/platform-budget-settings.composition.ts)与[费率审阅](src/runtime/budget/platform-reviewed-gateway-price.service.ts)通过同一管理应用接入所选宿主，保留最初 Guard 的 SaaS 请求身份。政策 CAS 与原操作收据、不可变费率记录在各自原事务中取得平台事务参加者，写后复核当前权威。[平台预算 Controller](../../apps/rental-api/src/ai-budget-http.ts)分别声明三读两写，原前端客户端使用相同公共合同。
+
+[平台额度审批](src/runtime/budget/ai-credit.service.ts)复用同一额度服务和原账本，由[平台额度 Controller](../../apps/rental-api/src/ai-credit-http.ts)挂载申请列表、批准决定和原决定读取。目标租户来自持久申请，管理租户与目标租户按固定顺序锁定，再由原平台参加者锁定主体和会话。新增批准在同一事务复核目标状态、CAS、原操作键及金额上限，提交前再次核权；已提交的同键决定允许在目标冻结后按当前平台读写权限核对，金额只增加一次。
+
 Rental 的通知缓存和草稿仓储通过 `@rental-os/rental-core/notification-draft` 消费以下组合：
 
 ```ts

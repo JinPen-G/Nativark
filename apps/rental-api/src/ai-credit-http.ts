@@ -1,4 +1,4 @@
-/** 原租户额度及调用记录消费者。平台审批由平台宿主独立授权，
+/** 原额度及调用记录消费者。平台审批与租户申请分别声明并独立授权，
  * 申请、空间上限和原收据继续使用同一服务与账本。 */
 import { Body, Controller, Header, HttpCode, Inject, Post, Req } from "@nestjs/common";
 import { AI_CREDIT_HTTP } from "@rental-os/shared";
@@ -26,4 +26,18 @@ export class RentalTenantCreditController {
   allocationReceipt(@Req() request: Request, @Body() body: unknown) { return this.original.allocationReceipt(request, body); }
   @Post(routes.calls) @HttpCode(200) @Header("Cache-Control", "no-store")
   calls(@Req() request: Request, @Body() body: unknown) { return this.original.calls(request, body); }
+}
+
+@Controller(routes.basePath)
+export class RentalPlatformCreditController {
+  private readonly original: AiCreditController;
+  constructor(@Inject(AiCreditService) service: AiCreditService) {
+    this.original = new AiCreditController(service);
+  }
+  @Post(routes.platformRead) @HttpCode(200) @Header("Cache-Control", "no-store")
+  platformRead(@Req() request: Request, @Body() body: unknown) { return this.original.platformRead(request, body); }
+  @Post(routes.platformDecide) @HttpCode(200) @Header("Cache-Control", "no-store")
+  platformDecide(@Req() request: Request, @Body() body: unknown) { return this.original.platformDecide(request, body); }
+  @Post(routes.platformReceipt) @HttpCode(200) @Header("Cache-Control", "no-store")
+  platformReceipt(@Req() request: Request, @Body() body: unknown) { return this.original.platformReceipt(request, body); }
 }

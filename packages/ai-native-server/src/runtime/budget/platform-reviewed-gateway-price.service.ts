@@ -14,6 +14,7 @@ import { reviewedGatewayPriceInput, reviewedGatewayPriceReadInput } from './revi
 import { PrismaGatewayPricingRecords, platformReviewedPricePayloadSchema, platformReviewedPriceReference, type GatewayPricingRecordDb,
   type GatewayPricingEvidenceSource } from './prisma-gateway-pricing-records';
 import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
+import { beginPlatformAiManagementTransaction } from '../platform-management-transaction';
 
 type Db = GatewayPricingRecordDb & Pick<PrismaClient, '$transaction' | 'aiTenantModelConfiguration'>;
 const profileSelect = { id: true, scopeId: true, scopeKind: true, serviceMode: true, configRevision: true,
@@ -86,24 +87,31 @@ export class PlatformReviewedGatewayPriceService {
     let attempted = false;
     try {
       await this.db.$transaction(async tx => {
-        await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_provider_profiles WHERE id = ${this.profileId} FOR UPDATE`);
-        if (!isDeepStrictEqual(await load(tx), profile)) throw new BudgetError('REVISION_CONFLICT');
-        const [original, version] = await Promise.all([
-          tx.aiGatewayPriceRecord.findFirst({ where: { scopeId: before.scope.id, sourceReference: reference } }),
-          tx.aiGatewayPriceRecord.findUnique({ where: { id } })]);
-        if (original || version) {
-          if (!original || !version || original.id !== id || version.id !== id || version.scopeId !== before.scope.id
-            || version.sourceReference !== reference || version.payloadHash !== payloadHash || hash(version.payload) !== payloadHash)
-            throw new BudgetError('IDEMPOTENCY_CONFLICT');
-          return;
-        }
-        // The Profile lock may have waited behind another configuration
-        // writer. Recheck current management authority before this append.
-        await this.recheck(before, true);
-        if (Date.parse(command.expiresAt) <= this.clock().getTime()) throw new BudgetError('INVALID');
-        attempted = true;
-        await tx.aiGatewayPriceRecord.create({ data: { id, scopeId: before.scope.id, configurationHash,
-          priceVersion: command.priceVersion, sourceReference: reference, payloadHash, payload: json(payload) } });
+        const lease = await beginPlatformAiManagementTransaction(tx, before.actorId);
+        try {
+          await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_provider_profiles WHERE id = ${this.profileId} FOR UPDATE`);
+          if (!isDeepStrictEqual(await load(tx), profile)) throw new BudgetError('REVISION_CONFLICT');
+          const [original, version] = await Promise.all([
+            tx.aiGatewayPriceRecord.findFirst({ where: { scopeId: before.scope.id, sourceReference: reference } }),
+            tx.aiGatewayPriceRecord.findUnique({ where: { id } })]);
+          if (original || version) {
+            if (!original || !version || original.id !== id || version.id !== id || version.scopeId !== before.scope.id
+              || version.sourceReference !== reference || version.payloadHash !== payloadHash || hash(version.payload) !== payloadHash)
+              throw new BudgetError('IDEMPOTENCY_CONFLICT');
+            await this.recheck(before, true);
+            await lease?.revalidate();
+            return;
+          }
+          // The Profile lock may have waited behind another configuration
+          // writer. Recheck current management authority before this append.
+          await this.recheck(before, true);
+          if (Date.parse(command.expiresAt) <= this.clock().getTime()) throw new BudgetError('INVALID');
+          attempted = true;
+          await tx.aiGatewayPriceRecord.create({ data: { id, scopeId: before.scope.id, configurationHash,
+            priceVersion: command.priceVersion, sourceReference: reference, payloadHash, payload: json(payload) } });
+          await this.recheck(before, true);
+          await lease?.revalidate();
+        } finally { lease?.close(); }
       }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
       const result = await this.records.price(before.scope.id, configurationHash, command.priceVersion);
       if (result.hash !== payloadHash) throw new BudgetError('PENDING_RECONCILIATION');

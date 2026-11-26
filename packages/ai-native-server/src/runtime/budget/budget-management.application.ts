@@ -22,7 +22,6 @@ import { PlatformReviewedGatewayPriceService, PrismaPlatformReviewedPriceSource 
 import { PlatformModelConfigurationAuthority } from '../platform-model-config.authority';
 import { AiScopeRepository } from '../ai-scope.repository';
 import { GatewayPricingRecordManagement } from './prisma-gateway-pricing-records';
-import { captureRentalInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
 import { beginTenantModelConfigurationTransaction, createTenantModelConfigurationTransactions,
   type TenantModelConfigurationTransactions } from '../tenant-model-config-transactions';
 import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
@@ -112,10 +111,10 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
     signal?.addEventListener('abort', close, { once: true });
     if (signal?.aborted) close();
     try {
-      const selected = captureRentalInternalAuthority();
       // The selected host already owns the original Guard store. Management
       // authority rechecks it without replacing the transaction's identity.
-      return await waitForTaskApplicationDependency(() => selected
+      // The member-only bridge cannot represent a SaaS platform principal.
+      return await waitForTaskApplicationDependency(() => hasRentalBusinessTenantFence()
         ? consume(credentials, command) : runWithRequestIdentity({}, () => consume(credentials, command)), write, signal);
     } catch (error) {
       if (error instanceof Error && 'code' in error && error.code === 'AI_RESULT_UNKNOWN')

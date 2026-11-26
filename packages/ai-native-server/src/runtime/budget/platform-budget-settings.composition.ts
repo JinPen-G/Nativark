@@ -69,7 +69,8 @@ export function createAuthorizedPlatformBudgetSettings(input: {
         entitled: after.context.actor.kind === 'saas_admin' && after.context.scope.kind === 'platform' };
     }
   };
-  const service = new BudgetService(new PrismaBudgetRepository(db), authority,
+  const service = (platform?: { actorId: string; scopeId: string }) => new BudgetService(
+    new PrismaBudgetRepository(db, clock, platform ? { platform } : undefined), authority,
     { quote: denied }, { dispatch: denied, usage: denied }, clock);
   const target = async (sceneCode: string, write = true) => {
     const before = await current(write);
@@ -85,7 +86,7 @@ export function createAuthorizedPlatformBudgetSettings(input: {
       const parsed = readSchema.safeParse(value);
       if (!parsed.success) throw new BudgetError('INVALID');
       const selected = await target(parsed.data.sceneCode, false);
-      const result = await service.settings(selected.key);
+      const result = await service().settings(selected.key);
       await selected.recheck();
       return result;
     },
@@ -135,7 +136,9 @@ export function createAuthorizedPlatformBudgetSettings(input: {
       };
       const settings = { ...command.settings, draftVersion: AI_USAGE_DRAFT_VERSION, scope: { kind: 'platform' },
         sceneCode: command.sceneCode, config } as AiUsageSettingsDraft;
-      const result = await service.saveSettings(selected.key, settings, command.expectedRevision, revalidateConfiguration, operation);
+      if (selected.context.actor.kind !== 'saas_admin') throw new BudgetError('FORBIDDEN');
+      const result = await service({ actorId: selected.context.actor.userId, scopeId: selected.key.scopeId })
+        .saveSettings(selected.key, settings, command.expectedRevision, revalidateConfiguration, operation);
       try { await selected.recheck(); } catch { throw new BudgetError('PENDING_RECONCILIATION'); }
       return result;
     }

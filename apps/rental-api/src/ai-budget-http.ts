@@ -1,4 +1,4 @@
-/** 租户预算管理的原 Controller 消费者。只声明租户方法，平台方法由独立平台授权宿主装配。
+/** 预算管理的原 Controller 消费者。租户与平台方法分别声明并使用各自精确授权。
  * DTO、配置与原操作收据继续由原 Controller 校验，保存不授予模型执行权限。 */
 import { Body, Controller, Header, HttpCode, Inject, Post, Req } from "@nestjs/common";
 import { AI_BUDGET_MANAGEMENT_HTTP_DRAFT } from "@rental-os/shared";
@@ -37,4 +37,22 @@ export class RentalTenantBudgetController {
   adoptPlatformPrice(@Req() request: Request, @Body() body: unknown) { return this.original.adoptPlatformPrice(request, body); }
   @Post(routes.readPlatformPriceAdoption) @HttpCode(200) @Header("Cache-Control", "no-store")
   readPlatformPriceAdoption(@Req() request: Request, @Body() body: unknown) { return this.original.readPlatformPriceAdoption(request, body); }
+}
+
+@Controller(routes.basePath)
+export class RentalPlatformBudgetController {
+  private readonly original: AiBudgetManagementController;
+  constructor(@Inject(AI_BUDGET_MANAGEMENT) application: Application) {
+    this.original = new AiBudgetManagementController(application);
+  }
+  @Post(routes.platformRead) @HttpCode(200) @Header("Cache-Control", "no-store")
+  platformRead(@Req() request: Request, @Body() body: unknown) { return this.original.platformRead(request, body); }
+  @Post(routes.platformSave) @HttpCode(200) @Header("Cache-Control", "no-store")
+  platformSave(@Req() request: Request, @Body() body: unknown) { return this.original.platformSave(request, body); }
+  @Post(routes.platformReadOperation) @HttpCode(200) @Header("Cache-Control", "no-store")
+  platformReadOperation(@Req() request: Request, @Body() body: unknown) { return this.original.platformReadOperation(request, body); }
+  @Post(routes.platformReviewPrice) @HttpCode(200) @Header("Cache-Control", "no-store")
+  platformReviewPrice(@Req() request: Request, @Body() body: unknown) { return this.original.platformReviewPrice(request, body); }
+  @Post(routes.platformPriceReviewReceipt) @HttpCode(200) @Header("Cache-Control", "no-store")
+  platformPriceReviewReceipt(@Req() request: Request, @Body() body: unknown) { return this.original.platformPriceReviewReceipt(request, body); }
 }

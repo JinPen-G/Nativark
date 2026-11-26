@@ -19,6 +19,7 @@ import { checkedSettingsOperation, budgetSettingsReceiptSchema, settingsOperatio
 import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
 import { beginTenantModelConfigurationTransaction, type TenantModelConfigurationTransactionParticipant } from '../tenant-model-config-transactions';
 import type { WorkspaceGatewayContext } from '../model-gateway.ports';
+import { beginPlatformAiManagementTransaction } from '../platform-management-transaction';
 
 type Db = Pick<PrismaClient, 'aiScope' | 'aiBudgetPolicy' | 'aiBudgetReservation' | 'aiBudgetLedgerEntry' | 'aiBudgetAllocation' | '$transaction'>
   & Partial<Pick<PrismaClient, 'operationLog' | 'aiModelConfigurationOperation'>>;
@@ -85,7 +86,7 @@ function sameLedgerPayload(existing: { kind: string; evidenceHash: string | null
 export class PrismaBudgetRepository implements BudgetTransactionRepository {
   constructor(private readonly db: Db, private readonly clock: () => Date = () => new Date(),
     private readonly settingsAuthorization?: { context: WorkspaceGatewayContext;
-      participant: TenantModelConfigurationTransactionParticipant }) {}
+      participant: TenantModelConfigurationTransactionParticipant } | { platform: { actorId: string; scopeId: string } }) {}
 
   async settings(key: BudgetPolicyKey) {
     const row = await this.db.aiBudgetPolicy.findUnique({ where: { scopeId_scopeKind_sceneCode: policyWhere(key) }, select: { id: true, scopeId: true, scopeKind: true, sceneCode: true, configRevision: true, settingsJson: true } });
@@ -113,11 +114,20 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
     let callbackCompleted = false;
     try {
       return await this.db.$transaction(async tx => {
-        const authorization = this.settingsAuthorization;
+        const authorization = this.settingsAuthorization && 'context' in this.settingsAuthorization
+          ? this.settingsAuthorization : undefined;
+        const platform = this.settingsAuthorization && 'platform' in this.settingsAuthorization
+          ? this.settingsAuthorization.platform : undefined;
         if (hasRentalBusinessTenantFence() && settings.scope.kind === 'tenant' && (!authorization
           || authorization.context.tenantId !== settings.scope.tenantId)) throw new BudgetError('UNAVAILABLE');
+        if (hasRentalBusinessTenantFence() && settings.scope.kind === 'platform' && (!platform
+          || key.scopeKind !== 'PLATFORM' || key.scopeId !== platform.scopeId
+          || operation && (operation.kind !== 'platform' || operation.actorId !== platform.actorId)))
+          throw new BudgetError('UNAVAILABLE');
         const participant = settings.scope.kind === 'tenant' && authorization
-          ? await beginTenantModelConfigurationTransaction(tx, authorization.context, authorization.participant) : undefined;
+          ? await beginTenantModelConfigurationTransaction(tx, authorization.context, authorization.participant)
+          : settings.scope.kind === 'platform' && platform
+            ? await beginPlatformAiManagementTransaction(tx, platform.actorId) : undefined;
         try {
           // A policy CAS changes available capacity too. It must not hold the
           // policy write lock while waiting for admission's canonical tenant lock.
