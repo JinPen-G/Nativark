@@ -70,17 +70,33 @@ node scripts/ops/release-verify.cjs mcp <本地ZeloGit目录> <基线完整SHA> 
 
 [verifyPairedBuildEvidence](../release-build-evidence.cjs) 消费本进程已核过固定构建证明的 `verifyPreparedRental` 结果。调用方须先核收候选归档、固定 CI 策略、同一次运行的构建记录及实际镜像观察。它比较含构建证明摘要的候选身份与构建记录，校验 GitHub 运行的仓库、工作流、主分支、固定 SHA、编号、尝试次数及成功状态。策略中显式选择 `automatic` 对应 `push`，`manual` 对应 `workflow_dispatch`。两种来源都须提供同一记录中的 API 和 Web 镜像 ID，逐项与实际镜像观察匹配。
 
-[双仓镜像工作流](../../../.github/workflows/rental-image-ci.yml) 只接受受信 Zelo `main` 工作流的 `workflow_call`，固定平台 SHA 必须等于该次运行的 `GITHUB_SHA`。调用方先按正式 Tag 与发行材料生成同组合的 API 上下文和 Web 静态产物，再执行 `candidate` 核验。由该次可信产物 job 上传 `rental-image-input-<run_id>-<run_attempt>`，并独立传递 `input.json` 的原文 SHA-256。交接内容如下。
+[Rental 正式候选构建](../../../.github/workflows/rental-release-candidate.yml) 从可信 Zelo `main` 手动派发。填写已发布的两仓完整 SHA、各自版本 Tag 和独立核收的两个发行归档 SHA-256。Zelo SHA 须等于该次运行的 `GITHUB_SHA`。调用方先验证 Tag 解引用，再取得该 Tag 下的 `platform-source-<版号>.tgz` 与 `rental-<版号>.tgz`，逐一核对原字节。在受管 Linux runner 使用锁定依赖，按[材料生成入口](../release-prepare-pair.cjs)构建普通单 Rental 组合。
+
+```sh
+node scripts/ops/release-prepare-pair.cjs release "$ZELO_REPO" "$ZELO_COMMIT" "$RENTAL_REPO" "$RENTAL_COMMIT" "$TASK_DIR" "$PLATFORM_DIGEST" "$RENTAL_DIGEST"
+```
+
+`TASK_DIR` 是本次专用目录，输入归档分别存为 `platform.tgz`、`rental.tgz`。调用从固定源码投影重新对照底座发行，使用原准备器生成部署锁、schema 和原迁移 SQL，再用正式宿主打包器构建 API。Web 使用同一源投影 npm 锁，直接消费 API 上下文中的 Core 包和同一份部署锁。归档生产与镜像运行使用同平台的锁定 Node 工具链，Linux 镜像使用 Linux 归档。`development` 模式省略两个发行摘要，使用原开发运行包生成离线演练材料并标记不可部署。
+
+产物 job 将 `rental-image-input-<run_id>-<run_attempt>` 交给双仓镜像工作流，并独立传递 `input.json` 的原文 SHA-256。镜像工作流按调用方 `github.workflow_ref` 核对固定入口。[双仓镜像工作流](../../../.github/workflows/rental-image-ci.yml) · [GitHub 可复用工作流上下文](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations#github-context)
+
+交接包含以下文件。
 
 | 路径 | 来源及要求 |
 | --- | --- |
 | `api/` | 正式 `package-rental-host` 归档解包结果，含 `.dockerignore`、实际宿主文件和三份来源／部署／构建收据 |
 | `web/` | 同一双仓、同一选择和锁的正式 Web 构建输出，含非空 `index.html`。Web 文件表用 [digestFiles](../release-facts.cjs) 的相对路径和原字节摘要算法汇总 |
-| `input.json` | `format: rental-image-input-1`，以及 API 宿主收据的 `contextSha256`、强核验给出的 `identitySha256`、已核 Web 产物的 `webFilesSha256` |
+| `input.json` | `format: rental-image-input-1`、`sourceMode: release`、双 SHA、构建器 SHA、两锁摘要，以及 API 宿主收据的 `contextSha256`、强核验给出的 `identitySha256`、Web 的 `webFilesSha256` |
 
 产物上传须包含核过的隐藏文件，实际运行环境文件、TLS 凭据和私有媒体继续走原现场管理。调用输入为 `platform_commit`、`rental_commit` 和 `input_sha256`。两个 `v<version>` Tag 均须分别解引用到候选完整 SHA。脚本从实际 API 文件重做强门禁，并核对同次可信 Web 产物及交接摘要。材料缺件、开发报告和 Tag 不匹配均在 Docker 构建前拒绝。
 
-同一托管 runner 由正式宿主 Dockerfile 与 [Web 固定配方](Dockerfile.rental-web) 建两个本地镜像，逐项核双仓、组合身份、部署锁、投影锁、宿主构建证明及运行编号标签，按各自镜像 ID 做无网络预检。最终只上传 `image-pair.json`，由 GitHub 在 job 结束时回收临时工作区与本地镜像。镜像记录仍标记 `releaseApproved: false` 与 `serverUpdateEligible: false`。当前正式 Tag、运行产物和调用方齐备后才执行该工作流。
+同一托管 runner 由正式宿主 Dockerfile 与 [Web 固定配方](Dockerfile.rental-web) 建两个本地镜像，逐项核双仓、组合身份、部署锁、投影锁、宿主构建证明及运行编号标签，按各自镜像 ID 做无网络预检。默认产物是 `image-pair.json`，其中 `releaseApproved` 与 `serverUpdateEligible` 均为 `false`。
+
+### 镜像留存与回退核对
+
+当全部镜像材料可公开时，派发参数 `retain_images` 可保留同次 `rental-images.tar.gz` 和 `SHA256SUMS`，Actions 留存七天。归档前逐一对照 API/Web 镜像 ID，双镜像放入同一个归档。同次记录、归档和摘要作为一组核收。长期留存使用受限存储并记录原 Actions 产物和 SHA-256。TLS、环境配置、业务数据与私有媒体继续单独管理。
+
+在独占 Docker 环境下载原配对产物，先对照可信 CI 的 `image-pair.json` 摘要，再执行 `sha256sum -c SHA256SUMS`。加载同组镜像后，对照记录中的 API/Web ID、角色、部署锁和相同的 CI 运行标签。候选和回退各保全一组完整记录及镜像。更换前以已核原账判断旧程序是否仍能读取当前数据。隔离切换演练应对两个角色同时比对 ID 和健康结果，失败时以原两镜像恢复并重查。数据库恢复仍使用单独批准的原账与备份。
 
 ### 更新前只读复核
 

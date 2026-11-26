@@ -1,0 +1,141 @@
+name: Rental 正式候选构建
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform_commit:
+        description: Zelo 本次发行的完整 SHA
+        required: true
+        type: string
+      rental_commit:
+        description: Rental 本次发行的完整 SHA
+        required: true
+        type: string
+      platform_tag:
+        description: 已存在的底座发行 Tag
+        required: true
+        type: string
+      rental_tag:
+        description: 已存在的 Rental 发行 Tag
+        required: true
+        type: string
+      platform_asset_sha256:
+        description: 独立核收的底座源码归档 SHA-256
+        required: true
+        type: string
+      rental_asset_sha256:
+        description: 独立核收的 Rental 标准包 SHA-256
+        required: true
+        type: string
+      retain_images:
+        description: 将公开材料构建的两镜像短期留存在 Actions 产物
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    outputs:
+      input_sha256: ${{ steps.materials.outputs.input_sha256 }}
+    env:
+      ZELO_COMMIT: ${{ inputs.platform_commit }}
+      RENTAL_COMMIT: ${{ inputs.rental_commit }}
+      ZELO_TAG: ${{ inputs.platform_tag }}
+      RENTAL_TAG: ${{ inputs.rental_tag }}
+      PLATFORM_DIGEST: ${{ inputs.platform_asset_sha256 }}
+      RENTAL_DIGEST: ${{ inputs.rental_asset_sha256 }}
+      TASK_DIR: output/.tmp/rental-release-candidate
+      GIT_TERMINAL_PROMPT: '0'
+    steps:
+      - name: 核定调用及固定输入
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = JinPen-G/Zelo
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_SHA" = "$ZELO_COMMIT"
+          [[ "$ZELO_COMMIT" =~ ^[a-f0-9]{40}$ && "$RENTAL_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$PLATFORM_DIGEST" =~ ^[a-f0-9]{64}$ && "$RENTAL_DIGEST" =~ ^[a-f0-9]{64}$ ]]
+          for tag in "$ZELO_TAG" "$RENTAL_TAG"; do [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$ ]]; done
+      - name: 检出固定 Zelo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.platform_commit }}
+          persist-credentials: false
+      - name: 检出固定 Rental
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: JinPen-G/nativark-rental-core
+          ref: ${{ inputs.rental_commit }}
+          path: ${{ env.TASK_DIR }}/rental
+          persist-credentials: false
+      - name: 固定 Node 工具链
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.13.0
+      - name: 核对真实 Tag 和发行材料
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$GITHUB_WORKSPACE/$TASK_DIR"
+          test "$(git rev-parse HEAD)" = "$ZELO_COMMIT"
+          test "$(git -C "$task/rental" rev-parse HEAD)" = "$RENTAL_COMMIT"
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const { requireReleaseTag } = require('./scripts/ops/release-image-pair.cjs');
+          const env = process.env;
+          const platform = require('./package.json').version;
+          const rental = require('./' + env.TASK_DIR + '/rental/package.json').version;
+          assert.equal(env.ZELO_TAG, 'v' + platform);
+          assert.equal(env.RENTAL_TAG, 'v' + rental);
+          requireReleaseTag({ repository: 'https://github.com/JinPen-G/Zelo', commit: env.ZELO_COMMIT }, platform, 'platform');
+          requireReleaseTag({ repository: 'https://github.com/JinPen-G/nativark-rental-core', commit: env.RENTAL_COMMIT }, rental, 'rental');
+          NODE
+          git -C "$task/rental" fetch --no-tags --depth=1 origin "refs/tags/$RENTAL_TAG:refs/tags/$RENTAL_TAG"
+          test "$(git -C "$task/rental" rev-parse "refs/tags/$RENTAL_TAG^{commit}")" = "$RENTAL_COMMIT"
+          mkdir "$task/pair"
+          curl -fsSL --proto '=https' --proto-redir '=https' --max-time 120 --max-filesize 134217728 \
+            "https://github.com/JinPen-G/Zelo/releases/download/$ZELO_TAG/platform-source-${ZELO_TAG#v}.tgz" -o "$task/pair/platform.tgz"
+          curl -fsSL --proto '=https' --proto-redir '=https' --max-time 120 --max-filesize 134217728 \
+            "https://github.com/JinPen-G/nativark-rental-core/releases/download/$RENTAL_TAG/rental-${RENTAL_TAG#v}.tgz" -o "$task/pair/rental.tgz"
+          (cd "$task/pair"; printf '%s  platform.tgz\n%s  rental.tgz\n' "$PLATFORM_DIGEST" "$RENTAL_DIGEST" | sha256sum --check --status)
+      - name: 按原锁安装编译依赖
+        shell: bash
+        run: npm ci --include=dev --ignore-scripts --no-audit --no-fund --cache "$GITHUB_WORKSPACE/$TASK_DIR/npm-cache"
+      - name: 生成同锁 API 和 Web 交接
+        id: materials
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$GITHUB_WORKSPACE/$TASK_DIR"
+          mkdir "$task/offline"
+          export DATABASE_URL=mysql://offline:offline@127.0.0.1:1/rental_os_offline
+          export AI_OFFLINE_WRITE_ROOT="$task" AI_OFFLINE_AUDIT="$task/offline/audit.log"
+          export TEMP="$task/offline" TMP="$task/offline" TMPDIR="$task/offline" XDG_CACHE_HOME="$task/offline"
+          node --no-compilation-cache --max-old-space-size=6144 --require ./tests/fixtures/ai-native/prisma-offline-preload.cjs \
+            scripts/ops/release-prepare-pair.cjs release "$GITHUB_WORKSPACE" "$ZELO_COMMIT" "$task/rental" "$RENTAL_COMMIT" "$task/pair" \
+            "$PLATFORM_DIGEST" "$RENTAL_DIGEST" | tee "$task/prepare.log"
+          test ! -e "$AI_OFFLINE_AUDIT"
+          digest=$(sha256sum "$task/pair/input/input.json" | cut -d ' ' -f 1)
+          printf 'input_sha256=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+      - name: 交接同运行材料
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rental-image-input-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.TASK_DIR }}/pair/input/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 2
+
+  paired-images:
+    needs: prepare
+    uses: ./.github/workflows/rental-image-ci.yml
+    with:
+      platform_commit: ${{ inputs.platform_commit }}
+      rental_commit: ${{ inputs.rental_commit }}
+      input_sha256: ${{ needs.prepare.outputs.input_sha256 }}
+      retain_images: ${{ inputs.retain_images }}
