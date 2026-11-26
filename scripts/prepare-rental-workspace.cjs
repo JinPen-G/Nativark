@@ -216,7 +216,18 @@ async function createRentalDevelopmentWorkspace(options, api) {
     scripts: {
       build: 'npm run build -w ' + (profile === 'domain' ? '@rental-os/rental-core' : '@rental-os/rental-api'),
       'build:core': 'npm run build -w @rental-os/rental-core',
-      ...(profile !== 'domain' ? { 'build:admin': 'npm run build -w @rental-os/rental-admin' } : {}),
+      ...(profile !== 'domain' ? {
+        'build:admin': 'npm run build -w @rental-os/rental-admin',
+        'dev:admin': 'npm run dev -w @rental-os/rental-admin',
+      } : {}),
+      ...(profile === 'full' ? {
+        'build:tenant-website': 'npm run build -w @rental-os/tenant-website',
+        'dev:tenant-website': 'npm run dev -w @rental-os/tenant-website',
+        'build:enterprise-portal': 'npm run build -w @rental-os/enterprise-portal',
+        'dev:enterprise-portal': 'npm run dev -w @rental-os/enterprise-portal',
+        'build:miniprogram': 'npm run build -w @rental-os/miniprogram',
+        'build:staff-miniprogram': 'npm run build -w @rental-os/staff-miniprogram',
+      } : {}),
       'check:types': 'node scripts/check-selected-prisma-types.cjs --mode rental --config '
         + (profile === 'domain' ? coreDirectory : 'apps/rental-api') + '/tsconfig.json',
       'check:core': 'node scripts/check-selected-prisma-types.cjs --mode rental --config packages/rental-core/tsconfig.json',
@@ -248,6 +259,7 @@ async function createRentalDevelopmentWorkspace(options, api) {
     `Core 位于 packages/rental-core，修改后用 \`npm run check:core\` 检查；` +
     `不需要维护者私有 docs、已有 dist、数据库或聊天记忆才能进行类型核查。\n\n` +
     (profile === 'domain' ? `当前仅领域源码，尚不包含独立宿主，不能据此启动完整服务。` : `实际生成所选 Client、构建、迁移准备和启动按 [Rental 宿主](apps/rental-api/README.md)执行。`) +
+    (profile === 'full' ? `四端构建分别使用 \`npm run build:tenant-website\`、\`npm run build:enterprise-portal\`、\`npm run build:miniprogram\` 和 \`npm run build:staff-miniprogram\`；原宿主构建前置和标准包锁仍须满足。` : '') +
     `发布前将 Core 自己的改动提交并打版本标签，再按 [Core 构建与发行](packages/rental-core/README.md#使用与构建)` +
     `核固定底座/独立 Core 来源和归档。部署锁、租户授权与成员分配独立办理。\n\n` +
     `开发新 Core 从 [五步手册](packages/core-contracts/README.md#五步快速接入)开始；` +
