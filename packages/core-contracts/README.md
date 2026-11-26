@@ -382,6 +382,12 @@ Rental 已提供自己的完整业务 schema、关系贡献和 MySQL 数据计�
 
 `source_conflict` 比较及历史 Nativark 包/锁保持原样，GitHub 仓库重定向也不会自动获得来源迁移权。独立 Core 继续使用各自原发行仓库标识，不因底座改名重写 Core 清单。[实际来源检查](src/update.ts) · [固定源码导出](src/export-platform.ts) · [原部署交接](../platform-core-host/src/core-package-preparation/README.md)
 
+### 依赖公共数据能力的新装迁移
+
+业务扩展依赖公共能力所建表时，通过[分阶段准备器](src/deployment.ts)锁定原 Core 和能力的前置版本、迁移 ID 及摘要。原公共、Core、能力的目录与摘要不改；新增扩展按 `post-capability.<coreId>.<migrationId>` 放在它们之后，回执保留实际所有者、固定来源、原文件与 `_prisma_migrations` 账名。
+
+`lockVersion: 2` 目前只供新装材料准备。旧运行与升级入口会拒绝这类锁；存量库继续使用 original lock 和原账，不能把旧执行记录替换成新装初始迁移。宿主仍须完成自己的部署与物理核验。
+
 底座默认保持既有公开 API 兼容。废弃或移除旧 API 时，发行说明须写清兼容范围、废弃说明和迁移方法，兼容承诺以声明范围为准。当前装配按 Core 的 `compatibility.platform`、`compatibility.contract`、`runtime.node` 和必需能力版本预检，区间采用 `minInclusive` / `maxExclusive`。[组合预检](src/compatibility.ts) · [版本范围](src/version.ts)
 
 先构建本包，再用实际发行元数据和迁移账快照执行只读预检。
