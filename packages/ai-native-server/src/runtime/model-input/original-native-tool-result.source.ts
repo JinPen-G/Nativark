@@ -59,7 +59,8 @@ export class OriginalNativeToolResultSource implements NativeToolResultResolver 
     const context = structuredClone(value), reference = nativeToolResultReferenceSchema.parse(structuredClone(raw));
     const active = () => { if (signal.aborted) throw new ModelGatewayError('CANCELLED'); };
     active();
-    if (!('tenantId' in context) || reference.taskId !== this.task.taskId || reference.runId !== this.task.runId
+    if (!context || !('tenantId' in context) || !('workspaceId' in context) || 'scopeKind' in context
+      || reference.taskId !== this.task.taskId || reference.runId !== this.task.runId
       || reference.modelRegistrationRef !== this.task.modelRegistrationRef
       || reference.toolRegistrationRef !== this.task.orderRegistrationRef || reference.callIndex !== 0) throw denied();
     const current = await this.input.execution.authorize(reference.taskId);
