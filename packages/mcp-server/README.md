@@ -24,7 +24,9 @@ npm run build -w @rental-os/mcp-server
 npm run typecheck -w @rental-os/mcp-server
 ```
 
-原结果候选仍使用可选 peer `@rental-os/shared` 0.1.0 的真实运行时和声明。所消费的 schema、声明和 JS 须来自同一版本产物。基础运输出口可独立加载，原结果子出口的 shared 前置由宿主核定。[shared 正式出口](../shared/src/index.ts)
+不装 Rental 的宿主可用 [公共编译配置](tsconfig.public.json) 和 [装包入口](public-package.cjs) 生成同名的公共包候选。先构建公共前置，从固定源码编译该配置；`assemblePublicMcpPackage(sources, emitted, ts)` 接包相对来源字节和当次 `dist-public` 相对产物，返回可交公共归档工具的文件集合。正式源带原 `LICENSE`、公共 README、五份原 SQL 和 schema；不从旧 dist 拾取产物。包保留运输、OAuth、持久计量和 `original-task-recovery-read`，会话与 Rental 销售的旧组合子出口留在完整包。公共 Task 直接从 `@rental-os/platform-contracts/ai-original-result` 取同源闭合合同，宿主继续承担原授权、对象、原目标和字段政策。[公共包说明](README.public.md)
+
+旧组合的会话与 Rental 销售候选仍消费可选 peer `@rental-os/shared` 0.1.0 的运行时和声明。所消费的 schema、声明和 JS 须来自同一版本产物。Task 原读使用公共合同，基础运输与公共 Task 子出口都可独立于 shared 加载。[shared 正式出口](../shared/src/index.ts)
 
 Rental 固定工具码与运输名由 `@rental-os/rental-mcp-host/capability-mapping` 提供，通用包不反向导出该业务映射。宿主通过本包原有 `McpReadTool`、`McpReadPublication`、`McpReadAuthority`、`McpReadAccounting` 和 `McpReadRelease` 显式绑定业务参加者。其他 Core 可按同一闭合 schema 和当前授权端口登记自己的受控读取；缺少生产者时保持不可用。[Rental 接入](../rental-mcp-host/README.md)
 
@@ -241,7 +243,7 @@ Rental 固定映射中的四项原只读码由 `@rental-os/rental-mcp-host/capab
 | `selected-proposal-read` | 原 Task / proposal / revision / reviewedPayloadHash 与单建单动作匹配，决定与执行各归原入口。[源码](src/selected-proposal-read.ts) |
 | `selected-order-result-read` | 请求绑定 readResult，复验原选择 / Task / Run / inputHash、批准消费与 Core 收据，unknown 保持原键。[源码](src/selected-order-result-read.ts) |
 
-上述候选以原完整 shared 契约及普通 JSON 快照校验私有请求 / 结果，分别最多 32 KiB / 128 KiB，所需原 schema 组件须完整供给。MCP 外发另需闭合投影 schema、publication / authority / accounting / release，并服从 2,000 字符 / 50 条 / 完整 64 KiB 响应。原 reader 负责当前本人、空间、哈希、祖先及读后权限，结果候选读取保持原状态与禁止自动重试。
+上述候选以各自所有者的原完整契约及普通 JSON 快照校验私有请求 / 结果，分别最多 32 KiB / 128 KiB，所需原 schema 组件须完整供给。MCP 外发另需闭合投影 schema、publication / authority / accounting / release，并服从 2,000 字符 / 50 条 / 完整 64 KiB 响应。原 reader 负责当前本人、空间、哈希、祖先及读后权限，结果候选读取保持原状态与禁止自动重试。
 
 ## 版本化 instructions、Prompts 与 Resources
 

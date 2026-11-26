@@ -1308,6 +1308,25 @@ function taskRecovery(state = "observed") {
     automaticExecution: false, nextAction: "existing_runner_recovery", observedResults: "preserved_even_if_task_cancelled", snapshot: "bounded_sequential_read" };
 }
 
+test("public original Task read preserves closed request and nested recovery branches", async () => {
+  const { createOriginalTaskRecoveryRead } = source("packages/mcp-server/src/original-task-recovery-read.ts");
+  const command = { draftVersion: "ain-scene-request-draft-1", inputRef: "00000000-0000-4000-8000-000000000001" };
+  let observation = taskRecovery("not_observed"), reads = 0;
+  const reader = createOriginalTaskRecoveryRead({ name: "synthetic_original_task", description: "Read the original task.",
+    outputSchema: { type: "object", properties: {}, additionalProperties: false },
+    read: async input => { assert.deepEqual(input, command); reads++; return observation; } });
+  await assert.rejects(() => reader.read({ ...command, userId: "caller-selected" }, signal()));
+  assert.equal(reads, 0);
+  assert.deepEqual(await reader.read(command, signal()), observation);
+  observation = taskRecovery();
+  assert.deepEqual(await reader.read(command, signal()), observation);
+  for (const change of [value => { value.task.private = true; }, value => { value.steps[0].private = true; },
+    value => { value.task = taskRecovery("not_observed").task; }, value => { value.task.revision = 4294967295; }]) {
+    observation = taskRecovery(); change(observation);
+    await assert.rejects(() => reader.read(command, signal()), /Original recovery unavailable/u);
+  }
+});
+
 async function verifyTaskRecoveryRead(t, createRead) {
   const { Client, StreamableHTTPClientTransport } = installed("@modelcontextprotocol/client");
   const command = { draftVersion: "ain-scene-request-draft-1", inputRef: "00000000-0000-4000-8000-000000000001" };
@@ -2155,6 +2174,7 @@ test("compiled MCP package exports load and serve both eras without source trans
   const packageRoot = path.join(root, "packages/mcp-server");
   const output = prepareOutput();
   const stagedShared = compileSharedExport(output);
+  const publicResultTypes = path.join(output, "node_modules/@rental-os/platform-contracts/dist/ai-original-result.d.ts");
   const staged = path.join(output, "node_modules/@rental-os/mcp-server");
   fs.mkdirSync(staged, { recursive: true });
   fs.copyFileSync(path.join(packageRoot, "package.json"), path.join(staged, "package.json"));
@@ -2166,6 +2186,7 @@ test("compiled MCP package exports load and serve both eras without source trans
   const program = ts.createProgram(configured.fileNames, {
     ...configured.options, outDir: path.join(staged, "dist"), typeRoots,
     paths: { "@modelcontextprotocol/server": [serverTypes], "@rental-os/shared": [path.join(stagedShared, "dist/index.d.ts")],
+      "@rental-os/platform-contracts/ai-original-result": [publicResultTypes],
       zod: [path.join(path.dirname(installed.resolve("zod/package.json")), "index.d.cts")] },
   });
   const diagnostics = ts.getPreEmitDiagnostics(program);

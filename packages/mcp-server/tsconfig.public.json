@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "outDir": "dist-public", "newLine": "lf", "noEmitOnError": true },
+  "exclude": [
+    "src/original-read-schema.ts",
+    "src/conversation-list-read.ts",
+    "src/conversation-operation-read.ts",
+    "src/conversation-result-read.ts",
+    "src/quote-selection-read.ts",
+    "src/selected-proposal-read.ts",
+    "src/selected-order-result-read.ts"
+  ]
+}

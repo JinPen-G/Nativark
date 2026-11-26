@@ -2,11 +2,11 @@
  * permission to claim, cancel, resume, reconcile or execute the original action. */
 import { fromJsonSchema } from "@modelcontextprotocol/server";
 import type { JsonSchemaType } from "@modelcontextprotocol/server";
-import { AI_SCENE_REQUEST_HTTP_CONTRACTS } from "@rental-os/shared";
-import type { AiSceneRequestReadDraft, AiSceneRequestRecoveryDraft } from "@rental-os/shared";
+import { AI_ORIGINAL_RESULT_LOCATOR_SCHEMAS, AI_ORIGINAL_TASK_RECOVERY_SCHEMAS,
+  type AiSceneRequestReadDraft, type AiSceneRequestRecoveryDraft } from "@rental-os/platform-contracts/ai-original-result";
 import type { McpReadTool } from "./read-tools.js";
 import { snapshotJson } from "./json-snapshot.js";
-import { originalReadSchema } from "./original-read-schema.js";
+import { assembleOriginalReadSchema } from "./assemble-original-read-schema.js";
 
 export interface OriginalTaskRecoveryReadBinding {
   /** Fixed capability metadata, never selected by a caller or model. */
@@ -20,16 +20,17 @@ export interface OriginalTaskRecoveryReadBinding {
   read(command: AiSceneRequestReadDraft, signal: AbortSignal): Promise<unknown>;
 }
 
-/** Construct an inert candidate using the original shared runtime contract.
+/** Construct an inert candidate using the public original runtime contract.
  * Missing identity, persistent accounting or field providers must keep it unpublished.
  * @param binding - fixed original reader and external field schema from their owners.
  * @returns a read-only candidate; this never starts a listener or recovers a task.
  */
 export function createOriginalTaskRecoveryRead(binding: OriginalTaskRecoveryReadBinding): McpReadTool {
-  const contract = AI_SCENE_REQUEST_HTTP_CONTRACTS.recovery;
-  const inputSchema = originalReadSchema(contract.request);
+  const inputSchema = assembleOriginalReadSchema(AI_ORIGINAL_RESULT_LOCATOR_SCHEMAS.AiSceneRequestReadDraft,
+    AI_ORIGINAL_RESULT_LOCATOR_SCHEMAS);
   const input = fromJsonSchema<AiSceneRequestReadDraft>(inputSchema);
-  const originalOutput = fromJsonSchema<AiSceneRequestRecoveryDraft>(originalReadSchema(contract.response));
+  const originalOutput = fromJsonSchema<AiSceneRequestRecoveryDraft>(assembleOriginalReadSchema(
+    AI_ORIGINAL_TASK_RECOVERY_SCHEMAS.AiSceneRequestRecoveryDraft, AI_ORIGINAL_TASK_RECOVERY_SCHEMAS));
   const outputSchema = structuredClone(binding.outputSchema), read = binding.read.bind(binding);
   if (outputSchema.type !== "object" || outputSchema.additionalProperties !== false) throw new TypeError("Original external recovery schema must be a closed object");
   fromJsonSchema(outputSchema);

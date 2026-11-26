@@ -7,8 +7,13 @@ import { createCoreArchive } from '@rental-os/core-contracts/archive';
 import { readPlatformDataCapabilityPackage, requirePlatformDataCapabilityFiles } from '@rental-os/core-contracts/platform-data-package';
 
 const schema = { file: 'prisma/schema.prisma', sha256: '8c3ad36c896693d3d056a9d1b067bf8c26cf222ed5aeadf7a1e367ae30fe7a63' } as const;
-const packageMetadataSha256 = 'ce4caeecbd0b4b81a879f02d4e845b6f7eb8fbaf8b5b89024c670a6a8afb1202';
-const packageBuildPathsSha256 = '723a3e360d87002c026dd2278aea1d386e4d78ccf6d16b5d1c24fae9ab9b46ff';
+// These are exact pairs for the old combined package, the current combined
+// package and the public package. They share the same original data version.
+const packageShapes = new Map([
+  ['ce4caeecbd0b4b81a879f02d4e845b6f7eb8fbaf8b5b89024c670a6a8afb1202', '723a3e360d87002c026dd2278aea1d386e4d78ccf6d16b5d1c24fae9ab9b46ff'],
+  ['f0386e52ce9bc6a49e0df9189bc7f81815bc67f7785dcbb10ca4358ae8e5a486', '720b367462add2cfba45bb0a3eb65347f6cc2cc8ea18d9d994f32cb0c7063277'],
+  ['26ca72466491f81e793101c349bc291f34935aa73f902c9eaa5f7ea32707ae6a', '5b83831e3b469e8efc453870873f5bf9c443ee551d27da1414cfb3b57edb37f9'],
+]);
 const migrations = [
   { id: 'mcp.0001-oauth', file: 'mysql-oauth-schema.sql', sha256: 'aa8f6004c1be402bd6adeda56bba9275d820cfdea43d52483429e684b5ddded4', requires: [] },
   { id: 'mcp.0002-read-budget', file: 'mysql-read-budget-schema.sql', sha256: 'c54ba21bd473f90c3be26761a60421af3fb2f6fc4f56f4edc9f2ab7bc73ef802', requires: [] },
@@ -53,8 +58,8 @@ function checkPackage(files: ReadonlyMap<string, Uint8Array>): void {
   if (metadata.name !== '@rental-os/mcp-server' || metadata.version !== MCP_DATA_CAPABILITY_VERSION
     || metadata.license !== 'MIT' || !metadata.exports || typeof metadata.exports !== 'object' || Array.isArray(metadata.exports))
     throw new Error('MCP 固定包身份或出口无效');
-  if (digest(Buffer.from(JSON.stringify(metadata))) !== packageMetadataSha256)
-    throw new Error('MCP 固定包元数据与本实现不一致');
+  const packageBuildPathsSha256 = packageShapes.get(digest(Buffer.from(JSON.stringify(metadata))));
+  if (!packageBuildPathsSha256) throw new Error('MCP 固定包元数据与本实现不一致');
   // 未导出的内部模块同样参与运行，不能只检查 package.json 中的公开入口。
   const buildPaths = [...files.keys()].filter(file => file.startsWith('dist/')).sort();
   if (digest(Buffer.from(JSON.stringify(buildPaths))) !== packageBuildPathsSha256)

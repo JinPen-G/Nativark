@@ -231,7 +231,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@modelcontextprotocol/server": "2.2.0"
+    "@modelcontextprotocol/server": "2.2.0",
+    "@rental-os/platform-contracts": "0.1.0"
   },
   "peerDependencies": {
     "@rental-os/core-contracts": "0.1.0",
