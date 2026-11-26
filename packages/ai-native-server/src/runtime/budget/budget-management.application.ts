@@ -22,6 +22,11 @@ import { PlatformReviewedGatewayPriceService, PrismaPlatformReviewedPriceSource 
 import { PlatformModelConfigurationAuthority } from '../platform-model-config.authority';
 import { AiScopeRepository } from '../ai-scope.repository';
 import { GatewayPricingRecordManagement } from './prisma-gateway-pricing-records';
+import { captureRentalInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
+import { beginTenantModelConfigurationTransaction, createTenantModelConfigurationTransactions,
+  type TenantModelConfigurationTransactions } from '../tenant-model-config-transactions';
+import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
+import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 
 const code = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const read = z.object({ scope: z.enum(['tenant', 'workspace']), sceneCode: code }).strict();
@@ -61,6 +66,7 @@ const platformSave = platformRead.extend({ expectedRevision: revision, operation
 export type BudgetManagementDependencies = {
   tenant?: Omit<Parameters<typeof createAuthorizedPersistedGatewayBudget>[0], 'credentials' | 'pricing' | 'taskId'> & {
     callPriceVersion: string;
+    transactions?: TenantModelConfigurationTransactions;
     initialConfiguration?: { db: Parameters<typeof createPersistedTenantModelConfiguration>[0]['db'];
       secrets: SecretBox; platformProfileId: string };
   };
@@ -106,7 +112,11 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
     signal?.addEventListener('abort', close, { once: true });
     if (signal?.aborted) close();
     try {
-      return await waitForTaskApplicationDependency(() => runWithRequestIdentity({}, () => consume(credentials, command)), write, signal);
+      const selected = captureRentalInternalAuthority();
+      // The selected host already owns the original Guard store. Management
+      // authority rechecks it without replacing the transaction's identity.
+      return await waitForTaskApplicationDependency(() => selected
+        ? consume(credentials, command) : runWithRequestIdentity({}, () => consume(credentials, command)), write, signal);
     } catch (error) {
       if (error instanceof Error && 'code' in error && error.code === 'AI_RESULT_UNKNOWN')
         throw new BudgetError('PENDING_RECONCILIATION');
@@ -131,7 +141,11 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
       return current;
     } };
     const pricing = new PrismaGatewayCallPricing(tenant.db, scopes, tenant.callPriceVersion, tenant.clock);
-    const root = createPersistedGatewayBudget({ ...tenant, authorization: source, scopes, pricing });
+    if (initial.context.actor.kind !== 'user' || initial.context.scope.kind !== 'workspace') throw new BudgetError('FORBIDDEN');
+    const settingsAuthorization = { context: { actorId: initial.context.actor.userId,
+      tenantId: initial.context.scope.tenantId, workspaceId: initial.context.scope.workspaceId },
+      participant: createTenantModelConfigurationTransactions({ transactions: tenant.transactions, credentials }) };
+    const root = createPersistedGatewayBudget({ ...tenant, authorization: source, scopes, pricing, settingsAuthorization });
     return { ...root, current: scopes.resolveCurrent };
   };
   const platformRoot = (credentials: AiTaskCredentialSource) => {
@@ -182,7 +196,33 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
             rateAuthority: 'platform_reviewed_budget_rate_not_provider_invoice' as const,
             inputCounting: 'not_certified_by_rate_review' as const, executionPermission: false as const, persisted: false as const };
         }
-        if (write) { await management.publishPrice({ reference }); publicationReturned = true; }
+        if (write) {
+          if (hasRentalBusinessTenantFence()) {
+            const current = await source.scopes.resolveCurrent(), context = current.context;
+            if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace') throw new BudgetError('FORBIDDEN');
+            const owner = { actorId: context.actor.userId, tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId };
+            const participant = createTenantModelConfigurationTransactions({ transactions: tenant.transactions, credentials });
+            let completed = false;
+            try {
+              // Adoption appends the original immutable rate only after the
+              // selected Auth/Tenant/Core locks, in the same short transaction.
+              await tenant.db.$transaction(async tx => {
+                const lease = await beginTenantModelConfigurationTransaction(tx, owner, participant);
+                try {
+                  const original = new GatewayPricingRecordManagement(tx, source.scopes, source,
+                    producer, undefined, parsed.data.sceneCode, tenant.clock);
+                  await original.publishPrice({ reference });
+                  await lease?.revalidate();
+                  completed = true;
+                } finally { lease?.close(); }
+              }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+            } catch (error) {
+              if (completed) throw new BudgetError('PENDING_RECONCILIATION');
+              throw error;
+            }
+          } else await management.publishPrice({ reference });
+          publicationReturned = true;
+        }
         // Read original adoption independently of profile, rate expiry or a new
         // adoption producer. No global reviewer identity reaches tenant output.
         const record = await management.readPublication({ reference }), evidence = record.evidence;
@@ -209,7 +249,8 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
       if (!parsed.success) throw new BudgetError('INVALID');
       const command = parsed.data, producer = tenant?.initialConfiguration;
       if (!tenant || !producer || !Object.is(producer.db, tenant.db)) throw new BudgetError('UNAVAILABLE');
-      const expected = refresh ? undefined : await registerCurrentAiConfigurationScopes({ ...tenant, credentials });
+      const transactionParticipant = createTenantModelConfigurationTransactions({ transactions: tenant.transactions, credentials });
+      const expected = refresh ? undefined : await registerCurrentAiConfigurationScopes({ ...tenant, credentials, transactionParticipant });
       const root = await tenantRoot(credentials, expected);
       const selector = { scope: command.scope, sceneCode: command.sceneCode };
       await checkOriginalSave(root, command);

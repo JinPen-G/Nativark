@@ -1167,7 +1167,7 @@ export const AI_NATIVE_BUDGET_MANAGEMENT_PROVIDER: FactoryProvider<ReturnType<ty
     return composeRequestBoundBudgetManagement({
       // The existing settings-only root exposes no pricing/reserve method;
       // this version never substitutes a calls price for token/money usage.
-      tenant: { db, auth, guard, subscriptions, callPriceVersion: configuration.priceVersion,
+      tenant: { db, auth, guard, subscriptions, callPriceVersion: configuration.priceVersion, transactions: { auth },
         initialConfiguration: { db, secrets, platformProfileId: configuration.platformProfileId } },
       platform: { db, guard, profileId: configuration.platformProfileId }
     }, { enabled: true });

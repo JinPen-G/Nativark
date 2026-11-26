@@ -49,6 +49,10 @@ Core 停用后的已有回答及模型结果核对，由宿主 [只读处理器�
 
 员工图片/语音识别从[原请求工厂](src/runtime/inspection-assist/inspection-assist.composition.ts)进入[标准识别组合](src/runtime/inspection-assist/inspection-standard.application.ts)。所选宿主保留最初 Guard 形成的请求身份，资源授权仍复核当前员工、空间、地点、订单及检查阶段；旧宿主继续使用自己的隔离身份作用域。冻结输入、Task 创建、显式执行、原结果引用及[调用账务](src/runtime/staff-inspection-accounting.composition.ts)各有独立入口，执行复用原 Gateway 单账和累计资源。结果保存只追加待核候选，人工采用/更正和原 Core 履约提交分别办理。独立宿主从[精确处理器清单](../../apps/rental-api/src/ai-http-policy.ts)发布上述操作，员工端通过[原运输工厂](../rental-core/clients/staff/inspection-transport.ts)读取和确认。
 
+租户预算经[原管理应用](src/runtime/budget/budget-management.application.ts)和[租户 Controller 包装](../../apps/rental-api/src/ai-budget-http.ts)进入同一设置服务。所选宿主保留最初 Guard 的请求身份，配置 Scope、政策 CAS/收据及平台费率采用的原事务先核 Auth/Tenant/Core，写入后复验当前权威；丢失提交应答只核对原操作。BYOK 保留调用与 Token 单位约束，租户自定费率入口继续拒绝。平台管理方法沿独立平台授权宿主办理。
+
+[价格历史工厂](src/runtime/budget/gateway-pricing-request.composition.ts)只按当前管理权限读取原价格、采用和输入上限依据，输入上限另核同一调用主体、空间和内容摘要。宿主以精确处理器闭集保留停新/Core停用后的原收据读取，撤权或身份变化仍拒绝。设置和历史接口均复用原 shared/DTO/OpenAPI；它们的挂载不启用模型执行，也不替代租户 AI 服务设置中的平台额度申请与空间分配。
+
 Rental 的通知缓存和草稿仓储通过 `@rental-os/rental-core/notification-draft` 消费以下组合：
 
 ```ts

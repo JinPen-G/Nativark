@@ -23,6 +23,9 @@ import { AI_STAFF_INSPECTION_REQUESTS } from "@rental-os/ai-native-server/runtim
 import * as shared from "@rental-os/shared";
 import { RENTAL_HOST_CONTROLLERS } from "./http-policy";
 import { RentalWebsiteClientEntryController, RentalWechatClientEntryController } from "./ai-client-http";
+import { RentalTenantBudgetController } from "./ai-budget-http";
+import { AiGatewayPricingHistoryController, AI_BUDGET_MANAGEMENT, AI_GATEWAY_PRICING_HISTORY }
+  from "@rental-os/ai-native-server/runtime/budget/budget-management.module";
 
 export const RENTAL_AI_INSPECTION_OPERATIONS = Object.freeze([
   "fulfillment-receipt-read", "history-read", "receipt-host-read", "host-read", "template-read",
@@ -30,6 +33,7 @@ export const RENTAL_AI_INSPECTION_OPERATIONS = Object.freeze([
   "draft-operation", "input-prepare", "input-receipt", "result-read", "result-save", "result-save-receipt", "submission-review", "submission-prepare", "submission-preparation", "submission-submit", "submission-read"
 ]);
 export const RENTAL_AI_CONTROLLERS = Object.freeze([
+  RentalTenantBudgetController, AiGatewayPricingHistoryController,
   OperatorEntrySceneCatalogController, StaffEntrySceneCatalogController, RentalStaffInspectionAssistController,
   InspectionRecognitionTaskController, StaffInspectionAccountingController,
   AiOriginalScenesController, AiOriginalSceneRecoveryController, AiTaskCenterController, AiModelSettingsController,
@@ -38,6 +42,7 @@ export const RENTAL_AI_CONTROLLERS = Object.freeze([
   RentalWebsiteClientEntryController, RentalWechatClientEntryController
 ]);
 export const RENTAL_AI_MOUNTED_REQUESTS: readonly symbol[] = Object.freeze([
+  AI_BUDGET_MANAGEMENT, AI_GATEWAY_PRICING_HISTORY,
   AI_STAFF_INSPECTION_REQUESTS, INSPECTION_RECOGNITION_TASKS, AI_STAFF_INSPECTION_ACCOUNTING, AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS,
   AI_NATIVE_TASK_CENTER_REQUESTS, AI_NATIVE_MODEL_SETTINGS_REQUESTS,
   AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS, AI_ORIGINAL_OPENING_MODEL_REQUESTS, AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS,
@@ -55,7 +60,16 @@ const plans = AiScenePlanPolicyController.prototype, actions = AiOriginalTaskAct
 const conversations = AiConversationController.prototype;
 const inspection = RentalStaffInspectionAssistController.prototype, recognition = InspectionRecognitionTaskController.prototype;
 const accounting = StaffInspectionAccountingController.prototype;
+const budget = RentalTenantBudgetController.prototype, pricing = AiGatewayPricingHistoryController.prototype;
 const declarations: readonly RentalHttpAccessDeclaration[] = [
+  ...reviewed(RentalTenantBudgetController, [budget.read, budget.readOperation, budget.readPriceConfiguration,
+    budget.readPriceReview, budget.previewPlatformPrice, budget.readPlatformPriceAdoption], "buffered-read",
+  "original current tenant management authority and settings/rate receipts; same selected identity and response recheck, no configuration, rate publication or model dispatch"),
+  ...reviewed(RentalTenantBudgetController, [budget.initialize, budget.change, budget.refreshConfiguration, budget.adoptPlatformPrice,
+    budget.reviewPrice], "transactional-write",
+  "original configuration Scope, budget policy CAS/operation and explicit platform-rate adoption retain same Auth/Tenant/Core before owning writes with final transactional revalidation; tenant-authored rate review remains denied, original unknown receipt never replays model or money"),
+  ...reviewed(AiGatewayPricingHistoryController, [pricing.readPrice, pricing.readPublication, pricing.readInputBound], "buffered-read",
+  "original immutable price/input-bound observations under current management authority and original invocation ownership; same selected identity and response check, no producer, admission, publication or model call"),
   ...reviewed(AiTaskOrderHandoffController, [AiTaskOrderHandoffController.prototype.read], "buffered-read",
   "original Task/Run/input provenance and current guarded order/next-step read; same selected request identity and final scope/source checks, manual handoff grants no approval or execution"),
   ...reviewed(AiConversationController, [conversations.read, conversations.list, conversations.turns,
@@ -209,6 +223,8 @@ export function createRentalAiHttpPolicy(authorization = createRentalAuthorizati
  * recover/reconcile 仍由原 lease/receipt 仓储裁定，不能据此创建或重新派发。 */
 export function rentalAiDeploymentContinuationSelector(policy: ReturnType<typeof createRentalAiHttpPolicy>) {
   const selected = new Map<Function, readonly Function[]>([
+    [RentalTenantBudgetController, [budget.readOperation, budget.readPriceReview, budget.readPlatformPriceAdoption]],
+    [AiGatewayPricingHistoryController, [pricing.readPrice, pricing.readPublication, pricing.readInputBound]],
     [RentalStaffInspectionAssistController, [inspection.fulfillmentReceiptRead, inspection.historyRead, inspection.receiptHostRead,
       inspection.hostRead, inspection.templateRead, inspection.draftRead, inspection.draftOperation, inspection.inputReceipt,
       inspection.resultRead, inspection.resultSaveReceipt, inspection.submissionPreparation, inspection.submissionRead]],
@@ -292,6 +308,8 @@ export function rentalAiRouteSelector(policy: ReturnType<typeof createRentalAiHt
  * 从真实controller/handler闭集取路由，并要求只读审定；请求标志不能扩展此集合。 */
 export function rentalAiOriginalReceiptSelector(policy: ReturnType<typeof createRentalAiHttpPolicy>) {
   const selected = new Map<Function, readonly Function[]>([
+    [RentalTenantBudgetController, [budget.readOperation, budget.readPriceReview, budget.readPlatformPriceAdoption]],
+    [AiGatewayPricingHistoryController, [pricing.readPrice, pricing.readPublication, pricing.readInputBound]],
     [RentalStaffInspectionAssistController, [inspection.fulfillmentReceiptRead, inspection.receiptHostRead,
       inspection.draftOperation, inspection.inputReceipt, inspection.resultRead, inspection.resultSaveReceipt,
       inspection.submissionPreparation, inspection.submissionRead]],

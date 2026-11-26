@@ -16,6 +16,9 @@ import { aiPersistenceScopeColumns } from '../persistence-scope';
 import type { BudgetSettingsOperation } from './budget.ports';
 import { checkedSettingsOperation, budgetSettingsReceiptSchema, settingsOperationId,
   platformBudgetOperationWhere, platformBudgetReceiptSchema } from './budget-settings-operation';
+import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
+import { beginTenantModelConfigurationTransaction, type TenantModelConfigurationTransactionParticipant } from '../tenant-model-config-transactions';
+import type { WorkspaceGatewayContext } from '../model-gateway.ports';
 
 type Db = Pick<PrismaClient, 'aiScope' | 'aiBudgetPolicy' | 'aiBudgetReservation' | 'aiBudgetLedgerEntry' | 'aiBudgetAllocation' | '$transaction'>
   & Partial<Pick<PrismaClient, 'operationLog' | 'aiModelConfigurationOperation'>>;
@@ -80,7 +83,9 @@ function sameLedgerPayload(existing: { kind: string; evidenceHash: string | null
  * provide an already authorized BudgetAuthority and trusted quote/evidence ports.
  */
 export class PrismaBudgetRepository implements BudgetTransactionRepository {
-  constructor(private readonly db: Db, private readonly clock: () => Date = () => new Date()) {}
+  constructor(private readonly db: Db, private readonly clock: () => Date = () => new Date(),
+    private readonly settingsAuthorization?: { context: WorkspaceGatewayContext;
+      participant: TenantModelConfigurationTransactionParticipant }) {}
 
   async settings(key: BudgetPolicyKey) {
     const row = await this.db.aiBudgetPolicy.findUnique({ where: { scopeId_scopeKind_sceneCode: policyWhere(key) }, select: { id: true, scopeId: true, scopeKind: true, sceneCode: true, configRevision: true, settingsJson: true } });
@@ -108,74 +113,83 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
     let callbackCompleted = false;
     try {
       return await this.db.$transaction(async tx => {
-        // A policy CAS changes available capacity too. It must not hold the
-        // policy write lock while waiting for admission's canonical tenant lock.
-        if (settings.scope.kind === 'tenant') await this.lockTenantCapacity(tx, settings.scope.tenantId,
-          key.scopeKind === 'TENANT' ? key.scopeId : undefined);
-        if (operation) {
-          // Any reused key is observation-only, including a lost COMMIT reply.
-          // Do not run another CAS or return today's policy as the old result.
-          if (await original(tx))
-            throw new BudgetError('PENDING_RECONCILIATION');
-        }
-        const receipt = async (saved: BudgetPolicy) => {
-          if (!operation) return;
-          if (operation.kind === 'platform') {
-            const detail = platformBudgetReceiptSchema.safeParse({ ...operation, version: 'platform-budget-settings-save-1',
+        const authorization = this.settingsAuthorization;
+        if (hasRentalBusinessTenantFence() && settings.scope.kind === 'tenant' && (!authorization
+          || authorization.context.tenantId !== settings.scope.tenantId)) throw new BudgetError('UNAVAILABLE');
+        const participant = settings.scope.kind === 'tenant' && authorization
+          ? await beginTenantModelConfigurationTransaction(tx, authorization.context, authorization.participant) : undefined;
+        try {
+          // A policy CAS changes available capacity too. It must not hold the
+          // policy write lock while waiting for admission's canonical tenant lock.
+          if (settings.scope.kind === 'tenant') await this.lockTenantCapacity(tx, settings.scope.tenantId,
+            key.scopeKind === 'TENANT' ? key.scopeId : undefined);
+          if (operation) {
+            // Any reused key is observation-only, including a lost COMMIT reply.
+            // Do not run another CAS or return today's policy as the old result.
+            if (await original(tx))
+              throw new BudgetError('PENDING_RECONCILIATION');
+          }
+          const receipt = async (saved: BudgetPolicy) => {
+            if (!operation) return;
+            if (operation.kind === 'platform') {
+              const detail = platformBudgetReceiptSchema.safeParse({ ...operation, version: 'platform-budget-settings-save-1',
+                ...policyWhere(key), policyId: saved.id, expectedRevision, savedRevision: saved.revision,
+                settingsHash: requestFingerprint(saved.settings) });
+              if (!detail.success) throw new BudgetError('INVALID');
+              await tx.aiModelConfigurationOperation.create({ data: { id: randomUUID(), ...platformBudgetOperationWhere(key, operation.operationKey),
+                actorId: operation.actorId, workspaceId: null, expectedRevision, resultRevision: saved.revision, commandHash: operation.commandHash,
+                result: json(detail.data), resultHash: requestFingerprint(detail.data), recordedAt: this.clock() } });
+              await revalidate();
+              return;
+            }
+            const detail = budgetSettingsReceiptSchema.safeParse({ ...operation, version: 'budget-settings-save-1',
               ...policyWhere(key), policyId: saved.id, expectedRevision, savedRevision: saved.revision,
               settingsHash: requestFingerprint(saved.settings) });
             if (!detail.success) throw new BudgetError('INVALID');
-            await tx.aiModelConfigurationOperation.create({ data: { id: randomUUID(), ...platformBudgetOperationWhere(key, operation.operationKey),
-              actorId: operation.actorId, workspaceId: null, expectedRevision, resultRevision: saved.revision, commandHash: operation.commandHash,
-              result: json(detail.data), resultHash: requestFingerprint(detail.data), recordedAt: this.clock() } });
+            await tx.operationLog.create({ data: { id: settingsOperationId(key, operation.operationKey),
+              tenantId: operation.tenantId, workspaceId: operation.workspaceId, userId: operation.actorId,
+              action: 'ai.budget.settings.saved', detail: json(detail.data), createdAt: this.clock() } });
             await revalidate();
-            return;
+          };
+          const where = policyWhere(key);
+          if (expectedRevision === 0) {
+            const created = await tx.aiBudgetPolicy.create({ data: {
+              id: randomUUID(), ...where, configRevision: 1, enabled: policyEnabled(settings), allowedModels: json(settings.allowedModels), allowedScenes: json(settings.allowedScenes), settingsJson: json(settings), ...policyMeterFields(settings),
+              maxConcurrent: settings.maxConcurrent, maxCallsPerRun: settings.maxCallsPerRun, priceVersion: undefined
+            }, select: { id: true, scopeId: true, scopeKind: true, sceneCode: true, configRevision: true, settingsJson: true } });
+            await revalidate();
+            const saved = policy(created);
+            await receipt(saved);
+            await participant?.revalidate();
+            callbackCompleted = true;
+            return saved;
           }
-          const detail = budgetSettingsReceiptSchema.safeParse({ ...operation, version: 'budget-settings-save-1',
-            ...policyWhere(key), policyId: saved.id, expectedRevision, savedRevision: saved.revision,
-            settingsHash: requestFingerprint(saved.settings) });
-          if (!detail.success) throw new BudgetError('INVALID');
-          await tx.operationLog.create({ data: { id: settingsOperationId(key, operation.operationKey),
-            tenantId: operation.tenantId, workspaceId: operation.workspaceId, userId: operation.actorId,
-            action: 'ai.budget.settings.saved', detail: json(detail.data), createdAt: this.clock() } });
+          const changed = await tx.aiBudgetPolicy.updateMany({ where: { ...where, configRevision: expectedRevision }, data: { configRevision: { increment: 1 }, enabled: policyEnabled(settings), allowedModels: json(settings.allowedModels), allowedScenes: json(settings.allowedScenes), settingsJson: json(settings), ...policyMeterFields(settings), maxConcurrent: settings.maxConcurrent, maxCallsPerRun: settings.maxCallsPerRun, priceVersion: undefined } });
+          if (changed.count !== 1) throw new BudgetError('REVISION_CONFLICT');
           await revalidate();
-        };
-        const where = policyWhere(key);
-        if (expectedRevision === 0) {
-          const created = await tx.aiBudgetPolicy.create({ data: {
-            id: randomUUID(), ...where, configRevision: 1, enabled: policyEnabled(settings), allowedModels: json(settings.allowedModels), allowedScenes: json(settings.allowedScenes), settingsJson: json(settings), ...policyMeterFields(settings),
-            maxConcurrent: settings.maxConcurrent, maxCallsPerRun: settings.maxCallsPerRun, priceVersion: undefined
-          }, select: { id: true, scopeId: true, scopeKind: true, sceneCode: true, configRevision: true, settingsJson: true } });
+          const next = await tx.aiBudgetPolicy.findUnique({ where: { scopeId_scopeKind_sceneCode: where }, select: { id: true, scopeId: true, scopeKind: true, sceneCode: true, configRevision: true, settingsJson: true } });
+          if (!next) throw new BudgetError('UNAVAILABLE');
+          if (settings.budget.state === 'limited') {
+            const meter = settings.budget.quantity;
+            // The successful CAS holds this policy's write lock until COMMIT;
+            // admission takes that same lock before inserting allocations.
+            // Meter bindings are immutable and released reservations cannot be
+            // reopened. Do not reinterpret an old unresolved/charged meter as
+            // zero, even after a disabled/not-configured intermediate policy.
+            const incompatible = await tx.aiBudgetAllocation.findFirst({ where: { policyId: next.id,
+              reservation: { status: { in: ['reserved', 'pending_reconciliation', 'settled'] }, OR: [
+                { unitKind: { not: meter.unit } },
+                ...(meter.unit === 'money' ? [{ moneyCurrency: { not: meter.currency } }, { moneyCurrency: null }] : [])
+              ] } }, select: { reservationId: true } });
+            if (incompatible) throw new BudgetError('REVISION_CONFLICT');
+          }
           await revalidate();
-          const saved = policy(created);
+          const saved = policy(next);
           await receipt(saved);
+          await participant?.revalidate();
           callbackCompleted = true;
           return saved;
-        }
-        const changed = await tx.aiBudgetPolicy.updateMany({ where: { ...where, configRevision: expectedRevision }, data: { configRevision: { increment: 1 }, enabled: policyEnabled(settings), allowedModels: json(settings.allowedModels), allowedScenes: json(settings.allowedScenes), settingsJson: json(settings), ...policyMeterFields(settings), maxConcurrent: settings.maxConcurrent, maxCallsPerRun: settings.maxCallsPerRun, priceVersion: undefined } });
-        if (changed.count !== 1) throw new BudgetError('REVISION_CONFLICT');
-        await revalidate();
-        const next = await tx.aiBudgetPolicy.findUnique({ where: { scopeId_scopeKind_sceneCode: where }, select: { id: true, scopeId: true, scopeKind: true, sceneCode: true, configRevision: true, settingsJson: true } });
-        if (!next) throw new BudgetError('UNAVAILABLE');
-        if (settings.budget.state === 'limited') {
-          const meter = settings.budget.quantity;
-          // The successful CAS holds this policy's write lock until COMMIT;
-          // admission takes that same lock before inserting allocations.
-          // Meter bindings are immutable and released reservations cannot be
-          // reopened. Do not reinterpret an old unresolved/charged meter as
-          // zero, even after a disabled/not-configured intermediate policy.
-          const incompatible = await tx.aiBudgetAllocation.findFirst({ where: { policyId: next.id,
-            reservation: { status: { in: ['reserved', 'pending_reconciliation', 'settled'] }, OR: [
-              { unitKind: { not: meter.unit } },
-              ...(meter.unit === 'money' ? [{ moneyCurrency: { not: meter.currency } }, { moneyCurrency: null }] : [])
-            ] } }, select: { reservationId: true } });
-          if (incompatible) throw new BudgetError('REVISION_CONFLICT');
-        }
-        await revalidate();
-        const saved = policy(next);
-        await receipt(saved);
-        callbackCompleted = true;
-        return saved;
+        } finally { participant?.close(); }
       }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (error) {
       // Callback completion is not a COMMIT acknowledgement. Never tell a

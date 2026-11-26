@@ -12,6 +12,7 @@ import { GatewayPricingRecordManagement } from './prisma-gateway-pricing-records
 import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
 import type { AiRequestAbortSource } from '../scenes/request-abort';
 import { ModelGatewayError } from '../model-gateway.ports';
+import { captureRentalInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
 
 type ServerDependencies = Omit<ConstructorParameters<typeof PrismaTaskBudgetAuthorizationSource>[0], 'credentials' | 'taskId'>
   & Pick<Parameters<typeof createRecordedPricingGatewayBudget>[0], 'db' | 'sceneCode'>
@@ -105,7 +106,6 @@ export class GatewayPricingRequestFactory {
     } };
     const identity = new AiTaskCurrentIdentityAuthority(auth, credentials, clock);
     const guard: ServerDependencies['guard'] = { canActivate: async execution => {
-      await identity.resolve();
       if (await server.guard.canActivate(execution) !== true) throw denied();
       const context = await identity.resolve(), stored = getRequestIdentity();
       if (!stored || context.actor.kind !== 'user' || context.scope.kind !== 'workspace' || !('access' in context)
@@ -115,7 +115,8 @@ export class GatewayPricingRequestFactory {
       return true;
     } };
     try {
-      return await waitForTaskApplicationDependency(() => runWithRequestIdentity({}, async () => {
+      const selected = captureRentalInternalAuthority();
+      const consume = async () => {
         await identity.resolve();
         const authorization = new PrismaTaskBudgetAuthorizationSource({ db: server.db, auth, credentials,
           subscriptions: server.subscriptions, guard, clock });
@@ -196,7 +197,9 @@ export class GatewayPricingRequestFactory {
         }
         await identity.resolve();
         return result;
-      }), action === 'publishPrice' || action === 'publishInputBound' || action === 'countTokens', signal);
+      };
+      return await waitForTaskApplicationDependency(() => selected ? consume() : runWithRequestIdentity({}, consume),
+        action === 'publishPrice' || action === 'publishInputBound' || action === 'countTokens', signal);
     } catch (error) {
       if (mutationReturned) throw new BudgetError('PENDING_RECONCILIATION');
       if (error instanceof BudgetError) throw error;
