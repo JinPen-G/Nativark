@@ -70,4 +70,24 @@ node scripts/ops/release-verify.cjs mcp <本地ZeloGit目录> <基线完整SHA> 
 
 [verifyPairedBuildEvidence](../release-build-evidence.cjs) 消费本进程已核过固定构建证明的 `verifyPreparedRental` 结果。调用方须先核收候选归档、固定 CI 策略、同一次运行的构建记录及实际镜像观察。它比较含构建证明摘要的候选身份与构建记录，校验 GitHub 运行的仓库、工作流、主分支、固定 SHA、编号、尝试次数及成功状态。策略中显式选择 `automatic` 对应 `push`，`manual` 对应 `workflow_dispatch`。两种来源都须提供同一记录中的 API 和 Web 镜像 ID，逐项与实际镜像观察匹配。
 
-双仓工作流接入时，先核收正式宿主归档并执行 `candidate` 校验，再将候选身份绑定到同一次 API/Web 构建记录。消费记录时从可信 CI 来源核实其运行归属，并用已核归档在当前进程重做候选校验。辅助函数返回 `releaseApproved: false`，用于比对证据。实际工作流接线待独立 API、发行 Tag 和镜像产物固定后进行。
+[双仓镜像工作流](../../../.github/workflows/rental-image-ci.yml) 只接受受信 Zelo `main` 工作流的 `workflow_call`，固定平台 SHA 必须等于该次运行的 `GITHUB_SHA`。调用方先按正式 Tag 与发行材料生成同组合的 API 上下文和 Web 静态产物，再执行 `candidate` 核验。由该次可信产物 job 上传 `rental-image-input-<run_id>-<run_attempt>`，并独立传递 `input.json` 的原文 SHA-256。交接内容如下。
+
+| 路径 | 来源及要求 |
+| --- | --- |
+| `api/` | 正式 `package-rental-host` 归档解包结果，含 `.dockerignore`、实际宿主文件和三份来源／部署／构建收据 |
+| `web/` | 同一双仓、同一选择和锁的正式 Web 构建输出，含非空 `index.html`。Web 文件表用 [digestFiles](../release-facts.cjs) 的相对路径和原字节摘要算法汇总 |
+| `input.json` | `format: rental-image-input-1`，以及 API 宿主收据的 `contextSha256`、强核验给出的 `identitySha256`、已核 Web 产物的 `webFilesSha256` |
+
+产物上传须包含核过的隐藏文件，实际运行环境文件、TLS 凭据和私有媒体继续走原现场管理。调用输入为 `platform_commit`、`rental_commit` 和 `input_sha256`。两个 `v<version>` Tag 均须分别解引用到候选完整 SHA。脚本从实际 API 文件重做强门禁，并核对同次可信 Web 产物及交接摘要。材料缺件、开发报告和 Tag 不匹配均在 Docker 构建前拒绝。
+
+同一托管 runner 由正式宿主 Dockerfile 与 [Web 固定配方](Dockerfile.rental-web) 建两个本地镜像，逐项核双仓、组合身份、部署锁、投影锁、宿主构建证明及运行编号标签，按各自镜像 ID 做无网络预检。最终只上传 `image-pair.json`，由 GitHub 在 job 结束时回收临时工作区与本地镜像。镜像记录仍标记 `releaseApproved: false` 与 `serverUpdateEligible: false`。当前正式 Tag、运行产物和调用方齐备后才执行该工作流。
+
+### 更新前只读复核
+
+独立核收的 `policy.json` 记批准核验的 CI 来源及其外部锚点，包括 `origin`、`repositoryId`、`workflowId`、`workflowPath`、`headSource`、`runId`、`runAttempt`、`buildRecordSha256`。`workflowPath` 取 GitHub 实际调用工作流路径。证据目录另含真实 GitHub `run.json`、该次产物 `image-pair.json` 和独立镜像观察 `images.json`，其中 `images.json` 使用 `api`、`web` 两个实际 `sha256:` 镜像 ID。
+
+```sh
+node scripts/ops/release-verify.cjs paired-review <候选目录> <候选收据SHA256> <基线目录或legacy-combined> <基线收据SHA256或-> <证据目录>
+```
+
+证据不匹配时退出 `1`。已核镜像组合如果涉及旧库或新旧 AI 数据切换，返回 `awaiting-migration-bridge`。已有 prepared 基线的迁移材料有差异时返回 `awaiting-migration-approval`，一致时等待 `awaiting-release-approval`。三种待处理状态均退出 `2`，保留正式审批入口。首切后续须另核原账、数据库前置、实际 TLS／私有媒体和应用健康。现行定时更新器继续使用原单仓工作流与回退路径。

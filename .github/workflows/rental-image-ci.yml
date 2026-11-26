@@ -1,0 +1,67 @@
+name: Rental 双仓镜像核验
+
+on:
+  workflow_call:
+    inputs:
+      platform_commit:
+        description: 已核平台发行的完整提交
+        required: true
+        type: string
+      rental_commit:
+        description: 已核 Rental 发行的完整提交
+        required: true
+        type: string
+      input_sha256:
+        description: 同次已核镜像交接清单的 SHA-256
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  image-pair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      ZELO_COMMIT: ${{ inputs.platform_commit }}
+      RENTAL_COMMIT: ${{ inputs.rental_commit }}
+      INPUT_SHA256: ${{ inputs.input_sha256 }}
+      GIT_TERMINAL_PROMPT: '0'
+    steps:
+      - name: 检查正式调用范围
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = JinPen-G/Zelo
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_EVENT_NAME" = push || test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          [[ "$ZELO_COMMIT" =~ ^[a-f0-9]{40}$ && "$RENTAL_COMMIT" =~ ^[a-f0-9]{40}$ && "$INPUT_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          test "$GITHUB_SHA" = "$ZELO_COMMIT"
+      - name: 检出固定核验入口
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: 固定 Node 工具链
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.13.0
+      - name: 取得同次核收材料
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: rental-image-input-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/.tmp/rental-image-ci/input
+      - name: 验证正式候选并构建 API 和 Web
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$GITHUB_WORKSPACE/output/.tmp/rental-image-ci"
+          node scripts/ops/release-image-pair.cjs "$task/input" "$INPUT_SHA256" > "$task/image-pair.json"
+          cat "$task/image-pair.json"
+      - name: 保留双镜像核验记录
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rental-image-pair-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/.tmp/rental-image-ci/image-pair.json
+          if-no-files-found: error
+          retention-days: 7

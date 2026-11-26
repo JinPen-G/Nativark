@@ -15,7 +15,8 @@ const ROOT = path.resolve(__dirname, "..");
 const facts = require(path.join(ROOT, "scripts/ops/release-facts.cjs"));
 const artifacts = require(path.join(ROOT, "scripts/ops/release-artifacts.cjs"));
 const { verifyPreparedRental, comparePreparedRental, verifyMcpSql, compareEntries } = require("../scripts/ops/release-composition.cjs");
-const { verifyPairedBuildEvidence } = require("../scripts/ops/release-build-evidence.cjs");
+const { verifyPairedBuildEvidence, reviewPairedUpdate } = require("../scripts/ops/release-build-evidence.cjs");
+const { buildImagePair } = require("../scripts/ops/release-image-pair.cjs");
 
 const ok = (m) => console.log(`  ✓ ${m}`);
 const buf = (text) => Buffer.from(text, "utf8");
@@ -306,7 +307,94 @@ function verifyBuildEvidence() {
   assert.throws(() => verifyPairedBuildEvidence(candidate, policy, { ...evidence, inspectedImageIds: { api: imageIds.api } }), /镜像 ID/u);
   assert.throws(() => verifyPairedBuildEvidence(candidate, policy, { ...evidence, inspectedImageIds: { api: imageIds.web, web: imageIds.api } }), /镜像 ID/u);
   assert.throws(() => verifyPairedBuildEvidence({ ...candidate, identity: { ...candidate.identity, deploymentLockSha256: undefined } }, policy, evidence), /候选身份/u);
+  verifyImagePair(archive, candidate, policy, run, imageIds);
   ok("双仓 CI 和镜像证明夹具：核同运行及触发来源，双镜像必须对应同一构建记录，结果仅为离线一致性");
+}
+
+function verifyImagePair(archive, candidate, initialPolicy, run, imageIds) {
+  const root = path.join(ROOT, "output", ".tmp", "rental-image-pair-fixture");
+  assert.equal(fs.existsSync(root), false);
+  const manifestPath = path.join(root, "input.json"), indexPath = path.join(root, "web", "index.html");
+  const web = buf("<html>fixture</html>");
+  const disk = new Map([...archive].map(([file, bytes]) => [path.join(root, "api", file), bytes]));
+  const manifest = { format: "rental-image-input-1", contextSha256: candidate.identity.contextSha256,
+    identitySha256: candidate.identitySha256,
+    webFilesSha256: facts.digestFiles([{ path: "index.html", contents: web, bytes: web.length }]).digest };
+  disk.set(manifestPath, json(manifest));
+  disk.set(indexPath, web);
+  const directories = new Set();
+  for (const file of disk.keys()) for (let dir = path.dirname(file); !directories.has(dir); dir = path.dirname(dir)) directories.add(dir);
+  const env = { GITHUB_ACTIONS: "true", RUNNER_ENVIRONMENT: "github-hosted", GITHUB_REPOSITORY: "JinPen-G/Zelo", GITHUB_REF: "refs/heads/main",
+    GITHUB_EVENT_NAME: "push", GITHUB_RUN_ID: "5", GITHUB_RUN_ATTEMPT: "2",
+    GITHUB_SHA: candidate.identity.platform.commit, ZELO_COMMIT: candidate.identity.platform.commit, RENTAL_COMMIT: candidate.identity.rental.commit };
+  const stored = new Map(), preflight = [];
+  let wrongTag = false;
+  function simulate(command, args) {
+    if (command === "git") {
+      assert.deepEqual(args.slice(0, 3), ["ls-remote", "--exit-code", "--tags"]);
+      const role = args[3].endsWith("/Zelo.git") ? "platform" : "rental";
+      assert.equal(args[4], `refs/tags/v${candidate.versions[role]}`);
+      const commit = candidate.identity[role].commit;
+      return `${"d".repeat(40)}\t${args[4]}\n${wrongTag ? "e".repeat(40) : commit}\t${args[5]}\n`;
+    }
+    assert.equal(command, "docker");
+    if (args[0] === "build") {
+      const tag = args[args.indexOf("--tag") + 1], role = tag.includes("-api:") ? "api" : "web";
+      const Labels = Object.fromEntries(args.flatMap((item, index) => item === "--label" ? [args[index + 1].split("=")] : []));
+      assert.equal(Labels["pro.zelo.release.ci"], "5/2");
+      assert.equal(Labels["pro.zelo.release.identity"], candidate.identitySha256);
+      assert.equal(Labels["pro.zelo.release.role"], role);
+      stored.set(tag, { Id: imageIds[role], Config: { Labels, User: "node" } });
+    } else if (args[0] === "image") {
+      assert.equal(args[1], "inspect");
+      return JSON.stringify([stored.get(args[2])]);
+    } else {
+      assert.deepEqual(args.slice(0, 5), ["run", "--rm", "--network", "none", "--entrypoint"]);
+      preflight.push(args[6]);
+    }
+  }
+  const originalFs = { lstatSync: fs.lstatSync, readdirSync: fs.readdirSync, readFileSync: fs.readFileSync };
+  const nodeType = file => {
+    if (!disk.has(file) && !directories.has(file)) throw Object.assign(new Error("missing fixture"), { code: "ENOENT" });
+    return { isFile: () => disk.has(file), isDirectory: () => directories.has(file), isSymbolicLink: () => false, size: disk.get(file)?.length ?? 0 };
+  };
+  let record;
+  try {
+    fs.lstatSync = nodeType;
+    fs.readFileSync = file => disk.get(file);
+    fs.readdirSync = dir => [...disk.keys(), ...directories].filter(file => file !== dir && path.dirname(file) === dir)
+      .map(file => ({ name: path.basename(file), ...nodeType(file) }));
+    const build = () => buildImagePair(root, hash(disk.get(manifestPath)), env, simulate);
+    assert.throws(() => buildImagePair(root, "0".repeat(64), env, simulate), /交接清单/u);
+    disk.set(manifestPath, json({ ...manifest, format: "rental-development-build-1" }));
+    assert.throws(build, /缺少正式宿主/u);
+    disk.set(manifestPath, json(manifest));
+    wrongTag = true;
+    assert.throws(build, /正式 Tag/u);
+    wrongTag = false;
+    disk.set(indexPath, buf("<html>changed</html>"));
+    assert.throws(build, /Web 文件集合/u);
+    disk.set(indexPath, web);
+    assert.equal(stored.size, 0);
+    record = json(build());
+  } finally {
+    Object.assign(fs, originalFs);
+  }
+  assert.equal(stored.size, 2);
+  assert.deepEqual(preflight, [imageIds.api, imageIds.web]);
+  assert.equal(JSON.parse(record).serverUpdateEligible, false);
+  const policy = { ...initialPolicy, buildRecordSha256: hash(record) };
+  const observed = { run, buildRecord: record, inspectedImageIds: imageIds };
+  assert.equal(reviewPairedUpdate(candidate, candidate, policy, observed).status, "awaiting-release-approval");
+  assert.equal(reviewPairedUpdate("legacy-combined", candidate, policy, observed).status, "awaiting-migration-bridge");
+  assert.equal(reviewPairedUpdate(verifyFixture(preparedFixture({ extra: true })), candidate, policy, observed).status, "awaiting-migration-approval");
+  assert.throws(() => reviewPairedUpdate(candidate, candidate, policy, { ...observed, buildRecord: json({}) }), /记录原文/u);
+  assert.throws(() => reviewPairedUpdate(candidate, candidate, policy, { ...observed, run: { ...run, conclusion: "failure" } }), /CI 仓库/u);
+  const changedSelection = json({ ...JSON.parse(record), selection: { ...candidate.identity.selection, profile: "full" } });
+  assert.throws(() => reviewPairedUpdate(candidate, candidate, { ...policy, buildRecordSha256: hash(changedSelection) },
+    { ...observed, buildRecord: changedSelection }), /候选选择/u);
+  assert.equal(fs.existsSync(root), false);
+  ok("同次 API／Web 镜像构建边界夹具通过，缺材料、错 Tag、开发报告与未通过 CI 均拒绝");
 }
 
 function verifyMcpContribution() {
