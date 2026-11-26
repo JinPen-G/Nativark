@@ -130,7 +130,8 @@ async function compiled() {
   fs.copyFileSync(path.join(rentalRoot, "package.json"), path.join(stagedRental, "package.json"));
   check(ts.createProgram([path.join(rentalRoot, "src/capability-mapping.ts"), path.join(rentalRoot, "src/catalog-goal-policy.ts")], {
     ...options, rootDir: path.join(rentalRoot, "src"), outDir: path.join(stagedRental, "dist"),
-    paths: { ...options.paths, "@rental-os/mcp-server": [path.join(staged, "dist/index.d.ts")] },
+    paths: { ...options.paths, "@rental-os/mcp-server": [path.join(staged, "dist/index.d.ts")],
+      "@rental-os/mcp-server/*": [path.join(staged, "dist/*.d.ts")] },
   }));
   const consumer = path.join(output, "consumer.mts");
   fs.writeFileSync(consumer, [
@@ -157,7 +158,7 @@ async function compiled() {
     'export function bindNativeBudget(db: OAuthSqlDatabase<OriginalNative>, target: OriginalMcpReadTargetSource<OriginalNative>) { return createPrismaMcpReadBudget(db, target); }',
     'import { createPrismaMcpReadBudget } from "@rental-os/mcp-server/prisma-mcp-read-budget";',
     'export { createPersistentOAuthAuthorization } from "@rental-os/mcp-server/persistent-oauth-authorization";',
-    'export { createPersistentOAuthTokenService, createPersistentOAuthResourceVerifier, oauthCredentialDigest } from "@rental-os/mcp-server/persistent-oauth-tokens";',
+    'export { createPersistentOAuthAccessReader, createPersistentOAuthTokenService, createPersistentOAuthResourceVerifier, oauthCredentialDigest } from "@rental-os/mcp-server/persistent-oauth-tokens";',
     'import type { OAuthSqlDatabase, OAuthSqlTransaction, OriginalOAuthCodeAudit, PrismaOAuthStore } from "@rental-os/mcp-server/prisma-oauth-store";',
     'export function useNative(store: PrismaOAuthStore, audit: OriginalOAuthCodeAudit, database: OAuthSqlDatabase): void { void store; void audit; void database; }',
     'export const nativeQuery = (tx: OAuthSqlTransaction) => tx.$queryRaw<unknown[]>`SELECT 1`;',
@@ -507,6 +508,136 @@ test('original catalog goal author persists before reads and never resets on cre
 });
 
 const resource = "https://mcp.example.invalid/mcp";
+test('selected MCP reads the same authorized quote receipt after Core stop and tenant disable', async () => {
+  const api = await compiled(), f = sqlFixture();
+  const { fixture, source, identity, shared } = require('./fixtures/mcp/original-identity.cjs');
+  const original = fixture(), native = original.tx;
+  const { createOriginalMcpCoreAccess } = source('packages/rental-mcp-host/src/original-mcp-core-access.ts');
+  const { createOriginalMcpResultReadTools } = source('packages/rental-mcp-host/src/original-mcp-result-read-tools.ts');
+  const { createOriginalMcpCatalogReadContext } = source('packages/rental-mcp-host/src/original-mcp-read-context.ts');
+  const who = { userId: 'user-a', tenantId: 'tenant-a', workspaceId: 'workspace-a' }, scope = { kind: 'workspace', tenantId: who.tenantId, workspaceId: who.workspaceId };
+  const owner = { ...who, grantId: 'grant-a', grantRevision: 1 }, name = 'read_quote_receipt', scopes = ['quote:read'];
+  const grant = { id: owner.grantId, subject: 'original-subject', revision: 1, clientId: 'original-client', resource, scopes, expiresAt: Math.floor(Date.now() / 1000) + 60 };
+  const token = Buffer.alloc(32, 1).toString('base64url'), digest = api.oauthCredentialDigest(token), familyId = 'original-family';
+  const authorization = { subject: grant.subject, clientId: grant.clientId, resource, scopes, token };
+  const input = { draftVersion: shared.AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: '64bb653c-7b01-4000-8000-c8183f24b396' };
+  const inputHash = api.captureMcpReadInput(input).inputHash, binding = { toolName: name, inputHash };
+  const target = { goalId: 'existing-quote-goal', goalRevision: 1, grantId: grant.id, subject: grant.subject, clientId: grant.clientId,
+    resource, scopes, purpose: 'existing-quote-purpose', originalInputHash: inputHash, policyVersion: 'existing-policy' };
+  const state = { grant: 'enabled', assignment: 'assigned', admission: 'accepting', purpose: target.purpose,
+    oauth: true, physical: true, readable: true, revokeOnRelease: false, reads: 0, released: 0 };
+  const rejectWrite = () => assert.fail('original quote read must not write business state or enter new business');
+  native.$executeRaw = rejectWrite;
+  native.$queryRaw = async (parts, ...values) => {
+    const sql = parts.join('?').replace(/\s+/gu, ' ').trim();
+    if (sql.includes('FROM mcp_oauth_access')) {
+      assert.deepEqual(values, [digest]); return [{ familyId, recordJson: { digest, grantId: grant.id, familyId, expiresAt: grant.expiresAt } }];
+    }
+    if (sql.includes('FROM mcp_oauth_families')) {
+      assert.deepEqual(values, [familyId]); return [{ revoked: 0, recordJson: { id: familyId, grantId: grant.id, grantRevision: grant.revision,
+        subject: grant.subject, clientId: grant.clientId, resource, scopes, expiresAt: grant.expiresAt } }];
+    }
+    if (sql.includes('FROM Tenant WHERE')) { assert.deepEqual(values, [who.tenantId]); return [{ id: who.tenantId, status: 'active' }]; }
+    if (sql.includes('FROM platform_tenant_core_grants')) {
+      assert.deepEqual(values, [who.tenantId, 'rental']); assert.match(sql, /FOR UPDATE$/u);
+      return state.grant ? [{ state: state.grant, revision: 1, operationId: 'tenant-grant' }] : [];
+    }
+    if (sql.includes('FROM platform_member_core_assignments')) {
+      assert.deepEqual(values, [who.tenantId, 'rental', who.userId]); assert.match(sql, /FOR UPDATE$/u);
+      return [{ state: state.assignment, revision: 1, operationId: 'member-assignment' }];
+    }
+    if (sql.includes('FROM platform_core_bindings')) return [{ bindingId: 'original-core-binding', revision: 1,
+      dataVersion: '0.1.0', containerType: 'rental-workspace', containerId: who.workspaceId }];
+    if (sql.includes('FROM SystemParameterSet')) return [{ id: 'original-admission', tenantId: 'tenant_platform', module: 'core-deployment-admission:rental',
+      versionNo: 1, status: 'effective', content: { coreId: 'rental', state: state.admission, revision: 1, operationId: 'deployment-admission' } }];
+    if (sql.includes('FROM mcp_read_target_bindings')) return [f.state.readBindings[values[0]]].filter(Boolean);
+    assert.fail('unexpected original read statement: ' + sql);
+  };
+  const coreAccess = createOriginalMcpCoreAccess({ users: original.repository, term: { requireNewBusiness: rejectWrite },
+    deploymentForTransaction: () => ({ requireRegistered: async () => {}, async requireAvailable(coreId, tenantId) {
+      assert.equal(coreId, 'rental'); assert.equal(tenantId, who.tenantId);
+      if (!state.physical) throw new Error('original physical data unavailable');
+    } }) });
+  const store = api.createPrismaOAuthStore({ $transaction: consume => consume(native) }, { record: rejectWrite });
+  const originalGoal = { async locate(call) { return call.toolName === name && call.inputHash === inputHash ? target.goalId : undefined; },
+    async current(goal, call) { return goal.purpose === state.purpose && call.toolName === name && call.inputHash === inputHash; },
+    async readExisting() { return { target, owner, bindings: [binding] }; }, async auditPublished() {} };
+  // Establish the original association once. Budget/traffic use their actual
+  // stores in a separate Native; the business transaction holds the Core rows.
+  await f.database.$transaction(tx => api.createPrismaMcpReadBindings(originalGoal, { current: () => owner }).publishIn(target.goalId, tx, signal()),
+    { isolationLevel: 'Serializable', maxWait: 2500, timeout: 5000 });
+  const originalBindings = structuredClone(f.state.readBindings);
+  const core = { store, coreAccess, database: f.database, grantAuthority: {
+    principal: async () => state.oauth ? original.binding : undefined,
+    access: { current: async () => state.oauth ? grant : undefined } } };
+  const createdAt = '2026-11-01T00:00:00.000Z', expiresAt = '2026-11-02T00:00:00.000Z';
+  const receipt = { original: { ...input, revision: 1, contentHash: 'a'.repeat(64), sceneCode: 'quote_clarification', sceneVersion: '1',
+    requestKey: 'original-quote-key', previousInputRef: null, expiresAt, createdAt, state: 'expired' },
+    result: { contractVersion: 'ain-09-quote-preview-draft-1', requestId: 'original-quote', scope, observedAt: expiresAt,
+      status: 'expired', quotePersistence: 'saved', quote: { id: 'original-quote', quoteNo: 'original-quote-no', createdAt, expiresAt,
+        chargeLines: [], rentalAmount: 10, discountAmount: 0, couponAmount: 0, serviceAmount: 0, fulfillmentAmount: 0,
+        depositAmount: 0, preAuthAmount: 0, payableAmount: 10, receivableAmount: 10, pricingPlanVersion: '1', ruleVersion: '1',
+        reservation: 'not_reserved', period: { startAt: createdAt, endAt: expiresAt }, lineUnits: [{ quantity: 1 }], promotionEvidence: [],
+        promotionVersionCoverage: 'charge_line_references_only', roundingEvidence: 'not_projected' } }, observation: 'original_operation_only',
+    selection: 'historical_not_current_confirmation', orderApproval: 'not_granted', inventoryReservation: 'not_attempted' };
+  const otherReaders = { selection: { read: rejectWrite }, approval: { readSelectedProposal: rejectWrite }, task: { readResult: rejectWrite } };
+  const quote = { tool: { name, description: 'Read an existing quote receipt.', outputSchema: { type: 'object', additionalProperties: false,
+    properties: { status: { type: 'string' } }, required: ['status'] } }, goals: originalGoal, requiredScopes: scopes, publication: { allows: async () => true },
+    // Explicit test source for this original object's route/field policy. The
+    // underlying ticket, current workspace/role resolution and ALS are real.
+    async withReadIn(tx, _input, resolve, consume) {
+      const ticket = original.auth.consumeTrustedWorkspaceAccess(await resolve()); assert.equal(ticket.transaction, tx);
+      const { user } = ticket.context;
+      const subject = { ...who, audience: 'operator', isSaasAdmin: false, isPlatformAdmin: false, staffApi: false,
+        permissions: user.permissions, dataScope: user.dataScope, organizationId: user.organizationId,
+        locationScope: { mode: 'selected', locationIds: ['loc-a'] } };
+      return identity.runWithRequestIdentity(subject, () => consume(subject));
+    },
+    async assertCurrentIn(evidence, command) {
+      return evidence.native === native && evidence.subject.grantId === owner.grantId && state.readable
+        && command.inputRef === input.inputRef && command.draftVersion === input.draftVersion;
+    },
+    async bindIn(custody) { assert.equal(custody.native, native); return { ...otherReaders, quote: { async readQuoteReceipt(command) {
+      state.reads++; assert.deepEqual(command, input); return structuredClone(receipt);
+    } } }; },
+    release: { async projectIn(custody, destination, value) {
+      assert.equal(custody.native, native); assert.deepEqual(destination, { clientId: grant.clientId, resource });
+      assert.equal(value.original.requestKey, receipt.original.requestKey); state.released++;
+      if (state.revokeOnRelease) state.readable = false;
+      return { status: value.result.status };
+    } } };
+  const tools = createOriginalMcpResultReadTools(api, { enabled: true, resourceUrl: resource, allowedScopes: scopes }, core, original.auth, {
+    operations: { quoteReceipt: quote }, traffic: { async current(operation) {
+      assert.equal(operation, 'mcp.tools.call'); return { policyRef: 'original-traffic', policyRevision: 1, expiresAt: grant.expiresAt, windowSeconds: 3600, limit: 20 };
+    } } });
+  const read = (command = input) => tools.accounting.withInvocation(authorization, name, command, stop => tools.authority.withRead(authorization, name,
+    command, () => tools.accounting.withCall(authorization, name, command, async allowance =>
+      tools.release.project(authorization, name, await tools.tools[0].read(command, allowance), allowance), stop), stop), signal());
+  for (const [grantState, admission] of [['enabled', 'accepting'], ['enabled', 'stopped'], ['disabled', 'accepting'], ['disabled', 'stopped']]) {
+    Object.assign(state, { grant: grantState, admission });
+    assert.deepEqual(await read(), { status: 'expired' }, `${grantState}/${admission} reads and releases the exact original receipt`);
+  }
+  assert.equal(state.reads, 4); assert.equal(state.released, 4);
+  assert.deepEqual(Object.values(f.state.readCalls).map(row => [row.goalId, row.state]), Array.from({ length: 4 }, () => [target.goalId, 'returned']));
+  assert.equal(f.state.budgets[target.goalId].consumedCalls, 4);
+  assert.equal(Object.values(f.state.trafficBuckets).reduce((total, row) => total + row.count, 0), 4);
+  const beforeDenial = structuredClone(f.state);
+  for (const [key, value] of [['oauth', false], ['assignment', 'revoked'], ['readable', false], ['physical', false], ['grant', undefined], ['purpose', 'other-purpose']]) {
+    const previous = state[key]; state[key] = value;
+    try { await assert.rejects(read()); } finally { state[key] = previous; }
+  }
+  await assert.rejects(read({ ...input, inputRef: '64bb653c-7b01-4000-8000-c8183f24b397' }));
+  const catalog = createOriginalMcpCatalogReadContext(coreAccess);
+  await original.run(current => assert.rejects(catalog.bind(authorization, name, inputHash)(owner, current, signal(),
+    rejectWrite, native), /租户授权已停用/u)); // Same tool name does not grant the receipt path.
+  assert.deepEqual(f.state, beforeDenial); assert.equal(state.reads, 4); assert.equal(state.released, 4);
+  state.revokeOnRelease = true;
+  await assert.rejects(read());
+  assert.equal(state.reads, 5); assert.equal(state.released, 5);
+  assert.equal(Object.values(f.state.readCalls).at(-1).state, 'failed');
+  assert.equal(f.state.budgets[target.goalId].consumedCalls, 5); assert.deepEqual(f.state.readBindings, originalBindings);
+});
+
 function values(api) {
   const verifier = "v".repeat(43), challenge = createHash("sha256").update(verifier).digest("base64url"), expiresAt = Math.floor(Date.now() / 1000) + 3600;
   const request = { clientId: "client", clientRevision: 1, resource, redirectUri: "http://127.0.0.1:49152/callback", scopes: ["catalog:read"], state: "state", codeChallenge: challenge };

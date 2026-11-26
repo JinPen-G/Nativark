@@ -85,10 +85,12 @@ export function createOriginalMcpOAuthCore(
   }
   const createReadTools = original.createReadTools?.bind(original);
   if (original.coreAccess !== undefined && (typeof original.coreAccess?.withCurrent !== 'function'
+    || original.coreAccess.withOriginalQuoteReceipt !== undefined && typeof original.coreAccess.withOriginalQuoteReceipt !== 'function'
     || !createReadTools || suppliedReadTools !== undefined || config.service.resource.resources !== undefined))
     throw new Error('Selected MCP Core requires its original controlled read factory');
-  const coreAccess = original.coreAccess === undefined ? undefined
-    : Object.freeze({ withCurrent: original.coreAccess.withCurrent.bind(original.coreAccess) });
+  const originalCore = original.coreAccess;
+  const coreAccess = originalCore === undefined ? undefined : Object.freeze({ withCurrent: originalCore.withCurrent.bind(originalCore),
+    ...(originalCore.withOriginalQuoteReceipt === undefined ? {} : { withOriginalQuoteReceipt: originalCore.withOriginalQuoteReceipt.bind(originalCore) }) });
   if (suppliedReadTools?.usage !== undefined) throw new Error('Original MCP OAuth core owns completed-read usage');
   const resourceUrl = config.service.resource.resourceUrl, allowedScopes = Object.freeze([...config.service.tokens.allowedScopes]);
   const grantConfig = Object.freeze({ enabled: config.service.enabled, resourceUrl, allowedScopes });

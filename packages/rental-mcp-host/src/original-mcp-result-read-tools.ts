@@ -5,6 +5,7 @@ import type { Prisma } from '@prisma/client';
 import { getRequestIdentity, runWithRequestIdentity, type RequestIdentity } from '@rental-os/platform-server/request-identity';
 import { resolveUserBusinessLocationScope } from '@rental-os/rental-core/business-location-scope';
 import type { AuthService } from '@rental-os/ai-native-server/runtime/rental-adapters/auth.service';
+import { originalRequestReferenceSchema } from '@rental-os/ai-native-server/runtime/task-request/original-request.validation';
 import type { McpReadAuthorization, McpReadTool, McpReadTools } from '@rental-os/mcp-server' with { 'resolution-mode': 'import' };
 import type { createPersistentOAuthAccessReader } from '@rental-os/mcp-server/persistent-oauth-tokens' with { 'resolution-mode': 'import' };
 import type { captureMcpReadInput, OriginalMcpReadCallRef } from '@rental-os/mcp-server/persistent-read-accounting' with { 'resolution-mode': 'import' };
@@ -12,7 +13,7 @@ import type { createPrismaMcpReadAccounting } from '@rental-os/mcp-server/prisma
 import type { createPrismaMcpReadBindings, OriginalMcpReadBindingAuthority } from '@rental-os/mcp-server/prisma-mcp-read-bindings' with { 'resolution-mode': 'import' };
 import type { createOriginalMcpTrafficMeter, OriginalMcpTrafficPolicySource } from '@rental-os/mcp-server/original-traffic-meter' with { 'resolution-mode': 'import' };
 import type { OriginalMcpReadCore } from './original-mcp-oauth-core';
-import { createOriginalMcpCatalogReadContext, type OriginalMcpReadSubject } from './original-mcp-read-context';
+import { createOriginalMcpCatalogReadContext, createOriginalMcpQuoteReceiptReadContext, type OriginalMcpReadSubject } from './original-mcp-read-context';
 import { captureOriginalMcpRequestCall } from './original-mcp-request-scope';
 import { originalMcpResultKinds, originalMcpResultTool, type OriginalMcpResultCustody, type OriginalMcpResultKind,
   type OriginalMcpResultReaderExports, type OriginalMcpResultSources } from './original-mcp-result-readers';
@@ -70,9 +71,7 @@ export function createOriginalMcpResultReadTools(mcp: OriginalMcpResultReadTools
   auth: ResultAuth, policy: OriginalMcpResultReadPolicy): McpReadTools {
   if (typeof policy?.traffic?.current !== 'function' || !policy.operations
     || Reflect.ownKeys(policy.operations).some(key => !originalMcpResultKinds.includes(key as OriginalMcpResultKind))) throw unavailable();
-  const context = createOriginalMcpCatalogReadContext(core.coreAccess);
-  if (!context.withReadNative) throw unavailable();
-  const withNative = context.withReadNative.bind(context);
+  const ordinaryContext = createOriginalMcpCatalogReadContext(core.coreAccess);
   const transaction = core.store.transaction.bind(core.store), nativeOf = core.store.native.bind(core.store);
   const principal = core.grantAuthority.principal.bind(core.grantAuthority), withPrincipal = auth.withTrustedWorkspacePrincipal.bind(auth);
   const consumeTicket = auth.consumeTrustedWorkspaceAccess.bind(auth);
@@ -108,6 +107,11 @@ export function createOriginalMcpResultReadTools(mcp: OriginalMcpResultReadTools
       || !Array.isArray(owner.requiredScopes) || !owner.requiredScopes.length || new Set(owner.requiredScopes).size !== owner.requiredScopes.length
       || owner.requiredScopes.some(scope => !allowedScopes.has(scope))) throw unavailable();
     const descriptor = { name: owner.tool.name, description: owner.tool.description, outputSchema: structuredClone(owner.tool.outputSchema) };
+    // The audited kind fixes the reader at construction. The transport name,
+    // locator and client cannot select the Core continuation permission.
+    const context = kind === 'quoteReceipt' ? createOriginalMcpQuoteReceiptReadContext(core.coreAccess) : ordinaryContext;
+    if (!context.withReadNative) throw unavailable();
+    const withNative = context.withReadNative.bind(context);
     const scopes = Object.freeze([...owner.requiredScopes]);
     const withReadIn = owner.withReadIn.bind(owner), assertCurrentIn = owner.assertCurrentIn.bind(owner), bindIn = owner.bindIn.bind(owner);
     const allows = owner.publication.allows.bind(owner.publication), projectIn = owner.release.projectIn.bind(owner.release);
@@ -143,7 +147,7 @@ export function createOriginalMcpResultReadTools(mcp: OriginalMcpResultReadTools
       if (!entry.dispatched || current(descriptor.name, signal).entry !== entry) throw unavailable();
       entry.observed = { value: result };
       return result;
-    } }), scopes, withReadIn, assertCurrentIn, bindings, allows, projectIn };
+    } }), kind, context, withNative, scopes, withReadIn, assertCurrentIn, bindings, allows, projectIn };
   }
   for (const kind of originalMcpResultKinds) {
     if (!Object.hasOwn(policy.operations, kind)) continue;
@@ -158,6 +162,7 @@ export function createOriginalMcpResultReadTools(mcp: OriginalMcpResultReadTools
   const open = (authorization: McpReadAuthorization, name: string, input: unknown, signal: AbortSignal) => {
     const op = operation(name), fixed = credential(authorization), captured = capture(input);
     if (!enabled || fixed.resource !== resourceUrl || !op.scopes.every(scope => fixed.scopes.includes(scope))) throw unavailable();
+    if (op.kind === 'quoteReceipt') originalRequestReferenceSchema.parse(captured.input);
     let entry!: Invocation, counted = false, resolvedTarget: Awaited<ReturnType<typeof op.bindings.resolve>>;
     const budget = mcp.createPrismaMcpReadAccounting(database, { async resolve(raw, frozen, native, stop) {
       const approval = approve(entry), call = captureOriginalMcpRequestCall(raw);
@@ -167,7 +172,7 @@ export function createOriginalMcpResultReadTools(mcp: OriginalMcpResultReadTools
       const target = await op.bindings.resolve(call, frozen, native, stop);
       resolvedTarget = target;
       if (target && !counted) {
-        const { userId, tenantId, workspaceId } = context.current(call);
+        const { userId, tenantId, workspaceId } = op.context.current(call);
         if (!workspaceId) throw unavailable();
         await traffic.consumeIn('mcp.tools.call', { userId, tenantId, workspaceId }, native, stop); counted = true;
       }
@@ -178,7 +183,7 @@ export function createOriginalMcpResultReadTools(mcp: OriginalMcpResultReadTools
       reading: false, read: false, dispatched: false, releasing: false, released: false, budget,
       async verifyGoal(stop) {
         const { call } = current(name, stop);
-        await withNative(call, stop, async (native, scoped) => {
+        await op.withNative(call, stop, async (native, scoped) => {
           const currentTarget = await op.bindings.resolve(call, captured.input, native, scoped);
           if (!currentTarget || !isDeepStrictEqual(resolvedTarget, currentTarget)) throw unavailable();
         });
@@ -203,7 +208,7 @@ export function createOriginalMcpResultReadTools(mcp: OriginalMcpResultReadTools
         const before = await issuer.readIn(tx, fixed.token, signal), token = before.authorization;
         if (signal.aborted || token.subject !== fixed.subject || token.clientId !== fixed.clientId || token.resource !== fixed.resource
           || !isDeepStrictEqual(token.scopes, fixed.scopes)) throw unavailable();
-        const native = nativeOf(tx), enter = context.bind(fixed, name, captured.inputHash);
+        const native = nativeOf(tx), enter = op.context.bind(fixed, name, captured.inputHash);
         const original = await principal(before.grantId, tx, signal);
         if (!original) throw unavailable();
         const authCurrent = async (same: Prisma.TransactionClient, stop: AbortSignal) => {
@@ -316,10 +321,11 @@ export function createOriginalMcpResultReadTools(mcp: OriginalMcpResultReadTools
       entry.releasing = true;
       await approval.assertCurrent();
       const destination = Object.freeze({ clientId: call.authorization.clientId, resource: call.authorization.resource });
-      const result = await withNative(call, signal, async (native, stop) => {
+      const op = operation(name);
+      const result = await op.withNative(call, signal, async (native, stop) => {
         const done = new AbortController(), scoped = AbortSignal.any([stop, done.signal]);
         try {
-          const projected = await operation(name).projectIn(Object.freeze({ native, subject: context.current(call), signal: scoped }), destination, value);
+          const projected = await op.projectIn(Object.freeze({ native, subject: op.context.current(call), signal: scoped }), destination, value);
           if (projected === value) throw unavailable();
           return projected;
         } finally { done.abort(); }

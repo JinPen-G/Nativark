@@ -53,7 +53,21 @@ function freeze(value: unknown): void {
  * authorization/execution, commit evidence or a durable request/goal locator. */
 export function createOriginalMcpCatalogReadContext(core?: OriginalMcpCoreAccess): OriginalMcpCatalogReadContext {
   if (core !== undefined && typeof core?.withCurrent !== 'function') throw fail();
-  const withCore = core?.withCurrent.bind(core);
+  return createReadContext(core, core?.withCurrent.bind(core));
+}
+
+/** Only the exact, server-registered original quote receipt gets this context.
+ * The receipt Core participant offers no accepting/new-business lease. */
+export function createOriginalMcpQuoteReceiptReadContext(core?: OriginalMcpCoreAccess): OriginalMcpCatalogReadContext {
+  if (core?.withOriginalQuoteReceipt === undefined) return createOriginalMcpCatalogReadContext(core);
+  if (typeof core.withCurrent !== 'function' || typeof core.withOriginalQuoteReceipt !== 'function') throw fail();
+  const receipt = core.withOriginalQuoteReceipt.bind(core), deny = () => { throw fail(); };
+  const lease: OriginalMcpCoreLease = Object.freeze({ requireAccepting: deny, async requireNewBusiness() { deny(); } });
+  return createReadContext(core, (native, subject, signal, consume) => receipt(native, subject, signal, () => consume(lease)));
+}
+
+function createReadContext(core: OriginalMcpCoreAccess | undefined,
+  withCore: OriginalMcpCoreAccess['withCurrent'] | undefined): OriginalMcpCatalogReadContext {
   const storage = new AsyncLocalStorage<{ subject: OriginalMcpReadSubject; toolName: string; inputHash: string;
     authorizationHash: string; active: boolean; signal: AbortSignal; native?: Prisma.TransactionClient; lease?: OriginalMcpCoreLease }>();
   const active = (call: OriginalMcpReadCallRef) => {
