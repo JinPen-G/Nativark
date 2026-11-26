@@ -17,11 +17,17 @@ export interface AiTaskTransactionAuthority<Transaction extends object> {
     revalidate(): Promise<void>;
   }>;
 }
+export type AiTaskTransactionBoundary<Transaction extends object> = ReturnType<typeof createAiTaskTransactionBoundary<Transaction>>;
+const strictBoundaries = new WeakSet<object>();
+
+export function isStrictAiTaskTransactionBoundary(boundary: object | undefined): boolean {
+  return boundary !== undefined && strictBoundaries.has(boundary);
+}
 
 /** Strict by default. A legacy host must explicitly supply its selection check;
  * an expired selected request must still return true and require a participant. */
 export function createAiTaskTransactionBoundary<Transaction extends object>(
-  selection: { isRequired(): boolean } = { isRequired: () => true }
+  selection?: { isRequired(): boolean }
 ) {
   type Authority = AiTaskTransactionAuthority<Transaction>;
   type Scope = { active: boolean; authority: Authority };
@@ -48,7 +54,7 @@ export function createAiTaskTransactionBoundary<Transaction extends object>(
     consume: () => Promise<T>): Promise<T> {
     const scope = scopes.getStore();
     if (!scope) {
-      if (selection.isRequired()) throw denied();
+      if (!selection || selection.isRequired()) throw denied();
       return consume();
     }
     if (!scope.active || '$transaction' in transaction) throw denied();
@@ -81,6 +87,8 @@ export function createAiTaskTransactionBoundary<Transaction extends object>(
     return withAiTaskTransaction(transaction, reference, consume);
   }
 
-  return Object.freeze({ withAiTaskTransactionAuthority, withAiTaskTransaction, withHeldAiTaskTransaction,
-    hasAiTaskTransactionAuthority: () => Boolean(scopes.getStore()) || selection.isRequired() });
+  const boundary = Object.freeze({ withAiTaskTransactionAuthority, withAiTaskTransaction, withHeldAiTaskTransaction,
+    hasAiTaskTransactionAuthority: () => Boolean(scopes.getStore()) || !selection || selection.isRequired() });
+  if (!selection) strictBoundaries.add(boundary);
+  return boundary;
 }

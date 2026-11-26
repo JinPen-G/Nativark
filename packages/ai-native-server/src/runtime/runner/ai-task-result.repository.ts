@@ -1,9 +1,9 @@
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import { AI_TASK_DRAFT_VERSION } from '@rental-os/shared';
+import { AI_TASK_DRAFT_VERSION } from '@rental-os/platform-contracts/ai-task';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
-import { AiTaskRepositoryError, type AiTaskRepository } from '../ai-task.repository';
+import { AiTaskRepositoryError, type TaskPersistenceRepository } from '../task-persistence.repository';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const inputSchema = z.object({ taskId: id, resultId: id }).strict();
@@ -50,7 +50,7 @@ export interface AiTaskResultProjection {
  * not become a successful model result.
  */
 export class AiTaskResultRepository {
-  constructor(private readonly db: Db, private readonly tasks: Pick<AiTaskRepository, 'resolveAccess'>, private readonly clock: () => Date = () => new Date()) {
+  constructor(private readonly db: Db, private readonly tasks: Pick<TaskPersistenceRepository, 'resolveAccess'>, private readonly clock: () => Date = () => new Date()) {
     if (typeof db?.$transaction !== 'function' || typeof db?.aiTaskResultArtifact?.findFirst !== 'function'
       || typeof db?.aiStep?.findFirst !== 'function' || typeof tasks?.resolveAccess !== 'function') {
       throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');

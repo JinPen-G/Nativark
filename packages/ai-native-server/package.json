@@ -35,6 +35,9 @@
       "task-transactions": [
         "dist/task-transactions.d.ts"
       ],
+      "task-persistence": [
+        "dist/task-persistence.d.ts"
+      ],
       "platform-transactions": [
         "dist/platform-transactions.d.ts"
       ],
@@ -93,6 +96,10 @@
     "./task-transactions": {
       "types": "./dist/task-transactions.d.ts",
       "default": "./dist/task-transactions.js"
+    },
+    "./task-persistence": {
+      "types": "./dist/task-persistence.d.ts",
+      "default": "./dist/task-persistence.js"
     },
     "./platform-transactions": {
       "types": "./dist/platform-transactions.d.ts",
