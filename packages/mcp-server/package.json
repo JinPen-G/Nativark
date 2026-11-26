@@ -226,6 +226,7 @@
     "mysql-catalog-goal-adoption-schema.sql"
   ],
   "scripts": {
+    "prebuild": "npm run build -w @rental-os/platform-core-host",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

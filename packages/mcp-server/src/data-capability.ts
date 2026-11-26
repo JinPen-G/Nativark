@@ -7,7 +7,7 @@ import { createCoreArchive } from '@rental-os/core-contracts/archive';
 import { readPlatformDataCapabilityPackage, requirePlatformDataCapabilityFiles } from '@rental-os/core-contracts/platform-data-package';
 
 const schema = { file: 'prisma/schema.prisma', sha256: '8c3ad36c896693d3d056a9d1b067bf8c26cf222ed5aeadf7a1e367ae30fe7a63' } as const;
-const packageMetadataSha256 = '94a611d8cf20b878d398745bc48e8b80a3082257d68b45076cbaaacaca554546';
+const packageMetadataSha256 = 'ce4caeecbd0b4b81a879f02d4e845b6f7eb8fbaf8b5b89024c670a6a8afb1202';
 const packageBuildPathsSha256 = '723a3e360d87002c026dd2278aea1d386e4d78ccf6d16b5d1c24fae9ab9b46ff';
 const migrations = [
   { id: 'mcp.0001-oauth', file: 'mysql-oauth-schema.sql', sha256: 'aa8f6004c1be402bd6adeda56bba9275d820cfdea43d52483429e684b5ddded4', requires: [] },
