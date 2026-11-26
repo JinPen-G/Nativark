@@ -143,17 +143,20 @@ async function modelReceipt() {
   const h = harness(); await h.reserve();
   const config = { configId: 'profile-a', configRevision: 1, credentialRef: 'vault-a', protocol: 'openai_chat_completions', provider: 'synthetic', model: 'model-a', serviceMode: 'tenant_managed', tenantId: 'tenant-a', configurationScope: { kind: 'tenant', tenantId: 'tenant-a' } };
   const association = { requestId: 'call-a', runId: 'run-a', stepId: 'step-a', actionId: 'action-a', idempotencyKey: 'call-a', priceVersion: 'price-a', scope: { kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'workspace-a' }, config };
+  const scope = { id: 'scope-a', kind: 'WORKSPACE', tenantId: 'tenant-a', workspaceId: 'workspace-a' };
+  Object.assign(h.state.aiTask[0], { scope, scopeKind: scope.kind, ownerKind: 'USER', audience: 'OPERATOR' });
   h.state.aiTaskExecutionCharge.push({ ...h.state.aiTaskExecutionCharge[0], chargeId: 'charge-calls', resource: 'CALLS', gatewayInvocationId: 'invocation-a' });
   const result = await h.make({ readDispatch: async () => assert.fail('capture only checks the supplied dependency, not dispatch') }).capture(lease, 'step-a', new AbortController().signal, async () => ({ kind: 'succeeded', payload: { synthetic: true } }));
   h.state.aiStep[0].status = 'SUCCEEDED'; h.state.aiStep[0].resultRef = result.resultRef;
-  h.state.aiGatewayInvocation.push({ id: 'invocation-a', scopeId: 'scope-a', taskId: 'task-a', actorId: 'user-a', callId: 'call-a', runId: 'run-a', stepId: 'step-a', actionId: 'action-a', stepFingerprint: 'a'.repeat(64), sceneCode: 'scene-a', priceVersion: 'price-a', configuration: config, configurationHash: requestFingerprint(config) });
+  h.state.aiGatewayInvocation.push({ id: 'invocation-a', scopeId: 'scope-a', taskId: 'task-a', actorId: 'user-a', callId: 'call-a', runId: 'run-a', stepId: 'step-a', actionId: 'action-a', stepFingerprint: 'a'.repeat(64), sceneCode: 'scene-a', priceVersion: 'price-a', configuration: config, configurationHash: requestFingerprint(config),
+    leaseOwnerId: lease.holderId, fencingToken: lease.fencingToken });
   h.state.aiGatewayAccountingReceipt.push({ id: 'receipt-a', scopeId: 'scope-a', scopeKind: 'WORKSPACE', taskId: 'task-a', invocationId: 'invocation-a', reservationId: 'reservation-a', admissionId: 'admission-a', tenantId: 'tenant-a', workspaceId: 'workspace-a', dispatchToken: 'dispatch-a', requestHash: 'b'.repeat(64), state: 'dispatched' });
-  h.state.aiInvocationAdmission.push({ id: 'admission-a', tenantId: 'tenant-a', workspaceId: 'workspace-a', actorId: 'user-a', callId: 'call-a', requestHash: 'b'.repeat(64), dispatchId: 'dispatch-a', profileId: 'profile-a', status: 'completed', revokedAt: null });
+  h.state.aiInvocationAdmission.push({ id: 'admission-a', scopeKind: 'WORKSPACE', tenantId: 'tenant-a', workspaceId: 'workspace-a', actorId: 'user-a', callId: 'call-a', requestHash: 'b'.repeat(64), dispatchId: 'dispatch-a', profileId: 'profile-a', status: 'completed', revokedAt: null });
   h.state.aiBudgetReservation.push({ id: 'reservation-a', scopeId: 'scope-a', scopeKind: 'WORKSPACE', tenantId: 'tenant-a', workspaceId: 'workspace-a', actorId: 'user-a', callId: 'call-a', requestId: 'call-a', idempotencyKey: 'call-a', runId: 'run-a', stepId: 'step-a', actionId: 'action-a', sceneCode: 'scene-a', priceVersion: 'price-a', configRevision: 1, configurationHash: requestFingerprint(config) });
   h.facts = new PrismaGatewayAccountingFacts(h.db, {
     resolveForReserve: async () => assert.fail('resource read must not reserve money'),
     resolveForReservation: async () => ({ actorId: 'user-a', association, sceneCode: 'scene-a', expiresAt: new Date(lease.expiresAt) })
-  }, { resolveCurrent: async () => ({ context: { actor: { kind: 'user', userId: 'user-a' }, scope: association.scope } }) }, {
+  }, { resolveCurrent: async () => ({ context: syntheticExecutionContext, scope }) }, {
     quantity: async () => assert.fail('task calls do not price or settle money')
   }, () => now);
   h.read = source => h.make(source).read({ taskId: 'task-a', lease, chargeId: 'charge-calls', evidenceRef: `${result.resultRef}:calls` }, false);
@@ -200,7 +203,13 @@ test('immutable persisted plan survives recreation and refuses changed limits or
   const loaded = await h.make().resolve({ taskId: 'task-a', status: 'running', revision: 2, cancelRequestedAt: null }, lease, true);
   assert.equal(loaded.taskRevision, 2); assert.deepEqual(loaded.steps, plan.steps);
   await assert.rejects(h.make().savePlan({ ...plan, limits: { ...plan.limits, maxStepMs: 99 } }, lease));
-  h.control.planHash = 'd'.repeat(64); await assert.rejects(h.make().resolve({ taskId: 'task-a', revision: 2 }, lease, true));
+  h.control.planHash = 'd'.repeat(64);
+  const before = clone(h.state), metadata = { taskId: 'task-a', status: 'running', revision: 2, cancelRequestedAt: null };
+  await assert.rejects(h.make().resolve(metadata, lease, false), e => e.code === 'AI_ACCESS_DENIED');
+  assert.deepEqual(await h.make().resolve(metadata, lease, true), loaded);
+  assert.deepEqual(h.state, before);
+  h.state.aiTaskRunPlan[0].planHash = 'f'.repeat(64);
+  await assert.rejects(h.make().resolve(metadata, lease, true), e => e.code === 'AI_ACCESS_DENIED');
 });
 
 test('actual persisted authorized plan supplies stable cumulative resource ceilings across revisions and restart', async () => {
@@ -600,13 +609,20 @@ test('incomplete recovery returns only a persisted unknown receipt; missing evid
   assert.equal(h.state.aiTaskExecutionCharge.every(c => c.status === 'RESERVED'), true);
 });
 
-test('policy changes during tool execution cannot produce a completed artifact or settle resources', async () => {
-  const h = harness(); await h.make().savePlan(plan, lease); await h.reserve();
-  await assert.rejects(h.make().capture(lease, 'step-a', new AbortController().signal, async () => {
-    h.control.planHash = 'e'.repeat(64); return { kind: 'succeeded', payload: { synthetic: true } };
-  }));
-  assert.equal(h.state.aiTaskResultArtifact.some(row => row.completeMeasurement), false);
+test('changed execution policy preserves original measurements and denies fresh capture', async () => {
+  const h = harness(); await h.reserve(); let calls = 0;
+  const execute = async () => {
+    calls++; h.control.planHash = 'e'.repeat(64); return { kind: 'succeeded', payload: { synthetic: true } };
+  };
+  const result = await h.make().capture(lease, 'step-a', new AbortController().signal, execute);
+  assert.equal(h.state.aiTaskResultArtifact[0].completeMeasurement, true);
   assert.equal(h.state.aiTaskExecutionCharge.every(row => row.status === 'RESERVED'), true);
+  h.state.aiStep[0].status = 'SUCCEEDED'; h.state.aiStep[0].resultRef = result.resultRef;
+  const settled = await h.budget.reconcile({ taskId: lease.taskId, lease, chargeId: 'charge-steps', evidenceRef: `${result.resultRef}:steps` });
+  assert.equal(settled.charge.status, 'recorded'); assert.equal(settled.budget.consumed.steps, 1n);
+  const fresh = harness(); await fresh.reserve(); fresh.control.planHash = h.control.planHash;
+  await assert.rejects(fresh.make().capture(lease, 'step-a', new AbortController().signal, execute), e => e.code === 'AI_ACCESS_DENIED');
+  assert.equal(fresh.state.aiTaskResultArtifact.length, 0); assert.equal(calls, 1);
 });
 
 test('actual resource source defers model-call binding until durable start and never executes a supplier', async () => {
