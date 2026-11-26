@@ -6,6 +6,22 @@
 
 排序请求摘要从 `@rental-os/platform-contracts/request-fingerprint` 使用，原 Rental 幂等出口再导出同一函数。[公共实现](../platform-contracts/src/request-fingerprint.ts)保留已保存摘要的排序与 JSON 语义。摘要用于内容绑定；当前权限、业务执行和原操作收据仍由各自真实参加者核对。
 
+## 公共事务出口
+
+以下出口供宿主注入自己的当前主体、数据与业务参加者。其运行时依赖闭包只使用公共模块，原业务仓储继续拥有事务、锁、CAS、幂等及收据。
+
+| 正式出口 | 使用方式与责任 |
+| --- | --- |
+| [request-binding](src/request-binding.ts) | `captureAiRequestBinding` 捕获原 ALS 身份对象及内容摘要，等待后以 `assertCurrent` 核对，退出时 `close`。它只绑定已经形成的请求身份，调用方仍须完成认证和当前权限检查。 |
+| [task-transactions](src/task-transactions.ts) | `createAiTaskTransactionBoundary<Tx>()` 默认要求真实参加者。每个宿主创建一个实例，由请求参加者与所有相关仓储共用；`begin` 在首个 Task 锁前核原来源，嵌套调用沿同一事务执行 `verifyReference`，返回前执行 `revalidate`。嵌套等待完成时仍检查原持有租约，已退出的事务不能继续调用写回调。 |
+| [platform-transactions](src/platform-transactions.ts) | `beginPlatformAiManagementTransaction` 绑定原 SaaS/operator 身份与宿主参加者。`createPlatformAiManagementTransactions` 复用原 `PlatformPrincipalAuthority.lock`，接收服务器登记的 `requiredPermission` 和同事务 `assertDataAvailable`，在最终数据等待后复核身份和期限。仓储必须在提交前调用返回租约的 `revalidate`，并在 `finally` 调用 `close`。 |
+
+通用执行和模型运输继续从 [platform-server/ai-runtime](../platform-server/src/ai-runtime/index.ts)及 [platform-server/ai-gateway](../platform-server/src/ai-gateway/index.ts)取得原 Runner、Gateway 和错误类。宿主提供唯一财务账、Task 累计资源及真实业务执行端口，公共事务出口不会派发模型或自行建立事务。
+
+现有 Rental 仓储沿 [Task 兼容入口](src/runtime/task-transaction-authority.ts)共享同一个公共边界实例。[部署准入适配器](src/runtime/rental-adapters/task-deployment-admission.ts)保留原 Rental 停新/控制读取，[平台管理适配器](src/runtime/rental-adapters/platform-management-transaction.ts)保留所选 Rental 宿主的原主体与 Tenant 父锁。只有这些显式适配器识别旧宿主兼容选择；所选请求失活后继续拒绝。
+
+上述出口构成公共事务边界。当前整包构建仍选择 Rental-AI schema 并构建 Rental 前置包。租户配置、完整平台生产装配、公共数据贡献、HTTP 和 UI 的独立宿主闭包仍须继续拆分，完整发行方式以本页下方数据与构建说明为准。
+
 完整原组合宿主从 [服务装配](../../apps/api/src/application-services.module.ts) 使用这些工厂。[独立 AI 宿主](../../apps/rental-api/src/ai-app.module.ts) 则显式选择 AI 数据贡献，由 [同实例装配](../../apps/rental-api/src/ai-composition.ts) 提供原 Auth、Guard、Core、数据库和文件权限。只有该宿主 [实际登记并审核的处理器](../../apps/rental-api/src/ai-http-policy.ts) 才发布为可调用能力；工厂、类型或合同存在不等于该宿主已开放全部 AI 路由。
 
 [批准订单授权桥](src/runtime/approval-execution/approved-order-route.authority.ts) 在进入隔离 Guard 前捕获原请求权威；完整 Guard 和身份一致性通过后，准备、读取与执行回调恢复同一原 ALS store。原 Task/批准/Core 事务和幂等仍由真实参加者裁定，失应答保持 unknown，不按新键重发。

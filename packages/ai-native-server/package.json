@@ -29,6 +29,15 @@
       "knowledge-fingerprint": [
         "dist/knowledge-fingerprint.d.ts"
       ],
+      "request-binding": [
+        "dist/request-binding.d.ts"
+      ],
+      "task-transactions": [
+        "dist/task-transactions.d.ts"
+      ],
+      "platform-transactions": [
+        "dist/platform-transactions.d.ts"
+      ],
       "runtime/*": [
         "dist/runtime/*.d.ts"
       ]
@@ -58,6 +67,18 @@
     "./knowledge-fingerprint": {
       "types": "./dist/knowledge-fingerprint.d.ts",
       "default": "./dist/knowledge-fingerprint.js"
+    },
+    "./request-binding": {
+      "types": "./dist/request-binding.d.ts",
+      "default": "./dist/request-binding.js"
+    },
+    "./task-transactions": {
+      "types": "./dist/task-transactions.d.ts",
+      "default": "./dist/task-transactions.js"
+    },
+    "./platform-transactions": {
+      "types": "./dist/platform-transactions.d.ts",
+      "default": "./dist/platform-transactions.js"
     },
     "./runtime/*": {
       "types": "./dist/runtime/*.d.ts",
