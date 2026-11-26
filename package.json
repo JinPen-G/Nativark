@@ -5,7 +5,8 @@
   "license": "MIT",
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "!apps/website-next"
   ],
   "scripts": {
     "prepare:rental-workspace": "node scripts/prepare-rental-workspace.cjs",

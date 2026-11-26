@@ -10,8 +10,7 @@ node_modules/
 /apps/deepseek-harness-clone/
 /apps/deepseek-harness-original/
 /apps/primefold-clone/
-/apps/website-next/migration-manifest.json
-/apps/website-next/tools/migrate-reference.mjs
+/apps/website-next/
 
 # Build output
 dist/

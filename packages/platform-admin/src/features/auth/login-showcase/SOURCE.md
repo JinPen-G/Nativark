@@ -1,6 +1,6 @@
 # 登录演示组件来源
 
-本目录复用负责人指定的 [website-next 演示源码](../../../../../../apps/website-next/components/demos/BusinessPreview.jsx)。来源是本仓库的新官网演示组件，不是 UIArc Pro 登录页源码或已连接业务的后台。
+本目录复用负责人指定的官网演示组件。[现行组件](https://github.com/JinPen-G/Zelo-website/blob/e54e6de90e14f60794de15e92384502a15f7e483/components/demos/BusinessPreview.jsx)由独立官网维护；迁入当时的文件路径与哈希仍见 `source/manifest.json`。登录演示只使用本地定稿，不加载官网工程或业务后台。
 
 `source/manifest.json` 保存原文件路径与 SHA-256。`source/components` 保留五组演示的组件、交互、示例数据与动画类名；适配涉及 admin 语言入口、本地素材路径、Agent 演示默认预约场景和自动焦点约束。轨迹示例原系统 span 映射缺失时沿用基础类，避免拼入 `undefined`。`showcase-source.css` 从官网现行样式定向提取，全部限定在 `.login-showcase-demo` 内；四组原动画的duration/delay按同一比例压入6.4秒，保留阶段与相对节奏，适应负责人指定的7秒轮播。没有加载官网全局 foundation、Next.js、Provider 或整站壳子。
 

@@ -57,8 +57,7 @@ jobs:
           # does not keep maintainer originals out of a public checkout.
           tracked_private=$(git ls-tree -r --name-only "$GITHUB_SHA" -- \
             docs assets .impeccable apps/deepseek-harness-clone apps/deepseek-harness-original \
-            apps/primefold-clone apps/website-next/migration-manifest.json \
-            apps/website-next/tools/migrate-reference.mjs)
+            apps/primefold-clone apps/website-next)
           if [[ -n "$tracked_private" ]]; then
             echo '公开源码仍追踪维护者原稿或参考镜像' >&2
             exit 1
@@ -84,7 +83,7 @@ jobs:
             )
           fi
           tar -tzf "$task/platform.tgz" > "$task/archive.list"
-          if grep -Eq '^(\./)?(assets|\.impeccable)(/|$)|(^|/)(docs|node_modules|output|deepseek-harness-clone|deepseek-harness-original|primefold-clone)(/|$)|^(apps/(api|rental-api|rental-admin)|packages/(rental-core|rental-mcp-host|shared))(/|$)' "$task/archive.list"; then
+          if grep -Eq '^(\./)?(assets|\.impeccable)(/|$)|(^|/)(docs|node_modules|output|deepseek-harness-clone|deepseek-harness-original|primefold-clone)(/|$)|^(apps/(api|rental-api|rental-admin|website-next)|packages/(rental-core|rental-mcp-host|shared))(/|$)' "$task/archive.list"; then
             echo '底座归档含私有资料或业务实现' >&2
             exit 1
           fi

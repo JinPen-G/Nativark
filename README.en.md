@@ -276,7 +276,7 @@ Zelo/
 │   ├── tenant-website/               # [Rental Client] Tenant booking storefront
 │   ├── enterprise-portal/            # [Rental Client] Enterprise customer portal
 │   ├── miniprogram/ & staff-miniprogram/  # [Rental Client] Customer & staff WeChat Mini Programs
-│   └── website/ & website-next/      # Product marketing websites
+│   └── website/                     # Legacy static site; active site in Zelo-website
 ├── packages/
 │   ├── core-contracts/               # [Base] Core manifests, compatibility, check CLI, capability CLI & source exporter
 │   ├── core-host/                    # [Base] Core registry, lifecycle & removal preflight engine
@@ -332,7 +332,7 @@ Zelo/
 | `apps/tenant-website`, `apps/enterprise-portal` | Tenant booking storefront and enterprise portal for Rental Core | [Storefront](apps/tenant-website/README.md) · [Enterprise Portal](apps/enterprise-portal/README.md) |
 | `apps/miniprogram`, `apps/staff-miniprogram` | Customer and staff WeChat Mini Programs for Rental Core | [Customer Mini Program](apps/miniprogram/README.md) · [Staff Mini Program](apps/staff-miniprogram/README.md) |
 | `apps/api`, `apps/admin`, `packages/shared` | Legacy composite entrypoints and compatibility barrel consuming the split packages | [API Module](apps/api/src/app.module.ts) · [Admin Rules](apps/admin/AGENTS.md) · [Shared Index](packages/shared/src/index.ts) |
-| `apps/website`, `apps/website-next` | Static marketing site and Next.js marketing site | [Static Site](apps/website/README.md) · [Next.js Site](apps/website-next/README.md) |
+| [Zelo-website](https://github.com/JinPen-G/Zelo-website) | The separately maintained Zelo website; the base build does not install website dependencies | [Website source and notices](https://github.com/JinPen-G/Zelo-website) |
 
 > **Compatibility Naming Note**: The brand, main repository, and standalone companion repositories now follow the **Zelo** naming (`JinPen-G/Zelo`, official Rental Core `JinPen-G/Zelo-rental-core`, and marketing site `JinPen-G/Zelo-website`), and the GitHub Core discovery topic is now **`zelo-core`**. Future official base releases retain `https://github.com/JinPen-G/Nativark` as their stable `source.repository` (use the Zelo URL to clone and browse the source), while historical packages, deployment locks, and source receipts remain immutable—do not rewrite old packages or hand-edit locks; see [Stable Release Source After Renaming](packages/core-contracts/README.md#stable-release-source) for export and update steps. Workspace package scopes (`@rental-os/*`) and certain environment prefixes (`RENTAL_*`) remain for migration and client compatibility without affecting zero-Core export or standalone execution.
 

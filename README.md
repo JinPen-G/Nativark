@@ -276,7 +276,7 @@ Zelo/
 │   ├── tenant-website/               # [Rental 客户端] 租户对外预约网站
 │   ├── enterprise-portal/            # [Rental 客户端] 企业客户门户
 │   ├── miniprogram/ & staff-miniprogram/  # [Rental 客户端] 客户与员工微信小程序
-│   └── website/ & website-next/      # 产品宣传官网
+│   └── website/                     # 历史静态官网，独立新版见 Zelo-website
 ├── packages/
 │   ├── core-contracts/               # [底座] Core 清单/兼容/包校验/能力索引 CLI 与底座源码导出
 │   ├── core-host/                    # [底座] Core 注册目录、生命周期与移除预检内核
@@ -332,7 +332,7 @@ Zelo/
 | `apps/tenant-website`、`apps/enterprise-portal` | Rental Core 配套租户预约网站与企业客户门户 | [客户网站](apps/tenant-website/README.md) · [企业门户](apps/enterprise-portal/README.md) |
 | `apps/miniprogram`、`apps/staff-miniprogram` | Rental Core 配套客户与员工微信小程序 | [客户小程序](apps/miniprogram/README.md) · [员工小程序](apps/staff-miniprogram/README.md) |
 | `apps/api`、`apps/admin`、`packages/shared` | 原组合工程兼容入口与共享总出口（底层消费拆分后的单源包） | [API 装配](apps/api/src/app.module.ts) · [Admin 规则](apps/admin/AGENTS.md) · [shared 出口](packages/shared/src/index.ts) |
-| `apps/website`、`apps/website-next` | 静态宣传网站与 Next.js 宣传网站 | [静态官网](apps/website/README.md) · [Next.js 官网](apps/website-next/README.md) |
+| [Zelo-website](https://github.com/JinPen-G/Zelo-website) | 独立维护的 Zelo 官网；底座构建不安装官网依赖 | [官网源码与许可](https://github.com/JinPen-G/Zelo-website) |
 
 > **关于兼容命名**：品牌、主仓库与独立配套仓库已统一为 Zelo 命名体系（主仓 `JinPen-G/Zelo`、官方 Rental Core 仓 `JinPen-G/Zelo-rental-core`、官网仓 `JinPen-G/Zelo-website`），GitHub Core 发现标签已切换为 **`zelo-core`**。官方底座的新发行继续用 `https://github.com/JinPen-G/Nativark` 作为稳定的 `source.repository`（clone 与浏览源码使用 Zelo 地址），历史包、部署锁和来源收据保持原值；不得修改旧包或手改锁把来源替换为新名称，具体导出和旧安装更新步骤见[更名后的稳定发行来源](packages/core-contracts/README.md#stable-release-source)。为保障既有迁移、构建及客户端兼容，workspace 包名（`@rental-os/*`）及部分环境键（`RENTAL_*`）仍保留原前缀，不影响零 Core 底座的独立导出与运行。
 

@@ -13,7 +13,6 @@ COPY apps/enterprise-portal/package.json apps/enterprise-portal/package.json
 COPY apps/miniprogram/package.json apps/miniprogram/package.json
 COPY apps/staff-miniprogram/package.json apps/staff-miniprogram/package.json
 COPY apps/tenant-website/package.json apps/tenant-website/package.json
-COPY apps/website-next/package.json apps/website-next/package.json
 COPY packages/shared/package.json packages/shared/package.json
 COPY packages/mcp-server/package.json packages/mcp-server/package.json
 COPY packages/web-client/package.json packages/web-client/package.json

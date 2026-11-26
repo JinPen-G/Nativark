@@ -41,7 +41,7 @@
 
 Rental 客户入口分别由[租户网站](../../apps/tenant-website/README.md)、[企业门户](../../apps/enterprise-portal/README.md)、[客户小程序](../../apps/miniprogram/README.md)和[员工小程序](../../apps/staff-miniprogram/README.md)装配。可复用页面、会话和业务客户端分别进入 [网站 UI](../rental-core/clients/website-ui/README.md)、[网站请求](../rental-core/clients/website/README.md)、[企业门户页面](../rental-core/clients/enterprise-portal/README.md)、[企业请求](../rental-core/clients/enterprise/README.md)、[客户原生贡献](../rental-core/clients/miniprogram/README.md)及[员工原生贡献](../rental-core/clients/staff/README.md)。Web 宿主提供构建、站点入口与会话运输，原生宿主负责原页面、设备运输及存储。服务端对应 [Rental HTTP 入口](../../apps/rental-api/README.md)。
 
-[静态官网](../../apps/website/README.md)与 [Next.js 官网](../../apps/website-next/README.md)承载公开营销内容和演示预约。预约提交到原[公开演示申请入口](../../apps/api/src/modules/demo-requests/public-demo-request.controller.ts)。租户商城的商品、预约和订单页面在租户网站宿主。第三方组件和保留适配从 [UIArc](../ui-arc/README.md) 及本页的来源说明追溯。
+[独立 Zelo 官网](https://github.com/JinPen-G/Zelo-website)维护公开介绍和演示预约，预约提交到[公共演示申请入口](../platform-server/src/modules/demo-requests/public-demo-request.controller.ts)。登录演示使用本包的定稿副本，不安装或加载官网工程。租户商城的商品、预约和订单页面在 Rental 独立宿主。第三方组件和保留适配从 [UIArc](../ui-arc/README.md) 及本页的来源说明追溯。
 
 ## 登录、外观与原页面呈现
 
