@@ -72,6 +72,43 @@ node scripts/ops/release-verify.cjs mcp <本地ZeloGit目录> <基线完整SHA> 
 
 [verifyPairedBuildEvidence](../release-build-evidence.cjs) 消费本进程已核过固定构建证明的 `verifyPreparedRental` 结果。调用方须先核收候选归档、固定 CI 策略、同一次运行的构建记录及实际镜像观察。它比较含构建证明摘要的候选身份与构建记录，校验 GitHub 运行的仓库、工作流、主分支、固定 SHA、编号、尝试次数及成功状态。策略中显式选择 `automatic` 对应 `push`，`manual` 对应 `workflow_dispatch`。两种来源都须提供同一记录中的 API 和 Web 镜像 ID，逐项与实际镜像观察匹配。
 
+### 生成下一对正式资产
+
+先由两仓负责人提交配套新版本并冻结完整 SHA。以 `0.1.18`／`0.1.15` 为下一组拟定版本，底座的根 manifest 与原 npm 锁版本须一致，Rental 的包版本、`RENTAL_CORE_VERSION` 和各宿主依赖须一致。保持已经使用的发行来源 `JinPen-G/Nativark` 与 `JinPen-G/nativark-rental-core`。独立仓根 `core.manifest.json` 保留最后一次已核发现结果，等本次完成后再单独回填。底座固定提交须已包含本节的正式工作流，派发时该提交是 `main` 的目标。两仓批准的 commit 和实际 Tag 值是下列命令的输入。
+
+在固定 Linux Node 24.13.0 构建环境，已安装 Zelo 原锁依赖，并采用本仓离线守卫的任务目录设置。`ASSET_DIR` 是现存空目录。先在各自仓库发布不存在的新版本 Tag，普通推送。用 `git ls-remote --tags` 回读两 Tag 的提交，检查与 `ZELO_SHA` 和 `RENTAL_SHA` 完全一致。以下是两个已批准新 Tag 都尚未创建时的命令。已有 Tag 或同名 Release 时先核其原对象与资产。
+
+```sh
+git -C "$ZELO_REPO" tag -a "$ZELO_TAG" "$ZELO_SHA" -m "Zelo 底座 $ZELO_TAG"
+git -C "$RENTAL_REPO" tag -a "$RENTAL_TAG" "$RENTAL_SHA" -m "Rental Core $RENTAL_TAG"
+git -C "$ZELO_REPO" push origin "refs/tags/$ZELO_TAG"
+git -C "$RENTAL_REPO" push origin "refs/tags/$RENTAL_TAG"
+```
+
+```sh
+node --require "$ZELO_REPO/tests/fixtures/ai-native/prisma-offline-preload.cjs" \
+  scripts/ops/release-rental-assets.cjs "$ZELO_REPO" "$ZELO_SHA" "$RENTAL_REPO" "$RENTAL_SHA" "$ASSET_DIR"
+```
+
+入口从固定源码调用原底座及 Core 归档器，回读两个实际资产和包内清单，打印 `rental-release-assets-1` 回执。回执的 `platform.asset.sha256`、`rental.asset.sha256` 用于正式 CI。下列命令适用于已安装并已授权 `gh` 的终端。`ZELO_TAG` 和 `RENTAL_TAG` 分别是已经核对的真实新 Tag。
+
+```sh
+gh release create "$ZELO_TAG" "$ASSET_DIR/platform-source-${ZELO_TAG#v}.tgz" \
+  --repo JinPen-G/Zelo --verify-tag --title "Zelo 底座 $ZELO_TAG" --notes '固定源码归档，供双仓候选构建与核验。'
+gh release create "$RENTAL_TAG" "$ASSET_DIR/rental-${RENTAL_TAG#v}.tgz" \
+  --repo JinPen-G/Zelo-rental-core --verify-tag --title "Rental Core $RENTAL_TAG" --notes '固定业务包，供双仓候选构建与核验。'
+```
+
+发布后重新下载原资产，核文件名、长度、原字节 SHA-256 与回执一致。再从目标 Zelo `main` 运行正式候选 CI，保存同运行的镜像回执及镜像留存摘要。取得两仓 Release 回读和正式配对 CI 的成功回执后，将 `core.manifest.next.json` 的完整原字节作为独立仓根 `core.manifest.json` 单独提交。先核待写清单的来源提交、版本和包摘要所属 Release，再用原发现及 `inspect` 入口回读新版本。发现更新提交与业务发行 Tag 对应的源码提交分别记录。
+
+```sh
+gh workflow run rental-release-candidate.yml --repo JinPen-G/Zelo --ref main \
+  -f platform_commit="$ZELO_SHA" -f rental_commit="$RENTAL_SHA" \
+  -f platform_tag="$ZELO_TAG" -f rental_tag="$RENTAL_TAG" \
+  -f platform_asset_sha256="$PLATFORM_DIGEST" -f rental_asset_sha256="$RENTAL_DIGEST" \
+  -f retain_images=true
+```
+
 [Rental 正式候选构建](../../../.github/workflows/rental-release-candidate.yml) 从可信 Zelo `main` 手动派发。填写已发布的两仓完整 SHA、各自版本 Tag 和独立核收的两个发行归档 SHA-256。Zelo SHA 须等于该次运行的 `GITHUB_SHA`。调用方先验证 Tag 解引用，再取得该 Tag 下的 `platform-source-<版号>.tgz` 与 `rental-<版号>.tgz`，逐一核对原字节。在受管 Linux runner 使用锁定依赖，按[材料生成入口](../release-prepare-pair.cjs)构建普通单 Rental 组合。
 
 ```sh
