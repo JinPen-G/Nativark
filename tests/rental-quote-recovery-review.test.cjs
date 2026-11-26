@@ -2,7 +2,11 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const { RentalBusinessService } = require('../apps/api/src/modules/rental-core/rental-business.service');
 const { RentalBusinessController } = require('../apps/api/src/modules/rental-core/rental-business.controller');
-const { RentalBusinessFactRepository } = require('../apps/api/src/modules/rental-core/rental-business-fact.repository');
+const { RentalCoreConfigRepository } = require('../apps/api/src/modules/rental-core/rental-core-config.repository');
+const { resolveScopeWorkspaceId } = require('../apps/api/src/modules/rental-core/workspace-scope');
+const { RENTAL_CATEGORY_DEFINITIONS } = require('@rental-os/rental-core/contracts');
+const { RentalBusinessFactRepository, createRentalQuoteConfigurationReader } = require('@rental-os/rental-core/mysql-business-facts');
+const { captureQuoteConfigurationBasis } = require('../packages/rental-core/src/quote-configuration');
 const { RentalOrderConfirmationService } = require('../apps/api/src/modules/rental-core/rental-order-confirmation.service');
 const { currentQuoteSource, assertQuoteReadAccess } = require('../apps/api/src/modules/rental-core/rental-quote-access');
 const { runWithRequestIdentity } = require('../apps/api/src/common/request-identity');
@@ -98,16 +102,42 @@ test('actual quote repository round-trips source/address/rental allocation and r
   let row;
   const item = { id: 'group', tenantId: 't', workspaceId: 'w', categoryCode: 'CAMERA', code: 'GROUP', name: 'Fixture group',
     inventoryMode: 'QUANTITY', unit: '件', status: 'enabled', createdAt: new Date('2026-10-30'), updatedAt: new Date('2026-10-30') };
+  const definition = RENTAL_CATEGORY_DEFINITIONS.find(category => category.code === 'camera');
+  const binding = { categoryVersionId: 'camera-v1', adoptionRevision: 1 };
+  const profile = { tenantId: 't', categoryCode: 'camera', configVersion: definition.version, capabilities: ['quantity_inventory', 'pickup', 'return'] };
+  const businessSettings = { ...profile, pricing: { enabledUnits: ['day_24h'], defaultUnit: 'day_24h', currency: 'CNY', taxIncluded: true },
+    calendar: { weekendDays: [0, 6], timeZone: 'Asia/Shanghai' }, fulfillment: { enabledModes: ['store_pickup_return'] } };
+  const inventoryGroup = { id: item.id, tenantId: item.tenantId, categoryCode: 'camera', code: item.code, name: item.name,
+    inventoryMode: 'quantity', unit: item.unit, status: item.status, bundleComponents: [] };
+  const original = quote();
+  const price = { id: 'price-v1', sequence: 1, effectiveFrom: new Date(original.createdAt),
+    rates: [{ id: 'rate', itemGroupId: item.id, itemGroupCode: item.code, itemGroupName: item.name,
+      unit: 'day_24h', baseAmount: original.rentalAmount, weekendMultiplier: 1, holidayMultiplier: 1, depositAmount: 0, minimumUnits: 1 }] };
+  const operator = { id: 'op', tenantId: 't', code: 'OP', name: 'Fixture operator', status: 'enabled', type: 'self_operated',
+    createdAt: original.createdAt, updatedAt: original.createdAt };
+  const locations = ['pickup', 'return'].map(id => ({ id, tenantId: 't', code: id, name: id, type: 'store',
+    operatorId: operator.id, operatorType: operator.type, operatorName: operator.name, status: 'enabled', capabilities: ['pickup', 'return'] }));
+  const core = { tenantId: 't', workspaceId: 'w', definition, binding, profile, businessSettings,
+    itemGroups: [{ ...inventoryGroup, attributes: {} }], pricingGroups: [], locations, operators: [operator], inspectionTemplates: [] };
+  const business = { tenantId: 't', workspaceId: 'w', categoryCode: 'camera',
+    pricingPlans: [], discountPlans: [], services: [], calendars: [], ruleVersions: [] };
   const db = { businessWorkspace: { findFirst: async ({ where }) => { assert.equal(where.tenantId, 't'); return { id: 'w' }; } },
     rentalQuote: { findFirst: async () => row ?? null, findUnique: async () => row ?? null,
       create: async ({ data }) => { row = Object.fromEntries(Object.entries(data).map(([key, value]) => [key, value === Prisma.DbNull ? null : value])); },
       update: async () => { throw Error('must reject before update'); } } };
-  const admission = require('./helpers/fulfillment-admission-fixture.cjs').fulfillmentAdmissionFixture('t', 'w', {
-    locations: ['pickup', 'return'].map(id => ({ id, name: id, operatorId: 'op', status: 'enabled', capabilities: ['pickup', 'return'] })),
-    operators: [{ id: 'op', status: 'enabled', type: 'self_operated' }]
-  });
+  const admission = require('./helpers/fulfillment-admission-fixture.cjs').fulfillmentAdmissionFixture('t', 'w', { locations, operators: [operator] });
   // New quotes require the same bounded inventory facts as the configuration writer; no current facts backfill saved quotes.
-  db.$queryRaw = async query => {
+  const transaction = { ...db, rentalCategoryVersion: { findUnique: async ({ where }) => {
+    assert.deepEqual(where, { id: binding.categoryVersionId });
+    return { categoryCode: 'camera', structureVersion: 1, status: 'published', definition };
+  } }, workspaceCapabilityInstance: { findMany: async ({ where }) => {
+    assert.deepEqual(where, { tenantId: 't', workspaceId: 'w', status: 'enabled' });
+    return [];
+  } }, rentalPriceVersion: { findFirst: async ({ where, orderBy }) => {
+    assert.deepEqual(where, { tenantId: 't', workspaceId: 'w', effectiveFrom: { lte: new Date(original.request.startAt) } });
+    assert.deepEqual(orderBy, [{ effectiveFrom: 'desc' }, { sequence: 'desc' }]);
+    return structuredClone(price);
+  } }, $queryRaw: async query => {
     if (query.sql.includes('SELECT * FROM rental_item_groups')) {
       assert.deepEqual(query.values, ['t', 'w', 'group', 2]);
       assert.match(query.sql, /LOCK IN SHARE MODE/);
@@ -117,17 +147,40 @@ test('actual quote repository round-trips source/address/rental allocation and r
       assert.deepEqual(query.values, ['group']);
       return [];
     }
+    if (query.sql.includes('SELECT categoryVersionId, categoryAdoptionRevision FROM business_workspaces')) {
+      assert.deepEqual(query.values, ['w', 't']);
+      return [{ categoryVersionId: binding.categoryVersionId, categoryAdoptionRevision: binding.adoptionRevision }];
+    }
     return admission.tx.$queryRaw(query);
-  };
-  db.$transaction = async work => work(db);
-  const repo = new RentalBusinessFactRepository(db);
-  const q = { ...quote(), request: { ...quote().request, lines: [{ itemGroupId: 'group', quantity: 1 }] },
-    inventoryBasis: { version: 'rental-quote-inventory-1', tenantId: 't', workspaceId: 'w', groups: [{ id: item.id, tenantId: item.tenantId,
-      categoryCode: 'camera', code: item.code, name: item.name, inventoryMode: 'quantity', unit: item.unit, status: item.status, bundleComponents: [] }] },
-    inspectionTemplateSnapshots: [], appliedDiscountPlanIds: [], rateSnapshot: [], calendarSnapshot: [], calendarWarnings: [], ruleSnapshot: {} };
+  } };
+  db.$transaction = async work => work(transaction);
+  const reader = createRentalQuoteConfigurationReader({ loadWorkspaceSnapshot: async (tenant, workspace, tx) => {
+    assert.deepEqual([tenant, workspace], ['t', 'w']);
+    assert.equal(tx, transaction);
+    return structuredClone(core);
+  } }, { loadWorkspaceSnapshot: async (tenant, workspace, expectedBinding, tx) => {
+    assert.deepEqual([tenant, workspace, expectedBinding], ['t', 'w', binding]);
+    assert.equal(tx, transaction);
+    return structuredClone(business);
+  } });
+  const repo = new RentalBusinessFactRepository(db, {
+    resolveWorkspaceId: resolveScopeWorkspaceId,
+    orderVisibilityWhere: () => { throw Error('unexpected order visibility read'); },
+    quoteConfiguration: new RentalCoreConfigRepository(db),
+    quoteConfigurationBasis: reader
+  });
+  const q = { ...original, request: { ...original.request, lines: [{ itemGroupId: 'group', quantity: 1 }] },
+    categoryVersionId: binding.categoryVersionId, capabilitySnapshot: [],
+    priceVersionId: price.id, priceVersion: `v${price.sequence}`,
+    inventoryBasis: { version: 'rental-quote-inventory-1', tenantId: 't', workspaceId: 'w', groups: [inventoryGroup] },
+    inspectionTemplateSnapshots: [], appliedDiscountPlanIds: [], rateSnapshot: price.rates, calendarSnapshot: [], calendarWarnings: [], ruleSnapshot: {} };
+  const configurationBasis = captureQuoteConfigurationBasis('t', 'w', {
+    category: definition, categoryVersionId: binding.categoryVersionId, categoryAdoptionRevision: binding.adoptionRevision,
+    profile, settings: businessSettings, groups: core.itemGroups, pricingGroups: core.pricingGroups, locations: core.locations, operators: core.operators
+  }, business, { versionId: price.id, version: q.priceVersion, effectiveFrom: price.effectiveFrom.toISOString(), rates: price.rates });
   await runWithRequestIdentity(scope, async () => {
     // Decimal values must retain the real class; only JSON is serialized by the DB.
-    await repo.upsertQuote(q);
+    await repo.upsertQuote(q, binding, configurationBasis);
     const restored = await repo.findQuote('t', 'q');
     assert.deepEqual(restored.sourceSnapshot, q.sourceSnapshot);
     assert.deepEqual(restored.deliveryAddressSnapshot, q.deliveryAddressSnapshot);
