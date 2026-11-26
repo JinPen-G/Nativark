@@ -31,3 +31,18 @@ python -B scripts/ops/deployment/hourly-update.py --self-test
 主仓库为 `JinPen-G/Zelo`，服务器部署根为 `/home/ritiadm/zelo`。服务器安装的更新器须同步 `REPOSITORY` 与 `ROOT`；仅更新 GitHub 链接或仓库源码不会自动替换已安装脚本。工作流显示名为“Zelo 发布”，文件路径 `nativark-release.yml` 保留，CI 仍严格核对固定提交、main push 和仓库身份。
 
 已有 `nativark-demo` Compose 项目、镜像标签、数据库、回退收据及 `# Nativark hourly update managed images` 识别标记保持兼容。目录移动只按实际服务器维护授权执行；仓库更名不授权数据库迁移或改写历史发布包来源。
+
+## 独立 Rental 发布材料离线校验
+
+[release-verify.cjs](../release-verify.cjs) 从已经核收并解包的正式宿主归档读取双仓来源、宿主收据、部署收据及实际文件。两个收据摘要取自可信归档核收结果。请分别提供上一份已核宿主和固定候选。
+
+```sh
+node scripts/ops/release-verify.cjs prepared <基线归档目录> <基线宿主收据SHA256> <候选归档目录> <候选宿主收据SHA256>
+node scripts/ops/release-verify.cjs mcp <本地ZeloGit目录> <基线完整SHA> <候选完整SHA>
+```
+
+`prepared` 核对 `development.workspace.json` 的 `release` 模式和实际 `host` 或 `full` 选择，复算 API 宿主文件、运行 npm 锁、部署锁、schema、`migration_lock.toml` 和原 SQL 摘要。发布身份包含两仓完整 SHA、装配选择、原 npm 锁、组合投影锁、运行锁、部署锁及宿主收据摘要。比较按所有者和正式迁移身份报告增删、原文或原账变更，并检查次序、schema、数据合同和能力选择。编译产物及所选 Client 的回执随宿主材料核对，镜像内实际生成的 Client 与 Web 产物在后续构建核收。
+
+`mcp` 使用支持 `--no-lazy-fetch` 的 Git 从本地固定对象读取公开贡献清单和全部原 SQL，验证顺序、直接前置和逐份摘要。该清单供差异核对。选择 MCP 的 prepared 候选须等正式能力部署包和原账适配固定后接入。
+
+退出 `0` 表示材料核对完成且数据比较无差异，`2` 表示有数据差异，`1` 表示输入验证失败或缺少必要材料。两种模式的 JSON 都标明 `releaseApproved: false` 和 `databaseChecked: false`。`domain`、旧单 SHA 证明和缺正式 AI 数据包的候选均被拒绝。旧组合基线可用 `prepared legacy-combined` 明确识别，校验会在读取现场材料前要求正式旧库桥接。原单仓更新器、原迁移门禁和回退继续沿上文入口。
