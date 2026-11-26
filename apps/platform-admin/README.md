@@ -12,6 +12,8 @@
 ## 选装公共 AI 管理
 
 如果 API 已在同一部署选择[公共 AI 管理](../platform-api/README.md#选装公共-ai-管理)，在 Web 组合安装同源的公共 AI 后台源码包 `0.2.1`，执行 `npm run build:ai -w @rental-os/platform-admin-app`。产物在 `dist-ai`。原应用、会话、路由及视觉规范保持，通过已有 `/platform/ai` 权限入口提供原模型、费率、预算和额度页面；页面启用不会授予权限。默认 `build` 不需要安装 AI 源码包。[选装接点](src/start-ai.tsx)
+
+租户的“AI 服务设置”仍在“服务与渠道”下，路径 `/settings/ai`，复用原设置编辑器和同一已验证会话。默认不选装时没有该路由；SaaS 账号和缺少原参数权限的成员不能通过直接链接进入编辑器。
 - 公共应用内置[Core管理目录](../../packages/platform-admin/src/CoreAccessPage.tsx)。SaaS管理员选择租户开通Core，租户管理员选择真实成员分配已开通Core；两层授权分别保存。无Core部署保留目录入口和准确空态。
 - “Core 包管理”位于 `/platform/core-packages`，同一应用工厂按当前 SaaS 管理权限提供菜单和受保护页面，普通租户及撤权会话在管理查询挂载前拒绝。页面复用原会话、QueryClient 和完整外壳，零 Core 显示实际空注册目录，缺部署或包证据显示不可用。原后台的同名入口通过正式公共出口消费同一页面，品牌沿原解析传入。[页面与客户端](../../packages/platform-admin/src/features/core-packages/README.md)
 - [人员/角色页面](../../packages/platform-admin/src/features/access/PublicManagementPages.tsx)读取公共目录并创建/编辑，角色权限复用原搜索编辑器。无Core也可维护公共角色；Core业务权限需先由部署入口按清单登记。

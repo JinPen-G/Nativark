@@ -53,6 +53,8 @@ node scripts/prepare-platform-public-ai.cjs --repo . --repository https://github
 
 用部署账号执行 `npm run grant:ai -- --role role_saas_admin --access manage`，显式给新库的初始 SaaS 角色登记并授予读/写；也可以指定实际要授权的 SaaS 角色 ID，`--access view` 只添加查看权限。命令核对实际迁移账、数据结构及角色归属，保留其他角色和原授权，以同一事务写审计。重复执行不会重复授权；默认初始化与启动均不授权。配置 `PLATFORM_AI_PROFILE_ID` 后运行 `npm start`，再用[配套公共 AI 后台](../platform-admin/README.md#选装公共-ai-管理)进入已有设置页。
 
+有 `system:params:manage` 的当前租户管理员可在 `/settings/ai` 管理本租户的模型配置，按原操作键核对保存结果。选装宿主从[公共租户设置模块](../../packages/ai-native-server/src/public-tenant-model-settings.ts)登记接口、Guard 和 OpenAPI，共用所选数据、当前会话和原事务，不要求安装业务 Core 或建立经营空间。
+
 反向代理部署可设置进程配置 `TRUST_PROXY_HOPS` 为非负安全整数，默认 `0` 不信任转发头。只在 API 无法绕过代理直达、代理链跳数固定且入口代理正确重写转发头时，按实际跳数配置（例如单层受控代理设为 `1`）。公共限流继续使用 Express 据此解析的 `request.ip`，不直接采信任意 `X-Forwarded-For`，演示预约仍为每地址 5 次 / 600 秒，邀请阈值也保持原规则。非法配置在创建应用前拒绝。[启动实现](src/main.ts)
 
 ## 实现与功能入口

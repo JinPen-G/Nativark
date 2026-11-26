@@ -16,7 +16,8 @@ import { SafetyCertificateOutlined } from "./components/ui/icons";
 import { useLocale } from "./app/locale";
 import { createCoreRouteElements, useCoreSession } from "./core";
 import { PlatformApplicationContext, usePlatformApplication, type PlatformAdminApplicationOptions } from "./application-context";
-import { createPublicAdminLocationAccess, LEGACY_PUBLIC_ADMIN_ROUTE_ALIASES, publicAdminNavigation } from "./application-navigation";
+import { createPublicAdminLocationAccess, LEGACY_PUBLIC_ADMIN_ROUTE_ALIASES, publicAdminNavigation,
+  TENANT_AI_SETTINGS_PATH, TENANT_AI_SETTINGS_PERMISSION } from "./application-navigation";
 import { AccountAppearancePage, SelfProfilePage, TenantAppearancePage, TenantProfilePage } from "./SettingsPage";
 import { CoreAccessPage } from "./CoreAccessPage";
 import { CorePackagesPage } from "./features/core-packages";
@@ -37,7 +38,7 @@ import { AcceptOperatorInvitationPage, CustomerSupportPage, TenantDispatchPage, 
 const clientAuthorizationPath = "/settings/client-authorization";
 
 function applicationPublicSections(options: PlatformAdminApplicationOptions, user: AuthUser, showOverview: boolean) {
-  const sections = publicAdminNavigation(user, showOverview, Boolean(options.platformAiPage), options.saasPages);
+  const sections = publicAdminNavigation(user, showOverview, Boolean(options.platformAiPage), options.saasPages, Boolean(options.tenantAiPage));
   if (options.clientAuthorizationPage && canManagePublicResource(user, "tenant", "system:params:manage")) {
     let group = sections.find(section => section.key === "account-access");
     if (!group) {
@@ -166,6 +167,12 @@ function SaasPage({ permission, children }: { permission: string; children: Reac
     ? children : <Result status="403" title="403" />;
 }
 
+function TenantAiSettings({ children }: { children: ReactNode }) {
+  const { user, sessionVerified } = useAdminSession();
+  return sessionVerified && canManagePublicResource(user, "tenant", TENANT_AI_SETTINGS_PERMISSION)
+    ? children : <Result status="403" title="403" />;
+}
+
 function ToolsPage() {
   const { user } = useAdminSession();
   return user?.isSaasAdmin
@@ -176,6 +183,7 @@ function ToolsPage() {
 export function createPlatformAdminApplication(options: PlatformAdminApplicationOptions) {
   const { session } = options;
   const PlatformAiPage = options.platformAiPage;
+  const TenantAiPage = options.tenantAiPage;
   const invitationApi = createOperatorInvitationApi(session.apiBaseURL);
   const router = createBrowserRouter([{ element: <ApplicationRouterLayout />, children: [
   { path: "/login", element: <SignIn /> },
@@ -189,6 +197,7 @@ export function createPlatformAdminApplication(options: PlatformAdminApplication
     { path: "/settings/appearance", element: <TenantSetting appearance /> },
     { path: "/settings/tenant", element: <TenantSetting /> }, { path: "/settings/tenant-appearance", element: <TenantSetting appearance /> },
     { path: TENANT_INTEGRATIONS_ROUTE.path, element: <TenantIntegrationsPage /> },
+    ...(TenantAiPage ? [{ path: TENANT_AI_SETTINGS_PATH, element: <TenantAiSettings><TenantAiPage /></TenantAiSettings> }] : []),
     { path: "/settings/dispatch", element: <TenantDispatchPage {...options.publicPageContent?.dispatch} /> },
     { path: "/settings/support", element: <CustomerSupportPage /> },
     { path: "/tenant/dispatch", element: <TenantDispatchPage {...options.publicPageContent?.dispatch} /> },
@@ -254,6 +263,7 @@ export function createPlatformAdminApplication(options: PlatformAdminApplication
   }
   const navigation = createPublicAdminLocationAccess({
     routes: router.routes, getSession: session.getSnapshot, platformAiAvailable: Boolean(PlatformAiPage), saasPages: options.saasPages,
+    tenantAiAvailable: Boolean(TenantAiPage),
   });
   const canClientAuthorization = () => {
     const state = session.getSnapshot();

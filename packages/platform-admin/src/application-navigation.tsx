@@ -23,6 +23,9 @@ export const PUBLIC_ADMIN_ROUTE_ALIASES = {
   "/tenant/support": "/settings/support",
 } as const;
 
+export const TENANT_AI_SETTINGS_PATH = "/settings/ai";
+export const TENANT_AI_SETTINGS_PERMISSION = "system:params:manage";
+
 /** 原深链接只定位同一已登记公共页面，不作为侧栏菜单的反向别名。 */
 export const LEGACY_PUBLIC_ADMIN_ROUTE_ALIASES = {
   "/platform": "/",
@@ -51,7 +54,7 @@ const routeDisplayLabels: Record<string, string> = {
 };
 
 export function publicAdminNavigation(user: AuthUser, showOverview: boolean, platformAiAvailable = false,
-  saasPages: readonly PlatformSaasPage[] = []): ShellNavigationSection[] {
+  saasPages: readonly PlatformSaasPage[] = [], tenantAiAvailable = false): ShellNavigationSection[] {
   const tenant = (permission: string) => canManagePublicResource(user, "tenant", permission);
   const saas = (permission: string) => canManagePublicResource(user, "saas", permission);
   const sections: ShellNavigationSection[] = [
@@ -71,6 +74,8 @@ export function publicAdminNavigation(user: AuthUser, showOverview: boolean, pla
         { path: "/tenant/dispatch", label: "寄件中心", icon: <SendOutlined /> },
         { path: "/tenant/support", label: "客服中心", icon: <CustomerServiceOutlined /> },
       ] : []),
+      ...(tenantAiAvailable && tenant(TENANT_AI_SETTINGS_PERMISSION)
+        ? [{ path: TENANT_AI_SETTINGS_PATH, label: "AI 服务设置", icon: <SettingOutlined /> }] : []),
       ...(tenant("system:integration:manage")
         ? [{ path: "/settings/appearance", label: "外观与音效", icon: <BgColorsOutlined /> }] : []),
     ] },
@@ -126,6 +131,7 @@ export function createPublicAdminLocationAccess(options: {
   routes: RouteObject[];
   getSession(): { sessionVerified: boolean; user?: AuthUser | null };
   platformAiAvailable: boolean;
+  tenantAiAvailable?: boolean;
   saasPages?: readonly PlatformSaasPage[];
 }) {
   function locate(href: string) {
@@ -137,7 +143,7 @@ export function createPublicAdminLocationAccess(options: {
     const matched = matchRoutes(options.routes, url.pathname)?.at(-1)?.route;
     if (!matched?.path || matched.path === "*" || matched.id?.startsWith("core:" ) || matched.id?.startsWith("core-alias:")) return;
     const original = publicAdminMenuPath(url.pathname);
-    const permitted = publicAdminNavigation(state.user, false, options.platformAiAvailable, options.saasPages)
+    const permitted = publicAdminNavigation(state.user, false, options.platformAiAvailable, options.saasPages, options.tenantAiAvailable)
       .flatMap(section => section.routes).some(route => original === route.path || original.startsWith(`${route.path}/`));
     return permitted ? { href: `${url.pathname}${url.search}${url.hash}`, original } : undefined;
   }

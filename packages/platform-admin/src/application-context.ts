@@ -19,6 +19,8 @@ export interface PlatformAdminApplicationOptions {
   management?: PublicManagementCoreAdapter;
   /** 显式选用的原平台模型配置页；入口仍受同一 SaaS 权限限制。 */
   platformAiPage?: ComponentType;
+  /** Optional tenant-only AI settings supplied by a public host; no Core or workspace capability. */
+  tenantAiPage?: ComponentType;
   /** 所选 Core 的 SaaS 管理页；复用公共身份守卫，不要求租户业务分配或经营空间。 */
   saasPages?: readonly PlatformSaasPage[];
   /** 原公共页面的领域文案由 Core 提供，不改变路由、权限或数据范围。 */

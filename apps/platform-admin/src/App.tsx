@@ -4,6 +4,6 @@ import { createPlatformAdminApplication } from "@rental-os/platform-admin/applic
 import type { ComponentType } from "react";
 import { session } from "./session";
 
-export function createPublicAdminApp(platformAiPage?: ComponentType) {
-  return createPlatformAdminApplication({ brandName: ADMIN_BRAND_NAME, brand: <AdminBrandMark />, session, platformAiPage });
+export function createPublicAdminApp(platformAiPage?: ComponentType, tenantAiPage?: ComponentType) {
+  return createPlatformAdminApplication({ brandName: ADMIN_BRAND_NAME, brand: <AdminBrandMark />, session, platformAiPage, tenantAiPage });
 }
