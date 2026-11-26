@@ -1,24 +1,18 @@
 "use strict";
 
 /** 比较已独立核收的候选、CI 运行、构建记录和镜像观察。调用方负责证据来源与记录摘要的核收。 */
-const { isFullCommit, isSha256, sha256 } = require("./release-composition.cjs");
+const { isSha256, isVerifiedFixedBuildCandidate } = require("./release-composition.cjs");
 
 const isGitHubId = value => Number.isSafeInteger(value) && value > 0;
 const isImageId = value => typeof value === "string" && /^sha256:[a-f0-9]{64}$/u.test(value);
 
 function verifyPairedBuildEvidence(candidate, policy, evidence) {
-  const { identity, identitySha256 } = candidate ?? {};
-  const platformCommit = identity?.platform?.commit, rentalCommit = identity?.rental?.commit;
-  const selection = identity?.selection, locks = identity?.npmLocks;
-  if (identity?.format !== "rental-release-identity-1" || !isFullCommit(platformCommit) || !isFullCommit(rentalCommit)
-    || selection?.host !== "rental" || !["host", "full"].includes(selection.profile)
-    || !Array.isArray(selection.coreIds) || selection.coreIds.length !== 1 || selection.coreIds[0] !== "rental"
-    || typeof selection.ai !== "boolean" || typeof selection.mcp !== "boolean" || (selection.mcp && !selection.ai)
-    || ![locks?.platform, locks?.projected, locks?.runtime].every(isSha256) || (locks.rental !== null && !isSha256(locks.rental))
-    || !isSha256(identity.contextSha256) || !isSha256(identity.deploymentLockSha256)
-    || !isSha256(identitySha256) || sha256(JSON.stringify(identity)) !== identitySha256) {
-    throw new Error("需要已核的双仓候选身份与完整摘要");
+  if (!isVerifiedFixedBuildCandidate(candidate)) {
+    throw new Error("需要经本进程核验固定构建证明的双仓候选身份");
   }
+  const { identity, identitySha256 } = candidate;
+  const { platform, rental, buildProvenanceSha256 } = identity;
+  const platformCommit = platform.commit, rentalCommit = rental.commit;
 
   const { origin, repositoryId, workflowId, workflowPath, headSource, runId, runAttempt, buildRecordSha256 } = policy ?? {};
   if (!["automatic", "manual"].includes(origin) || !["platform", "rental"].includes(headSource)
@@ -45,7 +39,7 @@ function verifyPairedBuildEvidence(candidate, policy, evidence) {
     throw new Error("API 与 Web 镜像 ID 必须逐项匹配同一已核构建记录");
   }
   return { scope: "paired-build-evidence", origin, runId, runAttempt, platformCommit, rentalCommit, identitySha256, buildRecordSha256,
-    imageIds: { api, web }, releaseApproved: false, databaseChecked: false };
+    buildProvenanceSha256, imageIds: { api, web }, releaseApproved: false, databaseChecked: false };
 }
 
 module.exports = { verifyPairedBuildEvidence };

@@ -17,7 +17,7 @@ function readOrdinary(file) {
   return bytes;
 }
 
-function readPrepared(directory, expectedDigest) {
+function readPrepared(directory, expectedDigest, options) {
   if (!isSha256(expectedDigest)) throw new Error("须提供已核宿主收据的 SHA-256");
   const root = path.resolve(directory);
   for (let current = root; ; current = path.dirname(current)) {
@@ -52,7 +52,7 @@ function readPrepared(directory, expectedDigest) {
     }
   }
   visit(root, "");
-  return verifyPreparedRental(files, expectedDigest);
+  return verifyPreparedRental(files, expectedDigest, options);
 }
 
 function readFixedMcp(repo, commit) {
@@ -84,6 +84,10 @@ function readFixedMcp(repo, commit) {
 function main(args) {
   const [mode, ...values] = args;
   const scope = { releaseApproved: false, databaseChecked: false };
+  if (mode === "candidate" && values.length === 2) {
+    const candidate = readPrepared(values[0], values[1], { requireFixedBuild: true });
+    return { scope: "prepared-candidate", ...scope, candidateIdentitySha256: candidate.identitySha256, candidateIdentity: candidate.identity };
+  }
   if (mode === "prepared" && values[0] === "legacy-combined") {
     throw new Error("旧组合需要正式旧库桥接和原迁移账，离线材料校验无法接收该基线");
   }
@@ -99,14 +103,14 @@ function main(args) {
     const candidate = readFixedMcp(values[0], values[2]);
     return { scope: "mcp-source-comparison", ...scope, previous, candidate, changes: compareEntries(previous.entries, candidate.entries) };
   }
-  throw new Error("用法：release-verify.cjs prepared <基线目录> <基线收据SHA256> <候选目录> <候选收据SHA256>，或 mcp <本地Git目录> <基线SHA> <候选SHA>");
+  throw new Error("用法：release-verify.cjs candidate <候选目录> <收据SHA256>，prepared <基线目录> <基线收据SHA256> <候选目录> <候选收据SHA256>，或 mcp <本地Git目录> <基线SHA> <候选SHA>");
 }
 
 if (require.main === module) {
   try {
     const result = main(process.argv.slice(2));
     process.stdout.write(`${JSON.stringify(result)}\n`);
-    process.exitCode = result.changes.different ? 2 : 0;
+    process.exitCode = result.changes?.different ? 2 : 0;
   } catch (error) {
     process.stderr.write(`${error.code ? "无法读取本地发布材料" : error.message}\n`);
     process.exitCode = 1;
