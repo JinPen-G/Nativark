@@ -27,6 +27,7 @@ import { capabilityNameSchema, capabilityVerificationSchema, capabilityProfileFi
 import { PrismaProviderCapabilityEvidenceRepository } from './provider-capability.repository';
 import { createPersistedTextCapabilityEvidence } from './prisma-text-capability-receipt.repository';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
+import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
 
 type Request = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
 type Dependencies = Omit<Parameters<typeof createAuthorizedPlatformModelConfiguration>[0], 'credentials' | 'invocation' | 'profileId'>
@@ -46,6 +47,10 @@ const directorySelect = { id: true, scopeId: true, scopeKind: true, serviceMode:
 export const AI_NATIVE_PLATFORM_MODEL_SETTINGS_REQUESTS = Symbol('AI_NATIVE_PLATFORM_MODEL_SETTINGS_REQUESTS');
 
 export function composeRequestBoundPlatformModelSettings(dependencies: Dependencies) {
+  // The selected host already owns the original Guard identity and lifetime.
+  // Only the legacy host creates a new isolated outer request context.
+  const inRequest = <T>(work: () => Promise<T>) => hasRentalBusinessTenantFence()
+    ? work() : runWithRequestIdentity({}, work);
   const list = async (request: Request, value: unknown, signal?: AbortSignal): Promise<AiPlatformModelDirectoryDraft> => {
     const header = bearer.safeParse(request?.headers?.authorization), query = directoryQuery.safeParse(structuredClone(value));
     if (!header.success) throw new ModelGatewayError('FORBIDDEN');
@@ -59,7 +64,7 @@ export function composeRequestBoundPlatformModelSettings(dependencies: Dependenc
     const noInvocation = { resolve: async (): Promise<never> => { throw new ModelGatewayError('FORBIDDEN'); } };
     signal?.addEventListener('abort', close, { once: true });
     try {
-      return await waitForTaskApplicationDependency(() => runWithRequestIdentity({}, async () => {
+      return await waitForTaskApplicationDependency(() => inRequest(async () => {
         const authority = new PlatformModelConfigurationAuthority(dependencies.guard, credentials, undefined, noInvocation);
         const scopes = new AiScopeRepository(dependencies.db, { resolve: () => authority.resolveDirectoryRead() });
         const before = await scopes.resolveCurrent();
@@ -97,7 +102,7 @@ export function composeRequestBoundPlatformModelSettings(dependencies: Dependenc
     } };
     signal?.addEventListener('abort', close, { once: true });
     try {
-      return await waitForTaskApplicationDependency(() => runWithRequestIdentity({}, async () => {
+      return await waitForTaskApplicationDependency(() => inRequest(async () => {
         const noInvocation = { resolve: async (): Promise<never> => { throw new ModelGatewayError('FORBIDDEN'); } };
         const authority = new PlatformModelConfigurationAuthority(dependencies.guard, credentials, target.data, noInvocation);
         const scopes = new AiScopeRepository(dependencies.db, { resolve: () => authority.resolveRead() });
@@ -170,7 +175,7 @@ export function composeRequestBoundPlatformModelSettings(dependencies: Dependenc
     signal?.addEventListener('abort', close, { once: true });
     if (signal?.aborted) close();
     try {
-      return await waitForTaskApplicationDependency(() => runWithRequestIdentity({}, async () => {
+      return await waitForTaskApplicationDependency(() => inRequest(async () => {
         const authority = new PlatformModelConfigurationAuthority(dependencies.guard, credentials, target.data, invocation);
         const current = () => write ? authority.resolve() : authority.resolveRead();
         const before = await current();

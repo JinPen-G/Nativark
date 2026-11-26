@@ -58,7 +58,9 @@ Core 包目录、预检、版本选择和候选准备的四个原 Controller 挂
 
 AI 选装宿主通过 [原收据选择器](src/ai-http-policy.ts) 从实际处理器生成只读闭集，并由 [AI 装配](src/ai-assembly.ts) 交给同一 Rental 准入。租户 Core 停用或部署停新后，只允许原操作、回答及结果核对；原 Task/Run/键、对象权限、成员分配、绑定和实际数据可用性仍须通过。正文摘要绑定整个读取过程，返回前再次复核。创建任务、提交输入、批准、启动或恢复执行器不属于此集合，不能借只读恢复派发模型。
 
-租户 AI 服务设置中的[平台额度](../../packages/ai-native-admin/src/platform-model-settings/AiCreditSettings.tsx)和[调用记录](../../packages/ai-native-admin/src/platform-model-settings/AiCallRecords.tsx)使用同一原租户额度服务。额度申请、空间分配在原 Serializable 事务中先锁当前 Auth/Tenant/Core，再核额度行、CAS 和操作键，提交前复验当前权威。提交应答丢失后沿原键读取收据。调用记录只返回当前租户有权查看的最少元数据，平台金额须有原账依据，BYOK 仅显示用量，缺用量保持未知。停新或 Core 停用仅保留申请收据、分配收据和调用记录，仍要求当前会话、租户管理员及成员分配有效。
+租户 AI 服务设置中的[平台额度](../../packages/ai-native-admin/src/platform-model-settings/AiCreditSettings.tsx)和[调用记录](../../packages/ai-native-admin/src/tenant-model-settings/AiCallRecords.tsx)使用同一原租户额度服务。额度申请、空间分配在原 Serializable 事务中先锁当前 Auth/Tenant/Core，再核额度行、CAS 和操作键，提交前复验当前权威。提交应答丢失后沿原键读取收据。调用记录只返回当前租户有权查看的最少元数据，平台金额须有原账依据，BYOK 仅显示用量，缺用量保持未知。停新或 Core 停用仅保留申请收据、分配收据和调用记录，仍要求当前会话、租户管理员及成员分配有效。
+
+SaaS 平台模型设置复用[原五操作 Controller](../../packages/ai-native-server/src/runtime/platform-model-settings.application.ts)，包括目录、配置、保存、原操作收据及能力证据观察。[平台管理选择器](src/ai-http-policy.ts)从实际挂载处理器生成方法和路径闭集，经原 SaaS 会话权威及所选数据可用性核验，支持没有经营空间的当前平台管理员。[原事务参加者](../../packages/ai-native-server/src/runtime/platform-management-transaction.ts)在 Scope 初始化和 Vault/Profile/CAS 保存的各自事务内复核同一请求身份及权限；失应答按原操作键核对。能力观察返回已有证据，配置白名单和保存成功均不证明供应商能力已通过。宿主 OpenAPI 统一原合同与 Nest 的参数模板后，只发布实际挂载的方法。
 
 ## 请求、事务与响应
 

@@ -13,6 +13,7 @@ import type { PlatformModelConfigurationAuthority } from './platform-model-confi
 import { AiModelConfigurationResultUnknownError } from './model-config-compatibility';
 import { ModelGatewayError } from './model-gateway.ports';
 import { beginTenantModelConfigurationTransaction, type TenantModelConfigurationTransactionParticipant } from './tenant-model-config-transactions';
+import { beginPlatformAiManagementTransaction } from './platform-management-transaction';
 
 /** Current tenant configuration metadata only. Same canonical keys/unique index
  * as task creation; never creates a task, policy, lease, entitlement or grant.
@@ -81,19 +82,23 @@ export async function registerCurrentPlatformAiConfigurationScope(input: {
     const context = structuredClone(await input.authority.resolve());
     if (context.actor.kind !== 'saas_admin' || context.scope.kind !== 'platform' || context.audience !== 'operator') throw new ModelGatewayError('FORBIDDEN');
     const { requestId: _, authorizedAt: __, ...stable } = context;
-    return requestFingerprint(stable);
+    return { actorId: context.actor.userId, fingerprint: requestFingerprint(stable) };
   };
   const before = await resolve(), key = aiPersistenceScopeColumns({ kind: 'platform' });
-  const current = async () => { if (await resolve() !== before) throw new ModelGatewayError('FORBIDDEN'); };
+  const current = async () => { if ((await resolve()).fingerprint !== before.fingerprint) throw new ModelGatewayError('FORBIDDEN'); };
   let callbackCompleted = false;
   try {
     await input.db.$transaction(async tx => {
+      const lease = await beginPlatformAiManagementTransaction(tx, before.actorId);
+      try {
       const row = await tx.aiScope.upsert({ where: { scopeKey: key.scopeKey }, create: { id: randomUUID(), ...key }, update: {},
         select: { id: true, kind: true, scopeKey: true, tenantId: true, workspaceId: true } });
       if (!row || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u.test(row.id)
         || Object.entries(key).some(([name, value]) => row[name as keyof typeof row] !== value)) throw new ModelGatewayError('FORBIDDEN');
       await current();
+      await lease?.revalidate();
       callbackCompleted = true;
+      } finally { lease?.close(); }
     }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     await current();
   } catch (error) {

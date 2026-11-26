@@ -8,6 +8,9 @@ import { AI_STAFF_INSPECTION_HTTP_DRAFT } from "@rental-os/shared";
 import { createRentalHostOpenApi } from "./openapi";
 import { RENTAL_AI_CONTROLLERS, RENTAL_AI_INSPECTION_OPERATIONS, createRentalAiHttpPolicy } from "./ai-http-policy";
 
+// 原 OpenAPI 使用 {name}，Nest 使用 :name；统一声明模板后仍按实际方法与处理器闭集选择。
+const templatePath = (path: string) => matchableRequestPath(path.replace(/\{([A-Za-z_][A-Za-z0-9_]*)\}/gu, ":$1"));
+
 export function createRentalAiOpenApi(lock: CoreDeploymentLock, policy = createRentalAiHttpPolicy(),
   additional: readonly CoreOpenApiSource[] = []) {
   policy.assertReviewed();
@@ -37,7 +40,7 @@ export function createRentalAiOpenApi(lock: CoreDeploymentLock, policy = createR
   const routes = policy.routes.filter(route => RENTAL_AI_CONTROLLERS.some(controller => route.controller === controller));
   const manualBase = matchableRequestPath(`/${AI_STAFF_INSPECTION_HTTP_DRAFT.basePath}`);
   const selected = AI_HTTP_OPERATIONS.filter(operation => {
-    const path = matchableRequestPath(operation.path), method = operation.method.toUpperCase();
+    const path = templatePath(operation.path), method = operation.method.toUpperCase();
     if (path.startsWith(manualBase + "/") && !RENTAL_AI_INSPECTION_OPERATIONS.includes(path.slice(manualBase.length + 1))) return false;
     return routes.some(route => route.method === method && (route.path === path
       || route.path === manualBase + "/:operation" && path.startsWith(manualBase + "/")));
@@ -72,7 +75,7 @@ export function createRentalAiOpenApi(lock: CoreDeploymentLock, policy = createR
     ? RENTAL_AI_INSPECTION_OPERATIONS.map(operation => ({ method: route.method, path: `${manualBase}/${operation}` }))
     : [{ method: route.method, path: route.path }]);
   rental["x-aiNativeDocumentationGaps"] = expandedRoutes.filter(route =>
-    !selected.some(item => item.method.toUpperCase() === route.method && matchableRequestPath(item.path) === route.path))
+    !selected.some(item => item.method.toUpperCase() === route.method && templatePath(item.path) === route.path))
     .map(route => ({ ...route, path: `/api${route.path}`, kind: "missing-original-operation" }));
   return rental;
 }

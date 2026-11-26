@@ -25,6 +25,8 @@ import { RENTAL_HOST_CONTROLLERS } from "./http-policy";
 import { RentalWebsiteClientEntryController, RentalWechatClientEntryController } from "./ai-client-http";
 import { RentalTenantBudgetController } from "./ai-budget-http";
 import { RentalTenantCreditController } from "./ai-credit-http";
+import { AiPlatformModelSettingsController, AI_NATIVE_PLATFORM_MODEL_SETTINGS_REQUESTS }
+  from "@rental-os/ai-native-server/runtime/platform-model-settings.application";
 import { AiGatewayPricingHistoryController, AI_BUDGET_MANAGEMENT, AI_GATEWAY_PRICING_HISTORY }
   from "@rental-os/ai-native-server/runtime/budget/budget-management.module";
 
@@ -34,6 +36,7 @@ export const RENTAL_AI_INSPECTION_OPERATIONS = Object.freeze([
   "draft-operation", "input-prepare", "input-receipt", "result-read", "result-save", "result-save-receipt", "submission-review", "submission-prepare", "submission-preparation", "submission-submit", "submission-read"
 ]);
 export const RENTAL_AI_CONTROLLERS = Object.freeze([
+  AiPlatformModelSettingsController,
   RentalTenantCreditController,
   RentalTenantBudgetController, AiGatewayPricingHistoryController,
   OperatorEntrySceneCatalogController, StaffEntrySceneCatalogController, RentalStaffInspectionAssistController,
@@ -44,6 +47,7 @@ export const RENTAL_AI_CONTROLLERS = Object.freeze([
   RentalWebsiteClientEntryController, RentalWechatClientEntryController
 ]);
 export const RENTAL_AI_MOUNTED_REQUESTS: readonly symbol[] = Object.freeze([
+  AI_NATIVE_PLATFORM_MODEL_SETTINGS_REQUESTS,
   AI_BUDGET_MANAGEMENT, AI_GATEWAY_PRICING_HISTORY,
   AI_STAFF_INSPECTION_REQUESTS, INSPECTION_RECOGNITION_TASKS, AI_STAFF_INSPECTION_ACCOUNTING, AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS,
   AI_NATIVE_TASK_CENTER_REQUESTS, AI_NATIVE_MODEL_SETTINGS_REQUESTS,
@@ -64,7 +68,13 @@ const inspection = RentalStaffInspectionAssistController.prototype, recognition 
 const accounting = StaffInspectionAccountingController.prototype;
 const budget = RentalTenantBudgetController.prototype, pricing = AiGatewayPricingHistoryController.prototype;
 const credit = RentalTenantCreditController.prototype;
+const platformSettings = AiPlatformModelSettingsController.prototype;
 const declarations: readonly RentalHttpAccessDeclaration[] = [
+  ...reviewed(AiPlatformModelSettingsController, [platformSettings.list, platformSettings.read,
+    platformSettings.operation, platformSettings.capabilities], "buffered-read",
+  "original SaaS management permission, profile ownership and bounded catalog/capability/operation observations; same selected identity and final principal recheck, no probe, model dispatch or credential export"),
+  ...reviewed(AiPlatformModelSettingsController, [platformSettings.save], "transactional-write",
+  "original platform Scope and vault/Profile CAS transactions acquire current SaaS principal and selected data authority before writes and revalidate before commit; original operation key and unknown receipt remain, no invocation grant"),
   ...reviewed(RentalTenantCreditController, [credit.read, credit.receipt, credit.allocationReceipt, credit.calls], "buffered-read",
   "original tenant-admin credit summary, own request/allocation receipts and bounded same-tenant call metadata; same selected authority and buffered response recheck, original ledger amounts only, no credit grant or model dispatch"),
   ...reviewed(RentalTenantCreditController, [credit.request, credit.allocate], "transactional-write",
@@ -223,6 +233,19 @@ const declarations: readonly RentalHttpAccessDeclaration[] = [
 export function createRentalAiHttpPolicy(authorization = createRentalAuthorization(shared)) {
   return compileRentalHttpAccessPolicy({ controllers: [...RENTAL_HOST_CONTROLLERS, ...RENTAL_AI_CONTROLLERS],
     authorization, declarations });
+}
+
+/** Global management is selected from the mounted reviewed handlers, not a
+ * platform URL prefix. The Core layer still requires its original SaaS lease. */
+export function rentalAiPlatformManagementSelector(policy: ReturnType<typeof createRentalAiHttpPolicy>) {
+  const handlers: readonly Function[] = [platformSettings.list, platformSettings.read, platformSettings.operation,
+    platformSettings.capabilities, platformSettings.save];
+  const routes = policy.routes.filter(route => route.controller === AiPlatformModelSettingsController
+    && handlers.includes(route.handler))
+    .map(route => ({ ...route, pattern: new RegExp(`^${route.path.split('/').map(segment => segment.startsWith(':')
+      ? '[^/]+' : segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('/')}$`, 'u') }));
+  return Object.freeze({ isRoute: (request: { method: string; url: string }) => routes.some(route =>
+    route.method === request.method.toUpperCase() && route.pattern.test(matchableRequestPath(request.url))) });
 }
 
 /** 只免除部署停新检查，不免当前身份、租户/Core、对象或物理可用性。

@@ -50,6 +50,8 @@ export interface RentalHostAiSetup<Binding> {
   deploymentContinuation(method: string, path: string): boolean;
   /** 只读原收据闭集；缺省不开放停用Core后的读取。 */
   originalReceiptRead?(method: string, path: string): boolean;
+  /** 已审定的平台配置处理器闭集；仍由原SaaS身份权威和所选数据准入复核。 */
+  platformManagement?(method: string, path: string): boolean;
   /** 同一已选数据库内读取原 AI 任务及历史依赖；未选择 AI 不证明旧数据不存在。 */
   removalDependencies: { read(coreId: string): Promise<{ complete: boolean; blockers: CoreRemovalAssessment["blockers"] }> };
   bind(input: { rental: RentalApplication; guard: RentalAuthorizationGuard;
@@ -196,6 +198,7 @@ export function composeRentalApplication<Binding = never, Additional = unknown>(
   const aiAccess = input.aiMode === "enabled" ? createRentalApplicationAccess({ ...accessInput,
     deploymentContinuation: input.ai.deploymentContinuation,
     originalReceiptRead: input.ai.originalReceiptRead,
+    platformManagement: input.ai.platformManagement,
     deploymentForTransaction: transaction => {
       const current = catalogueForTransaction(transaction);
       return { requireRegistered: current.availability.requireRegistered,

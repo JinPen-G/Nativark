@@ -55,6 +55,8 @@ Core 停用后的已有回答及模型结果核对，由宿主 [只读处理器�
 
 当前租户页面的额度申请、空间分配及调用记录经[租户额度 Controller](../../apps/rental-api/src/ai-credit-http.ts)进入[原额度服务](src/runtime/budget/ai-credit.service.ts)。所选宿主绑定最初 Guard 的同一 ALS 身份，申请与分配在原事务中复用[Auth/Tenant/Core 参加者](src/runtime/tenant-model-config-transactions.ts)，提交前复验权限，丢应答只核原操作收据。历史调用在有界快照中读取原 invocation、usage 和账务依据，BYOK 不生成金额，缺用量不补零，查询和游标继续核当前租户及空间范围。平台批准保留独立管理授权与原增额语义。
 
+[平台模型设置](src/runtime/platform-model-settings.application.ts)保留所选宿主最初 Guard 的原请求身份，继续由原平台配置权威区分查看和管理权限。Scope 初始化及[加密配置保存](src/runtime/platform-model-connection.ts)的原事务通过[平台事务参加者](src/runtime/platform-management-transaction.ts)锁定当前 SaaS 主体、会话和所选数据依据，提交前再次复核。未选择独立宿主时沿原隔离请求作用域。目录和能力证据按有界查询读取，保存保留原 CAS、操作收据及未知结果语义；前端通过[同源客户端工厂](../ai-native-admin/src/platform-model-settings/platformAiSettings.ts)消费五个操作，写请求关闭认证刷新后的自动重发。
+
 Rental 的通知缓存和草稿仓储通过 `@rental-os/rental-core/notification-draft` 消费以下组合：
 
 ```ts

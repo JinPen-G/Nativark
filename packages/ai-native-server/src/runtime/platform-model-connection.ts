@@ -16,6 +16,7 @@ import { parseAiProviderProfileRecord } from './provider-profile.repository';
 import { NATIVE_MODEL_PROTOCOLS, isNativeModelProtocol } from './native-model-protocols';
 import { modelConfigurationOperationKey, readModelConfigurationOperation, appendModelConfigurationOperation,
   type ModelConfigurationOperationDb } from './model-configuration-operation';
+import { beginPlatformAiManagementTransaction } from './platform-management-transaction';
 
 const id = z.string().min(1).max(36).regex(/^[\w.:-]+$/u);
 const revision = z.number().int().min(1).max(4294967295);
@@ -166,6 +167,8 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
     let callbackCompleted = false;
     try {
       const saved = await this.db.$transaction(async tx => {
+        const lease = await beginPlatformAiManagementTransaction(tx, before.actorId);
+        try {
         let profile = await tx.aiProviderProfile.findFirst({ where: { id: input.profileId,
           scopeId: before.scopeId, scopeKind: 'PLATFORM', serviceMode: 'platform_managed' } });
         if (input.expectedRevision === 0) {
@@ -212,8 +215,10 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
           operationKey: input.operationKey, expectedRevision: input.expectedRevision, commandHash: commandHash!, result });
         const final = await this.management(profile.id);
         if (final.scopeId !== before.scopeId || final.binding !== before.binding) throw new ModelGatewayError('FORBIDDEN');
+        await lease?.revalidate();
         callbackCompleted = true;
         return result;
+        } finally { lease?.close(); }
       }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
       const current = await this.management(input.profileId);
       if (current.scopeId !== before.scopeId || current.binding !== before.binding) throw new ModelGatewayError('FORBIDDEN');

@@ -86,6 +86,9 @@ export interface RentalApplicationAccessDependencies {
   /** 受控宿主从实际只读处理器闭集产生；仅准入原操作/回答/结果核对。
    * 原读取器仍复验Task/Run/操作键和对象归属，不准创建任务、批准或模型调用。 */
   originalReceiptRead?(method: string, path: string): boolean;
+  /** Trusted host's reviewed global-management handlers. Uses the original SaaS
+   * principal and selected data availability, never a tenant/member grant. */
+  platformManagement?(method: string, path: string): boolean;
   /** Same original public authority/user repository; SaaS never receives a
    * fabricated member assignment. Optional only for hosts without these routes. */
   managementAuthority?: Pick<PlatformPrincipalAuthority, "lock">;
@@ -270,6 +273,8 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
   }
   if (input.deploymentContinuation !== undefined && typeof input.deploymentContinuation !== "function")
     throw new CoreAccessError("core_unavailable", "Rental 部署续程必须由宿主提供固定路由选择器");
+  if (input.platformManagement !== undefined && typeof input.platformManagement !== "function")
+    throw new CoreAccessError("core_unavailable", "Rental 平台管理必须由宿主提供固定处理器选择器");
   const deploymentContinuation = input.deploymentContinuation;
   const requests = new AsyncLocalStorage<ApplicationRequestScope>();
   const policy = input.authorization;
@@ -293,7 +298,8 @@ export function createRentalApplicationAccess(input: RentalApplicationAccessDepe
       throw new CoreAccessError("denied", "Rental HTTP 需要原 Guard 已核定的租户业务主体");
     }
     const method = request.method.toUpperCase(), path = matchableRequestPath(request.url);
-    const management = identity.isSaasAdmin ? saasManagementScope(method, path) : undefined;
+    const management = identity.isSaasAdmin ? saasManagementScope(method, path)
+      ?? (input.platformManagement?.(method, path) === true ? { kind: "catalog" as const } : undefined) : undefined;
     if (identity.isSaasAdmin && (!management || identity.audience !== "operator" || identity.staffApi
       || typeof input.managementAuthority?.lock !== "function")) throw new CoreAccessError("denied", "Rental SaaS 请求缺少精确管理范围与原身份权威");
     const workspaceId = identity.workspaceId;
