@@ -360,8 +360,8 @@ function main(args) {
     if (!options['--commit'] || !options['--core-repo'] || !options['--core-commit'])
       throw Error('双仓构建须提供两个完整SHA和独立源码目录');
     const api = require('./prepare-rental-workspace.cjs');
-    snapshot = api.composeRentalBuildSnapshot(api.readRentalBuildSupport(options['--commit'], options['--build-repo'] ?? root),
-      api.readIndependentRentalSource(options['--core-repo'], options['--core-commit'], { mode: options['--source-mode'] ?? 'development' }));
+    const rental = api.readIndependentRentalSource(options['--core-repo'], options['--core-commit'], { mode: options['--source-mode'] ?? 'development' });
+    snapshot = api.composeRentalBuildSnapshot(api.readRentalBuildSupport(options['--commit'], options['--build-repo'] ?? root, rental), rental);
   }
   const build = createBuild(deps, { snapshot });
   verifyContracts(build);

@@ -57,7 +57,7 @@ function fixedPortableSource(options, documentationSource, buildDirectory) {
   if (!legacySupport && !rental.layout.paths.some(entry => entry.target === 'apps/rental-api' && entry.roles.includes('host')))
     throw Error('正式发行缺少独立 Rental API 宿主源码；不能使用底座旧业务副本');
   const snapshot = legacySupport ? readBuildSnapshot(documentationSource.commit, buildDirectory)
-    : readRentalBuildSupport(documentationSource.commit, buildDirectory);
+    : readRentalBuildSupport(documentationSource.commit, buildDirectory, rental);
   const combined = composeRentalBuildSnapshot(snapshot, rental, { legacySupport });
   const output = path.resolve(options.get('--out'));
   const relative = path.relative(root, output).split(path.sep);

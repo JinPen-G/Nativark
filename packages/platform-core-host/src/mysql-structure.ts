@@ -228,7 +228,7 @@ export function mysqlCheckShape(clause: string): string | undefined {
     const replacements: Record<string, string> = { "0": "\0", b: "\b", n: "\n", r: "\r", t: "\t", Z: "\x1a" };
     return replacements[escaped[1]] ?? ("%_".includes(escaped[1]) ? escaped : escaped[1]);
   });
-  const arities: Record<string, readonly [number, number]> = { char_length: [1, 1], octet_length: [1, 1],
+  const arities: Record<string, readonly [number, number]> = { char_length: [1, 1], octet_length: [1, 1], length: [1, 1],
     json_type: [1, 1], json_unquote: [1, 1], json_extract: [2, 2], coalesce: [2, 4096],
     concat: [1, 4096], regexp_like: [2, 3] };
   const operand = (): Node => {
@@ -286,7 +286,8 @@ export function mysqlCheckShape(clause: string): string | undefined {
         while (is(",")) { take(","); values.push(or()); }
       }
       if (values.length < arity[0] || values.length > arity[1]) throw new Error("CHECK函数参数错误");
-      return ["call", value, values];
+      // MySQL 8.4 emits LENGTH for OCTET_LENGTH. CHAR_LENGTH remains distinct.
+      return ["call", value === "length" ? "octet_length" : value, values];
     });
   };
   const addition = (): Node => {

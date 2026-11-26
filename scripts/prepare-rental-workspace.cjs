@@ -22,7 +22,7 @@ const renamedRepository = 'https://github.com/JinPen-G/Zelo-rental-core';
 const rootLayout = { format: 'rental-source-layout-1', paths: [{ source: '.', target: coreDirectory,
   roles: ['domain'],
   required: ['package.json', 'LICENSE', 'tsconfig.json', 'tsconfig.contracts.json', 'src/index.ts', 'src/server.ts', 'prisma/schema.prisma'] }] };
-const rentalOwned = file => /^packages\/rental-[^/]+(?:\/|$)/u.test(file)
+const rentalOwned = file => /^packages\/(?:rental-[^/]+|web-client)(?:\/|$)/u.test(file)
   || rentalApps.some(directory => file === directory || file.startsWith(directory + '/'));
 const supportScripts = [
   'scripts/prepare-selected-prisma-schema.cjs', 'scripts/miniprogram-shared-types.cjs',
@@ -31,6 +31,8 @@ const supportScripts = [
   'scripts/rental-build-snapshot.cjs', 'scripts/verify-rental-distribution.cjs',
   'scripts/prepare-rental-workspace.cjs',
 ];
+
+const freshAiHostExport = name => ['ai-app-module', 'ai-data-extension'].includes(name.replace(/^\.\//u, ''));
 
 function git(directory, args) {
   return execFileSync('git', ['--no-replace-objects', ...args],
@@ -66,6 +68,22 @@ function mapRentalSource(raw, layout, source) {
       assertSourcePath(required);
       if (!isSource(required) || !raw.has(prefix + required)) throw Error('Rental 源码缺少必需文件：' + prefix + required);
     }
+    if (entry.target === 'packages/rental-mcp-host' && (entry.roles.length !== 1 || entry.roles[0] !== 'mcp'))
+      throw Error('Rental MCP 参加者只允许显式 mcp 角色');
+    if (entry.aiFiles !== undefined) {
+      const files = entry.aiFiles;
+      if (entry.target !== 'apps/rental-api' || !entry.roles.includes('host') || entry.roles.includes('ai')
+        || !Array.isArray(files) || new Set(files).size !== files.length || !files.length)
+        throw Error('新装 AI 源码须由 Rental API 宿主逐文件声明');
+      for (const file of files) {
+        assertSourcePath(file);
+        if (!/^(?:src\/ai-[a-z.-]+\.ts|tsconfig\.ai\.json|prisma\/ai-extension\/[^/]+)$/u.test(file)
+          || !isSource(file) || !raw.has(prefix + file) || entry.required.includes(file))
+          throw Error('新装 AI 文件不存在、越出宿主范围或与普通必需文件重叠：' + file);
+      }
+      if (raw.has(prefix + 'prisma/ai-extension/.gitattributes') && !files.includes('prisma/ai-extension/.gitattributes'))
+        throw Error('新装 AI 扩展须随原始字节属性选装');
+    }
     const metadata = JSON.parse(raw.get(prefix + 'package.json').toString('utf8'));
     const expectedName = entry.target === coreDirectory ? '@rental-os/rental-core'
       : '@rental-os/' + entry.target.split('/')[1];
@@ -73,6 +91,9 @@ function mapRentalSource(raw, layout, source) {
     for (const [name, bytes] of raw) {
       assertSourcePath(name);
       if (!name.startsWith(prefix) || name === layoutFile || name === 'tools/prepare-workspace.cjs') continue;
+      if (entry.source === '.' && name.startsWith('workspace/')
+        && !layout.paths.some(other => other !== entry && name.startsWith(other.source + '/')))
+        throw Error('独立源码存在未登记的工作区路径：' + name);
       // 根布局仅装领域包；多路径布局的其他工作区不能又嵌套进领域包。
       if (layout.paths.some(other => other !== entry && other.source !== '.'
         && other.source.startsWith(prefix) && name.startsWith(other.source + '/'))) continue;
@@ -137,11 +158,15 @@ function readIndependentRentalSource(directory, commit, options = {}) {
 function composeRentalBuildSnapshot(support, rental, options = {}) {
   if (options.legacySupport && (rental.mode !== 'release' || rental.layoutKind !== 'legacy-root'))
     throw Error('旧底座业务支持只适用于已核标签的历史根布局');
+  const independentWeb = rental.layout.paths.some(entry => entry.target === 'packages/web-client');
   const files = new Map([...support.files].filter(([file]) => {
     const relative = path.relative(root, file).split(path.sep).join('/');
-    return !rentalOwned(relative) || options.legacySupport && !relative.startsWith(coreDirectory + '/');
+    return !rentalOwned(relative) || (!independentWeb && relative.startsWith('packages/web-client/'))
+      || options.legacySupport && !relative.startsWith(coreDirectory + '/');
   }));
-  for (const [file, bytes] of rental.snapshot.files) files.set(file, bytes);
+  // Distribution and contract builds use the business package and its ordinary
+  // hosts. The MCP participant is projected only by the explicit workspace selector.
+  for (const [file, bytes] of rental.snapshot.files) if (!file.startsWith(slash('packages/rental-mcp-host') + '/')) files.set(file, bytes);
   const result = snapshotFromFiles(support.commit, files);
   result.sources = { platform: { commit: support.commit }, rental: rental.source, mode: rental.mode,
     layout: rental.layoutKind, legacySupport: Boolean(options.legacySupport) };
@@ -152,8 +177,11 @@ function composeRentalBuildSnapshot(support, rental, options = {}) {
 }
 
 /** 新组合读取公共支持时不读取底座旧业务副本；历史发行另走显式legacySupport。 */
-function readRentalBuildSupport(commit, directory = root) {
-  return readBuildSnapshot(commit, directory, selections.filter(file => !rentalOwned(file)
+function readRentalBuildSupport(commit, directory = root, rental) {
+  // Old declared sources used the compatibility support copy. Once the Core
+  // declares Web ownership, it is the only allowed source in the new build.
+  const independentWeb = rental?.layout.paths.some(entry => entry.target === 'packages/web-client');
+  return readBuildSnapshot(commit, directory, selections.filter(file => (!rentalOwned(file) || file === 'packages/web-client' && !independentWeb)
     && !['apps/admin', 'apps/example-tickets-api', 'apps/example-tickets-admin', 'packages/example-tickets-core'].includes(file)));
 }
 
@@ -170,11 +198,18 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
   const required = profile === 'domain' ? [coreDirectory] : ['apps/rental-api', 'apps/rental-admin',
     ...(profile === 'full' ? ['apps/tenant-website', 'apps/enterprise-portal', 'apps/miniprogram', 'apps/staff-miniprogram'] : [])];
   if (options.mcp && !options.ai) throw Error('MCP 开发组合须同时选用 AI');
+  if (options.freshAi && (!options.ai || options.mcp || profile === 'domain'))
+    throw Error('新装 AI 只接受带宿主、不含 MCP 的显式组合');
+  const freshHost = rental.layout.paths.find(entry => entry.target === 'apps/rental-api' && entry.aiFiles);
+  if (options.freshAi && (!['src/ai-fresh-main.ts', 'src/ai-fresh-deployment.ts', 'tsconfig.ai.json']
+    .every(file => freshHost?.aiFiles.includes(file)) || !freshHost.aiFiles.some(file => /^prisma\/ai-extension\/\d{14}-initial\.sql$/u.test(file))))
+    throw Error('固定独立仓缺少新装 AI 宿主或原扩展 SQL，不能从底座补齐');
   const selectedRoles = ['domain', ...(profile === 'domain' ? [] : ['host']), ...(profile === 'full' ? ['client'] : []),
     ...(options.ai ? ['ai'] : []), ...(options.mcp ? ['mcp'] : [])];
   const selected = rental.layout.paths.filter(entry => entry.roles.some(role => selectedRoles.includes(role))
     && (!entry.roles.includes('ai') || options.ai) && (!entry.roles.includes('mcp') || options.mcp));
   for (const role of selectedRoles.filter(role => role === 'ai' || role === 'mcp')) {
+    if (role === 'ai' && options.freshAi) continue;
     if (!selected.some(entry => entry.roles.includes(role)))
       throw Error('独立源码尚未交付 ' + role + ' 业务适配角色；公共引擎不能代替业务适配');
   }
@@ -184,7 +219,9 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
     const metadata = JSON.parse(rental.snapshot.files.get(slash(path.join(root, target, 'package.json'))));
     return Object.hasOwn(metadata.dependencies ?? {}, '@rental-os/ai-native-data');
   });
-  const extras = [...supportWorkspaces, ...(options.ai || needsAiData ? ['packages/ai-native-data'] : []),
+  const independentWeb = rental.layout.paths.some(entry => entry.target === 'packages/web-client');
+  const extras = [...supportWorkspaces.filter(directory => directory !== 'packages/web-client' || !independentWeb),
+    ...(options.ai || needsAiData ? ['packages/ai-native-data'] : []),
     ...(options.ai ? ['packages/ai-native-server'] : []),
     ...(options.mcp ? ['packages/mcp-server'] : [])];
   const support = readBuildSnapshot(options.commit, options.repo, [...extras, ...supportScripts]);
@@ -195,6 +232,7 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
   }
   for (const [absolute, bytes] of rental.snapshot.files) {
     const relative = path.relative(root, absolute).split(path.sep).join('/');
+    if (!options.freshAi && freshHost?.aiFiles.some(file => freshHost.target + '/' + file === relative)) continue;
     if (isSource(relative) && selected.some(entry => relative.startsWith(entry.target + '/'))) files.set(relative, bytes);
   }
   const workspaces = new Map();
@@ -207,6 +245,13 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
       if (metadata[field]?.['@rental-os/rental-core']) metadata[field]['@rental-os/rental-core'] = rental.metadata.version;
     }
     if (metadata.scripts) metadata.scripts = Object.fromEntries(Object.entries(metadata.scripts).filter(([name]) => name !== 'test'));
+    if (freshHost?.target === directory && !options.freshAi) {
+      for (const name of Object.keys(metadata.scripts ?? {})) if (/:ai(?::|$)/u.test(name)) delete metadata.scripts[name];
+      for (const name of Object.keys(metadata.exports ?? {})) if (freshAiHostExport(name)) delete metadata.exports[name];
+      for (const name of Object.keys(metadata.typesVersions?.['*'] ?? {})) if (freshAiHostExport(name)) delete metadata.typesVersions['*'][name];
+      delete metadata.peerDependencies?.['@rental-os/ai-native-server'];
+      delete metadata.peerDependenciesMeta?.['@rental-os/ai-native-server'];
+    }
     files.set(packageFile, json(metadata));
     workspaces.set(directory, metadata);
   }
@@ -238,6 +283,7 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
         'build:ai': 'npm run build:ai -w @rental-os/rental-api',
         'check:ai': 'node scripts/check-selected-prisma-types.cjs --mode rental-ai --config apps/rental-api/tsconfig.ai.json',
       } : {}),
+      ...(options.freshAi ? { 'build:admin:fresh': 'npm run build:fresh -w @rental-os/rental-admin' } : {}),
     } };
   const originalLockBytes = readBuildSnapshot(options.commit, options.repo, ['package-lock.json'])
     .files.get(slash(path.join(root, 'package-lock.json')));
@@ -293,6 +339,7 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
     format: 'nativark-core-development-source-2', profile, mode: rental.mode,
     host: profile === 'domain' ? null : 'rental', coreIds: ['rental'], ai: Boolean(options.ai), mcp: Boolean(options.mcp),
     platform: { version: platform.version, source: platform.source, layout: 'platform-source', packageRoot: '.' },
+    ...(options.freshAi ? { installation: 'fresh-ai' } : {}),
     core: { version: rental.metadata.version, source: rental.source, tag: rental.tag,
       checkoutRepository: rental.checkoutRepository, layout: rental.layoutKind,
       packageRoot: selected.find(entry => entry.target === coreDirectory).source, paths: selected },
@@ -323,13 +370,14 @@ function argumentsOf(args) {
   for (let index = 0; index < args.length; index++) {
     const name = args[index];
     if (name === '--ai' && result.ai === undefined) { result.ai = true; continue; }
+    if (name === '--fresh-ai' && result.ai === undefined) { result.ai = true; result.freshAi = true; continue; }
     if (name === '--mcp' && result.mcp === undefined) { result.mcp = true; continue; }
     const field = names[name], value = args[++index];
     if (!field || !value || value.startsWith('--') || result[field] !== undefined) throw Error('未知、重复或缺少值的源码准备参数');
     result[field] = value;
   }
   if (['repo', 'repository', 'commit', 'coreRepo', 'coreCommit', 'out'].some(name => !result[name]))
-    throw Error('用法：prepare-rental-workspace --repo <底座Git目录> --repository <GitHub地址> --commit <完整SHA> --core-repo <独立CoreGit目录> --core-commit <完整SHA> --out <新.tgz文件> [--mode development|release] [--profile domain|host|full] [--ai] [--mcp]');
+    throw Error('用法：prepare-rental-workspace --repo <底座Git目录> --repository <GitHub地址> --commit <完整SHA> --core-repo <独立CoreGit目录> --core-commit <完整SHA> --out <新.tgz文件> [--mode development|release] [--profile domain|host|full] [--ai|--fresh-ai] [--mcp]');
   return result;
 }
 
