@@ -32,7 +32,7 @@
 
 ### 选装 SaaS 模型设置
 
-[公共设置模块](src/public-platform-model-settings.ts)从 `@rental-os/ai-native-server/public-platform-model-settings` 提供原目录、配置读取、原键收据、保存和能力证据五条路由。它使用同一 `PlatformServerModule` 的签名 Auth、原 Guard、SecretBox 和数据库对象。保存沿原会话/租户/角色锁，在 Profile、凭据库和原键收据的同一事务里复核所选数据与当前授权。能力只读观察复用原探测收据和财务事实的核验；既有证明缺失、配置失效或伪造记录不会成为可用能力。
+[公共设置模块](src/public-platform-model-settings.ts)从 `@rental-os/ai-native-server/public-platform-model-settings` 提供原目录、配置读取、原键收据、保存和能力证据五条路由。它使用同一 `PlatformServerModule` 的签名 Auth、原 Guard、SecretBox 和数据库对象。保存沿原会话/租户/角色锁，在 Profile、凭据库和原键收据的同一事务里复核相同 Scope、当前权限和所选数据。Scope 注册也使用原事务租约；签名会话的根读取在事务前及提交后进行。能力只读观察复用原探测收据和财务事实的核验；既有证明缺失、配置失效或伪造记录不会成为可用能力。
 
 宿主选用此模块时，将 `withPublicPlatformModelSettingsHttpAccess(existingCoreHttp)` 作为原 `PlatformServerModule.register` 的 `coreHttpProvider` 结果，并用 `createPlatformModelSettingsOpenApi(document)` 合入同版文档。`PublicPlatformModelSettingsModule.register({ imports, inject, useFactory })` 的 `imports` 复用同一个已登记平台模块，`useFactory` 给出原数据库及 `assertDataAvailable`。可从[公共数据装配](../ai-native-data/src/public-data-admission.ts)沿选定归档、原锁和物理/原迁移观察构造该函数，接同一原 Client 或当前事务。首次安装作业显式选用公共 AI schema，并沿受权角色维护入口登记 `PLATFORM_AI_MODEL_SETTINGS_PERMISSIONS`；选择模型设置本身不会授予角色。
 

@@ -36,7 +36,8 @@ async function registerScope(db: ScopeDatabase, columns: ReturnType<typeof aiPer
         if (!row || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u.test(row.id)
           || Object.entries(columns).some(([key, value]) => row[key as keyof typeof row] !== value))
           throw new ModelGatewayError('FORBIDDEN');
-        await current();
+        // The required participant owns authorization while the write holds a
+        // connection. Keep the request's root reads outside this transaction.
         await lease.revalidate();
         callbackCompleted = true;
       } finally { lease.close(); }
@@ -74,6 +75,7 @@ export function createPublicPlatformModelConfiguration(input: {
   db: ConstructorParameters<typeof PrismaPlatformModelConnection>[0] & ScopeDatabase;
   authority: PlatformConnectionAuthority & AiCurrentScopeAuthority & { resolveRead(): ReturnType<AiCurrentScopeAuthority['resolve']> };
   secrets: SecretBox;
+  /** Revalidates the same current principal, action and binding on the supplied transaction. */
   transactionParticipant: PlatformAiManagementTransactionParticipant<Prisma.TransactionClient>;
 }) {
   if (typeof input?.transactionParticipant?.begin !== 'function' || typeof input.authority?.resolveRead !== 'function')
@@ -82,7 +84,19 @@ export function createPublicPlatformModelConfiguration(input: {
     beginPlatformAiManagementTransaction(transaction, actorId, input.transactionParticipant);
   const scopes = new AiScopeRepository(input.db, input.authority);
   const configuration = new PrismaPlatformModelConnection(input.db, scopes, input.authority, input.secrets,
-    new AiScopeRepository(input.db, { resolve: () => input.authority.resolveRead() }), begin);
+    new AiScopeRepository(input.db, { resolve: () => input.authority.resolveRead() }), async (transaction, actorId, scopeId) => {
+      const lease = await begin(transaction, actorId);
+      const columns = aiPersistenceScopeColumns({ kind: 'platform' });
+      return { close: lease.close, revalidatesConfigurationInTransaction: true,
+        async revalidate() {
+          // The public lease checks the stored principal on this transaction;
+          // also bind the exact configuration scope captured by the read.
+          const row = await transaction.aiScope.findFirst({ where: columns });
+          if (!row || row.id !== scopeId || Object.entries(columns).some(([key, value]) => row[key as keyof typeof columns] !== value))
+            throw new ModelGatewayError('FORBIDDEN');
+          await lease.revalidate();
+        } };
+    });
   return Object.freeze({ configuration, async registerScope() {
     const resolve = async () => {
       const context = structuredClone(await input.authority.resolve());

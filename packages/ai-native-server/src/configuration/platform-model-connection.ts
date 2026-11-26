@@ -42,6 +42,8 @@ const select = { profileId: true, configRevision: true, baseUrl: true, maxOutput
 type Connection = z.infer<typeof connectionSchema>;
 type Db = Pick<PrismaClient, '$transaction' | 'aiProviderProfile' | 'aiPlatformModelConnection'> & ModelConfigurationOperationDb;
 type Scopes = Pick<AiScopeRepository, 'resolveRoutingScopes'>;
+/** A selected public lease checks both the current principal and selected Scope. */
+type ConfigurationLease = AiConfigurationTransactionLease & { revalidatesConfigurationInTransaction?: true };
 
 /** Fresh action-specific server authorization is mandatory. Scope lookup is NOT
  * permission, entitlement, budget admission or provider dispatch authority.
@@ -60,7 +62,7 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
   constructor(private readonly db: Db, private readonly scopes: Scopes,
     private readonly authority: PlatformConnectionAuthority, private readonly secrets: SecretBox,
     private readonly readScopes: Scopes | undefined,
-    private readonly beginTransaction: (transaction: Prisma.TransactionClient, actorId: string) => Promise<AiConfigurationTransactionLease | undefined>) {
+    private readonly beginTransaction: (transaction: Prisma.TransactionClient, actorId: string, scopeId: string) => Promise<ConfigurationLease | undefined>) {
     if ([db?.$transaction, db?.aiProviderProfile?.findFirst, db?.aiPlatformModelConnection?.findUnique,
       scopes?.resolveRoutingScopes, authority?.manage, authority?.invoke, secrets?.encrypt, secrets?.decrypt]
       .some(method => typeof method !== 'function')) throw new ModelGatewayError('CONFIG_INVALID');
@@ -151,14 +153,17 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
     const parsed = saveSchema.safeParse(value);
     if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
     const input = parsed.data, before = await this.management(input.profileId);
+    const recheck = async () => {
+      const current = await this.management(input.profileId);
+      if (current.scopeId !== before.scopeId || current.binding !== before.binding) throw new ModelGatewayError('FORBIDDEN');
+    };
     const owner = { scopeId: before.scopeId, scopeKind: 'PLATFORM' as const,
       targetId: input.profileId, actorId: before.actorId, workspaceId: null };
     const commandHash = input.operationKey === undefined ? undefined : this.secrets.fingerprint(requestFingerprint({ owner, input }));
     if (input.operationKey !== undefined) {
       if (!this.db.aiModelConfigurationOperation?.create) throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
       const original = await readModelConfigurationOperation(this.db, owner, input.operationKey, commandHash);
-      const current = await this.management(input.profileId);
-      if (current.binding !== before.binding || current.scopeId !== before.scopeId) throw new ModelGatewayError('FORBIDDEN');
+      await recheck();
       if (original.state === 'recorded') {
         if (!('profileId' in original.result) || original.result.profileId !== input.profileId) throw new ModelGatewayError('CONFIG_INVALID');
         return original.result;
@@ -168,8 +173,10 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
     let callbackCompleted = false;
     try {
       const saved = await this.db.$transaction(async tx => {
-        const lease = await this.beginTransaction(tx, before.actorId);
+        const lease = await this.beginTransaction(tx, before.actorId, before.scopeId);
+        const recheckInWrite = () => lease?.revalidatesConfigurationInTransaction ? lease.revalidate() : recheck();
         try {
+        if (lease?.revalidatesConfigurationInTransaction) await recheckInWrite();
         let profile = await tx.aiProviderProfile.findFirst({ where: { id: input.profileId,
           scopeId: before.scopeId, scopeKind: 'PLATFORM', serviceMode: 'platform_managed' } });
         if (input.expectedRevision === 0) {
@@ -197,8 +204,7 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
             revision: String(nextRevision), protocol: input.protocol, model: input.model, baseUrl }); }
           catch { throw new ModelGatewayError('CREDENTIAL_UNAVAILABLE'); }
         }
-        const current = await this.management(profile.id);
-        if (current.scopeId !== before.scopeId || current.binding !== before.binding) throw new ModelGatewayError('FORBIDDEN');
+        await recheckInWrite();
         const enabled = Boolean(key) && input.enabled;
         const updated = await tx.aiProviderProfile.updateMany({ where: { id: profile.id, scopeId: before.scopeId,
           scopeKind: 'PLATFORM', serviceMode: 'platform_managed', configRevision: profile.configRevision },
@@ -214,15 +220,13 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
         const result = { profileId: profile.id, revision: nextRevision, enabled, credentialConfigured: Boolean(key) };
         if (input.operationKey !== undefined) await appendModelConfigurationOperation(tx, owner, {
           operationKey: input.operationKey, expectedRevision: input.expectedRevision, commandHash: commandHash!, result });
-        const final = await this.management(profile.id);
-        if (final.scopeId !== before.scopeId || final.binding !== before.binding) throw new ModelGatewayError('FORBIDDEN');
-        await lease?.revalidate();
+        await recheckInWrite();
+        if (!lease?.revalidatesConfigurationInTransaction) await lease?.revalidate();
         callbackCompleted = true;
         return result;
         } finally { lease?.close(); }
       }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
-      const current = await this.management(input.profileId);
-      if (current.scopeId !== before.scopeId || current.binding !== before.binding) throw new ModelGatewayError('FORBIDDEN');
+      await recheck();
       return saved;
     } catch (error) {
       if (callbackCompleted) throw new AiModelConfigurationResultUnknownError();
