@@ -1,7 +1,7 @@
 /** One configuration editor's lifecycle, not authorization or idempotency.
  * Persist only the original operation reference; never credentials or drafts.
  * An ambiguous save blocks further writes until its own receipt is observed. */
-import type { AiLegacyModelConfigurationDraft, AiTenantModelSettingsInputDraft, AiTenantModelSettingsSummaryDraft } from "@rental-os/shared/ai-admin";
+import type { AiLegacyModelConfigurationDraft, AiTenantModelSettingsInputDraft, AiTenantModelSettingsSummaryDraft } from "@rental-os/platform-contracts/ai-usage";
 import { readSettingsReference, retainSettingsReference, clearSettingsReference } from '@rental-os/platform-admin/forms';
 
 type Row = Record<string, unknown>;

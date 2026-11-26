@@ -2,6 +2,8 @@
 
 [页面入口](AiModelSettingsPage.tsx)保留服务配置、平台额度和调用记录三个原页签。宿主在同一 [AiAdminHostProvider](../host.tsx) 中按当前登记与权限传入可选 `taskCenterPath`；缺失时保留设置正文并不呈现任务链接。它只用于原“打开 AI 任务中心”链接，不决定身份、权限或任务准入。[正式出口](index.ts)
 
+[公共租户页面工厂](../public-tenant-application.tsx)使用同一个[设置编辑器](TenantSettingsEditor.tsx)，由显式选装的公共宿主挂到受 `system:params:manage` 保护的租户入口。它只接公共租户的配置、目录与原收据接口，按租户和原操作者保留恢复引用，无需经营空间。Rental 继续用原空间引用和三页签，连接检测仍沿原回调。
+
 ## 会话与原业务接点
 
 [页面适配](runtime.ts)与[平台配置适配](../platform-model-settings/runtime.ts)共用唯一 `AdminRuntime` 和已验证会话。租户、人员、当前经营空间和范围代次沿原宿主，设置仍要求 `system:params:manage`；页面不读取凭据、另建查询缓存或选择模型执行器。[请求边界](../platform-model-settings/request.ts)在发送与返回时核对当前身份、权限和取消信号，命令不因认证刷新而自动重发，服务端继续独立授权。

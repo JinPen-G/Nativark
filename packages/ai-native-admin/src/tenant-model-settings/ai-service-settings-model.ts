@@ -1,4 +1,4 @@
-import type { AiTenantModelSettingsInputDraft, AiTenantModelSettingsSummaryDraft } from "@rental-os/shared/ai-admin";
+import type { AiTenantModelSettingsInputDraft, AiTenantModelSettingsSummaryDraft } from "@rental-os/platform-contracts/ai-usage";
 
 export type AiSettingsMode = "platform_managed" | "tenant_managed";
 export type SecretOperation = "retain" | "replace" | "clear";

@@ -65,6 +65,7 @@
     "./source/platform-model-settings/request": "./src/platform-model-settings/request.ts",
     "./source/platform-model-settings/runtime": "./src/platform-model-settings/runtime.ts",
     "./tenant-model-settings": "./src/tenant-model-settings/index.ts",
+    "./tenant-model-settings/public-application": "./src/public-tenant-application.tsx",
     "./source/tenant-model-settings/aiCapabilityProbe": "./src/tenant-model-settings/aiCapabilityProbe.ts",
     "./source/tenant-model-settings/AiCallRecords": "./src/tenant-model-settings/AiCallRecords.tsx",
     "./source/tenant-model-settings/ai-service-settings-model": "./src/tenant-model-settings/ai-service-settings-model.ts",

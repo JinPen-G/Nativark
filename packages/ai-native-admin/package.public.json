@@ -4,10 +4,11 @@
   "private": true,
   "license": "MIT",
   "type": "module",
-  "description": "Zelo 公共后台 SaaS 模型、费率、预算和额度设置源码包",
+  "description": "Zelo 公共后台平台与租户 AI 设置源码包",
   "exports": {
     "./host": "./src/host.tsx",
     "./platform-model-settings/public-application": "./src/public-platform-application.tsx",
+    "./tenant-model-settings/public-application": "./src/public-tenant-application.tsx",
     "./source/platform-model-settings/platformAiSettings": "./src/platform-model-settings/platformAiSettings.ts",
     "./source/platform-model-settings/aiBudgetSettings": "./src/platform-model-settings/aiBudgetSettings.ts",
     "./source/platform-model-settings/aiCredit": "./src/platform-model-settings/aiCredit.ts"
@@ -15,6 +16,10 @@
   "files": [
     "README.md", "LICENSE",
     "src/host.tsx", "src/public-platform-application.tsx",
+    "src/public-tenant-application.tsx", "src/tenant-model-settings/TenantSettingsEditor.tsx",
+    "src/tenant-model-settings/AiServiceSettingsCard.tsx", "src/tenant-model-settings/ai-service-settings-model.ts",
+    "src/tenant-model-settings/aiModelSettings.ts", "src/tenant-model-settings/model-settings-session.ts",
+    "src/tenant-model-settings/settings-save-session.ts",
     "src/platform-model-settings/PlatformCapabilityObservation.tsx", "src/platform-model-settings/PlatformModelSettingsView.tsx",
     "src/platform-model-settings/model-runtime.ts", "src/platform-model-settings/platform-model-settings-session.ts",
     "src/platform-model-settings/platformAiSettings.ts", "src/platform-model-settings/request.ts",

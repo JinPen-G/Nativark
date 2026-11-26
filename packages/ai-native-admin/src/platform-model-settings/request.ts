@@ -6,7 +6,7 @@ import type { AiAdminHost } from "../host";
 export interface AiSettingsAccess {
   audience: "platform" | "tenant";
   permission: string;
-  workspace?: boolean;
+  workspace?: boolean | 'absent';
   /** 按实际动作声明；POST 也可能只是读原配置或收据。 */
   write: boolean;
 }
@@ -29,7 +29,8 @@ export function createAiSettingsRequest(host: AiAdminHost) {
         || !session.sessionVerified || !session.authenticated || !session.user
         || Boolean(session.user.isSaasAdmin) !== (access.audience === "platform")
         || access.audience === "tenant" && !session.tenant?.tenantId
-        || access.workspace && !session.currentWorkspaceId
+        || access.workspace === true && !session.currentWorkspaceId
+        || access.workspace === 'absent' && session.currentWorkspaceId !== undefined
         || !session.hasPermission(access.permission)) throw new DOMException("AI_SCOPE_CHANGED", "AbortError");
     };
     check();

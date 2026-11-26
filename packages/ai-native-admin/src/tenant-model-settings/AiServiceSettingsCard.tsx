@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { ActionButton, Alert, Input, Segmented, Select, Switch } from "@rental-os/platform-admin/ui";
-import type { AiLegacyModelConfigurationReferenceDraft, AiTenantModelSettingsSummaryDraft, AiProviderDiscoveryInputDraft, AiProviderDiscoveryResultDraft, AiProviderDiscoveryProtocol } from "@rental-os/shared/ai-admin";
+import type { AiLegacyModelConfigurationReferenceDraft, AiTenantModelSettingsSummaryDraft } from "@rental-os/platform-contracts/ai-usage";
+import type { AiProviderDiscoveryInputDraft, AiProviderDiscoveryResultDraft, AiProviderDiscoveryProtocol } from "@rental-os/platform-contracts/ai-provider-discovery";
 import { useAiManagementLocale as useLocale } from '../ai-native/management-locale';
 import { fromAiServiceSummary, setAiSettingsMode, toAiSettingsInput, validateAiSettingsDraft, type AiServiceSettingsDraft, type AiSettingsMode } from "./ai-service-settings-model";
 import { SettingsSaveSession } from "./settings-save-session";

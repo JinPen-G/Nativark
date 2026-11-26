@@ -1,12 +1,12 @@
 /** 原租户配置与供应商元数据接口；复用所选宿主，不持久化密钥或触发模型检测。 */
-import { AI_MODEL_SETTINGS_HTTP_DRAFT, type AiTenantModelSettingsInputDraft,
-  type AiProviderDiscoveryInputDraft, type AiProviderDiscoveryResultDraft } from "@rental-os/shared/ai-admin";
+import { AI_MODEL_SETTINGS_HTTP_DRAFT, type AiTenantModelSettingsInputDraft } from "@rental-os/platform-contracts/ai-usage";
+import type { AiProviderDiscoveryInputDraft, AiProviderDiscoveryResultDraft } from "@rental-os/platform-contracts/ai-provider-discovery";
 import type { AiAdminHost } from "../host";
 import { createAiSettingsRequest } from "../platform-model-settings/request";
 
-export function createAiModelSettingsApi(host: AiAdminHost) {
+export function createAiModelSettingsApi(host: AiAdminHost, scope: 'workspace' | 'tenant' = 'workspace') {
   const request = createAiSettingsRequest(host);
-  const access = { audience: "tenant", permission: "system:params:manage", workspace: true, write: false } as const;
+  const access = { audience: "tenant", permission: "system:params:manage", workspace: scope === 'tenant' ? 'absent' : true, write: false } as const;
   const path = (action: "read" | "save" | "operation" | "legacy") =>
     `/${AI_MODEL_SETTINGS_HTTP_DRAFT.basePath}/${AI_MODEL_SETTINGS_HTTP_DRAFT[action]}`;
   return Object.freeze({
