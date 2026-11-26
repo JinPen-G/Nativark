@@ -11,6 +11,18 @@ const DEPLOYMENT_FILE = "rental-host.deployment-provenance.json";
 const DEPLOYMENT_ROOT = "apps/rental-api/prisma-deployment/";
 const MCP_MANIFEST = "data-contribution.json";
 const MCP_SQL = /^mysql-[a-z0-9-]+\.sql$/u;
+const CAPABILITY_ROOTS = { "ai-native": "packages/ai-native-data/", mcp: "packages/mcp-server/" };
+const AI_RELEASES = new Map([
+  ["0.1.1", { dataVersion: "0.1.0", schema: "prisma/schema.prisma", entries: ["data", "prisma-schema", "preparation", "data-package", "mysql-data"] }],
+  ["0.2.0", { dataVersion: "0.2.0", schema: "prisma-public/schema.prisma", entries: ["public-data", "public-data-package", "public-mysql-data"] }],
+]);
+const MCP_MIGRATIONS = [
+  ["mcp.0001-oauth", "mysql-oauth-schema.sql"],
+  ["mcp.0002-read-budget", "mysql-read-budget-schema.sql"],
+  ["mcp.0003-catalog-goal", "mysql-catalog-goal-schema.sql"],
+  ["mcp.0004-catalog-intent", "mysql-catalog-goal-intent-schema.sql"],
+  ["mcp.0005-catalog-adoption", "mysql-catalog-goal-adoption-schema.sql"],
+];
 const isFullCommit = value => typeof value === "string" && /^[a-f0-9]{40}$/u.test(value);
 const isSha256 = value => typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
@@ -73,23 +85,70 @@ function verifyContextFiles(files, context) {
   return digests;
 }
 
-function verifyAiData(capability, context, files, digests) {
-  requireEvidence(isSha256(capability.sha256) && capability.sha256 === context.aiDataSha256
-    && capability.prerequisites && Array.isArray(capability.files) && Array.isArray(capability.data?.migrations) && capability.schema,
-    "缺少正式锁定的 AI 数据包及前置");
-  const prefix = "packages/ai-native-data/";
+function verifyCapabilityFiles(capability, files, digests, schema, label) {
+  requireEvidence(isSha256(capability.sha256) && capability.prerequisites?.platform && Array.isArray(capability.prerequisites.cores)
+    && Array.isArray(capability.files) && Array.isArray(capability.data?.migrations) && capability.schema?.file === schema,
+    `缺少正式锁定的 ${label} 数据包及前置`);
+  const prefix = CAPABILITY_ROOTS[capability.id];
   const declared = new Map();
   for (const item of capability.files) {
     requireEvidence(isPackagePath(item?.file) && !declared.has(item.file) && isSha256(item.sha256)
-      && digests.get(prefix + item.file) === item.sha256, "正式 AI 数据包文件缺失或摘要不一致");
+      && digests.get(prefix + item.file) === item.sha256 && files.get(prefix + item.file)?.length > 0,
+      `正式 ${label} 数据包文件缺失或摘要不一致`);
     declared.set(item.file, item.sha256);
   }
+  requireEvidence([...digests.keys()].filter(file => file.startsWith(prefix)).length === declared.size,
+    `正式 ${label} 数据包含锁外文件`);
   for (const item of [capability.schema, ...capability.data.migrations]) {
-    requireEvidence(isSha256(item?.sha256) && declared.get(item.file) === item.sha256, "正式 AI 数据包缺少 schema 或原 SQL");
+    requireEvidence(isSha256(item?.sha256) && declared.get(item.file) === item.sha256, `正式 ${label} 数据包缺少 schema 或原 SQL`);
   }
-  const metadata = readJson(files.get(prefix + "package.json"), "正式 AI 数据包清单");
-  requireEvidence(declared.has("package.json") && metadata.name === "@rental-os/ai-native-data" && metadata.version === capability.version
-    && declared.has("dist/data-package.js") && files.get(prefix + "dist/data-package.js")?.length > 0, "缺少正式 AI 数据包运行入口或版本不一致");
+  requireEvidence(["package.json", "LICENSE", "README.md"].every(file => declared.has(file)), `正式 ${label} 数据包缺少包清单、许可或说明`);
+  const metadata = readJson(files.get(prefix + "package.json"), `正式 ${label} 数据包清单`);
+  requireEvidence(metadata.name === `@rental-os/${prefix.split("/")[1]}` && metadata.version === capability.version && metadata.license === "MIT",
+    `正式 ${label} 数据包身份或版本不一致`);
+  return { declared, metadata };
+}
+
+function verifyCapabilityExports({ declared, metadata }, entries, condition, label) {
+  for (const name of entries) {
+    const target = metadata.exports?.[`./${name}`];
+    const runtime = `dist/${name}.js`, types = `dist/${name}.d.ts`;
+    requireEvidence(target?.[condition] === `./${runtime}` && target?.types === `./${types}` && declared.has(runtime) && declared.has(types),
+      `缺少正式 ${label} 数据包运行入口 ${runtime}`);
+  }
+}
+
+function verifyAiData(capability, context, files, digests) {
+  const variant = AI_RELEASES.get(capability.version);
+  requireEvidence(variant && capability.data?.version === variant.dataVersion && capability.sha256 === context.aiDataSha256,
+    "AI 数据发行版本、数据版本或宿主摘要不一致");
+  const material = verifyCapabilityFiles(capability, files, digests, variant.schema, "AI");
+  verifyCapabilityExports(material, variant.entries, "default", "AI");
+  if (capability.version === "0.2.0") {
+    const [initial] = capability.data.migrations;
+    requireEvidence(material.declared.size === 12 && material.declared.has("prisma-public/provenance.json")
+      && capability.data.migrations.length === 1 && initial.id === "ai-native.20261126000000-public-initial"
+      && initial.file === "prisma-public/20261126000000-initial.sql" && capability.prerequisites.cores.length === 0,
+      "公共 AI 数据包的新装迁移、来源材料或前置不一致");
+  } else {
+    requireEvidence(capability.data.migrations.every(item => /^prisma\/migrations\/[^/]+\/migration\.sql$/u.test(item.file)),
+      "旧 AI 数据包须保留原迁移目录");
+  }
+}
+
+function verifyMcpData(capability, files, digests) {
+  requireEvidence(capability.version === "0.1.0" && capability.data?.version === "0.1.0", "MCP 数据包发行版本不一致");
+  const material = verifyCapabilityFiles(capability, files, digests, "prisma/schema.prisma", "MCP");
+  verifyCapabilityExports(material, ["data-capability", "mysql-data"], "import", "MCP");
+  requireEvidence(material.metadata.exports?.["./data-contribution.json"] === `./${MCP_MANIFEST}`, "MCP 缺少正式包内数据清单出口");
+  const raw = new Map([...material.declared.keys()].filter(file => file === MCP_MANIFEST || file.endsWith(".sql"))
+    .map(file => [file, files.get(CAPABILITY_ROOTS.mcp + file)]));
+  const sql = verifyMcpSql(raw);
+  const migrations = capability.data.migrations;
+  requireEvidence(sql.length === MCP_MIGRATIONS.length && migrations.length === MCP_MIGRATIONS.length
+    && MCP_MIGRATIONS.every(([id, file], index) => sql[index].id === file
+      && isDeepStrictEqual(migrations[index], { id, file, sha256: sql[index].sha256 })),
+    "正式 MCP 迁移身份、五份原 SQL 或顺序不一致");
 }
 
 function verifyDeployment(files, deployment, lock, capabilities, digests) {
@@ -107,7 +166,7 @@ function verifyDeployment(files, deployment, lock, capabilities, digests) {
     { owner: "platform", release: lock.platform, root: "apps/platform-api/", prefix: "" },
     ...lock.cores.map(pin => ({ owner: pin.manifest.id, release: { ...pin.manifest, sha256: pin.sha256 },
       root: "packages/rental-core/", prefix: `core.${pin.manifest.id}.` })),
-    ...capabilities.map(release => ({ owner: release.id, release, root: "packages/ai-native-data/", prefix: "platform-capability." })),
+    ...capabilities.map(release => ({ owner: release.id, release, root: CAPABILITY_ROOTS[release.id], prefix: "platform-capability." })),
   ];
   const expected = [];
   const data = {};
@@ -127,7 +186,7 @@ function verifyDeployment(files, deployment, lock, capabilities, digests) {
       ids.add(migration.id);
       const directory = prefix ? prefix + migration.id : /^prisma\/migrations\/([a-z0-9_]+)\/migration\.sql$/u.exec(migration.file)?.[1];
       requireEvidence(directory && directory > previousDirectory && !directories.has(directory)
-        && (owner !== "ai-native" || migration.id.startsWith("ai-native.")), "部署迁移目录重复或顺序不一致");
+        && (prefix !== "platform-capability." || migration.id.startsWith(`${owner}.`)), "部署迁移目录、能力归属或顺序不一致");
       previousDirectory = directory;
       directories.add(directory);
       const file = prepared(`migrations/${directory}/migration.sql`);
@@ -166,10 +225,11 @@ function verifyPreparedRental(files, expectedContextSha256) {
   requireEvidence(source.format === "nativark-core-development-source-2" && source.mode === "release" && source.host === "rental"
     && ["host", "full"].includes(source.profile) && isDeepStrictEqual(source.coreIds, ["rental"])
     && typeof source.ai === "boolean" && typeof source.mcp === "boolean", "需要 release 模式的 Rental 宿主双来源，domain 源码不能作为候选");
-  requireEvidence(!source.mcp && context.mcpMode === "disabled" && context.mcpEntry === undefined,
-    "缺少正式 MCP 能力部署包和原账适配，原 SQL 清单仅供比较");
+  requireEvidence(source.mcp ? source.ai && context.mcpMode === "enabled" && typeof context.mcpEntry === "string"
+    && /^apps\/rental-api\/dist-mcp\/[a-z0-9][a-z0-9-]*\.js$/u.test(context.mcpEntry)
+    : context.mcpMode === "disabled" && context.mcpEntry === undefined, "缺少正式 MCP 宿主入口或选择不一致");
   requireEvidence(context.aiMode === (source.ai ? "enabled" : "disabled"), "AI 选择与宿主收据不一致");
-  const entry = `apps/rental-api/${source.ai ? "dist-ai/ai-main.js" : "dist/main.js"}`;
+  const entry = source.mcp ? context.mcpEntry : `apps/rental-api/${source.ai ? "dist-ai/ai-main.js" : "dist/main.js"}`;
   requireEvidence(context.entry === entry && files.get(entry)?.length > 0, "宿主缺少所选运行入口");
   for (const file of ["Dockerfile", "package.json", "verify-runtime.cjs"]) {
     requireEvidence(files.get(file)?.length > 0, `缺少正式宿主材料 ${file}`);
@@ -197,9 +257,11 @@ function verifyPreparedRental(files, expectedContextSha256) {
     "部署锁和实际 Rental 包清单不一致");
 
   const capabilities = lock.dataCapabilities === undefined ? [] : lock.dataCapabilities;
-  requireEvidence(Array.isArray(capabilities) && isDeepStrictEqual(capabilities.map(capability => capability?.id), source.ai ? ["ai-native"] : []),
-    "缺少所选能力的正式部署材料，或部署锁能力与选择不一致");
-  if (source.ai) verifyAiData(capabilities[0], context, files, digests);
+  const selectedCapabilities = source.mcp ? ["ai-native", "mcp"] : source.ai ? ["ai-native"] : [];
+  requireEvidence(Array.isArray(capabilities) && isDeepStrictEqual(capabilities.map(capability => capability?.id).sort(), selectedCapabilities),
+    "缺少所选 AI/MCP 能力的正式部署材料，或部署锁与选择不一致");
+  if (source.ai) verifyAiData(capabilities.find(item => item.id === "ai-native"), context, files, digests);
+  if (source.mcp) verifyMcpData(capabilities.find(item => item.id === "mcp"), files, digests);
   const npm = source.npmLocks;
   const npmLocks = {
     platform: lockDigest(npm?.platform, "底座原 npm 锁", "package-lock.json"),
@@ -241,10 +303,12 @@ function comparePreparedRental(previous, candidate) {
   const schemaChanged = before.schemaSha256 !== after.schemaSha256 || before.platformSchemaSha256 !== after.platformSchemaSha256;
   const migrationLockChanged = before.migrationLockSha256 !== after.migrationLockSha256;
   const dataChanged = !isDeepStrictEqual(before.data, after.data);
+  const aiVersions = [before.data["ai-native"]?.version, after.data["ai-native"]?.version];
+  const requiresAiDataBridge = aiVersions.includes("0.1.0") && aiVersions.includes("0.2.0");
   const { ai: beforeAi, mcp: beforeMcp, coreIds: beforeCores } = previous.identity.selection;
   const { ai, mcp, coreIds } = candidate.identity.selection;
   const selectionChanged = beforeAi !== ai || beforeMcp !== mcp || !isDeepStrictEqual(beforeCores, coreIds);
-  return { entries, schemaChanged, migrationLockChanged, dataChanged, selectionChanged,
+  return { entries, schemaChanged, migrationLockChanged, dataChanged, selectionChanged, requiresAiDataBridge,
     different: entries.different || schemaChanged || migrationLockChanged || dataChanged || selectionChanged };
 }
 

@@ -43,6 +43,14 @@ node scripts/ops/release-verify.cjs mcp <本地ZeloGit目录> <基线完整SHA> 
 
 `prepared` 核对 `development.workspace.json` 的 `release` 模式和实际 `host` 或 `full` 选择，复算 API 宿主文件、运行 npm 锁、部署锁、schema、`migration_lock.toml` 和原 SQL 摘要。发布身份包含两仓完整 SHA、装配选择、原 npm 锁、组合投影锁、运行锁、部署锁及宿主收据摘要。比较按所有者和正式迁移身份报告增删、原文或原账变更，并检查次序、schema、数据合同和能力选择。编译产物及所选 Client 的回执随宿主材料核对，镜像内实际生成的 Client 与 Web 产物在后续构建核收。
 
-`mcp` 使用支持 `--no-lazy-fetch` 的 Git 从本地固定对象读取公开贡献清单和全部原 SQL，验证顺序、直接前置和逐份摘要。该清单供差异核对。选择 MCP 的 prepared 候选须等正式能力部署包和原账适配固定后接入。
+选择 AI 时，旧发行 `0.1.1` 对应 `./data-package` 和原 `prisma/` 迁移，公共数据发行 `0.2.0` 对应 `./public-data-package` 和 `prisma-public/` 新装材料。两种发行分别核锁、包文件、导出和 SQL。运行 SDK `0.2.1` 缺正式数据发行身份时会被拒绝。旧混合与新公共数据之间的正反向比较均标记 `requiresAiDataBridge`，继续等待原账桥接。
+
+选择 MCP 的 prepared 材料需同时提供正式宿主入口、部署锁中的 `mcp` `0.1.0` 能力、固定包文件及五项按正式 ID 排列的 SQL 和原账标识。原账名按 `platform-capability.mcp.*` 核对，既有库的历史映射仍由原宿主取得执行证据。`mcp` 模式使用支持 `--no-lazy-fetch` 的 Git 从本地固定对象读取公开贡献清单和原 SQL，仅核顺序、前置和摘要。现有宿主打包入口还需接入 MCP 能力和原账观察。
 
 退出 `0` 表示材料核对完成且数据比较无差异，`2` 表示有数据差异，`1` 表示输入验证失败或缺少必要材料。两种模式的 JSON 都标明 `releaseApproved: false` 和 `databaseChecked: false`。`domain`、旧单 SHA 证明和缺正式 AI 数据包的候选均被拒绝。旧组合基线可用 `prepared legacy-combined` 明确识别，校验会在读取现场材料前要求正式旧库桥接。原单仓更新器、原迁移门禁和回退继续沿上文入口。
+
+### 双仓构建证据
+
+[verifyPairedBuildEvidence](../release-build-evidence.cjs) 的调用方须先核收候选归档、固定 CI 策略、同一次运行的构建记录和实际镜像观察。它比较双仓候选身份和构建记录摘要，校验 GitHub 运行的仓库、工作流、主分支、固定 SHA、编号、尝试次数及成功状态。策略中显式选择 `automatic` 对应 `push`，`manual` 对应 `workflow_dispatch`。两种来源都须提供同一记录中的 API 和 Web 镜像 ID，逐项与实际镜像观察匹配。
+
+构建记录摘要和候选身份来自独立核收。调用方须从可信 CI 来源核实记录与运行的归属，再提取对照字段。辅助函数返回 `releaseApproved: false`，用于比对证据。正式宿主构建证明固定后，再接工作流和运行入口。

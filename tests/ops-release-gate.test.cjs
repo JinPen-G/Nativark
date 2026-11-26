@@ -15,6 +15,7 @@ const ROOT = path.resolve(__dirname, "..");
 const facts = require(path.join(ROOT, "scripts/ops/release-facts.cjs"));
 const artifacts = require(path.join(ROOT, "scripts/ops/release-artifacts.cjs"));
 const { verifyPreparedRental, comparePreparedRental, verifyMcpSql, compareEntries } = require("../scripts/ops/release-composition.cjs");
+const { verifyPairedBuildEvidence } = require("../scripts/ops/release-build-evidence.cjs");
 
 const ok = (m) => console.log(`  ✓ ${m}`);
 const buf = (text) => Buffer.from(text, "utf8");
@@ -31,7 +32,8 @@ function packReceipt(files, context) {
 }
 
 function preparedFixture({ platformSha = "a".repeat(40), rentalSha = "b".repeat(40), profile = "host", projected = "a".repeat(64),
-  dataVersion = "0.1.0", publicSql = "SELECT 0;", sql = "SELECT 1;", aiSql = "SELECT 3;", extra = false, ai = false, mcp = false } = {}) {
+  dataVersion = "0.1.0", publicSql = "SELECT 0;", sql = "SELECT 1;", aiSql = "SELECT 3;", extra = false, ai = false, aiRelease = "0.1.1",
+  mcp = false, mcpData = true } = {}) {
   const platformSource = { repository: "https://github.com/JinPen-G/Zelo", commit: platformSha };
   const rentalSource = { repository: "https://github.com/JinPen-G/nativark-rental-core", commit: rentalSha };
   const files = new Map();
@@ -60,18 +62,46 @@ function preparedFixture({ platformSha = "a".repeat(40), rentalSha = "b".repeat(
   if (extra) addMigration(rentalOwner, manifest.data, "rental.later", "prisma/migrations/002_rental/migration.sql",
     "core.rental.rental.later", "SELECT 2;", "packages/rental-core/");
   const capabilities = [];
-  if (ai) {
-    const root = "packages/ai-native-data/", data = { version: "0.1.0", readable, migrations: [] };
-    const release = { id: "ai-native", source: platformSource, sha256: "3".repeat(64), version: "0.1.1", data,
-      prerequisites: { platform: readable, cores: [] } };
-    addMigration({ owner: "ai-native", ...release }, data, "ai-native.initial", "prisma/migrations/001_ai/migration.sql",
-      "platform-capability.ai-native.initial", aiSql, root);
-    files.set(root + "prisma/schema.prisma", buf("ai schema fixture"));
-    files.set(root + "dist/data-package.js", buf("ai module fixture"));
-    files.set(root + "package.json", json({ name: "@rental-os/ai-native-data", version: release.version }));
-    release.files = [...files].filter(([file]) => file.startsWith(root)).map(([file, bytes]) => ({ file: file.slice(root.length), sha256: hash(bytes) }));
-    release.schema = release.files.find(item => item.file === "prisma/schema.prisma");
+  function lockDataPackage(release, root, schemaPath, entryNames, condition, exports = {}) {
+    for (const name of entryNames) {
+      const runtime = `dist/${name}.js`, types = `dist/${name}.d.ts`;
+      files.set(root + runtime, buf("data module fixture"));
+      files.set(root + types, buf("data types fixture"));
+      exports[`./${name}`] = { [condition]: `./${runtime}`, types: `./${types}` };
+    }
+    files.set(root + "package.json", json({ name: `@rental-os/${root.split("/")[1]}`, version: release.version, license: "MIT", exports }));
+    for (const file of ["README.md", "LICENSE", schemaPath]) files.set(root + file, buf(file));
+    release.files = [...files].filter(([file]) => file.startsWith(root))
+      .map(([file, bytes]) => ({ file: file.slice(root.length), sha256: hash(bytes) }));
+    release.schema = release.files.find(item => item.file === schemaPath);
     capabilities.push(release);
+  }
+  if (ai) {
+    const root = "packages/ai-native-data/", legacy = aiRelease === "0.1.1";
+    const data = { version: legacy ? "0.1.0" : "0.2.0", readable, migrations: [] };
+    const release = { id: "ai-native", source: platformSource, sha256: "3".repeat(64), version: aiRelease, data,
+      prerequisites: { platform: readable, cores: [] } };
+    const id = legacy ? "ai-native.initial" : "ai-native.20261126000000-public-initial";
+    const original = legacy ? "prisma/migrations/001_ai/migration.sql" : "prisma-public/20261126000000-initial.sql";
+    addMigration({ owner: "ai-native", ...release }, data, id, original, `platform-capability.${id}`, aiSql, root);
+    if (!legacy) files.set(root + "prisma-public/provenance.json", json({ fixture: true }));
+    lockDataPackage(release, root, legacy ? "prisma/schema.prisma" : "prisma-public/schema.prisma", legacy
+      ? ["data", "prisma-schema", "preparation", "data-package", "mysql-data"]
+      : ["public-data", "public-data-package", "public-mysql-data"], "default");
+  }
+  if (mcp && mcpData) {
+    const root = "packages/mcp-server/", data = { version: "0.1.0", readable, migrations: [] };
+    const release = { id: "mcp", source: platformSource, sha256: "5".repeat(64), version: "0.1.0", data,
+      prerequisites: { platform: readable, cores: [] } };
+    const names = ["oauth", "read-budget", "catalog-goal", "catalog-intent", "catalog-adoption"];
+    const mcpSql = ["oauth-schema", "read-budget-schema", "catalog-goal-schema", "catalog-goal-intent-schema", "catalog-goal-adoption-schema"];
+    for (const [index, name] of names.entries()) {
+      const id = `mcp.000${index + 1}-${name}`;
+      addMigration({ owner: "mcp", ...release }, data, id, `mysql-${mcpSql[index]}.sql`, `platform-capability.${id}`, `SELECT ${index};`, root);
+    }
+    files.set(root + "data-contribution.json", json({ formatVersion: 1, capabilityId: "mcp", owner: "platform-capability:mcp", provider: "mysql",
+      sql: data.migrations.map(({ file, sha256 }) => ({ file, sha256, requires: [] })) }));
+    lockDataPackage(release, root, "prisma/schema.prisma", ["data-capability", "mysql-data"], "import", { "./data-contribution.json": "./data-contribution.json" });
   }
   const lock = json({ lockVersion: 1, platform, cores: [core], dataCapabilities: capabilities });
   const schema = buf("prepared schema fixture"), migrationLock = buf('provider = "mysql"\n');
@@ -87,7 +117,7 @@ function preparedFixture({ platformSha = "a".repeat(40), rentalSha = "b".repeat(
     platform: { source: platformSource, version: "0.1.0" }, core: { source: rentalSource, version: manifest.version, tag: `v${manifest.version}` },
     npmLocks: { platform: { path: "package-lock.json", bytes: 10, sha256: "4".repeat(64) }, rental: null,
       projected: { path: "package-lock.json", bytes: 20, sha256: projected } } });
-  const entry = `apps/rental-api/${ai ? "dist-ai/ai-main.js" : "dist/main.js"}`;
+  const entry = `apps/rental-api/${mcp ? "dist-mcp/mcp-main.js" : ai ? "dist-ai/ai-main.js" : "dist/main.js"}`;
   files.set("development.workspace.json", source);
   files.set("apps/platform-api/prisma/schema.prisma", baseSchema);
   files.set("packages/rental-core/core.manifest.json", json(manifest));
@@ -98,6 +128,7 @@ function preparedFixture({ platformSha = "a".repeat(40), rentalSha = "b".repeat(
   files.set(entry, buf("api build fixture"));
   return packReceipt(files, { format: "rental-host-context-1", host: "rental", deployment: "pending", imageBuild: "not-run", entry,
     aiMode: ai ? "enabled" : "disabled", mcpMode: mcp ? "enabled" : "disabled",
+    ...(mcp ? { mcpEntry: entry } : {}),
     sourceProvenance: { file: "development.workspace.json", sha256: hash(source) },
     deploymentProvenance: "rental-host.deployment-provenance.json", deploymentLockSha256: hash(lock),
     originalNpmLockSha256: projected, platformBuild: { sourceArchiveSha256: platform.sha256 }, coreSha256: core.sha256,
@@ -138,12 +169,38 @@ function verifyIndependentRelease() {
   assert.deepEqual(aiChange.entries.added, ["ai-native/ai-native.initial"]);
   assert.deepEqual(comparePreparedRental(aiCandidate, verifyFixture(preparedFixture({ ai: true, aiSql: "SELECT 8;" }))).entries.changed,
     ["ai-native/ai-native.initial"]);
+  const publicFiles = preparedFixture({ ai: true, aiRelease: "0.2.0" });
+  const publicAi = verifyFixture(publicFiles);
+  const publicInitial = "ai-native/ai-native.20261126000000-public-initial";
+  const publicUpgrade = comparePreparedRental(aiCandidate, publicAi);
+  assert.deepEqual(publicUpgrade.entries.added, [publicInitial]);
+  assert.equal(publicUpgrade.requiresAiDataBridge, true);
+  assert.equal(comparePreparedRental(publicAi, aiCandidate).requiresAiDataBridge, true);
+  assert.equal(comparePreparedRental(publicAi, publicAi).requiresAiDataBridge, false);
+  const publicContext = JSON.parse(publicFiles.get(contextFile));
+  publicFiles.delete("packages/ai-native-data/dist/public-data-package.js");
+  assert.throws(() => verifyFixture(packReceipt(publicFiles, publicContext)), /正式 AI 数据包文件缺失/u);
+  assert.throws(() => verifyFixture(preparedFixture({ ai: true, aiRelease: "0.2.1" })), /AI 数据发行版本/u);
   const aiContext = JSON.parse(aiFiles.get(contextFile));
   aiFiles.delete("packages/ai-native-data/dist/data-package.js");
   assert.throws(() => verifyFixture(packReceipt(aiFiles, aiContext)), /正式 AI 数据包文件缺失/u);
   assert.throws(() => verifyFixture(preparedFixture({ profile: "domain" })), /domain/u);
   assert.throws(() => verifyFixture(preparedFixture({ rentalSha: "b".repeat(12) })), /完整提交 SHA/u);
-  assert.throws(() => verifyFixture(preparedFixture({ ai: true, mcp: true })), /缺少正式 MCP/u);
+  assert.throws(() => verifyFixture(preparedFixture({ ai: true, mcp: true, mcpData: false })), /正式部署材料/u);
+  const mcpFiles = preparedFixture({ ai: true, mcp: true });
+  const mcpCandidate = verifyFixture(mcpFiles);
+  const mcpEntries = mcpCandidate.migrations.entries.filter(item => item.owner === "mcp");
+  assert.equal(mcpEntries.length, 5);
+  assert.equal(mcpEntries[0].ledger.migrationName, "platform-capability.mcp.0001-oauth");
+  assert.equal(comparePreparedRental(aiCandidate, mcpCandidate).selectionChanged, true);
+  const wrongLedger = new Map(mcpFiles);
+  const provenanceFile = "rental-host.deployment-provenance.json";
+  const provenance = JSON.parse(wrongLedger.get(provenanceFile));
+  provenance.migrations.find(item => item.owner === "mcp").ledger.migrationName = "legacy_oauth";
+  wrongLedger.set(provenanceFile, json(provenance));
+  assert.throws(() => verifyFixture(packReceipt(wrongLedger, JSON.parse(wrongLedger.get(contextFile)))), /原账/u);
+  const staticMcp = new Map([...mcpFiles].filter(([file]) => !file.startsWith("packages/mcp-server/dist/")));
+  assert.throws(() => verifyFixture(packReceipt(staticMcp, JSON.parse(staticMcp.get(contextFile)))), /正式 MCP 数据包文件缺失/u);
   assert.throws(() => verifyPreparedRental(new Map([["development.workspace.json", files.get("development.workspace.json")]]), "0".repeat(64)), /旧组合须先核定原库桥接/u);
   assert.throws(() => verifyPreparedRental(new Map([["build-provenance.json", json({ git: { commit: before.identity.platform.commit } })]]), "0".repeat(64)), /旧组合须先核定原库桥接/u);
   assert.throws(() => verifyPreparedRental(files, "0".repeat(64)), /已核摘要不一致/u);
@@ -156,6 +213,39 @@ function verifyIndependentRelease() {
   const hidden = new Map(files).set(deploymentRoot + "migrations/999_extra/migration.sql", buf("SELECT 4;"));
   assert.throws(() => verifyFixture(packReceipt(hidden, JSON.parse(files.get(contextFile)))), /额外材料/u);
   ok("双仓 prepared 身份和迁移比较：双 SHA、选择、依赖锁、部署锁与实际原文；缺件和旧来源拒绝");
+}
+
+function verifyBuildEvidence() {
+  const candidate = verifyFixture(preparedFixture());
+  const policy = { origin: "automatic", headSource: "platform", repositoryId: 10, workflowId: 37,
+    workflowPath: ".github/workflows/fixture.yml", runId: 5, runAttempt: 2, buildRecordSha256: hash(buf("build record fixture")) };
+  const run = { id: 5, run_attempt: 2, workflow_id: 37, path: policy.workflowPath, repository: { id: 10 }, head_repository: { id: 10 },
+    event: "push", head_branch: "main", head_sha: candidate.identity.platform.commit, status: "completed", conclusion: "success" };
+  const imageIds = { api: `sha256:${"1".repeat(64)}`, web: `sha256:${"2".repeat(64)}` };
+  const verifiedBuild = { sha256: policy.buildRecordSha256, identitySha256: candidate.identitySha256,
+    platformCommit: candidate.identity.platform.commit, rentalCommit: candidate.identity.rental.commit, runId: 5, runAttempt: 2, imageIds };
+  const evidence = { run, verifiedBuild, inspectedImageIds: { ...imageIds } };
+  const checked = verifyPairedBuildEvidence(candidate, policy, evidence);
+  assert.equal(checked.origin, "automatic");
+  assert.equal(checked.releaseApproved, false);
+  assert.equal(checked.databaseChecked, false);
+  const manual = { ...policy, origin: "manual", headSource: "rental" };
+  assert.equal(verifyPairedBuildEvidence(candidate, manual, { ...evidence,
+    run: { ...run, event: "workflow_dispatch", head_sha: candidate.identity.rental.commit } }).origin, "manual");
+  for (const change of [{ event: "workflow_dispatch" }, { event: "pull_request" }, { run_attempt: 1 }, { head_branch: "test" },
+    { head_repository: { id: 11 } }, { workflow_id: 38 }, { status: "in_progress" }, { conclusion: "failure" }, { head_sha: candidate.identity.rental.commit }]) {
+    assert.throws(() => verifyPairedBuildEvidence(candidate, policy, { ...evidence, run: { ...run, ...change } }), /CI 仓库/u);
+  }
+  for (const change of [{ rentalCommit: undefined }, { platformCommit: "a".repeat(12) }, { runAttempt: 1 },
+    { sha256: hash(buf("different build")) }, { identitySha256: hash(buf("different identity")) }]) {
+    assert.throws(() => verifyPairedBuildEvidence(candidate, policy, { ...evidence, verifiedBuild: { ...verifiedBuild, ...change } }), /双仓构建记录/u);
+  }
+  assert.throws(() => verifyPairedBuildEvidence(candidate, policy, { run }), /双仓构建记录/u);
+  assert.throws(() => verifyPairedBuildEvidence(candidate, { ...policy, buildRecordSha256: undefined }, evidence), /锚点/u);
+  assert.throws(() => verifyPairedBuildEvidence(candidate, policy, { ...evidence, inspectedImageIds: { api: imageIds.api } }), /镜像 ID/u);
+  assert.throws(() => verifyPairedBuildEvidence(candidate, policy, { ...evidence, inspectedImageIds: { api: imageIds.web, web: imageIds.api } }), /镜像 ID/u);
+  assert.throws(() => verifyPairedBuildEvidence({ ...candidate, identity: { ...candidate.identity, deploymentLockSha256: undefined } }, policy, evidence), /候选身份/u);
+  ok("双仓 CI 和镜像证明夹具：核同运行及触发来源，双镜像必须对应同一构建记录，结果仅为离线一致性");
 }
 
 function verifyMcpContribution() {
@@ -398,5 +488,6 @@ void (() => {
 
   verifyIndependentRelease();
   verifyMcpContribution();
+  verifyBuildEvidence();
   console.log("\nOPS-01B 发布候选门禁专项：全部通过");
 })();
