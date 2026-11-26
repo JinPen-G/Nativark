@@ -411,6 +411,8 @@ Zelo/
 
 Zelo 公开发布的自有源码及配套说明文档采用 **[MIT License](LICENSE)** 开源，允许自由使用、修改、分发和商业使用；分发时须保留版权与许可证声明。
 
+项目原名 Nativark，许可证保留原作者版权署名。
+
 项目中引用的第三方开源组件与素材遵循各自原始许可证，并在源码与发行包中保留对应版权和来源文件：
 
 - **UIArc**：[许可证](packages/ui-arc/LICENSE) · [来源与集成说明](packages/ui-arc/README.md)

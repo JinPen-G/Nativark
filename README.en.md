@@ -411,6 +411,8 @@ If you discover an authentication bypass, cross-tenant authorization leak, crede
 
 Zelo's original public source code and documentation are released under the **[MIT License](LICENSE)**, permitting free use, modification, distribution, and commercial adoption with copyright and license notice retention.
 
+The project was formerly called Nativark. The license retains the original copyright notice.
+
 Third-party open-source components and assets remain under their respective licenses, with upstream license and attribution files preserved in source and release bundles:
 
 - **UIArc**: [License](packages/ui-arc/LICENSE) · [Source & Integration Notes](packages/ui-arc/README.md)
