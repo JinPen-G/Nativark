@@ -12,8 +12,13 @@ permissions:
 
 jobs:
   platform:
+    name: ${{ matrix.profile }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [platform, public-ai]
     services:
       mysql:
         image: mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb
@@ -28,8 +33,9 @@ jobs:
           --health-cmd="mysqladmin ping -h 127.0.0.1 --silent"
           --health-interval=5s --health-timeout=3s --health-retries=30
     env:
-      DATABASE_URL: mysql://zelo_ci:zelo_ci_database_only@127.0.0.1:3306/zelo_platform_ci
+      DATABASE_URL: mysql://zelo_ci:zelo_ci_database_only@127.0.0.1:3306/zelo_platform_ci?connection_limit=1
       CI_DIR: output/.tmp/zelo-platform-ci
+      CI_PROFILE: ${{ matrix.profile }}
     steps:
       - name: 检出本次提交
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -47,11 +53,26 @@ jobs:
           set -euo pipefail
           task="$GITHUB_WORKSPACE/$CI_DIR"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          npm ci --workspace @rental-os/core-contracts --include-workspace-root --ignore-scripts \
-            --no-audit --no-fund --cache "$task/npm-cache"
-          npm run build -w @rental-os/core-contracts
-          node packages/core-contracts/dist/export-platform.js --repo . \
-            --repository https://github.com/JinPen-G/Nativark --commit "$GITHUB_SHA" --out "$task/platform.tgz"
+          if [[ "$CI_PROFILE" == platform ]]; then
+            npm ci --workspace @rental-os/core-contracts --include-workspace-root --ignore-scripts \
+              --no-audit --no-fund --cache "$task/npm-cache"
+            npm run build -w @rental-os/core-contracts
+            node packages/core-contracts/dist/export-platform.js --repo . \
+              --repository https://github.com/JinPen-G/Nativark --commit "$GITHUB_SHA" --out "$task/platform.tgz"
+          else
+            npm ci --include=dev --ignore-scripts --no-audit --no-fund --cache "$task/npm-cache"
+            mkdir "$task/offline"
+            (
+              export DATABASE_URL=mysql://offline:offline@127.0.0.1:1/rental_os_offline
+              export AI_OFFLINE_WRITE_ROOT="$task" AI_OFFLINE_AUDIT="$task/offline/audit.log"
+              export TEMP="$task/offline" TMP="$task/offline" TMPDIR="$task/offline" XDG_CACHE_HOME="$task/offline"
+              node --no-compilation-cache --max-old-space-size=6144 \
+                --require ./tests/fixtures/ai-native/prisma-offline-preload.cjs \
+                scripts/prepare-platform-public-ai.cjs --repo . --repository https://github.com/JinPen-G/Nativark \
+                --commit "$GITHUB_SHA" --out "$task/platform.tgz"
+              test ! -e "$AI_OFFLINE_AUDIT"
+            )
+          fi
           tar -tzf "$task/platform.tgz" > "$task/archive.list"
           if grep -Eq '(^|/)(docs|node_modules|output|deepseek-harness-clone|deepseek-harness-original|primefold-clone)(/|$)|^(apps/(api|rental-api|rental-admin)|packages/(rental-core|rental-mcp-host|shared))(/|$)' "$task/archive.list"; then
             echo '底座归档含私有资料或业务实现' >&2
@@ -73,10 +94,21 @@ jobs:
           npm run build
           npm run db:migrate:deploy
           npm run db:initialize
-          node apps/platform-api/dist/main.js > "$task/api.log" 2>&1 &
+          # The selected AI host may use its local database. The smoke has no provider or supplier credentials.
+          if [[ "$CI_PROFILE" == public-ai ]]; then
+            export CORE_DEPLOYMENT_LOCK_FILE="$PWD/apps/platform-api/prisma-deployment/core.deployment.lock.json"
+            export PLATFORM_AI_DATA_PACKAGE_DIR="$PWD/public-ai-data" PLATFORM_AI_PROFILE_ID=ci-public-profile
+            npm run grant:ai -- --role role_saas_admin --access manage
+            entry=apps/platform-api/dist-ai/ai-main.js
+            web_args=(--mode public-ai --outDir dist-ai)
+          else
+            entry=apps/platform-api/dist/main.js
+            web_args=()
+          fi
+          node "$entry" > "$task/api.log" 2>&1 &
           api_pid=$!
           trap 'kill "$api_pid" ${web_pid:+"$web_pid"} 2>/dev/null || true; wait || true' EXIT
-          node node_modules/vite/bin/vite.js preview apps/platform-admin --host 127.0.0.1 --port 5191 --strictPort > "$task/web.log" 2>&1 &
+          node node_modules/vite/bin/vite.js preview apps/platform-admin --host 127.0.0.1 --port 5191 --strictPort "${web_args[@]}" > "$task/web.log" 2>&1 &
           web_pid=$!
           if ! curl -fsS --retry 15 --retry-connrefused --max-time 5 http://127.0.0.1:5191/api/health -o "$task/health.json"; then
             tail -n 30 "$task/api.log" "$task/web.log"
@@ -103,4 +135,28 @@ jobs:
           assert.equal(me.tenant.tenantCode, 'platform');
           assert.equal(me.user.account, 'admin');
           console.log('零 Core：独立 MySQL 迁移、公共后台产物、代理、登录及真实会话通过');
+          if (process.env.CI_PROFILE === 'public-ai') {
+            const json = { 'Content-Type': 'application/json' };
+            const changed = await body('/api/auth/change-password', { method: 'POST',
+              headers: { ...json, Authorization: `Bearer ${session.accessToken}` },
+              body: JSON.stringify({ currentPassword: process.env.SEED_PLATFORM_PASSWORD,
+                newPassword: `${process.env.SEED_PLATFORM_PASSWORD}-New8!` }) });
+            const headers = { ...json, Authorization: `Bearer ${changed.accessToken}` };
+            const operationKey = 'ci-public-model-save', id = process.env.PLATFORM_AI_PROFILE_ID;
+            const provider = '/api/platform/ai/providers/' + id;
+            const result = await body(provider, { method: 'PUT', headers, body: JSON.stringify({
+              expectedRevision: 0, operationKey, protocol: 'openai_chat_completions', model: 'ci-only',
+              baseUrl: 'https://model.example.invalid/v1', maxOutputTokens: 32, enabled: false,
+              allowedCapabilities: [], secretChange: { operation: 'clear' }
+            }) });
+            assert.equal(result.profileId, id);
+            assert.equal(result.revision, 1);
+            assert.equal(result.enabled, false);
+            assert.equal(result.credentialConfigured, false);
+            const receipt = await body(`${provider}/operations/${operationKey}`, { headers });
+            assert.equal(receipt.state, 'recorded');
+            assert.equal(receipt.operationKey, operationKey);
+            assert.equal(receipt.resultRevision, 1);
+            console.log('公共 AI：选装 API 和后台、显式授权、单连接模型保存及原键收据通过');
+          }
           NODE
