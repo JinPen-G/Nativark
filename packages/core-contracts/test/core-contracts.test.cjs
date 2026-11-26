@@ -164,6 +164,33 @@ test("目录链接不能把包内入口指向外部", () => {
   assert.equal(fs.existsSync(path.join(other, "server.cjs")), true);
 });
 
+test("已安装包只兼容旧 Windows/Linux gzip OS 标记并继续核对原锁完整摘要", () => {
+  const { createCoreArchive, matchesInstalledCoreArchive, readCoreArchive } = require(path.join(dist, "archive.js"));
+  const { packCoreDirectory, requireCorePackagePin } = require(path.join(dist, "install.js"));
+  const dir = fixture();
+  const native = packCoreDirectory(dir, host);
+  const expanded = readCoreArchive(native.bytes, native.sha256).files;
+  assert.equal(matchesInstalledCoreArchive(expanded, native.sha256), true);
+  const oldWindows = Buffer.from(native.bytes), oldLinux = Buffer.from(native.bytes);
+  oldWindows[9] = 10;
+  oldLinux[9] = 3;
+  const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
+  for (const archive of [oldWindows, oldLinux]) {
+    const pin = { manifest: native.manifest, sha256: sha256(archive) };
+    assert.deepEqual(requireCorePackagePin(dir, pin, host).manifest, native.manifest);
+  }
+  const extra = Buffer.from(native.bytes);
+  extra[9] = 255;
+  if (native.bytes[9] !== 255) assert.throws(() => requireCorePackagePin(dir, { manifest: native.manifest, sha256: sha256(extra) }, host), /锁定摘要/);
+  const changedTimestamp = Buffer.from(native.bytes);
+  changedTimestamp[4] = 1;
+  assert.throws(() => requireCorePackagePin(dir, { manifest: native.manifest, sha256: sha256(changedTimestamp) }, host), /锁定摘要/);
+  assert.throws(() => readCoreArchive(oldLinux, sha256(oldWindows)), /压缩包SHA-256/);
+  assert.equal(createCoreArchive(expanded).sha256, native.sha256);
+  fs.appendFileSync(path.join(dir, "server.cjs"), "\n// modified");
+  assert.throws(() => requireCorePackagePin(dir, { manifest: native.manifest, sha256: sha256(oldWindows) }, host), /锁定摘要/);
+});
+
 test("命令输出是可解析 JSON，退出码区分包错误和用法错误", () => {
   const dir = fixture();
   const cli = path.join(dist, "check.js");

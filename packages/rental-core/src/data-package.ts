@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import { lstatSync, realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { CorePackagePinSchema, CoreOpenApiContributionSchema, type CoreDeploymentLock, type CoreHostVersions } from "@rental-os/core-contracts";
-import { CORE_ARCHIVE_LIMITS, createCoreArchive } from "@rental-os/core-contracts/archive";
+import { CORE_ARCHIVE_LIMITS, createCoreArchive, matchesInstalledCoreArchive } from "@rental-os/core-contracts/archive";
 import { inspectCorePackageFiles, readCorePackageFiles } from "@rental-os/core-contracts/package";
 import { RENTAL_CORE_ID, RENTAL_CORE_SCOPE, RENTAL_CORE_VERSION } from "./core-identity";
 import { createRentalDataRelease, readRentalPrismaSchema, RENTAL_DATA_MIGRATIONS,
@@ -14,10 +14,15 @@ import { createRentalMysqlDataPlanFromRelease } from "./mysql-data";
 
 export function readRentalDataPackage(files: ReadonlyMap<string, Uint8Array>,
   input: CoreDeploymentLock["cores"][number], host: CoreHostVersions, legacyApiRoutes: readonly string[] = []) {
+  return readDataPackage(files, input, host, legacyApiRoutes, false);
+}
+
+function readDataPackage(files: ReadonlyMap<string, Uint8Array>, input: CoreDeploymentLock["cores"][number],
+  host: CoreHostVersions, legacyApiRoutes: readonly string[], installed: boolean) {
   const pin = CorePackagePinSchema.parse(input);
   const inspected = inspectCorePackageFiles(files, host, legacyApiRoutes);
   if (!inspected.ok || !inspected.manifest || !isDeepStrictEqual(inspected.manifest, pin.manifest)
-    || createCoreArchive(files).sha256 !== pin.sha256)
+    || !(installed ? matchesInstalledCoreArchive(files, pin.sha256) : createCoreArchive(files).sha256 === pin.sha256))
     throw new Error("Rental 完整包与锁定清单、摘要或宿主版本不一致");
   if (pin.manifest.id !== RENTAL_CORE_ID || pin.manifest.version !== RENTAL_CORE_VERSION
     || !isDeepStrictEqual(pin.manifest.scope, RENTAL_CORE_SCOPE))
@@ -52,7 +57,7 @@ export function readRentalPackageSnapshot(directory: string, pin: CoreDeployment
   legacyApiRoutes: readonly string[] = []) {
   const root = requireOrdinaryDirectory(directory);
   const files = readCorePackageFiles(root, CORE_ARCHIVE_LIMITS.fileBytes, CORE_ARCHIVE_LIMITS.totalBytes);
-  const selected = readRentalDataPackage(files, pin, host, legacyApiRoutes);
+  const selected = readDataPackage(files, pin, host, legacyApiRoutes, true);
   if (requireOrdinaryDirectory(directory) !== root) throw new Error("Rental 标准包目录在读取期间已变化");
   return { root, ...selected, files };
 }
