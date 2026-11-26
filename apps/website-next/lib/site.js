@@ -19,10 +19,10 @@ export const siteIcons = {
   ],
 };
 export const siteLinks = {
-  repository: "https://github.com/JinPenG-AI",
+  repository: "https://github.com/JinPen-G/Zelo",
   docs: {
-    zh: "https://deepseek-harness.github.io/deepseek-harness/guide/quickstart",
-    en: "https://deepseek-harness.github.io/deepseek-harness/en/guide/quickstart",
+    zh: "https://github.com/JinPen-G/Zelo/blob/main/packages/core-contracts/README.md#core-quick-start",
+    en: "https://github.com/JinPen-G/Zelo/blob/main/README.en.md#quick-start",
   },
   plugins: "https://github.com/topics/dsh-plugin",
   paper: "https://arxiv.org/abs/2608.25512",

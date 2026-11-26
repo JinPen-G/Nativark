@@ -1,10 +1,10 @@
 import { LanguageBootstrap } from "../../components/LanguageBootstrap";
-import { sitePath } from "../../lib/site";
+import { SiteApp } from "../../components/SiteApp";
 export default function Home() {
   return (
     <>
       <LanguageBootstrap home />
-      <a href={sitePath("/harness/")}>Rental OS</a>
+      <SiteApp locale="zh" />
     </>
   );
 }

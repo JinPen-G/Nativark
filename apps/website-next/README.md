@@ -1,6 +1,8 @@
-# Rental OS 官网 · Next.js 源码工程
+# Zelo 官网 · Next.js 源码工程
 
-沿用原站的技术路线：Next.js App Router、React、next-intl、Framer Motion，以及 WebGL / Three.js 动效。保留当前 Rental OS 官网的文案、布局、业务演示、预约入口和社交链接；这是从现有发布版迁移整理的可编辑源码，不是原作者未公开的开发工程。
+平台官网采用 Next.js App Router、React、next-intl、Framer Motion 和 WebGL / Three.js 动效。页面、中英文文案与元数据使用 Zelo 正式品牌，现有布局、业务演示、预约入口及社交链接由对应组件维护。
+
+完整横标与图形标逐字节取自[Zelo 黑白定稿](../../assets/01_Logo/zelo-logo-bw/README.md)。横标画布为 704×236，导航和内部演示按原比例显示白色版本。favicon 使用 512×512 黑白图形标，按系统深浅色选择。应用内沿用 `public/harness/icons/rentalos-logo.svg` 与 `rentalos-icon-black.svg`、`rentalos-icon-white.svg` 的兼容路径。
 
 ## 启动和构建
 
@@ -53,10 +55,10 @@ tools/                   静态预览、源码检查及一次性迁移工具
 
 ## 路由与交互边界
 
-- 中文 `/harness/`，英文 `/en/harness/`。根路径进入浏览器语言对应版本；中文以外默认英语，手动选择写入 `NEXT_LOCALE` Cookie。
+- 中文 `/harness/`，英文 `/en/harness/`。明确语言路径保持对应语言。根路径先提供完整的中文静态正文，再进入浏览器偏好的版本；中文以外默认英语，手动选择写入 `NEXT_LOCALE` Cookie。
 - AI 管理、传统管理、预约、履约、门店协同、插件、自动任务和能力卡片保留前端演示。确认操作只产生示例回执，不连接真实 AI 或业务系统。
 - 预约/合作入口共用 React 表单，保留咨询意向预填、人工输入保护、请求标识重试、超时与后端回执判断。线上配置公开构建变量 `NEXT_PUBLIC_DEMO_API_BASE_URL`（HTTPS，含 `/api`）；未配置时不伪造成功。仅本机 HTTP 预览可回落到 `http://127.0.0.1:3000/api`。
-- 顶栏和页脚 GitHub、页脚 X 使用用户指定链接。页脚署名 `Powered by PenG-AI · All rights reserved.`；政策文字保留但不跳转。移动菜单尚保留迁移前已有的原模板外部文档/插件/论文入口，这些不是 Rental OS 自有资源。
+- 顶栏和页脚 GitHub、页脚 X 使用用户指定链接。页脚署名 `Powered by PenG-AI · All rights reserved.`。移动菜单的外部文档、插件和论文沿各自来源维护，政策文字沿现有入口呈现。
 - 原站字体、图标和着色器的来源不因迁移而变化；源码迁移不等于第三方素材已获得新的许可。
 
 ## 与旧目录的关系
@@ -69,10 +71,20 @@ Next.js 原生路由与安装说明见 [官方文档](https://nextjs.org/docs/ap
 
 ## GitHub 独立官网仓库
 
-发布仓库为 `JinPenG-AI/rental-os-website`（旧地址 `Xiao0ozZ/rental-os-website` 已由 GitHub 重定向），源码直接位于仓库根目录。推送 main 后，现有 GitHub Pages 工作流会安装依赖、校验源码、构建并仅发布 `out/`；不会发布 node_modules、开发缓存或后端工程。旧官网仍保留在 Git 历史中。
+发布仓库为 `JinPen-G/Zelo-website`（旧地址 `JinPen-G/rental-os-website`、`JinPenG-AI/rental-os-website` 与 `Xiao0ozZ/rental-os-website` 由 GitHub 重定向），源码直接位于仓库根目录。推送 main 后，现有 GitHub Pages 工作流会安装依赖、校验源码、构建并仅发布 `out/`；不会发布 node_modules、开发缓存或后端工程。旧官网仍保留在 Git 历史中。
 
-工作流从 Pages 配置读取 `NEXT_PUBLIC_BASE_PATH`，自动适配 `/rental-os-website` 之类的项目路径；本地开发默认使用域名根路径。手动构建子路径时，PowerShell 使用 `$env:NEXT_PUBLIC_BASE_PATH='/rental-os-website'; npm run build`。构建后 `npm start` 会从生成的 `out/site-config.json` 读取路径，无需再次设置变量。
+工作流从 Pages 配置读取 `NEXT_PUBLIC_BASE_PATH`，自动适配 `/Zelo-website` 之类的项目路径；本地开发默认使用域名根路径。手动构建子路径时，PowerShell 使用 `$env:NEXT_PUBLIC_BASE_PATH='/Zelo-website'; npm run build`。构建后 `npm start` 会从生成的 `out/site-config.json` 读取路径，无需再次设置变量。
 
 `tools/prepare-export.mjs` 为普通静态托管补齐 Next.js 分段预取文件别名并生成 `.nojekyll`，不修改页面内容。字体由构建器打包，品牌 SVG 继续保留在 icons 目录。
 
 如需接通线上预约提交，在仓库 Actions 变量中配置公开的 `NEXT_PUBLIC_DEMO_API_BASE_URL`，值为实际 HTTPS API 前缀（含 `/api`），并在后端允许官网来源。本次不写入密钥、不猜测 API 地址，未配置时不会伪报预约成功。
+
+## 搜索与开发者发现
+
+中英文页面复用 `lib/seo.js` 生成标题、简介、canonical、hreflang、Open Graph 和 Twitter 摘要。`SiteApp` 输出与公开项目说明一致的 WebSite / SoftwareSourceCode JSON-LD。根路径静态 HTML 包含完整正文，关闭 JavaScript 的读取工具也能取得项目介绍。
+
+`app/sitemap.js` 导出两种语言的规范 URL 及语言关系。`public/llms.txt` 提供源码、入门、工单示例和反馈入口，作为机器可读的资料索引。它的存在不代表搜索引擎已收录或 AI 服务已采用。
+
+默认正式地址为 `https://jinpen-g.github.io/Zelo-website`，迁移域名时通过 `NEXT_PUBLIC_SITE_URL` 设置包含子路径的完整站点地址，并同步 `llms.txt` 的官网链接。页面资源路径继续由 `NEXT_PUBLIC_BASE_PATH` 控制。
+
+当前 GitHub Pages 使用项目子目录。搜索爬虫的 robots 规则归域名根路径 `/robots.txt` 管理，项目子目录内的同名文件不能替代该规则。上线后在对应 Search Console URL 前缀属性提交 `/Zelo-website/sitemap.xml`，索引状态以搜索引擎回执为准。

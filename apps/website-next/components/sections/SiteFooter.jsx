@@ -2,6 +2,7 @@
 // Migrated component logic; edit this source directly. No captured runtime is loaded.
 import { useTranslations } from 'next-intl';
 import { useLocale } from 'next-intl';
+import { siteLinks } from '../../lib/site.js';
 export function SiteFooter() {
   const t = useTranslations('Harness.Index');
   const locale = useLocale();
@@ -39,7 +40,7 @@ export function SiteFooter() {
               }
               {
                 <a
-                  href="https://github.com/JinPenG-AI"
+                  href={siteLinks.repository}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="rentalos-footer-social text-ds-secondary hover:text-ds-primary transition-colors"
