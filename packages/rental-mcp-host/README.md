@@ -24,6 +24,7 @@
 | Web 管理 | [grant](src/original-mcp-grant-control-plane.ts)、[admission](src/original-mcp-admission-control-plane.ts)、[review](src/original-mcp-review-control-plane.ts)、[subject](src/original-mcp-subject-control-plane.ts) | 按原 Web 身份办理当前租户/平台的授权、审查和主体管理 |
 | 原目标与收据 | [catalog goal](src/original-mcp-catalog-goal-control-plane.ts)、[目标验证](src/original-mcp-catalog-goal-intent-authority.ts)、[目录资源](src/original-mcp-catalog-resources.ts) | 沿原操作、原修订与当前授权读取和推进目标 |
 | 原请求保存与核对 | `/original-mcp-request-authority` 的 [资源权威](src/original-mcp-request-authority.ts)、`/original-mcp-request-participant` 的 [参加者](src/original-mcp-request-participant.ts)、`/original-mcp-request-save-audit` 的 [关联审计](src/original-mcp-request-save-audit.ts) | 在调用方同一 Native 内保存与审计；提交不明时只核对原键，不创建 Task 或重发操作 |
+| 原结果读取 | `/original-mcp-result-read-tools` 的 [选装工厂](src/original-mcp-result-read-tools.ts)与[原读取绑定](src/original-mcp-result-readers.ts) | 沿当前 MCP grant、原权限、已持久目标与字段放行读取已有会话、Task、报价与销售收据 |
 | 可用量与订单历史 | `/original-mcp-availability-read-authority` 的 [专属授权](src/original-mcp-availability-read-authority.ts)、`/original-mcp-availability-resources` 的 [库存事实](src/original-mcp-availability-resources.ts)、`/original-mcp-order-status-resources` 的 [订单资源](src/original-mcp-order-status-resources.ts) | 复验原 POST / GET Guard、scope、当前主体和同一事务；历史报价、检查、款项的缺项沿原投影表示 |
 | 空间管理 | `/workspace-management` 的 [权威适配](src/workspace-management.ts) | 从宿主的真实账号仓储、空间投影与配置，在原事务复验管理范围 |
 | 严格事务审计 | `/operation-log` 的 [OperationLogService](src/operation-log.service.ts) | 将原授权、请求、目标和绑定事件与原业务事实一并提交 |
@@ -35,6 +36,10 @@
 原 [目录意图权威](src/original-mcp-catalog-goal-intent-authority.ts)同时供给通用存储的必需 `acceptsNextInput` 端口。该端口只核同源目录输入及原 50 条限制；当前身份、Guard、适用验证、同 Native 锁和提交后复验仍由原 `withCurrent` / `withTransition` 负责。校验器不能作为业务授权或目标采用收据。
 
 [原目录目标](src/original-mcp-catalog-goals.ts)和[总宿主](src/original-mcp-host.ts)复用同一份 Rental 政策。历史记录继续使用原记录的政策版本，当前准入仍由原 Auth、Guard 和政策检查决定。
+
+`createOriginalMcpResultReadTools` 从原 `createReadTools(current)` 获取本次宿主的 OAuth store、grant 权威、Core 参加者和预算数据库。调用方按正式出口传入原 MCP 构造器和该读取的真实所有者；每项分别提供当前权限与 ALS、原持久目标定位及当前绑定审计、发布和闭合字段投影。可用 `combineOriginalMcpReadTools(catalog, results)` 交回同一服务注册，目录保留原路径。默认宿主仍只装配目录。
+
+业务所有者在该回调的同一 Native 绑定原读者，原 Web Bearer、目录 Guard 和原私有结果 schema 都不能替代它。会话沿公共关联读取；Task 沿原请求仓储、适用资源和持久动作策略；报价、选单、提案、订单沿原窄读方法。字段政策只接当前主体、Native 和固定目的地，不接凭据；原读取和 release 结束后各自的租约失效。没有相应权限、读者、绑定或放行的结果保持不可用；原键、过期、`not_observed` 与 `unknown` 仍按原证据解释。
 
 ## 构建与验证
 

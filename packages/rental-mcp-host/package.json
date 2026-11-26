@@ -36,6 +36,10 @@
       "types": "./dist/original-mcp-catalog-read-tools.d.ts",
       "default": "./dist/original-mcp-catalog-read-tools.js"
     },
+    "./original-mcp-result-read-tools": {
+      "types": "./dist/original-mcp-result-read-tools.d.ts",
+      "default": "./dist/original-mcp-result-read-tools.js"
+    },
     "./original-mcp-review-control-plane": {
       "types": "./dist/original-mcp-review-control-plane.d.ts",
       "default": "./dist/original-mcp-review-control-plane.js"
@@ -181,6 +185,9 @@
       ],
       "original-mcp-catalog-read-tools": [
         "dist/original-mcp-catalog-read-tools.d.ts"
+      ],
+      "original-mcp-result-read-tools": [
+        "dist/original-mcp-result-read-tools.d.ts"
       ],
       "original-mcp-review-control-plane": [
         "dist/original-mcp-review-control-plane.d.ts"
