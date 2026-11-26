@@ -22,8 +22,7 @@ function compileRentalPlatformSource(input) {
   const { platformFiles, release, selection, api } = input;
   if (!(platformFiles instanceof Map) || !path.isAbsolute(input.dependencyDirectory || ''))
     throw Error('须提供完整底座归档文件与明确只读编译依赖目录');
-  const archive = api.createCoreArchive(platformFiles);
-  if (archive.sha256 !== release.sha256) throw Error('底座源码完整归档摘要与启动锁不一致');
+  if (!api.matchesInstalledCoreArchive(platformFiles, release.sha256)) throw Error('底座源码完整归档摘要与启动锁不一致');
   const source = api.createPlatformSource(platformFiles, release.source);
   if (source.version !== release.versions.platform || source.files.size !== platformFiles.size || [...source.files].some(([file, bytes]) =>
     !platformFiles.has(file) || !Buffer.from(platformFiles.get(file)).equals(bytes)))
@@ -210,7 +209,7 @@ function compileRentalPlatformSource(input) {
   const generated = new Map([...outputs].map(([file, bytes]) => [file.slice(workspace.length + 1), bytes]));
   for (const directory of publicDirectories) generated.set(directory + '/package.json', Buffer.from(readSource(directory + '/package.json')));
   return { generated, evidence: {
-    release: structuredClone(release), sourceArchiveSha256: archive.sha256,
+    release: structuredClone(release), sourceArchiveSha256: release.sha256,
     sourceLockSha256: hash(platformFiles.get('package-lock.json')),
     compiler: { name: 'typescript', version: ts.version, sha256: hash(dependencies.get('node_modules/typescript/lib/typescript.js')) },
     client: { mode: 'platform', schemaSha256: hash(platformFiles.get('apps/platform-api/prisma/schema.prisma')),

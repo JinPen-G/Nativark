@@ -10,7 +10,7 @@ import { CoreVersionRangeSchema, isCoreVersionSupported } from "./version";
 import { inspectCorePackageFiles } from "./package";
 import { checkCoreCombination } from "./compatibility";
 import { isDeepStrictEqual } from "node:util";
-import { createCoreArchive } from "./archive";
+import { matchesInstalledCoreArchive } from "./archive";
 import { checkPlatformDataCapabilities, coreDeploymentHostVersions } from "./data-capability";
 import { requirePlatformDataCapabilityFiles } from "./platform-data-package";
 
@@ -92,7 +92,7 @@ export function createCoreMigrationDeployment(input: {
     const inspected = inspectCorePackageFiles(source, host,
       input.legacyApiRoutes && Object.hasOwn(input.legacyApiRoutes, pin.manifest.id) ? input.legacyApiRoutes[pin.manifest.id] : []);
     if (!inspected.ok || !inspected.manifest || !isDeepStrictEqual(inspected.manifest, pin.manifest)
-      || createCoreArchive(source).sha256 !== pin.sha256)
+      || !matchesInstalledCoreArchive(source, pin.sha256))
       throw new Error(`所选Core清单/包文件与部署锁不一致：${pin.manifest.id}`);
     for (const migration of pin.manifest.data.migrations) put(corePrismaMigrationName(pin.manifest.id, migration.id), source.get(migration.file)!);
   }
