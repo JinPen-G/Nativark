@@ -11,8 +11,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { PrismaClient } from "@prisma/client";
 import { CoreDeploymentLockSchema, checkCoreCombination, checkPlatformDataCapabilities,
   coreDeploymentHostVersions, type CoreDeploymentLock } from "@rental-os/core-contracts";
-import { AI_NATIVE_DATA_PACKAGE_VERSION } from "@rental-os/ai-native-data/data-package";
-import { AI_NATIVE_DATA_PREREQUISITES } from "@rental-os/ai-native-data/preparation";
+import { AI_NATIVE_DATA_PACKAGE_VERSION, aiNativeDataPrerequisites } from "@rental-os/ai-native-data/data-package";
 import { PrismaBusinessFailureOutbox, BUSINESS_FAILURE_OUTBOX, type BusinessFailureResourcePorts } from "@rental-os/ai-native-server/business-events/prisma-business-failure-outbox";
 import { createNotificationDraftBodyRetentionReader, notificationDraftRetentionState,
   notificationDraftRetentionReceiptId } from "@rental-os/ai-native-server/privacy/notification-draft-reader";
@@ -147,12 +146,11 @@ function requireKnowledgeOwner(value: FileBusinessOwner | undefined) {
 export function requireRentalAiSelection(value: CoreDeploymentLock): CoreDeploymentLock {
   const lock = CoreDeploymentLockSchema.parse(value), rentals = lock.cores.filter(pin => pin.manifest.id === "rental");
   const rental = rentals[0], ai = lock.dataCapabilities?.[0];
-  const required = AI_NATIVE_DATA_PREREQUISITES;
+  const required = aiNativeDataPrerequisites(), initial = required.cores[0].migrations[0];
   if (rentals.length !== 1 || lock.dataCapabilities?.length !== 1
     || ai?.id !== "ai-native" || ai.version !== AI_NATIVE_DATA_PACKAGE_VERSION
-    || lock.platform.data.version !== required.platform.dataVersion
-    || rental.manifest.data.version !== required.rental.dataVersion
-    || !rental.manifest.data.migrations.some(item => item.id === required.rental.migrationId && item.sha256 === required.rental.migrationSha256)
+    || !isDeepStrictEqual(ai.prerequisites, required)
+    || !rental.manifest.data.migrations.some(item => item.id === initial.id && item.sha256 === initial.sha256)
     || checkPlatformDataCapabilities(lock).length
     || checkCoreCombination(lock.cores.map(pin => pin.manifest), coreDeploymentHostVersions(lock)).issues.length) {
     throw new Error("AI 组合须选择本版公共、Rental 与 ai-native 固定数据贡献");

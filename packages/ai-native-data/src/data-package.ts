@@ -30,19 +30,24 @@ function packageEntries(files: ReadonlyMap<string, Uint8Array>): void {
     throw new Error("AI 数据固定包缺少接入说明或许可");
 }
 
-function releaseMetadata(contribution: AiNativeDataContribution) {
+/** 发行与宿主共用同一已核定区间；每次返回独立值，部署锁不能扩大兼容范围。 */
+export function aiNativeDataPrerequisites() {
   const prerequisites = AI_NATIVE_DATA_PREREQUISITES;
+  // Rental 0.1.1 仅追加六张换货 raw SQL 表；原 schema、initial 及 AI 外键目标保持。
+  // 只接受已核定的 0.1.0/0.1.1，未来数据版本须重新验证，不以 readable 范围代替。
+  return { platform: { minInclusive: prerequisites.platform.dataVersion, maxExclusive: "0.1.10" },
+    cores: [{ coreId: "rental", version: { minInclusive: prerequisites.rental.dataVersion, maxExclusive: "0.1.2" },
+      migrations: [{ id: prerequisites.rental.migrationId, sha256: prerequisites.rental.migrationSha256 }] }] } satisfies CorePlatformDataCapabilityRelease["prerequisites"];
+}
+
+function releaseMetadata(contribution: AiNativeDataContribution) {
   return {
     id: "ai-native", version: AI_NATIVE_DATA_PACKAGE_VERSION,
     compatibility: { platform: { minInclusive: "0.1.0", maxExclusive: "0.2.0" },
       contract: { minInclusive: "0.1.1", maxExclusive: "0.2.0" } },
     runtime: { node: { minInclusive: "22.0.0", maxExclusive: "25.0.0" } },
     schema: AI_NATIVE_PRISMA_SCHEMA, data: contribution.data,
-    // Rental 0.1.1 仅追加六张换货 raw SQL 表；原 schema、initial 及 AI 外键目标保持。
-    // 只接受已核定的 0.1.0/0.1.1，未来数据版本须重新验证，不以 readable 范围代替。
-    prerequisites: { platform: { minInclusive: prerequisites.platform.dataVersion, maxExclusive: "0.1.10" },
-      cores: [{ coreId: "rental", version: { minInclusive: prerequisites.rental.dataVersion, maxExclusive: "0.1.2" },
-        migrations: [{ id: prerequisites.rental.migrationId, sha256: prerequisites.rental.migrationSha256 }] }] }
+    prerequisites: aiNativeDataPrerequisites()
   };
 }
 

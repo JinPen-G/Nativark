@@ -26,7 +26,7 @@ const prepared = createAiNativeDataPreparation({ baseSchema, contribution: ai })
 // prepared.files 只包含 AI 候选材料，不是完整可执行部署锁。
 ```
 
-`AI_NATIVE_DATA_PREREQUISITES` 记录本版材料依赖的公共／Rental 数据版本、Rental schema 和 initial 摘要。它是部署前置要求，不是已经检查过数据库的证明。base 的摘要写入候选，固定包、可选能力版本及迁移顺序仍须由宿主的正式部署合同共同锁定。
+`AI_NATIVE_DATA_PREREQUISITES` 记录提取基线的公共／Rental 数据版本、Rental schema 和 initial 摘要。[data-package](src/data-package.ts) 的 `aiNativeDataPrerequisites()` 提供发行与宿主共用的已核定兼容区间。宿主核对锁中的前置声明与该值一致，再核当前组合版本和原 initial 摘要。base 的摘要写入候选，固定包、可选能力版本及迁移顺序仍须由宿主的正式部署合同共同锁定，数据库状态由原迁移账和物理观察核定。
 
 ## 持久模型与服务消费者
 
