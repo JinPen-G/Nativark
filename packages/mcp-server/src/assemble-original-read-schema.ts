@@ -2,6 +2,11 @@
  * This adapts the object root for MCP; it keeps every original union branch. */
 import type { JsonSchemaType } from "@modelcontextprotocol/server";
 
+export function assembleNamedOriginalReadSchema(components: Readonly<Record<string, JsonSchemaType>>, name: string): JsonSchemaType {
+  if (!Object.hasOwn(components, name) || !components[name]) throw new TypeError("Original result schema unavailable");
+  return assembleOriginalReadSchema(components[name], components);
+}
+
 export function assembleOriginalReadSchema(root: JsonSchemaType,
   components: Readonly<Record<string, JsonSchemaType>> = {}): JsonSchemaType {
   const reachable = new Map<string, JsonSchemaType>();

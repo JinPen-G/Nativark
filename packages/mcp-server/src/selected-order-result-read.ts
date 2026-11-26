@@ -3,11 +3,11 @@
  * this adapter never starts, reconciles, cancels or approves an operation. */
 import { fromJsonSchema } from "@modelcontextprotocol/server";
 import type { JsonSchemaType } from "@modelcontextprotocol/server";
-import { AI_SELECTED_QUOTE_TASK_HTTP_CONTRACTS } from "@rental-os/shared";
+import { AI_QUOTE_SELECTION_DRAFT_SCHEMAS, AI_SELECTED_QUOTE_TASK_HTTP_CONTRACTS } from "@rental-os/shared";
 import type { AiSelectedQuoteTaskRequestDraft, AiSelectedQuoteTaskResultDraft } from "@rental-os/shared";
 import type { McpReadTool } from "./read-tools.js";
 import { snapshotJson } from "./json-snapshot.js";
-import { originalReadSchema } from "./original-read-schema.js";
+import { assembleNamedOriginalReadSchema } from "./assemble-original-read-schema.js";
 
 export interface SelectedOrderResultReadBinding {
   name: string;
@@ -27,9 +27,10 @@ export interface SelectedOrderResultReadBinding {
  */
 export function createSelectedOrderResultRead(binding: SelectedOrderResultReadBinding): McpReadTool {
   const contract = AI_SELECTED_QUOTE_TASK_HTTP_CONTRACTS.readResult;
-  const inputSchema = originalReadSchema(contract.request);
+  const inputSchema = assembleNamedOriginalReadSchema(AI_QUOTE_SELECTION_DRAFT_SCHEMAS, contract.request);
   const input = fromJsonSchema<AiSelectedQuoteTaskRequestDraft>(inputSchema);
-  const originalOutput = fromJsonSchema<AiSelectedQuoteTaskResultDraft>(originalReadSchema(contract.response));
+  const originalOutput = fromJsonSchema<AiSelectedQuoteTaskResultDraft>(assembleNamedOriginalReadSchema(
+    AI_QUOTE_SELECTION_DRAFT_SCHEMAS, contract.response));
   const outputSchema = structuredClone(binding.outputSchema), read = binding.read.bind(binding);
   if (outputSchema.type !== "object" || outputSchema.additionalProperties !== false) {
     throw new TypeError("Original external order-result schema must be a closed object");

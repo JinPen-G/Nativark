@@ -2,10 +2,12 @@
  * accounting and external field release remain required by the MCP registry. */
 import { fromJsonSchema } from "@modelcontextprotocol/server";
 import type { JsonSchemaType } from "@modelcontextprotocol/server";
-import { AI_CONVERSATION_DRAFT_VERSION, AI_CONVERSATION_HTTP_DRAFT } from "@rental-os/shared";
-import type { AiConversationModelResultReadDraft, AiConversationModelResultResponseDraft } from "@rental-os/shared";
+import { AI_CONVERSATION_DRAFT_VERSION, AI_ORIGINAL_RESULT_LOCATOR_SCHEMAS,
+  type AiConversationModelResultReadDraft } from "@rental-os/platform-contracts/ai-original-result";
+import { AI_CONVERSATION_HTTP_DRAFT, type AiConversationModelResultResponseDraft } from "@rental-os/shared";
 import type { McpReadTool } from "./read-tools.js";
 import { snapshotJson } from "./json-snapshot.js";
+import { assembleOriginalReadSchema } from "./assemble-original-read-schema.js";
 import { originalReadSchema } from "./original-read-schema.js";
 
 /** The registered name/description come from the capability owner, not a model.
@@ -25,14 +27,15 @@ export interface ConversationResultReadBinding {
   read(command: AiConversationModelResultReadDraft, signal: AbortSignal): Promise<unknown>;
 }
 
-/** Build an inert read candidate from the public shared export. This does not
+/** Use the public locator and the original complete result contract. This does not
  * publish a capability, grant access, install an HTTP proxy or start a listener.
  * @param binding - fixed capability metadata and the original read-only adapter.
  * @returns a candidate requiring the registry's original policy/accounting/release.
  */
 export function createConversationResultRead(binding: ConversationResultReadBinding): McpReadTool {
   const contract = AI_CONVERSATION_HTTP_DRAFT.operations.modelResult;
-  const inputSchema = originalReadSchema(contract.request, binding.originalSchemas);
+  const inputSchema = assembleOriginalReadSchema(AI_ORIGINAL_RESULT_LOCATOR_SCHEMAS.AiConversationModelResultReadDraft,
+    AI_ORIGINAL_RESULT_LOCATOR_SCHEMAS);
   const originalOutputSchema = originalReadSchema(contract.response, binding.originalSchemas);
   const input = fromJsonSchema<AiConversationModelResultReadDraft>(inputSchema);
   const output = fromJsonSchema<AiConversationModelResultResponseDraft>(originalOutputSchema);

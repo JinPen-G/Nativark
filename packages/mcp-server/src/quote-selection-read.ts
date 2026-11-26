@@ -3,11 +3,11 @@
  * ancestry. Selection metadata is not approval, execution or personal candidate data. */
 import { fromJsonSchema } from "@modelcontextprotocol/server";
 import type { JsonSchemaType } from "@modelcontextprotocol/server";
-import { AI_QUOTE_SELECTION_HTTP_CONTRACTS } from "@rental-os/shared";
+import { AI_QUOTE_SELECTION_DRAFT_SCHEMAS, AI_QUOTE_SELECTION_HTTP_CONTRACTS } from "@rental-os/shared";
 import type { AiQuoteSelectionReadDraft, AiQuoteSelectionReceiptDraft } from "@rental-os/shared";
 import type { McpReadTool } from "./read-tools.js";
 import { snapshotJson } from "./json-snapshot.js";
-import { originalReadSchema } from "./original-read-schema.js";
+import { assembleNamedOriginalReadSchema } from "./assemble-original-read-schema.js";
 
 export interface QuoteSelectionReadBinding {
   name: string;
@@ -27,9 +27,10 @@ export interface QuoteSelectionReadBinding {
  */
 export function createQuoteSelectionRead(binding: QuoteSelectionReadBinding): McpReadTool {
   const contract = AI_QUOTE_SELECTION_HTTP_CONTRACTS.read;
-  const inputSchema = originalReadSchema(contract.request);
+  const inputSchema = assembleNamedOriginalReadSchema(AI_QUOTE_SELECTION_DRAFT_SCHEMAS, contract.request);
   const input = fromJsonSchema<AiQuoteSelectionReadDraft>(inputSchema);
-  const originalOutput = fromJsonSchema<AiQuoteSelectionReceiptDraft>(originalReadSchema(contract.response));
+  const originalOutput = fromJsonSchema<AiQuoteSelectionReceiptDraft>(assembleNamedOriginalReadSchema(
+    AI_QUOTE_SELECTION_DRAFT_SCHEMAS, contract.response));
   const outputSchema = structuredClone(binding.outputSchema), read = binding.read.bind(binding);
   if (outputSchema.type !== "object" || outputSchema.additionalProperties !== false) {
     throw new TypeError("Original external selection schema must be a closed object");

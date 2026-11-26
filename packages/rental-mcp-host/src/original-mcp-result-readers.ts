@@ -1,6 +1,5 @@
 /** Bind the original result readers to the current MCP custody. No Web/DB fallback, execution or field release. */
 import type { Prisma } from '@prisma/client';
-import { AI_SCENE_REQUEST_DRAFT_SCHEMAS } from '@rental-os/shared';
 import type { AiConversationAdmissionResponseDraft, AiSceneModelResultObservationDraft } from '@rental-os/shared';
 import { createOriginalConversationResultRead } from '@rental-os/ai-native-server/runtime/original-result-reads';
 import { bindRentalOriginalSaleReads, bindRentalOriginalTaskRecoveryReadIn, rentalOriginalResultComponents } from '@rental-os/ai-native-server/runtime/rental-adapters/original-result-reads';
@@ -13,7 +12,8 @@ import type { createSelectedProposalRead } from '@rental-os/mcp-server/selected-
 import type { createSelectedOrderResultRead } from '@rental-os/mcp-server/selected-order-result-read' with { 'resolution-mode': 'import' };
 import type { McpReadTool } from '@rental-os/mcp-server' with { 'resolution-mode': 'import' };
 import type { OriginalMcpReadCallRef } from '@rental-os/mcp-server/persistent-read-accounting' with { 'resolution-mode': 'import' };
-import type { AiConversationTurnReferenceDraft, AiSceneRequestReadDraft } from '@rental-os/platform-contracts/ai-original-result';
+import { AI_ORIGINAL_RESULT_LOCATOR_SCHEMAS,
+  type AiConversationTurnReferenceDraft, type AiSceneRequestReadDraft } from '@rental-os/platform-contracts/ai-original-result';
 import { createOriginalMcpRequestAuthority } from './original-mcp-request-authority';
 import type { OriginalMcpCatalogReadContext, OriginalMcpReadSubject } from './original-mcp-read-context';
 
@@ -100,7 +100,7 @@ export function originalMcpResultTool<K extends OriginalMcpResultKind>(mcp: Orig
     case 'conversation': return mcp.createConversationResultRead({ ...descriptor,
       originalSchemas: rentalOriginalResultComponents() as Parameters<typeof createConversationResultRead>[0]['originalSchemas'], read });
     case 'taskRecovery': return mcp.createOriginalTaskRecoveryRead({ ...descriptor, read });
-    case 'quoteReceipt': return { ...descriptor, inputSchema: structuredClone(AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneRequestReadDraft), read };
+    case 'quoteReceipt': return { ...descriptor, inputSchema: structuredClone(AI_ORIGINAL_RESULT_LOCATOR_SCHEMAS.AiSceneRequestReadDraft), read };
     case 'quoteSelection': return mcp.createQuoteSelectionRead({ ...descriptor, read });
     case 'selectedProposal': return mcp.createSelectedProposalRead({ ...descriptor, read });
     case 'selectedOrderResult': return mcp.createSelectedOrderResultRead({ ...descriptor, read });

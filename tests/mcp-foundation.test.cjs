@@ -1414,7 +1414,7 @@ test("original task recovery read preserves unknown and absence without executio
 function selectedProposalReview(status = "pending_confirmation") {
   const selection = quoteSelectionReceipt();
   const target = { resourceType: "quote", resourceId: selection.quoteId, version: "original-quote-version" };
-  return { draftVersion: "ain-approval-application-draft-1", proposal: { payloadHash: "c".repeat(64), status,
+  return { draftVersion: "ain-approval-order-review-draft-2", proposal: { payloadHash: "c".repeat(64), status,
     payload: { contractVersion: "ain-c05-draft-1", proposalId: "proposal-a", taskId: selection.taskId, revision: 1,
       audience: "operator", scope: { kind: "workspace", tenantId: "tenant-a", workspaceId: "workspace-a" },
       atomicity: "single_action", failurePolicy: "stop_and_reconcile", expiresAt: "2026-10-31T23:59:00.000Z",
@@ -1423,7 +1423,10 @@ function selectedProposalReview(status = "pending_confirmation") {
         preview: { recordId: "preview-a", revision: 1, contentHash: selection.quoteHash } }] } },
     deterministic: { target: { ...target }, quoteAmounts: { rentalAmount: 123, discountAmount: 0, couponAmount: 0,
       serviceAmount: 0, fulfillmentAmount: 0, depositAmount: 0, preAuthAmount: 0, payableAmount: 123, receivableAmount: 123 },
-      currency: "CNY", quoteExpiresAt: "2026-10-31T23:59:00.000Z", decisionExpiresAt: "2026-10-31T23:59:00.000Z" }, generatedText: null };
+      currency: "CNY", quoteExpiresAt: "2026-10-31T23:59:00.000Z", decisionExpiresAt: "2026-10-31T23:59:00.000Z",
+      order: { customer: { id: "customer-a", type: "personal" }, booking: { identity: "personal", enterpriseContractAndPayer: false },
+        lines: [{ itemGroupId: "group-a", quantity: 1 }], period: { startAt: "2026-10-29T00:00:00.000Z", endAt: "2026-10-30T00:00:00.000Z" },
+        fulfillment: { mode: "store_pickup_return", pickupLocationId: "location-a", returnLocationId: "location-a" }, services: [] } }, generatedText: null };
 }
 
 async function verifySelectedProposalRead(t, createRead) {
@@ -1471,6 +1474,7 @@ async function verifySelectedProposalRead(t, createRead) {
         value => { value.proposal.payload.revision = 2; }, value => { value.proposal.payload.actions[0].input.contentHash = "f".repeat(64); },
         value => { value.proposal.payload.actions[0].toolCode = "tenant.config.propose"; }, value => { value.deterministic.target.resourceId = "other-quote"; },
         value => { value.generatedText = "synthetic-private-review"; }, value => { value.deterministic.quoteAmounts.payableAmount = null; },
+        value => { value.draftVersion = "ain-approval-application-draft-1"; delete value.deterministic.order; },
         value => { Object.defineProperty(value, "proposal", { enumerable: true, get() { getters++; return review.proposal; } }); }]) {
         current = selectedProposalReview(); change(current); const beforeRelease = releases;
         const result = await client.callTool({ name: read.name, arguments: command });

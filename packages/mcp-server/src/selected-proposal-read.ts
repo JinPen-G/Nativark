@@ -4,11 +4,13 @@
 import { fromJsonSchema } from "@modelcontextprotocol/server";
 import { isDeepStrictEqual } from "node:util";
 import type { JsonSchemaType } from "@modelcontextprotocol/server";
-import { AI_HUMAN_QUOTE_ORDER_HTTP_CONTRACTS } from "@rental-os/shared";
+import { AI_SCOPE_DRAFT_SCHEMAS } from "@rental-os/platform-contracts/ai-gateway";
+import { AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS, AI_HUMAN_QUOTE_ORDER_HTTP_CONTRACTS,
+  AI_PROPOSAL_DRAFT_SCHEMAS, AI_QUOTE_SELECTION_DRAFT_SCHEMAS } from "@rental-os/shared";
 import type { AiHumanQuoteOrderReviewRequestDraft, AiApprovalApplicationReviewDraft } from "@rental-os/shared";
 import type { McpReadTool } from "./read-tools.js";
 import { snapshotJson } from "./json-snapshot.js";
-import { originalReadSchema } from "./original-read-schema.js";
+import { assembleNamedOriginalReadSchema } from "./assemble-original-read-schema.js";
 
 export interface SelectedProposalReadBinding {
   name: string;
@@ -29,9 +31,13 @@ export interface SelectedProposalReadBinding {
  */
 export function createSelectedProposalRead(binding: SelectedProposalReadBinding): McpReadTool {
   const contract = AI_HUMAN_QUOTE_ORDER_HTTP_CONTRACTS.readSelectedProposal;
-  const inputSchema = originalReadSchema(contract.request);
+  // Selection proof and approval review use their own definitions. The
+  // reachable proposal/scope components stay under their original owners.
+  const components = { ...AI_SCOPE_DRAFT_SCHEMAS, ...AI_QUOTE_SELECTION_DRAFT_SCHEMAS,
+    ...AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS, ...AI_PROPOSAL_DRAFT_SCHEMAS };
+  const inputSchema = assembleNamedOriginalReadSchema(components, contract.request);
   const input = fromJsonSchema<AiHumanQuoteOrderReviewRequestDraft>(inputSchema);
-  const originalOutput = fromJsonSchema<AiApprovalApplicationReviewDraft>(originalReadSchema(contract.response));
+  const originalOutput = fromJsonSchema<AiApprovalApplicationReviewDraft>(assembleNamedOriginalReadSchema(components, contract.response));
   const outputSchema = structuredClone(binding.outputSchema), read = binding.read.bind(binding);
   if (outputSchema.type !== "object" || outputSchema.additionalProperties !== false) {
     throw new TypeError("Original external proposal schema must be a closed object");
