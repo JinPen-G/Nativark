@@ -34,6 +34,20 @@ python -B scripts/ops/deployment/hourly-update.py --self-test
 
 ## 独立 Rental 发布材料离线校验
 
+### 开发组合 CI
+
+[`Rental 双仓开发构建`](../../../.github/workflows/rental-development-ci.yml) 使用工作流中固定的 Zelo 与 Rental 完整 SHA。它从固定 Zelo 锁安装编译依赖，按 `full` 装配和回读来源归档，通过原构建器在内存生成 Prisma 声明和 API 产物，并核后台及四端的 TypeScript 配置。
+
+开发报告 `rental-development-build-1` 记录双源码、归档、投影锁、编译项目和 API 产物摘要。CI 唯一上传物是 JSON 报告，状态标明 `deployment: not-prepared`、`releaseApproved: false` 和 `serverUpdateEligible: false`。本地可在已有编译依赖的固定 Zelo 检出下复用同一入口，末项选 `host` 或 `full`。
+
+```sh
+node scripts/ops/release-rental-development.cjs <Zelo目录> <Zelo完整SHA> <Rental目录> <Rental完整SHA> full
+```
+
+正式候选仍须按真实版本 Tag 取得锁定底座与 Core 归档、完成 `prepared` 材料、通过下面的 `candidate` 校验，再由同一次正式 CI 核对 API 与 Web 镜像 ID。旧组合过渡继续等待原账桥接。
+
+### 正式候选材料
+
 [release-verify.cjs](../release-verify.cjs) 从已经核收并解包的正式宿主归档读取双仓来源、宿主收据、部署收据及实际文件。两个收据摘要取自可信归档核收结果。请分别提供上一份已核宿主和固定候选。
 
 ```sh
