@@ -80,7 +80,11 @@ export async function readPlatformCapabilityEvidence(db: PlatformSettingsEvidenc
         applicability: recorded.observedRevision === before.profile.configRevision ? 'current_configuration' : 'historical_configuration' } : null });
   }
   const afterRows = await repository.list(before.profile), after = await current();
-  if (signal?.aborted || after.identity !== before.identity || capabilityProfileFingerprint(after.profile) !== capabilityProfileFingerprint(before.profile)
+  // current() reads the Profile after resolving its owner. A revocation during
+  // that final read must not deliver the already observed evidence.
+  const deliveryIdentity = identityHash(await authority.resolve());
+  if (signal?.aborted || deliveryIdentity !== before.identity || after.identity !== before.identity
+    || capabilityProfileFingerprint(after.profile) !== capabilityProfileFingerprint(before.profile)
     || after.profile.enabled !== before.profile.enabled || requestFingerprint(after.profile.disabledAt) !== requestFingerprint(before.profile.disabledAt)
     || requestFingerprint(rows) !== requestFingerprint(afterRows)) throw new ModelGatewayError('FORBIDDEN');
   const now = new Date();
