@@ -51,7 +51,7 @@ async function runtime(): Promise<OriginalMcpHostExports & OriginalMcpCatalogRea
     ...consentAuthority, ...policies, ...traffic, ...protocolTraffic, ...accounting, ...input, ...goals,
     ...bindings, ...goalIntents, ...goalAdoptions, ...goalControl, ...clientReview, ...noticeReview,
     ...grantManagement, ...subjectStore, ...tokens,
-    ...(await import("@rental-os/mcp-server/capability-mapping")) };
+    ...(await import("@rental-os/rental-mcp-host/capability-mapping")) };
 }
 
 export async function createRentalOriginalMcpHost<Additional = unknown>(host: RentalAiHostAssembly<Additional>,

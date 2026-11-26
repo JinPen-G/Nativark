@@ -502,7 +502,7 @@ function nativeAvailabilityFixture(mode = 'quantity', lines) {
   const f = fixture(), now = new Date('2026-11-06T00:00:00Z');
   f.member.role.permissions = [{ permission:{ code:'rental-os:order:create' } }];
   const input = { locationId:'loc-a',startAt:'2026-11-07T00:00:00+08:00',endAt:'2026-11-08T00:00:00+08:00',lines:lines ?? [{ itemGroupId:'group-a',quantity:1 }] };
-  const mcp = { ...source('packages/mcp-server/src/capability-mapping.ts'), ...source('packages/mcp-server/src/persistent-read-accounting.ts') };
+  const mcp = { ...source('packages/rental-mcp-host/src/capability-mapping.ts'), ...source('packages/mcp-server/src/persistent-read-accounting.ts') };
   const name = mcp.MCP_BUSINESS_CAPABILITIES.find(row=>row.code==='rental.availability.check').name;
   const authorization = { subject:'issuer-not-user',token:'private-native-availability-token',clientId:'client-a',scopes:['availability:read'],resource:'https://mcp.example.invalid/mcp' };
   const call = { callId:'original-availability-call',authorization,toolName:name,inputHash:mcp.captureMcpReadInput(input).inputHash };
@@ -609,7 +609,7 @@ test("native catalog resources execute original Guard Core configuration and pro
   const { createOriginalMcpCatalogReadContext } = source('apps/api/src/modules/auth/original-mcp-read-context.ts');
   const { aiPersistenceScopeColumns } = source('apps/api/src/modules/ai-native/persistence-scope.ts');
   const { captureMcpReadInput } = source('packages/mcp-server/src/persistent-read-accounting.ts');
-  const mcp = source('packages/mcp-server/src/capability-mapping.ts'), name = mcp.MCP_BUSINESS_CAPABILITIES.find(row => row.code === 'rental.catalog.search').name;
+  const mcp = source('packages/rental-mcp-host/src/capability-mapping.ts'), name = mcp.MCP_BUSINESS_CAPABILITIES.find(row => row.code === 'rental.catalog.search').name;
   const now = new Date('2026-11-06T00:00:00Z'), authorization = { subject: 'issuer-not-user', token: 'private-native-catalog-token', clientId: 'client-a', scopes: ['catalog:read'], resource: 'https://mcp.example.invalid/mcp' };
   const make = (input = { limit: 2 }) => {
     const f = fixture(), control = { queries: [], bundleQueries: [], afterScope: undefined, afterPage: undefined, rows: [] };
@@ -706,7 +706,7 @@ test("native order status resources execute original Guard Core repository and p
   const { createOriginalMcpCatalogReadContext } = source('apps/api/src/modules/auth/original-mcp-read-context.ts');
   const { RentalCoreService } = source('apps/api/src/modules/rental-core/rental-core.service.ts');
   const { RentalCoreFactRepository } = source('apps/api/src/modules/rental-core/rental-core-fact.repository.ts');
-  const { MCP_BUSINESS_CAPABILITIES } = source('packages/mcp-server/src/capability-mapping.ts');
+  const { MCP_BUSINESS_CAPABILITIES } = source('packages/rental-mcp-host/src/capability-mapping.ts');
   const { aiPersistenceScopeColumns } = source('apps/api/src/modules/ai-native/persistence-scope.ts');
   const mcp = { MCP_BUSINESS_CAPABILITIES }, mapping = MCP_BUSINESS_CAPABILITIES.find(value => value.code === 'rental.order.explain');
   const now = new Date('2026-11-06T00:00:00Z'), body = { sceneCode: 'order_explanation', input: { orderId: 'order-a', question: 'status' } };
@@ -1338,7 +1338,7 @@ test("selected MCP Core fences new work and preserves exact Native request recov
   const { createOriginalMcpCatalogReadAuthority } = source('apps/api/src/modules/auth/original-mcp-catalog-read-authority.ts');
   const { createOriginalMcpAvailabilityReadAuthority } = source('apps/api/src/modules/auth/original-mcp-availability-read-authority.ts');
   const oauth = source('packages/mcp-server/src/persistent-oauth-tokens.ts');
-  const api = { ...oauth, ...source('packages/mcp-server/src/capability-mapping.ts'),
+  const api = { ...oauth, ...source('packages/rental-mcp-host/src/capability-mapping.ts'),
     ...source('packages/mcp-server/src/persistent-read-accounting.ts') };
   const authorization = { ...call.authorization, token: Buffer.alloc(32, 7).toString('base64url'), scopes: ['catalog:read', 'availability:read'] };
   const expiresAt = Math.floor(Date.now() / 1000) + 600;

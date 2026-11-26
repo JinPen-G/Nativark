@@ -29,7 +29,14 @@ async function compiled() {
       '@rental-os/shared': [path.join(principalShared, 'dist/index.d.ts')],
       zod: [path.join(path.dirname(installed.resolve('zod/package.json')), 'index.d.cts')] } };
   const check = program => { const diagnostics = ts.getPreEmitDiagnostics(program); assert.equal(diagnostics.length, 0, diagnostics.map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n')).join('\n')); assert.equal(program.emit().emitSkipped, false); };
-  check(ts.createProgram(['original-traffic-meter.ts', 'catalog-goal-control-plane.ts', 'prisma-mcp-catalog-goal-adoptions.ts', 'prisma-mcp-read-goal-settlement.ts', 'prisma-mcp-catalog-goal-intents.ts', 'prisma-mcp-catalog-goals.ts', 'prisma-mcp-read-accounting.ts', 'persistent-read-accounting.ts', 'capability-mapping.ts', 'host-router.ts', 'service.ts', 'consent-control-plane.ts', 'review-control-plane.ts', 'grant-control-plane.ts', 'admission-control-plane.ts', 'reviewed-governance-control-plane.ts', 'subject-control-plane.ts', 'prisma-oauth-web-consent.ts', 'prisma-oauth-consent-review.ts'].map(file => path.join(packageRoot, 'src', file)), options));
+  check(ts.createProgram(['original-traffic-meter.ts', 'catalog-goal-control-plane.ts', 'prisma-mcp-catalog-goal-adoptions.ts', 'prisma-mcp-read-goal-settlement.ts', 'prisma-mcp-catalog-goal-intents.ts', 'prisma-mcp-catalog-goals.ts', 'prisma-mcp-read-accounting.ts', 'persistent-read-accounting.ts', 'host-router.ts', 'service.ts', 'consent-control-plane.ts', 'review-control-plane.ts', 'grant-control-plane.ts', 'admission-control-plane.ts', 'reviewed-governance-control-plane.ts', 'subject-control-plane.ts', 'prisma-oauth-web-consent.ts', 'prisma-oauth-consent-review.ts'].map(file => path.join(packageRoot, 'src', file)), options));
+  // Keep the Rental mapping in its own package and consume emitted MCP types.
+  const rentalRoot = path.join(root, 'packages/rental-mcp-host'), stagedRental = path.join(output, 'node_modules/@rental-os/rental-mcp-host');
+  fs.mkdirSync(stagedRental, { recursive: true }); fs.copyFileSync(path.join(rentalRoot, 'package.json'), path.join(stagedRental, 'package.json'));
+  check(ts.createProgram([path.join(rentalRoot, 'src/capability-mapping.ts')], {
+    ...options, rootDir: path.join(rentalRoot, 'src'), outDir: path.join(stagedRental, 'dist'),
+    paths: { ...options.paths, '@rental-os/mcp-server': [path.join(staged, 'dist/index.d.ts')] },
+  }));
   // Strictly compile only the new API context and original request-identity types.
   // Nest exception declaration is an explicit facade, not API/Prisma/DI validation.
   const nestTypes = path.join(output, 'context-nest.d.ts');
@@ -46,7 +53,7 @@ async function compiled() {
   fs.writeFileSync(consumer, [
     'export { createOriginalMcpTrafficMeter, originalMcpTrafficClass } from "@rental-os/mcp-server/original-traffic-meter";',
     'export { createPrismaMcpProtocolTraffic, originalMcpProtocolOperations } from "@rental-os/mcp-server/protocol-traffic";',
-    'export { MCP_BUSINESS_CAPABILITIES } from "@rental-os/mcp-server/capability-mapping";',
+    'export { MCP_BUSINESS_CAPABILITIES } from "@rental-os/rental-mcp-host/capability-mapping";',
     'export { createPrismaOAuthWebConsent } from "@rental-os/mcp-server/prisma-oauth-web-consent";',
     'export { createPrismaOAuthConsentReview } from "@rental-os/mcp-server/prisma-oauth-consent-review";',
     'export { createPrismaOAuthConsentAuthority } from "@rental-os/mcp-server/prisma-oauth-consent-authority";',
@@ -372,7 +379,7 @@ test('original catalog goal adoption closes once under trusted Web nonce preserv
   const originalUnknown=structuredClone(unknown.f.state),unknownReceipt=await unknown.intents.receipt(unknownIntent.operationKey,unknown.browser(),signal());assert.equal(unknownReceipt.adoption.state,'observed');assert.deepEqual(unknown.f.state,originalUnknown);assert.deepEqual(await unknown.adopt(unknownIntent),unknownReceipt.adoption);assert.deepEqual(unknown.f.state,originalUnknown,'lost answer never adopts another UUID');
   const beforeBad=unknown.f.transactions;await assert.rejects(unknown.intents.adopt(unknown.post(unknown.config.adoptEndpoint,{ operationKey:unknownIntent.operationKey,nextInput:unknownIntent.nextInput,expectedRevision:2,nonce:unknownIntent.nonce,actor:'self' }),signal()));
   await assert.rejects(unknown.intents.adopt(unknown.post(unknown.config.adoptEndpoint,{ operationKey:unknownIntent.operationKey,nextInput:unknownIntent.nextInput,expectedRevision:2,nonce:unknownIntent.nonce },{ origin:'https://evil.example.invalid' }),signal()));assert.equal(unknown.f.transactions,beforeBad);
-  assert.throws(()=>api.createPrismaMcpCatalogGoalIntents(unknown.config,{ withCurrent:unknown.authority.withCurrent,withOwner:unknown.authority.withOwner,audit:unknown.authority.audit }),'missing original transition path never falls back to intent authority');
+  assert.throws(()=>api.createPrismaMcpCatalogGoalIntents(unknown.config,{ acceptsNextInput:unknown.authority.acceptsNextInput,withCurrent:unknown.authority.withCurrent,withOwner:unknown.authority.withOwner,audit:unknown.authority.audit }),'missing original transition path never falls back to intent authority');
   // HTTP goal control uses the ACTUAL original host/Core. Identity/goal setup
   // above and SQL/MFA remain fixtures; no listener or real external HTTP runs.
   const web=await make();await web.read();const OriginalPlatform=source('apps/api/src/modules/platform/platform.service.ts').PlatformService;

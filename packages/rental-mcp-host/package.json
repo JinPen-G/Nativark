@@ -155,6 +155,10 @@
     "./original-mcp-request-save-audit": {
       "types": "./dist/original-mcp-request-save-audit.d.ts",
       "default": "./dist/original-mcp-request-save-audit.js"
+    },
+    "./capability-mapping": {
+      "types": "./dist/capability-mapping.d.ts",
+      "default": "./dist/capability-mapping.js"
     }
   },
   "typesVersions": {
@@ -263,6 +267,9 @@
       ],
       "original-mcp-request-save-audit": [
         "dist/original-mcp-request-save-audit.d.ts"
+      ],
+      "capability-mapping": [
+        "dist/capability-mapping.d.ts"
       ]
     }
   },

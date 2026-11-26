@@ -11,7 +11,7 @@ import type { OriginalMcpCatalogReadContext } from './original-mcp-read-context'
 import { assertOriginalMcpCoreContext } from './original-mcp-read-context';
 import { aiAvailabilityReadInputSchema } from '@rental-os/ai-native-server/runtime/availability-read-facts.service';
 import type { McpReadAuthority, McpReadAuthorization } from '@rental-os/mcp-server' with { 'resolution-mode': 'import' };
-import type { MCP_BUSINESS_CAPABILITIES } from '@rental-os/mcp-server/capability-mapping' with { 'resolution-mode': 'import' };
+import type { MCP_BUSINESS_CAPABILITIES } from './capability-mapping';
 import type { createPersistentOAuthAccessReader } from '@rental-os/mcp-server/persistent-oauth-tokens' with { 'resolution-mode': 'import' };
 import type { captureMcpReadInput } from '@rental-os/mcp-server/persistent-read-accounting' with { 'resolution-mode': 'import' };
 export interface OriginalMcpAvailabilityAuthorityExports {

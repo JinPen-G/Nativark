@@ -12,7 +12,7 @@ import type { createPrismaMcpCatalogGoals, OriginalCatalogGoal, ORIGINAL_MCP_CAT
 import type { createPrismaMcpReadBindings, OriginalMcpReadGoalOwner } from '@rental-os/mcp-server/prisma-mcp-read-bindings' with { 'resolution-mode': 'import' };
 import type { OriginalMcpReadInputTargetSource } from '@rental-os/mcp-server/prisma-mcp-read-accounting' with { 'resolution-mode': 'import' };
 import type { createPrismaMcpReadGoalSettlement, OriginalMcpReadGoalSettlement } from '@rental-os/mcp-server/prisma-mcp-read-goal-settlement' with { 'resolution-mode': 'import' };
-import type { MCP_BUSINESS_CAPABILITIES } from '@rental-os/mcp-server/capability-mapping' with { 'resolution-mode': 'import' };
+import type { MCP_BUSINESS_CAPABILITIES } from './capability-mapping';
 import type { McpReadAuthorization } from '@rental-os/mcp-server' with { 'resolution-mode': 'import' };
 import type { OperationLogService } from './operation-log.service';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';

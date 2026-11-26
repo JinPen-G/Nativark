@@ -16,6 +16,7 @@
 | 接点 | 正式入口与实现 | 职责 |
 | --- | --- | --- |
 | 总装配 | 根出口的 [createOriginalMcpHost](src/original-mcp-host.ts) | 固定同一 issuer、resource、scope 和互异路由，组合原控制面及统一关闭链 |
+| Rental 工具映射 | `/capability-mapping` 的 [固定映射与只读构造器](src/capability-mapping.ts) | 保留七项原工具码、运输名及 `rental-mcp-capability-map-1`；仅四项只读码可构造候选，构造不发布、不授权或执行 |
 | OAuth 生命周期 | `/original-mcp-oauth-core` 的 [OAuth Core](src/original-mcp-oauth-core.ts) | 在同一 Native 数据库中维护 consent、grant、code、token 和原已完成读取计量 |
 | 当前身份 | [浏览器主体](src/original-mcp-browser-identity.ts)、[grant 主体](src/original-mcp-grant-identity.ts)、[读取上下文](src/original-mcp-read-context.ts) | 复用原 Auth/ALS 与短租约，绑定当前主体、空间及原授权 |
 | Core 与业务读取 | 根出口的 `createOriginalMcpCoreAccess`、`/original-mcp-catalog-read-tools` | 复验成员、绑定、期限、物理数据与部署停新，消费原 Guard 和业务字段来源 |
@@ -27,6 +28,10 @@
 | 严格事务审计 | `/operation-log` 的 [OperationLogService](src/operation-log.service.ts) | 将原授权、请求、目标和绑定事件与原业务事实一并提交 |
 
 旧组合宿主的 `apps/api/src/modules/auth/original-mcp-*.ts` 通过正式出口消费这些相同实现。运输、协议和 SQL 仓储继续由 [MCP 服务包](../mcp-server/README.md)提供，业务对象及最终裁定沿 [Rental Core](../rental-core/README.md)读取。
+
+选装宿主的 [MCP 装配](../../apps/rental-api/src/mcp-host.ts)从 `@rental-os/rental-mcp-host/capability-mapping` 加载本包映射，并与通用 MCP 工厂一并显式传给原参加者。映射依赖 shared 的同源运行时工具码，返回通用 `McpReadTool`；同一原 Guard、Native 事务、持久计量与字段释放继续决定实际读取。旧 `@rental-os/mcp-server/capability-mapping` 导入须迁到本包子出口；通用包不保留反向兼容转发。包版本仍为 `0.1.0`，发布者须将生产者、消费者和锁文件作为同一兼容变更核定。
+
+原 [目录意图权威](src/original-mcp-catalog-goal-intent-authority.ts)同时供给通用存储的必需 `acceptsNextInput` 端口。该端口只核同源目录输入及原 50 条限制；当前身份、Guard、适用验证、同 Native 锁和提交后复验仍由原 `withCurrent` / `withTransition` 负责。校验器不能作为业务授权或目标采用收据。
 
 ## 构建与验证
 

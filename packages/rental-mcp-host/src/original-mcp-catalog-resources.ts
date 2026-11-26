@@ -5,7 +5,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { Prisma } from '@prisma/client';
 import { AI_CONTRACT_DRAFT_VERSION, aiCatalogReadInputSchema, type AiCatalogReadProjection } from '@rental-os/shared';
 import type { captureMcpReadInput, OriginalMcpReadCallRef } from '@rental-os/mcp-server/persistent-read-accounting' with { 'resolution-mode': 'import' };
-import type { MCP_BUSINESS_CAPABILITIES } from '@rental-os/mcp-server/capability-mapping' with { 'resolution-mode': 'import' };
+import type { MCP_BUSINESS_CAPABILITIES } from './capability-mapping';
 import type { AuthService } from '@rental-os/ai-native-server/runtime/rental-adapters/auth.service';
 import type { ApiAuthGuard } from '@rental-os/ai-native-server/runtime/rental-adapters/api-auth.guard';
 import type { RentalCoreService } from '@rental-os/ai-native-server/runtime/rental-adapters/rental-core.service';

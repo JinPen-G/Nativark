@@ -172,10 +172,6 @@
       "types": "./dist/public-client-authorization.d.ts",
       "import": "./dist/public-client-authorization.js"
     },
-    "./capability-mapping": {
-      "types": "./dist/capability-mapping.d.ts",
-      "import": "./dist/capability-mapping.js"
-    },
     "./conversation-result-read": {
       "types": "./dist/conversation-result-read.d.ts",
       "import": "./dist/conversation-result-read.js"
@@ -361,9 +357,6 @@
       ],
       "public-client-authorization": [
         "dist/public-client-authorization.d.ts"
-      ],
-      "capability-mapping": [
-        "dist/capability-mapping.d.ts"
       ],
       "conversation-result-read": [
         "dist/conversation-result-read.d.ts"

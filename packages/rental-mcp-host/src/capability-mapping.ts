@@ -1,9 +1,9 @@
-/** MCP transport names for the approved business scope, not a capability grant.
+/** Rental-owned MCP transport names for the approved business scope, not a capability grant.
  * Original public codes stay unchanged; contract owners still supply current
  * schemas, readers, authorization, accounting and field release before publication. */
 import { AI_TOOL_CODES } from "@rental-os/shared";
 import type { AiRisk, AiToolCode } from "@rental-os/shared";
-import type { McpReadTool } from "./read-tools.js";
+import type { McpReadTool } from "@rental-os/mcp-server" with { "resolution-mode": "import" };
 
 /** Version of the transport mapping only, never an original schema or grant revision. */
 export const MCP_CAPABILITY_MAPPING_VERSION = "rental-mcp-capability-map-1" as const;

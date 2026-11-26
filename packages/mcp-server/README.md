@@ -12,7 +12,7 @@
 | 同一 OAuth 与 MCP 服务 | `@rental-os/mcp-server/service` | [createRentalMcpService](src/service.ts) |
 | 固定宿主总路由 | `@rental-os/mcp-server/host-router` | [createMcpHostRouter](src/host-router.ts) |
 | 原事务仓储 | `@rental-os/mcp-server/prisma-oauth-store` | [createPrismaOAuthStore](src/prisma-oauth-store.ts) |
-| 固定业务运输映射 | `@rental-os/mcp-server/capability-mapping` | [映射及只读构造器](src/capability-mapping.ts) |
+| 通用只读登记 | `@rental-os/mcp-server` | [工具、发布、授权、计量与字段释放端口](src/read-tools.ts) |
 
 全部子出口及声明以包配置为准。ESM 消费者使用 `exports` 的 `import` 入口，原 Node10 类型解析通过精确 `typesVersions` 取得同一构建声明。源码链接用于阅读，运行消费使用正式包出口。[包配置](package.json)
 
@@ -24,7 +24,9 @@ npm run build -w @rental-os/mcp-server
 npm run typecheck -w @rental-os/mcp-server
 ```
 
-业务映射及原结果候选使用可选 peer `@rental-os/shared` 0.1.0 的真实运行时和声明。所消费的 schema、声明和 JS 须来自同一版本产物。基础运输出口可独立加载，业务子出口的 shared 前置由宿主核定。[shared 正式出口](../shared/src/index.ts)
+原结果候选仍使用可选 peer `@rental-os/shared` 0.1.0 的真实运行时和声明。所消费的 schema、声明和 JS 须来自同一版本产物。基础运输出口可独立加载，原结果子出口的 shared 前置由宿主核定。[shared 正式出口](../shared/src/index.ts)
+
+Rental 固定工具码与运输名由 `@rental-os/rental-mcp-host/capability-mapping` 提供，通用包不反向导出该业务映射。宿主通过本包原有 `McpReadTool`、`McpReadPublication`、`McpReadAuthority`、`McpReadAccounting` 和 `McpReadRelease` 显式绑定业务参加者。其他 Core 可按同一闭合 schema 和当前授权端口登记自己的受控读取；缺少生产者时保持不可用。[Rental 接入](../rental-mcp-host/README.md)
 
 ## 原宿主统一装配入口
 
@@ -146,6 +148,10 @@ public-client 登记 / 审查由原当前 SaaS 管理身份办理。通知与准
 
 采用在同一原事务保存原键收据、旧目标 history，CAS 更新 frontier，并写 admitted / adopted 日志。旧预算、calls、bindings 和审计完整保留，新 goal 首次读仍须准备原输入关联后进独立预算。settled / adopted 均只描述原计量或 frontier 证据，业务完成与执行批准另沿原链核定。[采用参加者](src/prisma-mcp-catalog-goal-adoptions.ts) · [意图 SQL](mysql-catalog-goal-intent-schema.sql) · [采用 SQL](mysql-catalog-goal-adoption-schema.sql)
 
+目标意图权威必须提供同步 `acceptsNextInput(input)`。通用存储先捕获不可变原输入并计算原 hash，仅接受严格 `true`；它不转换业务输入或代替当前授权。Rental 的原权威使用同源目录 schema 和 50 条上限，并在原 Guard 事务内再次校验。缺校验器、异步返回或拒绝均不可进入原事务。[意图存储](src/prisma-mcp-catalog-goal-intents.ts) · [Rental 校验生产者](../rental-mcp-host/src/original-mcp-catalog-goal-intent-authority.ts)
+
+五份 SQL 是原结构材料，尚未注册为完整的公共数据能力发行。新空库的依赖顺序为 OAuth → read-budget → catalog-goal → catalog-goal-intent → catalog-goal-adoption；目标结构中的 ALTER 依赖前两份，采用结构依赖意图表，不能按文件名字典序安装。已有库须先观察原表、索引、外键和迁移账，保留原迁移身份及凭据/目标/调用记录，再核定增量和发布锁；不能重复执行初始化 DDL 或凭源码 hash 宣称物理结构已就绪。正式能力包还需按 [数据发行合同](../core-contracts/src/data-capability.ts)补齐 schema 文件、源提交、归档摘要、迁移清单与宿主观察接线；本包构造器不执行迁移。
+
 ### 原调用键只读核对
 
 原 Web 可显式声明 readCallReceipt / readCallList 路，并供给 receiptTraffic 独立原政策源。当前本人在短事务定位原 grant / call，后续独立事务按原 grant / 身份 → goal → call 核完整关联。租户管理权不自动取得他人 call，游标只表示当前范围的位置。本人页最多 20 条、ASCII callId 顺序与 limit+1，翻页保留非完整历史快照语义。[原收据 store](src/prisma-mcp-read-receipt.ts) · [原 grant 工厂](../rental-mcp-host/src/original-mcp-grant-control-plane.ts)
@@ -175,7 +181,7 @@ Native 读取复用原领域与仓储算法，活动 owner、当前授权及 sig
 
 订单费用只读原关联快照，缺金额、报价、检查或支付来源保留原缺项与 references_only / complete:false 状态，支付缺记录与未支付分别核定。检查分页保留 partial / truncated / nextCursor，支付分页保留原金额精度及资金状态，内部读取上限另服从各事实服务。完整订单、附件 / checkout URL、Provider 引用、私人字段和模型重算结果须经所属原释放政策，内部投影不能直接当 MCP wire。
 
-固定映射中的四项原只读码由 createMappedBusinessRead 接入 reader，报价 / 提案保存及批准后建单继续原 R1 / R2 路径。映射版本仅定位运输名称，实际工具版本、schema、权限和就绪证据由原作者提供。[正式映射](src/capability-mapping.ts)
+Rental 固定映射中的四项原只读码由 `@rental-os/rental-mcp-host/capability-mapping` 的 `createMappedBusinessRead` 接入 reader，报价 / 提案保存及批准后建单继续原 R1 / R2 路径。映射版本仅定位运输名称，实际工具版本、schema、权限和就绪证据由原作者提供。[正式映射](../rental-mcp-host/src/capability-mapping.ts)
 
 | 原结果候选出口 | 精确读取与约束 |
 | --- | --- |

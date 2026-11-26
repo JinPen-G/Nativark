@@ -211,7 +211,7 @@ async function verifyBusinessCapabilityMapping(t, mapping) {
 }
 
 test("fixed business mapping keeps public codes and refuses side effects in read construction", async t => {
-  await verifyBusinessCapabilityMapping(t, source("packages/mcp-server/src/capability-mapping.ts"));
+  await verifyBusinessCapabilityMapping(t, source("packages/rental-mcp-host/src/capability-mapping.ts"));
 });
 
 async function verifyPublicClientAuthorization(t, create) {
@@ -2173,10 +2173,23 @@ test("compiled MCP package exports load and serve both eras without source trans
   const emitted = program.emit();
   assert.equal(emitted.emitSkipped, false);
   assert.equal(emitted.diagnostics.length, 0);
+  // Compile the Rental mapping in its own package; its MCP port resolves only
+  // the emitted public declarations, preserving the CJS/ESM package boundary.
+  const rentalRoot = path.join(root, "packages/rental-mcp-host"), stagedRental = path.join(output, "node_modules/@rental-os/rental-mcp-host");
+  fs.mkdirSync(stagedRental, { recursive: true });
+  fs.copyFileSync(path.join(rentalRoot, "package.json"), path.join(stagedRental, "package.json"));
+  const mappingProgram = ts.createProgram([path.join(rentalRoot, "src/capability-mapping.ts")], {
+    ...program.getCompilerOptions(), rootDir: path.join(rentalRoot, "src"), outDir: path.join(stagedRental, "dist"),
+    paths: { ...program.getCompilerOptions().paths, "@rental-os/mcp-server": [path.join(staged, "dist/index.d.ts")] },
+  });
+  const mappingDiagnostics = ts.getPreEmitDiagnostics(mappingProgram);
+  assert.equal(mappingDiagnostics.length, 0, mappingDiagnostics.map(d => ts.flattenDiagnosticMessageText(d.messageText, "\n")).join("\n"));
+  const mappingEmitted = mappingProgram.emit();
+  assert.equal(mappingEmitted.emitSkipped, false); assert.equal(mappingEmitted.diagnostics.length, 0);
   const consumer = path.join(output, "consumer.mts");
   fs.writeFileSync(consumer, [
     'import { createProtectedMcpEndpoint, ResourceAuthorizationError } from "@rental-os/mcp-server";',
-    'import * as businessMapping from "@rental-os/mcp-server/capability-mapping";',
+    'import * as businessMapping from "@rental-os/rental-mcp-host/capability-mapping";',
     'export { businessMapping };',
     'import { createPublicClientAuthorization } from "@rental-os/mcp-server/public-client-authorization";',
     'export { createPublicClientAuthorization };',
@@ -2194,7 +2207,7 @@ test("compiled MCP package exports load and serve both eras without source trans
     'export { assertAuthorizationCodeBinding };',
     'import { createAuthorizationServerMetadata } from "@rental-os/mcp-server/authorization-server-metadata";',
     'export { createAuthorizationServerMetadata };',
-    'import type { McpBusinessReadCode } from "@rental-os/mcp-server/capability-mapping";',
+    'import type { McpBusinessReadCode } from "@rental-os/rental-mcp-host/capability-mapping";',
     'const readCode: McpBusinessReadCode = "rental.catalog.search";',
     'void readCode;',
     'import { createConversationResultRead } from "@rental-os/mcp-server/conversation-result-read";',

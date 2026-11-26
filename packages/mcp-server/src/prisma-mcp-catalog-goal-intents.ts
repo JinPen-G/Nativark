@@ -5,7 +5,6 @@
  * automatic rollover/retry, listener or model-facing goal management tool. */
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { aiCatalogReadInputSchema } from '@rental-os/shared';
 import { captureMcpReadInput } from './persistent-read-accounting.js';
 import { snapshotJson, snapshotJsonFields } from './json-snapshot.js';
 import { captureOriginalMcpCatalogGoal } from './prisma-mcp-catalog-goals.js';
@@ -23,6 +22,9 @@ export interface OriginalCatalogGoalIntentAudit {
   goalId: string; recordHash: string; revision: 1 | 2; state: 'pending' | 'accepted' | 'denied';
 }
 export interface OriginalCatalogGoalIntentAuthority<Native extends OAuthSqlTransaction> {
+  /** Fixed business owner's synchronous validator over the captured immutable
+   * input. Exact true is required; this validates shape, never current authority. */
+  acceptsNextInput(input: unknown): boolean;
   /** Must own and CONFIRM its original current-grant/Auth/Guard transaction.
    * Locate separately, then grant -> Auth -> goal. No model identity or fake token. */
   withCurrent<T>(browser: Request, request: { operationKey: string; nextInput: unknown }, signal: AbortSignal,
@@ -75,10 +77,10 @@ function principal(raw: unknown): OAuthConsentBrowserPrincipal {
   return Object.freeze(p) as unknown as OAuthConsentBrowserPrincipal;
 }
 const fixedOwner = (p: OAuthConsentBrowserPrincipal) => ({ userId: p.userId, tenantId: p.tenantId, workspaceId: p.workspaceId, audience: p.audience, sessionId: p.sessionId });
-const request = (raw: unknown) => {
+const request = (raw: unknown, acceptsNextInput: (input: unknown) => boolean) => {
   const r = object(raw, ['operationKey','nextInput']); if (!key(r.operationKey)) throw fail('invalid');
-  const input = captureMcpReadInput(r.nextInput), parsed = aiCatalogReadInputSchema.safeParse(input.input);
-  if (!parsed.success || parsed.data.limit > 50) throw fail('invalid');
+  const input = captureMcpReadInput(r.nextInput);
+  if (acceptsNextInput(input.input) !== true) throw fail('invalid');
   return Object.freeze({ operationKey: r.operationKey, nextInput: input.input, nextInputHash: input.inputHash });
 };
 type Draft = { operationKey: string; owner: ReturnType<typeof fixedOwner>; goal: OriginalCatalogGoal; nextInputHash: string; policyHash: string; expiresAt: number };
@@ -100,8 +102,10 @@ export function createPrismaMcpCatalogGoalIntents<Native extends OAuthSqlTransac
   const routes = urls.map(raw => { const u = new URL(raw);
     if (u.protocol !== 'https:' || u.href !== raw || u.username || u.password || u.search || u.hash || raw.length > 2048) throw fail('invalid'); return u; });
   if (new Set(routes.map(u => u.origin)).size !== 1 || new Set(routes.map(u => u.pathname)).size !== routes.length
-    || typeof authority?.withCurrent !== 'function' || typeof authority.withOwner !== 'function' || typeof authority.audit !== 'function') throw fail('unavailable');
+    || typeof authority?.withCurrent !== 'function' || typeof authority.withOwner !== 'function' || typeof authority.audit !== 'function'
+    || typeof authority.acceptsNextInput !== 'function') throw fail('unavailable');
   const current = authority.withCurrent.bind(authority),owner = authority.withOwner.bind(authority),audit = authority.audit.bind(authority);
+  const acceptsNextInput = authority.acceptsNextInput.bind(authority);
   if (authority.requireNewWorkIn !== undefined && typeof authority.requireNewWorkIn !== 'function') throw fail('unavailable');
   const requireNewWork = authority.requireNewWorkIn?.bind(authority);
   const enabledAdoption = config.adoptEndpoint !== undefined;
@@ -157,7 +161,7 @@ export function createPrismaMcpCatalogGoalIntents<Native extends OAuthSqlTransac
   return Object.freeze({
     async prepare(browser: Request, signal: AbortSignal) {
       signal = AbortSignal.any([signal, browser.signal]); let entered = false;
-      try { route(browser, 0); const input = request(await body(browser, signal));
+      try { route(browser, 0); const input = request(await body(browser, signal), acceptsNextInput);
         return await current(browser, input, signal, async (raw, sql, stop) => {
           entered = true; live(sql, stop); const c = checked(raw), existing = await row(sql, input.operationKey, c.principal, stop);
           if (existing) { check(existing, c, input.nextInputHash); await audit(sql, auditInput(existing), stop, true); live(sql, stop); return receipt(existing); }
@@ -178,7 +182,7 @@ export function createPrismaMcpCatalogGoalIntents<Native extends OAuthSqlTransac
       signal = AbortSignal.any([signal, browser.signal]); let entered = false;
       try { route(browser, 1); const v = object(await body(browser, signal), ['operationKey','expectedRevision','decision','nonce']);
         if (!key(v.operationKey) || v.expectedRevision !== 1 || !['accept','deny'].includes(v.decision as string) || typeof v.nonce !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(v.nonce) || Buffer.from(v.nonce, 'base64url').toString('base64url') !== v.nonce) throw fail('invalid');
-        const input = request({ operationKey: v.operationKey, nextInput }), decision = v.decision === 'accept' ? 'accepted' : 'denied', nonce = v.nonce;
+        const input = request({ operationKey: v.operationKey, nextInput }, acceptsNextInput), decision = v.decision === 'accept' ? 'accepted' : 'denied', nonce = v.nonce;
         return await current(browser, input, signal, async (raw, sql, stop) => {
           entered = true; live(sql, stop); const c = checked(raw), saved = await row(sql, input.operationKey, c.principal, stop); if (!saved) throw fail('denied'); check(saved, c, input.nextInputHash);
           const expected = Buffer.from(saved.nonceHash, 'hex'), supplied = createHash('sha256').update(nonce).digest(); if (expected.length !== supplied.length || !timingSafeEqual(expected, supplied)) throw fail('denied');
@@ -205,7 +209,7 @@ export function createPrismaMcpCatalogGoalIntents<Native extends OAuthSqlTransac
         route(browser,3);if (!transition || !prepareAdoption || !readAdoption) throw fail('unavailable');
         const v=object(await body(browser,signal),['operationKey','nextInput','expectedRevision','nonce']);
         if (v.expectedRevision !== 2 || typeof v.nonce !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(v.nonce) || Buffer.from(v.nonce,'base64url').toString('base64url') !== v.nonce) throw fail('invalid');
-        const input=request({ operationKey:v.operationKey,nextInput:v.nextInput }),nonce=v.nonce;
+        const input=request({ operationKey:v.operationKey,nextInput:v.nextInput }, acceptsNextInput),nonce=v.nonce;
         const nonceMatches=(r: Row) => {
           const supplied=createHash('sha256').update(nonce).digest(),expected=Buffer.from(r.nonceHash,'hex');
           if (expected.length !== supplied.length || !timingSafeEqual(expected,supplied)) throw fail('denied');
@@ -259,7 +263,7 @@ export function createPrismaMcpCatalogGoalIntents<Native extends OAuthSqlTransac
       async withAccepted<T>(operationKey: string, nextInput: unknown, browser: Request, signal: AbortSignal,
         consume: (intent: OriginalAcceptedCatalogGoalIntent, goal: OriginalCatalogGoal, native: Native, signal: AbortSignal) => Promise<T>): Promise<T> {
         signal = AbortSignal.any([signal, browser.signal]); route(browser, 2); if (typeof consume !== 'function') throw fail('invalid');
-        const input = request({ operationKey, nextInput });
+        const input = request({ operationKey, nextInput }, acceptsNextInput);
         return current(browser, input, signal, async (raw, sql, stop) => {
           const c = checked(raw), saved = await row(sql, input.operationKey, c.principal, stop); if (!saved || saved.state !== 'accepted') throw fail('denied'); check(saved, c, input.nextInputHash);
           await audit(sql, auditInput(saved), stop, true); live(sql, stop);

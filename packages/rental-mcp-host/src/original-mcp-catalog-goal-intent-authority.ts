@@ -32,6 +32,10 @@ export interface OriginalCatalogGoalIntentVerificationSource {
     goal: OriginalCatalogGoal, operationKey: string, nextInputHash: string, signal: AbortSignal): Promise<OriginalCatalogGoalIntentVerification | undefined>;
 }
 const fail = () => new Error('Original catalog goal intent authority unavailable');
+const acceptsNextInput = (input: unknown): boolean => {
+  const parsed = aiCatalogReadInputSchema.safeParse(input);
+  return parsed.success && parsed.data.limit <= 50;
+};
 export function createOriginalMcpCatalogGoalIntentAuthority(mcp: {
   captureMcpReadInput: typeof captureMcpReadInput; createPrismaMcpCatalogGoals: typeof createPrismaMcpCatalogGoals;
   ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION: typeof ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION;
@@ -127,6 +131,7 @@ export function createOriginalMcpCatalogGoalIntentAuthority(mcp: {
     if (stop.aborted || finalExpiresAt === undefined || finalExpiresAt <= Date.now()/1000) throw fail(); return result;
   };
   return Object.freeze({
+    acceptsNextInput,
     ...(withCore ? { requireNewWorkIn(sql: Prisma.TransactionClient, stop: AbortSignal) {
       const lease = coreLeases.get(sql);
       if (stop.aborted || !lease) throw fail();

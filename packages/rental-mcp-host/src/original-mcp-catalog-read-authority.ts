@@ -9,7 +9,7 @@ import type { AuthService } from '@rental-os/ai-native-server/runtime/rental-ada
 import type { ApiAuthGuard } from '@rental-os/ai-native-server/runtime/rental-adapters/api-auth.guard';
 import type { OriginalMcpOAuthCore } from './original-mcp-oauth-core';
 import type { McpReadAuthority, McpReadAuthorization } from '@rental-os/mcp-server' with { 'resolution-mode': 'import' };
-import type { MCP_BUSINESS_CAPABILITIES } from '@rental-os/mcp-server/capability-mapping' with { 'resolution-mode': 'import' };
+import type { MCP_BUSINESS_CAPABILITIES } from './capability-mapping';
 import type { createPersistentOAuthAccessReader } from '@rental-os/mcp-server/persistent-oauth-tokens' with { 'resolution-mode': 'import' };
 import type { captureMcpReadInput } from '@rental-os/mcp-server/persistent-read-accounting' with { 'resolution-mode': 'import' };
 import type { OriginalMcpCatalogReadContext } from './original-mcp-read-context';

@@ -122,7 +122,16 @@ async function compiled() {
   };
   // Compile the OAuth/read-budget persistence adapters and actual dependency
   // closure, not unrelated business readers or shared; never overwrite common dist.
-  check(ts.createProgram([path.join(source, "src/original-traffic-meter.ts"), path.join(source, "src/prisma-oauth-store.ts"), path.join(source, "src/prisma-mcp-read-budget.ts"), path.join(source, "src/prisma-mcp-read-accounting.ts"), path.join(source, "src/prisma-mcp-read-bindings.ts"), path.join(source, "src/prisma-mcp-catalog-goals.ts"), path.join(source, "src/prisma-mcp-read-goal-settlement.ts"), path.join(source, "src/capability-mapping.ts")], options));
+  check(ts.createProgram([path.join(source, "src/original-traffic-meter.ts"), path.join(source, "src/prisma-oauth-store.ts"), path.join(source, "src/prisma-mcp-read-budget.ts"), path.join(source, "src/prisma-mcp-read-accounting.ts"), path.join(source, "src/prisma-mcp-read-bindings.ts"), path.join(source, "src/prisma-mcp-catalog-goals.ts"), path.join(source, "src/prisma-mcp-read-goal-settlement.ts"), path.join(source, "src/index.ts")], options));
+  // Rental owns the mapping artifact; use the public MCP declarations across
+  // package roots instead of compiling Rental sources into the framework.
+  const rentalRoot = path.join(root, "packages/rental-mcp-host"), stagedRental = path.join(output, "node_modules/@rental-os/rental-mcp-host");
+  fs.mkdirSync(stagedRental, { recursive: true });
+  fs.copyFileSync(path.join(rentalRoot, "package.json"), path.join(stagedRental, "package.json"));
+  check(ts.createProgram([path.join(rentalRoot, "src/capability-mapping.ts")], {
+    ...options, rootDir: path.join(rentalRoot, "src"), outDir: path.join(stagedRental, "dist"),
+    paths: { ...options.paths, "@rental-os/mcp-server": [path.join(staged, "dist/index.d.ts")] },
+  }));
   const consumer = path.join(output, "consumer.mts");
   fs.writeFileSync(consumer, [
     'export { createOriginalMcpTrafficMeter, originalMcpTrafficClass } from "@rental-os/mcp-server/original-traffic-meter";',
@@ -134,7 +143,7 @@ async function compiled() {
     'export { createPrismaMcpReadBindings } from "@rental-os/mcp-server/prisma-mcp-read-bindings";',
     'export { createPrismaMcpCatalogGoals, captureOriginalMcpCatalogGoal, ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION } from "@rental-os/mcp-server/prisma-mcp-catalog-goals";',
     'export { createPrismaMcpReadGoalSettlement } from "@rental-os/mcp-server/prisma-mcp-read-goal-settlement";',
-    'export { MCP_BUSINESS_CAPABILITIES } from "@rental-os/mcp-server/capability-mapping";',
+    'export { MCP_BUSINESS_CAPABILITIES } from "@rental-os/rental-mcp-host/capability-mapping";',
     'import { createPrismaMcpReadBindings } from "@rental-os/mcp-server/prisma-mcp-read-bindings";',
     'import type { OriginalMcpReadBindingAuthority, OriginalMcpReadGoalOwner } from "@rental-os/mcp-server/prisma-mcp-read-bindings";',
     'interface ScopedOwner extends OriginalMcpReadGoalOwner { dataScope: "organization"; }',
