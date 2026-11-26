@@ -12,6 +12,9 @@ import { isGatewayConfig } from '../gateway-contract-validation';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { modelUsageSchema } from '../model-gateway.ports';
 import { CountCallHistoryReader, type CallHistoryAnchor } from './count-call-history.reader';
+import { getRequestIdentity } from '@rental-os/platform-server/request-identity';
+import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
+import { createTenantModelConfigurationTransactions } from '../tenant-model-config-transactions';
 
 const id = z.string().min(1).max(191), key = z.string().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/u);
 const currency = z.string().regex(/^[A-Z]{3}$/u);
@@ -165,8 +168,19 @@ export class AiCreditService {
   private async call<T>(authorization: string | undefined, platform: boolean,
     work: (actor: Awaited<ReturnType<AiCreditService['identity']>>, recheck: () => Promise<void>) => Promise<T>, manage = false, write = false) {
     try {
+      const selected = hasRentalBusinessTenantFence(), source = getRequestIdentity(), original = digest(source ?? null);
+      const sameRequest = () => {
+        if (selected && (!source || getRequestIdentity() !== source || digest(source) !== original)) fail('AI_ACCESS_DENIED', 403);
+      };
       const actor = await this.identity(authorization, platform, manage), initial = digest(actor);
-      const recheck = async () => { if (digest(await this.identity(authorization, platform, manage)) !== initial) fail('AI_ACCESS_DENIED', 403); };
+      sameRequest();
+      if (selected && (source?.userId !== actor.userId || source.tenantId !== actor.tenantId
+        || source.workspaceId !== actor.workspaceId || source.isSaasAdmin !== platform)) fail('AI_ACCESS_DENIED', 403);
+      const recheck = async () => {
+        sameRequest();
+        if (digest(await this.identity(authorization, platform, manage)) !== initial) fail('AI_ACCESS_DENIED', 403);
+        sameRequest();
+      };
       const result = await work(actor, recheck);
       try { await recheck(); }
       catch (error) {
@@ -183,9 +197,32 @@ export class AiCreditService {
       fail('AI_RESOURCE_UNAVAILABLE', 503);
     }
   }
-  private async write<T>(work: (tx: Tx) => Promise<T>): Promise<T> {
+  private async write<T>(work: (tx: Tx) => Promise<T>, tenant?: {
+    actor: Awaited<ReturnType<AiCreditService['identity']>>;
+    authorization: string | undefined;
+    recheck(): Promise<void>;
+  }): Promise<T> {
+    const selected = !!tenant && hasRentalBusinessTenantFence();
+    const participant = selected ? createTenantModelConfigurationTransactions({ transactions: { auth: this.auth },
+      credentials: { current: async () => {
+        await tenant!.recheck();
+        if (!tenant!.authorization) fail('AI_ACCESS_DENIED', 403);
+        return { authorization: tenant!.authorization, audience: 'operator', requestId: 'credit-settings' };
+      } } }) : undefined;
     let completed = false;
-    try { return await this.db.$transaction(async tx => { const result = await work(tx); completed = true; return result; },
+    try { return await this.db.$transaction(async tx => {
+      if (selected && !tenant!.actor.workspaceId) fail('AI_ACCESS_DENIED', 403);
+      // The original allowance/request transaction owns Auth/Tenant/Core first.
+      // Only a confirmed commit may publish its original operation receipt.
+      const lease = await participant?.begin(tx, { actorId: tenant!.actor.userId,
+        tenantId: tenant!.actor.tenantId, workspaceId: tenant!.actor.workspaceId! });
+      try {
+        const result = await work(tx);
+        if (selected) { await tenant!.recheck(); await lease!.revalidate(); }
+        completed = true;
+        return result;
+      } finally { lease?.close(); }
+    },
       { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 }); }
     catch (error) { if (!completed && error instanceof HttpException) throw error; fail('AI_RESULT_UNKNOWN'); }
   }
@@ -242,7 +279,7 @@ export class AiCreditService {
         return present(await tx.aiTenantAiCreditRequest.create({ data: { id: randomUUID(), tenantId: actor.tenantId,
           requestedBy: actor.userId, operationKey: input.operationKey, requestHash, currency: input.currency,
           requestedAmount: input.amount }, include: requestInclude }));
-      });
+      }, { actor, authorization, recheck });
     }, false, true);
   }
   async receipt(authorization: string | undefined, raw: unknown) {
@@ -298,7 +335,7 @@ export class AiCreditService {
           userId: actor.userId, action: 'ai.credit.allocate', detail: {
             kind: 'ai_credit_allocation', currency: input.currency, commandHash, result } } });
         return result;
-      });
+      }, { actor, authorization, recheck });
     }, false, true);
   }
   async allocationReceipt(authorization: string | undefined, raw: unknown) {

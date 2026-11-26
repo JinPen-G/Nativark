@@ -53,6 +53,8 @@ Core 停用后的已有回答及模型结果核对，由宿主 [只读处理器�
 
 [价格历史工厂](src/runtime/budget/gateway-pricing-request.composition.ts)只按当前管理权限读取原价格、采用和输入上限依据，输入上限另核同一调用主体、空间和内容摘要。宿主以精确处理器闭集保留停新/Core停用后的原收据读取，撤权或身份变化仍拒绝。设置和历史接口均复用原 shared/DTO/OpenAPI；它们的挂载不启用模型执行，也不替代租户 AI 服务设置中的平台额度申请与空间分配。
 
+当前租户页面的额度申请、空间分配及调用记录经[租户额度 Controller](../../apps/rental-api/src/ai-credit-http.ts)进入[原额度服务](src/runtime/budget/ai-credit.service.ts)。所选宿主绑定最初 Guard 的同一 ALS 身份，申请与分配在原事务中复用[Auth/Tenant/Core 参加者](src/runtime/tenant-model-config-transactions.ts)，提交前复验权限，丢应答只核原操作收据。历史调用在有界快照中读取原 invocation、usage 和账务依据，BYOK 不生成金额，缺用量不补零，查询和游标继续核当前租户及空间范围。平台批准保留独立管理授权与原增额语义。
+
 Rental 的通知缓存和草稿仓储通过 `@rental-os/rental-core/notification-draft` 消费以下组合：
 
 ```ts

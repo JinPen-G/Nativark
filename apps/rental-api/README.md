@@ -16,6 +16,7 @@
 | [ai-client-http.ts](src/ai-client-http.ts)、[ai-client-request.ts](src/ai-client-request.ts) | 网站和小程序各五十一个原客户操作的明确挂载，覆盖目标与候选、报价参数准备/明确确认/原收据、Booking草稿/选择/页面提交、订单导航、资料、Task、模型及取消收尾；仅接受同一 Guard/客户准入绑定的实际请求，保留原方法、收据、响应状态和中止语义。 |
 | [ai-inspection-http.ts](src/ai-inspection-http.ts) | 逐条挂载员工原检查的二十二个操作，复用原 Controller；识别 Task 的十四个操作及两类账务操作由原 Controller 承接，读取、保存候选、人工确认与履约提交分别核权。 |
 | [ai-budget-http.ts](src/ai-budget-http.ts) | 挂载原预算管理的十一个租户方法；初始化、修改、配置刷新和明确采用平台费率进入原 Auth/Tenant/Core 事务，保留政策 CAS 及原操作收据。价格与输入上限的三个历史读取由原只读 Controller 承接。 |
+| [ai-credit-http.ts](src/ai-credit-http.ts) | 当前租户 AI 服务设置的六个额度与调用记录操作；申请和空间上限分配复用原服务、账本与收据，并在同一事务内核 Auth/Tenant/Core。平台批准由平台管理入口单独办理。 |
 | [database.ts](src/database.ts) | 当前公共 41 模型与 Rental 121 模型组成宿主 Client，公共数据库令牌使用同一连接池；生成物仅归本宿主。唯一请求入口将公共及 Core 适配使用的官方 JSON 空值映射为所选 Client 的同义单例，不另开连接或改动调用方事务。 |
 | [http-application-views.ts](src/http-application-views.ts) | 向 HTTP 注入原服务方法，隐藏 Nest 生命周期钩子，避免同一业务实例被多个模块重复启动。 |
 | [lifecycle.ts](src/lifecycle.ts) | 唯一初始化、预热、配货/到期/文件/限流作业与数据库退出负责人；停止新请求和作业，等待原 HTTP 处理器及四作业参加者完成，再断开连接，排空失败不提前断库。 |
@@ -56,6 +57,8 @@ Core 包目录、预检、版本选择和候选准备的四个原 Controller 挂
 公共、Core 管理、Core 包管理与 Rental 文档在唯一 OpenAPI 入口组合，操作均对应实际挂载处理器。客户头像读/写及员工检查证据绑定已采用同源媒体合同；无 AI 宿主的检查绑定保留明确 503。原未挂的品类选项路径保留为未挂说明；原宽泛合同按 `RENTAL_HTTP_SCHEMA_GAPS` 明确标为 `incomplete`。这些缺口不伪造请求/响应字段，也不将路由挂载视为当前部署或业务授权通过。
 
 AI 选装宿主通过 [原收据选择器](src/ai-http-policy.ts) 从实际处理器生成只读闭集，并由 [AI 装配](src/ai-assembly.ts) 交给同一 Rental 准入。租户 Core 停用或部署停新后，只允许原操作、回答及结果核对；原 Task/Run/键、对象权限、成员分配、绑定和实际数据可用性仍须通过。正文摘要绑定整个读取过程，返回前再次复核。创建任务、提交输入、批准、启动或恢复执行器不属于此集合，不能借只读恢复派发模型。
+
+租户 AI 服务设置中的[平台额度](../../packages/ai-native-admin/src/platform-model-settings/AiCreditSettings.tsx)和[调用记录](../../packages/ai-native-admin/src/platform-model-settings/AiCallRecords.tsx)使用同一原租户额度服务。额度申请、空间分配在原 Serializable 事务中先锁当前 Auth/Tenant/Core，再核额度行、CAS 和操作键，提交前复验当前权威。提交应答丢失后沿原键读取收据。调用记录只返回当前租户有权查看的最少元数据，平台金额须有原账依据，BYOK 仅显示用量，缺用量保持未知。停新或 Core 停用仅保留申请收据、分配收据和调用记录，仍要求当前会话、租户管理员及成员分配有效。
 
 ## 请求、事务与响应
 
