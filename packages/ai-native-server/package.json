@@ -53,6 +53,9 @@
       "gateway-admission": [
         "dist/gateway-admission.d.ts"
       ],
+      "public-tenant-gateway": [
+        "dist/public-tenant-gateway.d.ts"
+      ],
       "public-tenant-task-authority": [
         "dist/public-tenant-task-authority.d.ts"
       ],
@@ -138,6 +141,10 @@
     "./gateway-admission": {
       "types": "./dist/gateway-admission.d.ts",
       "default": "./dist/gateway-admission.js"
+    },
+    "./public-tenant-gateway": {
+      "types": "./dist/public-tenant-gateway.d.ts",
+      "default": "./dist/public-tenant-gateway.js"
     },
     "./public-tenant-task-authority": {
       "types": "./dist/public-tenant-task-authority.d.ts",

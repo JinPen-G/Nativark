@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { Prisma } from '@prisma/client';
 import type { AiExecutionContext } from '@rental-os/platform-contracts/ai-gateway';
 import type { AiUsageAssociationDraft, AiUsageSettingsDraft } from '@rental-os/platform-contracts/ai-usage';
 import { isAiStepExecutionContext } from '../../execution-context-validation';
@@ -17,10 +18,8 @@ function fingerprint(value: unknown): string {
 const same = (a: unknown, b: unknown) => fingerprint(a) === fingerprint(b);
 const identifier = (value: unknown, max = 191): value is string => typeof value === 'string' && value.length <= max && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value);
 
-/** Explicitly assembled server service. Every authority call is action-specific.
- * Revalidation in the DB transaction is sequential, not an atomic auth/DB lock.
- * Gateway still owns the final dispatch winner and must reauthorize itself.
- */
+/** Action-specific budget authority. A public Native recheck uses its owning
+ * transaction. Gateway still owns the dispatch winner and final authorization. */
 export class BudgetService {
   constructor(private readonly repository: BudgetTransactionRepository, private readonly authority: BudgetAuthority,
     private readonly quotes: BudgetQuotePort, private readonly evidence: BudgetEvidencePort, private readonly clock: () => Date = () => new Date()) {
@@ -37,9 +36,10 @@ export class BudgetService {
       || !association.config || !identifier(association.config.configId) || !Number.isSafeInteger(association.config.configRevision) || association.config.configRevision < 1
       || !association.scope || !['platform', 'tenant', 'workspace'].includes(association.scope.kind)) throw new BudgetError('INVALID');
   }
-  private async authorize(action: BudgetAction, resource: { association?: AiUsageAssociationDraft; reservationId?: string; policy?: BudgetPolicyKey }) {
+  private async authorize(action: BudgetAction, resource: { association?: AiUsageAssociationDraft; reservationId?: string; policy?: BudgetPolicyKey },
+    transaction?: Prisma.TransactionClient) {
     let grant: BudgetGrant;
-    try { grant = structuredClone(await this.authority.resolve(action, structuredClone(resource))); }
+    try { grant = structuredClone(await this.authority.resolve(action, structuredClone(resource), transaction)); }
     catch { throw new BudgetError('FORBIDDEN'); }
     const now = this.now(), context = grant?.context;
     if (!grant || !isAiStepExecutionContext(context) || typeof grant.entitled !== 'boolean'
@@ -52,8 +52,8 @@ export class BudgetService {
   }
   private async session(action: BudgetAction, resource: { association?: AiUsageAssociationDraft; reservationId?: string; policy?: BudgetPolicyKey }) {
     const initial = await this.authorize(action, resource);
-    return { ...initial, revalidate: async () => {
-      const current = await this.authorize(action, resource);
+    return { ...initial, revalidate: async (transaction?: Prisma.TransactionClient) => {
+      const current = await this.authorize(action, resource, transaction);
       if (current.identityHash !== initial.identityHash) throw new BudgetError('FORBIDDEN');
     } };
   }

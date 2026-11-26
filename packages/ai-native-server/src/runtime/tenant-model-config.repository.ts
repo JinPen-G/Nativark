@@ -45,6 +45,17 @@ export function checkedTenantModelRecord(value: unknown): TenantModelRecord {
 const select = { tenantId: true, mode: true, revision: true, serviceEnabled: true, settings: true, credentialsEncrypted: true } satisfies Prisma.AiTenantModelConfigurationSelect;
 type TenantModelRepository = TenantModelConfigPorts['repository'];
 
+/** Current stored settings only. No legacy migration or assumed default. */
+export async function readStoredTenantModelConfiguration(db: Pick<PrismaClient, 'aiTenantModelConfiguration'>, tenantId: string) {
+  const row = await db.aiTenantModelConfiguration.findUnique({ where: { tenantId }, select });
+  if (!row) return null;
+  if (row.tenantId !== tenantId) throw new ModelGatewayError('FORBIDDEN');
+  return checkedTenantModelRecord({ tenantId: row.tenantId, revision: row.revision, mode: row.mode,
+    ...(row.serviceEnabled != null ? { serviceEnabled: row.serviceEnabled } : {}),
+    ...(row.settings !== null ? { settings: row.settings } : {}),
+    ...(row.credentialsEncrypted !== null ? { credentialsEncrypted: row.credentialsEncrypted } : {}) });
+}
+
 /** Server-only storage port, not an authorization boundary. Its caller must use
  * TenantModelConfigService with fresh action authority. No startup migration,
  * plaintext import, provider fallback or test-success inference is performed.
@@ -80,13 +91,9 @@ export class PrismaTenantModelConfigRepository implements TenantModelRepository 
   }
   async read(value: string, legacy?: LegacyModelConfigurationBasis): Promise<TenantModelRecord | null> {
     const tenantId = this.tenant(value);
-    const row = await this.db.aiTenantModelConfiguration.findUnique({ where: { tenantId }, select });
-    if (!row) { await this.assertNoUnconvertedLegacy(tenantId, legacy); return null; }
-    if (row.tenantId !== tenantId) throw new ModelGatewayError('FORBIDDEN');
-    return checkedTenantModelRecord({ tenantId: row.tenantId, revision: row.revision, mode: row.mode,
-      ...(row.serviceEnabled != null ? { serviceEnabled: row.serviceEnabled } : {}),
-      ...(row.settings !== null ? { settings: row.settings } : {}),
-      ...(row.credentialsEncrypted !== null ? { credentialsEncrypted: row.credentialsEncrypted } : {}) });
+    const stored = await readStoredTenantModelConfiguration(this.db, tenantId);
+    if (!stored) await this.assertNoUnconvertedLegacy(tenantId, legacy);
+    return stored;
   }
   async compareAndSwap(value: string, expectedRevision: number, nextValue: TenantModelRecord, _caller?: GatewayContext,
     _operation?: ModelConfigurationOperationWrite, legacy?: LegacyModelConfigurationBasis): Promise<boolean> {

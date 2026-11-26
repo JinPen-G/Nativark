@@ -5,14 +5,16 @@ import { inspectPcmWav, inspectBoundedImage } from '../modules/media';
 import type { ResolvedNativeToolResult } from './model-input/native-tool-result.ports';
 /** Internal implementation ports, NOT the centrally maintained AIN-C03 wire contract. */
 export type ModelFeature = "tools" | "structuredOutput" | "streaming" | "image" | "audio" | "reasoning" | "embedding";
-/** Explicit SaaS/platform gateway principal, never an absent tenantId silently
- * interpreted as platform work. Discriminate by field presence: platform
- * contexts carry actorId only, workspace consumers keep the legacy shape. */
+/** Internal principal binding, not an HTTP identity. Keep the old workspace
+ * and SaaS shapes. A missing workspace does not make a legacy call tenant-wide. */
 export interface WorkspaceGatewayContext { tenantId: string; workspaceId: string; actorId: string; }
 export interface PlatformGatewayContext { actorId: string; }
-export type GatewayContext = WorkspaceGatewayContext | PlatformGatewayContext;
+export interface TenantGatewayContext { scopeKind: 'TENANT'; tenantId: string; actorId: string; }
+export type GatewayContext = WorkspaceGatewayContext | PlatformGatewayContext | TenantGatewayContext;
+const tenantContextId = z.string().min(1).max(128).regex(/^[\w.:-]+$/u);
+export const tenantGatewayContextSchema = z.object({ scopeKind: z.literal('TENANT'), tenantId: tenantContextId, actorId: tenantContextId }).strict();
 export function isPlatformGatewayContext(value: Readonly<GatewayContext>): value is PlatformGatewayContext {
-  return !('tenantId' in value) && !('workspaceId' in value) && typeof value.actorId === 'string' && value.actorId.length > 0;
+  return !('tenantId' in value) && !('workspaceId' in value) && !('scopeKind' in value) && typeof value.actorId === 'string' && value.actorId.length > 0;
 }
 /** Content bytes, not provider tokens or the serialized HTTP envelope. Keep
  * the existing media ceiling for every ingress, including text-only calls. */

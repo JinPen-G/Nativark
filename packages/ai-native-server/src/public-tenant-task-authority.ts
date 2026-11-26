@@ -141,7 +141,18 @@ export function createPublicTenantTaskAuthority(input: {
           grants.set(tx, nativeActions);
           return { verifyReference: verify, revalidate: () => verify(reference), close: () => { grants.delete(tx); } };
         } });
-      return Object.freeze({ identities, actions, transaction, resourceScopes: Object.freeze(resourceScopes), close: binding.close });
+      // Original accounting has its own action permission and can outlive a
+      // run's write lease. Its enclosing ledger transaction still uses the
+      // original signed principal and same Native connection.
+      const principalOn = async (tx: Tx) => {
+        active();
+        if (!tx || '$transaction' in tx) throw denied();
+        const lease = await principals.lock(tx, { tenantId: tenantId!, subjectId: userId!, audience: 'operator' }, tenantId!);
+        await available(tx);
+        return current(project(await lease.revalidate()));
+      };
+      return Object.freeze({ identities, actions, transaction, principalOn, assertCurrent: active,
+        resourceScopes: Object.freeze(resourceScopes), close: binding.close });
     } catch (error) { binding.close(); throw error; }
   } });
 }

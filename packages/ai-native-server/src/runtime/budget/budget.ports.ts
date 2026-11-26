@@ -1,5 +1,6 @@
 import type { AiExecutionContext } from '@rental-os/platform-contracts/ai-gateway';
 import type { AiUsageAssociationDraft, AiUsageQuantityDraft, AiUsageSettingsDraft } from '@rental-os/platform-contracts/ai-usage';
+import type { Prisma } from '@prisma/client';
 
 export type BudgetAction = 'settings_read' | 'settings_write' | 'reserve' | 'dispatch' | 'read' | 'settle' | 'release' | 'unknown' | 'reconcile';
 /** Original reservation lifecycle only. These actions cannot admit a new call;
@@ -24,8 +25,10 @@ export interface BudgetGrant {
   entitled: boolean;
 }
 export interface BudgetAuthority {
-  resolve(action: BudgetAction, resource: Readonly<{ association?: AiUsageAssociationDraft; reservationId?: string; policy?: BudgetPolicyKey }>): Promise<BudgetGrant>;
+  resolve(action: BudgetAction, resource: Readonly<{ association?: AiUsageAssociationDraft; reservationId?: string; policy?: BudgetPolicyKey }>,
+    transaction?: Prisma.TransactionClient): Promise<BudgetGrant>;
 }
+export type BudgetRevalidate = (transaction?: Prisma.TransactionClient) => Promise<void>;
 export interface BudgetReserveCommand {
   association: AiUsageAssociationDraft;
   callId: string;
@@ -66,13 +69,13 @@ export interface BudgetEvidencePort {
 export interface BudgetTransactionRepository {
   settings(key: BudgetPolicyKey): Promise<BudgetPolicy | null>;
   saveSettings(key: BudgetPolicyKey, settings: AiUsageSettingsDraft, expectedRevision: number, revalidate: () => Promise<void>, operation?: BudgetSettingsOperation): Promise<BudgetPolicy>;
-  reserve(quote: BudgetQuote, command: BudgetReserveCommand, identityHash: string, revalidate: () => Promise<void>): Promise<BudgetRecord>;
+  reserve(quote: BudgetQuote, command: BudgetReserveCommand, identityHash: string, revalidate: BudgetRevalidate): Promise<BudgetRecord>;
   get(id: string, association: AiUsageAssociationDraft): Promise<BudgetRecord | null>;
   /** Exact original ledger event only. Optional for legacy adapters; absence
    * cannot be inferred from a current balance or by replaying mutate. */
-  readMutation?(record: BudgetRecord, input: { action: 'release' | 'reconcile'; eventKey: string; usage?: BudgetUsageEvidence }, revalidate: () => Promise<void>): Promise<BudgetRecord | null>;
+  readMutation?(record: BudgetRecord, input: { action: 'release' | 'reconcile'; eventKey: string; usage?: BudgetUsageEvidence }, revalidate: BudgetRevalidate): Promise<BudgetRecord | null>;
   /** All mutations and ledger events are one DB transaction. No blind retry. */
-  mutate(record: BudgetRecord, input: { action: 'dispatch' | 'settle' | 'release' | 'unknown' | 'reconcile'; eventKey: string; usage?: BudgetUsageEvidence; reason?: string }, revalidate: () => Promise<void>): Promise<BudgetRecord>;
+  mutate(record: BudgetRecord, input: { action: 'dispatch' | 'settle' | 'release' | 'unknown' | 'reconcile'; eventKey: string; usage?: BudgetUsageEvidence; reason?: string }, revalidate: BudgetRevalidate): Promise<BudgetRecord>;
 }
 export class BudgetError extends Error {
   constructor(readonly code: 'INVALID' | 'FORBIDDEN' | 'UNAVAILABLE' | 'REVISION_CONFLICT' | 'IDEMPOTENCY_CONFLICT' | 'EXHAUSTED' | 'PENDING_RECONCILIATION') { super(code); }

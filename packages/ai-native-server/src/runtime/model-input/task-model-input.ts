@@ -8,6 +8,8 @@ import { requestFingerprint } from '@rental-os/platform-contracts/request-finger
 import { gatewayBudgetPrincipal, gatewayPlatformBudgetPrincipal } from '../budget/gateway-budget-principal';
 import { nativeToolResultReferenceSchema, nativeToolResultIntentFingerprint } from './native-tool-result.ports';
 import { taskModelDisplayWitnessSchema, inspectTaskModelDisplayInput, withoutTaskModelDisplayMessages } from './task-model-display-witness';
+import { taskModelInputBindingSchema } from './task-model-input-binding';
+export { taskModelIdentity } from './task-model-input-binding';
 
 export const TASK_TEXT_MODEL_TOOL = AI_TEXT_MODEL_STEP_CODE;
 export const TASK_IMAGE_MODEL_TOOL = AI_IMAGE_MODEL_STEP_CODE;
@@ -67,14 +69,9 @@ const audioMediaReference = audioReference.extend({ mediaType: z.literal('audio/
 export const taskImageMediaSchema = z.array(imageMediaReference).min(1).max(8);
 export const taskAudioMediaSchema = z.array(audioMediaReference).min(1).max(8);
 export const taskModelMediaSchema = z.array(z.union([imageMediaReference, audioMediaReference])).min(1).max(8);
-const storedSchema = z.object({ mode: z.literal('invoke'), intent: z.unknown(), configuration: z.unknown(),
-  priceVersion: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u), routingHash: hash, identityHash: hash,
+const storedSchema = taskModelInputBindingSchema.extend({ mode: z.literal('invoke'),
   structuredSchemaHash: hash.optional(),
   media: taskModelMediaSchema.optional(), displayWitness: taskModelDisplayWitnessSchema.optional() }).strict();
-
-export function taskModelIdentity({ requestId: _, authorizedAt: __, ...context }: AiExecutionContext) {
-  return requestFingerprint(context);
-}
 
 export function parseTaskModelInput(value: unknown, policy: TaskModelPolicy) {
   policy = taskModelPolicy(policy);

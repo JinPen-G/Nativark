@@ -16,8 +16,8 @@ export function assertBudgetPolicyBinding(quote: BudgetQuote, sceneCode: string)
     if (association.config.serviceMode === 'tenant_managed' && association.scope.kind !== 'platform'
       && quote.quantity.unit === 'calls' && consumer.sceneCode === byokMeterScene(sceneCode, association)) {
       expected = () => byokMeterScene(sceneCode, association);
-    } else if (association.config.serviceMode === 'platform_managed' && association.scope.kind === 'workspace'
-      && quote.quantity.unit === 'money' && consumer.scopeKind === 'WORKSPACE'
+    } else if (association.config.serviceMode === 'platform_managed' && association.scope.kind !== 'platform'
+      && quote.quantity.unit === 'money' && consumer.scopeKind === association.scope.kind.toUpperCase()
       && consumer.sceneCode === platformCreditScene(sceneCode, association)) {
       expected = kind => kind === 'PLATFORM' ? sceneCode : platformCreditScene(sceneCode, association);
     } else throw new BudgetError('INVALID');

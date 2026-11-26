@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { SECRET_BOX_ENVELOPE_PATTERN, type SecretBox } from '@rental-os/platform-server/secret-box';
 import type { AiScopeRepository } from '../runtime/ai-scope.repository';
 import type { AiProfileCapability, AiProviderProfileRecord } from '../runtime/provider-profile.ports';
-import { ModelGatewayError, type GatewayContext } from '@rental-os/platform-server/ai-gateway';
+import { ModelGatewayError, isPlatformGatewayContext, tenantGatewayContextSchema, type GatewayContext } from '@rental-os/platform-server/ai-gateway';
 import type { GatewayConnectionResolver } from '@rental-os/platform-server/ai-gateway';
 import { capabilityNameSchema, capabilityProfileFingerprint } from '../runtime/capability-verification';
 import { normalizeTenantModelBaseUrl } from '../runtime/tenant-model-config.service';
@@ -236,7 +236,7 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
   }
 
   private platformInvocationGate(context: GatewayContext, profile: AiProviderProfileRecord) {
-    if (!('tenantId' in context && 'workspaceId' in context)) {
+    if (isPlatformGatewayContext(context)) {
       // Explicit SaaS platform consumer: the invocation authority resolves the
       // current platform identity; no tenant attribution is consulted.
       return (async () => {
@@ -250,6 +250,27 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
     }
     return null;
   }
+
+  private async tenantConsumer(context: GatewayContext, profile: AiProviderProfileRecord) {
+    if (!('tenantId' in context)) throw new ModelGatewayError('FORBIDDEN');
+    const tenant = tenantGatewayContextSchema.safeParse(context).success;
+    if (!tenant && (!('workspaceId' in context)
+      || [context.tenantId, context.workspaceId, context.actorId].some(v => typeof v !== 'string' || !/^[\w.:-]{1,128}$/u.test(v))))
+      throw new ModelGatewayError('FORBIDDEN');
+    try { await this.authority.invoke(structuredClone(context)); } catch { throw new ModelGatewayError('FORBIDDEN'); }
+    const owner = await this.currentOwner(), { actor, scope, audience } = owner.context;
+    const actorId = actor.kind === 'user' ? actor.userId
+      : actor.kind === 'customer' && audience === 'client' && isAiStepExecutionContext(owner.context) ? actor.customerId
+        : actor.kind === 'automation' && audience === 'automation' && isAiStepExecutionContext(owner.context) ? actor.subjectId : null;
+    const matches = tenant ? scope.kind === 'tenant' && actor.kind === 'user' && audience === 'operator'
+      && owner.consumerScope.kind === 'TENANT' && owner.consumerScope.tenantId === context.tenantId
+      && owner.consumerScope.workspaceId === undefined
+      : 'workspaceId' in context && scope.kind === 'workspace' && scope.workspaceId === context.workspaceId;
+    if (!matches || actorId !== context.actorId || scope.kind === 'platform' || scope.tenantId !== context.tenantId
+      || owner.configurationScope.kind !== 'PLATFORM' || owner.configurationScope.id !== profile.scopeId) throw new ModelGatewayError('FORBIDDEN');
+    const { authorizedAt: _, requestId: __, ...identity } = owner.context;
+    return requestFingerprint(identity);
+  }
   async assertCurrent(value: GatewayContext, selected: AiProviderProfileRecord) {
     const context = structuredClone(value), profile = structuredClone(selected);
     if (!profile.enabled || profile.disabledAt || profile.scopeKind !== 'PLATFORM' || profile.serviceMode !== 'platform_managed') throw new ModelGatewayError('CONFIG_INVALID');
@@ -260,20 +281,7 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
       await this.platformInvocationGate(context, profile);
       return;
     }
-    const current = async () => {
-      try { await this.authority.invoke(structuredClone(context)); } catch { throw new ModelGatewayError('FORBIDDEN'); }
-      const owner = await this.currentOwner(), actor = owner.context.actor, scope = owner.context.scope;
-      const workspaceContext = context as { tenantId: string; workspaceId: string; actorId: string };
-      const actorId = actor.kind === 'user' ? actor.userId
-        : actor.kind === 'customer' && owner.context.audience === 'client' && isAiStepExecutionContext(owner.context) ? actor.customerId
-          : actor.kind === 'automation' && owner.context.audience === 'automation' && isAiStepExecutionContext(owner.context)
-            ? actor.subjectId : null;
-      if (!actorId || actorId !== context.actorId || scope.kind !== 'workspace' || scope.tenantId !== workspaceContext.tenantId
-        || scope.workspaceId !== workspaceContext.workspaceId || owner.configurationScope.kind !== 'PLATFORM'
-        || owner.configurationScope.id !== profile.scopeId) throw new ModelGatewayError('FORBIDDEN');
-      const { authorizedAt: _, requestId: __, ...identity } = owner.context;
-      return requestFingerprint(identity);
-    };
+    const current = () => this.tenantConsumer(context, profile);
     const before = await current();
     const row = await this.db.aiProviderProfile.findFirst({ where: { id: profile.id, scopeId: profile.scopeId, scopeKind: 'PLATFORM',
       serviceMode: 'platform_managed', enabled: true, disabledAt: null, configRevision: profile.configRevision } });
@@ -283,53 +291,11 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
 
   async resolve(value: GatewayContext, selected: AiProviderProfileRecord) {
     const context = structuredClone(value), profile = structuredClone(selected);
-    if (!('tenantId' in context && 'workspaceId' in context)) {
-      // Explicit SaaS platform consumer: same revision/credential binding as
-      // workspace consumers, but the identity gate is the platform principal.
-      if (typeof context?.actorId !== 'string' || !/^[\w.:-]{1,128}$/u.test(context.actorId)) throw new ModelGatewayError('INVALID_REQUEST');
-      if (!profile?.enabled || profile.disabledAt || profile.scopeKind !== 'PLATFORM'
-        || profile.serviceMode !== 'platform_managed' || !isNativeModelProtocol(profile.protocol)
-        || profile.credentialRef !== this.reference(profile.id, profile.configRevision)) throw new ModelGatewayError('CONFIG_INVALID');
-      if (await this.platformInvocationGate(context, profile) !== true) throw new ModelGatewayError('FORBIDDEN');
-      const read = () => this.db.aiProviderProfile.findFirst({ where: { id: profile.id, scopeId: profile.scopeId,
-        scopeKind: 'PLATFORM', serviceMode: 'platform_managed', configRevision: profile.configRevision,
-        enabled: true, disabledAt: null }, include: { platformConnection: { select } } });
-      const profileFields = ['id', 'scopeId', 'scopeKind', 'profileKey', 'role', 'serviceMode', 'protocol', 'provider', 'model', 'credentialRef', 'configRevision'] as const;
-      const stored = await read();
-      if (!stored || profileFields.some(field => stored[field] !== profile[field])
-        || requestFingerprint(stored.allowedCapabilities) !== requestFingerprint(profile.allowedCapabilities)) throw new ModelGatewayError('CONFIG_INVALID');
-      const parsed = connectionSchema.safeParse(stored.platformConnection);
-      if (!parsed.success) throw new ModelGatewayError('CREDENTIAL_UNAVAILABLE');
-      const credential = this.decrypt(parsed.data, profile);
-      if (await this.platformInvocationGate(context, profile) !== true) throw new ModelGatewayError('FORBIDDEN');
-      const latest = await read();
-      if (!latest || profileFields.some(field => latest[field] !== stored[field])
-        || requestFingerprint(latest.allowedCapabilities) !== requestFingerprint(stored.allowedCapabilities)
-        || requestFingerprint(latest.platformConnection) !== requestFingerprint(stored.platformConnection)) throw new ModelGatewayError('CONFIG_INVALID');
-      return { profileFingerprint: capabilityProfileFingerprint(profile), baseUrl: normalizeTenantModelBaseUrl(parsed.data.baseUrl),
-        credential, maxOutputTokens: parsed.data.maxOutputTokens };
-    }
-    if (!context || [context.tenantId, context.workspaceId, context.actorId].some(v => typeof v !== 'string' || !/^[\w.:-]{1,128}$/u.test(v))) throw new ModelGatewayError('INVALID_REQUEST');
+    if (typeof context?.actorId !== 'string' || !/^[\w.:-]{1,128}$/u.test(context.actorId)) throw new ModelGatewayError('INVALID_REQUEST');
     if (!profile?.enabled || profile.disabledAt || profile.scopeKind !== 'PLATFORM'
       || profile.serviceMode !== 'platform_managed' || !isNativeModelProtocol(profile.protocol)
       || profile.credentialRef !== this.reference(profile.id, profile.configRevision)) throw new ModelGatewayError('CONFIG_INVALID');
-    const current = async () => {
-      try { await this.authority.invoke(structuredClone(context)); } catch { throw new ModelGatewayError('FORBIDDEN'); }
-      const owner = await this.currentOwner(), actor = owner.context.actor, scope = owner.context.scope;
-      const workspaceContext = context as { tenantId: string; workspaceId: string; actorId: string };
-      // Customer and automation invocation require their distinct current task
-      // authorities. This consumes no user identity or platform management grant.
-      const actorId = actor.kind === 'user' ? actor.userId
-        : actor.kind === 'customer' && owner.context.audience === 'client' && isAiStepExecutionContext(owner.context)
-          ? actor.customerId
-          : actor.kind === 'automation' && owner.context.audience === 'automation' && isAiStepExecutionContext(owner.context)
-            ? actor.subjectId : null;
-      if (!actorId || actorId !== context.actorId || scope.kind !== 'workspace'
-        || scope.tenantId !== context.tenantId || scope.workspaceId !== context.workspaceId
-        || owner.configurationScope.kind !== 'PLATFORM' || owner.configurationScope.id !== profile.scopeId) throw new ModelGatewayError('FORBIDDEN');
-      const { authorizedAt: _, requestId: __, ...identity } = owner.context;
-      return requestFingerprint(identity);
-    };
+    const current = () => this.platformInvocationGate(context, profile) ?? this.tenantConsumer(context, profile);
     const before = await current();
     // Prisma may execute relation loading as separate statements. The encrypted
     // revision binding and subsequent reread must reject mixed revisions.

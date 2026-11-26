@@ -1,7 +1,7 @@
 import type { GatewayBudgetReserveRequest } from '@rental-os/platform-server/ai-gateway';
 export type { GatewayBudgetReserveRequest } from '@rental-os/platform-server/ai-gateway';
-import type { AiUsageAssociationDraft } from '@rental-os/shared';
-import { modelRequestSchema, type GatewayContext, type ModelUsage } from '../model-gateway.ports';
+import type { AiUsageAssociationDraft } from '@rental-os/platform-contracts/ai-usage';
+import { modelRequestSchema, tenantGatewayContextSchema, isPlatformGatewayContext, type GatewayContext, type ModelUsage } from '@rental-os/platform-server/ai-gateway';
 import { BudgetError, type BudgetRecord } from './budget.ports';
 import { BudgetService } from './budget.service';
 
@@ -20,9 +20,9 @@ export interface BudgetGatewayInvocationBinding {
 }
 
 /** Aliases of the canonical gateway context union from model-gateway.ports. */
-export type { PlatformGatewayContext } from '../model-gateway.ports';
+export type { PlatformGatewayContext } from '@rental-os/platform-server/ai-gateway';
 export type BudgetGatewayContext = GatewayContext;
-export { isPlatformGatewayContext } from '../model-gateway.ports';
+export { isPlatformGatewayContext } from '@rental-os/platform-server/ai-gateway';
 export interface BudgetGatewayBindingSource {
   resolveForReserve(context: Readonly<BudgetGatewayContext>, request: Readonly<GatewayBudgetReserveRequest>): Promise<BudgetGatewayInvocationBinding>;
   resolveForReservation(context: Readonly<BudgetGatewayContext>, reservationId: string): Promise<BudgetGatewayInvocationBinding>;
@@ -58,10 +58,11 @@ function assertBinding(contextValue: Readonly<BudgetGatewayContext>, binding: Re
   // wider than GatewayContext, so a type predicate cannot narrow negatively.
   // The workspace consumer context keeps charging its own workspace ledger;
   // the platform context is reserved for explicit SaaS/platform work.
-  const validScope = !('tenantId' in context) && !('workspaceId' in context)
-    ? scope.kind === 'platform'
-    : 'tenantId' in context && 'workspaceId' in context && scope.kind === 'workspace'
-      && scope.tenantId === context.tenantId && scope.workspaceId === context.workspaceId;
+  const tenant = tenantGatewayContextSchema.safeParse(context);
+  const validScope = scope.kind === 'tenant' ? tenant.success && tenant.data.tenantId === scope.tenantId
+    : scope.kind === 'platform' ? isPlatformGatewayContext(context)
+      : 'tenantId' in context && 'workspaceId' in context && !('scopeKind' in context)
+        && scope.tenantId === context.tenantId && scope.workspaceId === context.workspaceId;
   if (!validScope || !binding.sceneCode || binding.association.idempotencyKey === '') throw new BudgetError('FORBIDDEN');
 }
 

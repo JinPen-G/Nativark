@@ -8,7 +8,7 @@ import { isGatewayConfig, isGatewayIntent, isAiExecutionContext, createGatewayCo
   type GatewayContractValidators } from './gateway-contract-validation';
 import { gatewayTextIntentBindingSchema, type GatewayTextIntentBinding } from './gateway-intent';
 import { type GatewayRoutingResolution } from './gateway-routing.service';
-import { ModelGatewayError, isPlatformGatewayContext, type GatewayContext, type ModelAdapter } from './model-gateway.ports';
+import { ModelGatewayError, tenantGatewayContextSchema, type GatewayContext, type ModelAdapter } from './model-gateway.ports';
 import { RoutedModelTransport, type GatewayConnectionResolver } from './routed-model-transport';
 import { UnifiedAiGatewayService } from './unified-ai-gateway.service';
 import type { GatewayInvocationResult, UnifiedGatewayPorts } from './unified-ai-gateway.ports';
@@ -40,7 +40,7 @@ function identity(value: AiExecutionContext) {
   return requestFingerprint(rest);
 }
 
-/** C03 public port for server-authorized workspace principals. Customer and
+/** C03 public port for server-authorized principals. Customer and
  * automation owners keep their distinct namespace in the original task/ledger;
  * routing must revalidate the same current principal before every effect.
  * No production root registers this module automatically, and no default evidence verifier is supplied.
@@ -50,7 +50,8 @@ export class PublicAiGatewayService<TToolRequest = never> implements AiGatewayPo
   private readonly runtime: PublicGatewayRuntime<TToolRequest>;
   private readonly validators: GatewayContractValidators<TToolRequest>;
   constructor(runtime: PublicGatewayRuntime<TToolRequest>, scenes: readonly GatewayTextIntentBinding[], private readonly timeoutMs = 120000,
-    toolPolicy: GatewayToolResultPolicy<TToolRequest> | undefined = runtime?.ports?.toolPolicy) {
+    toolPolicy: GatewayToolResultPolicy<TToolRequest> | undefined = runtime?.ports?.toolPolicy,
+    private readonly tenantScope = false) {
     if (!runtime?.ports || !['mock', 'live'].includes(runtime.evidence) || typeof runtime.verifyEvidence !== 'function'
       || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120000 || !Array.isArray(scenes) || !scenes.length || scenes.length > 100) throw new ModelGatewayError('CONFIG_INVALID');
     const ports = runtime.ports;
@@ -70,23 +71,23 @@ export class PublicAiGatewayService<TToolRequest = never> implements AiGatewayPo
 
   private call(value: AiExecutionContext, intent: AiGatewayIntentDraft, signal?: AbortSignal) {
     if (!isGatewayIntent(intent)) throw new ModelGatewayError('INVALID_REQUEST');
-    const platformCall = isAiExecutionContext(value) && value.scope.kind === 'platform'
-      && value.audience === 'operator' && value.actor.kind === 'saas_admin';
-    if (!platformCall && (!isAiExecutionContext(value) || value.scope.kind !== 'workspace'
-      || (value.audience === 'client' ? value.actor.kind !== 'customer'
-        : value.audience === 'automation' ? value.actor.kind !== 'automation' : value.actor.kind !== 'user')
-      || !['operator', 'staff', 'client', 'automation'].includes(value.audience))) throw new ModelGatewayError('FORBIDDEN');
+    if (!isAiExecutionContext(value)) throw new ModelGatewayError('FORBIDDEN');
+    const scope = value.scope;
+    const platformCall = scope.kind === 'platform' && value.audience === 'operator' && value.actor.kind === 'saas_admin';
+    const tenantCall = this.tenantScope && scope.kind === 'tenant' && value.audience === 'operator' && value.actor.kind === 'user';
+    const workspaceCall = scope.kind === 'workspace' && ['operator', 'staff', 'client', 'automation'].includes(value.audience)
+      && (value.audience === 'client' ? value.actor.kind === 'customer'
+        : value.audience === 'automation' ? value.actor.kind === 'automation' : value.actor.kind === 'user');
+    if (!platformCall && !tenantCall && !workspaceCall) throw new ModelGatewayError('FORBIDDEN');
     const context = structuredClone(value), binding = this.scenes.get(intent?.sceneCode);
     if (!binding) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
     const expected = identity(context);
     const actorId = value.actor.kind === 'customer' ? value.actor.customerId
       : value.actor.kind === 'automation' ? value.actor.subjectId
         : 'userId' in value.actor ? value.actor.userId : (() => { throw new ModelGatewayError('FORBIDDEN'); })();
-    // Explicit SaaS platform principal: actorId only, no tenant attribution.
-    const workspaceScope = value.scope as { tenantId: string; workspaceId: string };
-    const narrow: GatewayContext = platformCall
-      ? { actorId }
-      : { tenantId: workspaceScope.tenantId, workspaceId: workspaceScope.workspaceId, actorId };
+    const narrow: GatewayContext = scope.kind === 'platform' ? { actorId }
+      : scope.kind === 'workspace' ? { tenantId: scope.tenantId, workspaceId: scope.workspaceId, actorId }
+        : tenantGatewayContextSchema.parse({ scopeKind: 'TENANT', tenantId: scope.tenantId, actorId });
     const life = new GatewayDeadline(this.timeoutMs, signal);
     let resolution: GatewayRoutingResolution | undefined, actual: AiGatewayConfigReferenceDraft | undefined, dispatched = false;
     const ports = this.runtime.ports;
@@ -116,21 +117,23 @@ export class PublicAiGatewayService<TToolRequest = never> implements AiGatewayPo
         const parsed = referenceSchema.safeParse({ configId: profile.id, configRevision: profile.configRevision, credentialRef: profile.credentialRef,
           protocol: profile.protocol, provider: profile.provider, model: profile.model });
         if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
-        if (isPlatformGatewayContext(narrow)) {
+        if (scope.kind === 'platform') {
           if (route.selection.mode !== 'platform_managed' || owner.kind !== 'PLATFORM'
             || route.consumerScope.kind !== 'PLATFORM') throw new ModelGatewayError('CONFIG_INVALID');
           actual = { ...parsed.data, consumerScope: { kind: 'platform' }, serviceMode: 'platform_managed', configurationScope: { kind: 'platform' } };
         } else {
-          const workspaceNarrow: { tenantId: string; workspaceId: string; actorId: string } = narrow;
+          const tenantId = scope.tenantId;
+          const consumerMatch = scope.kind === 'tenant'
+            ? route.consumerScope.kind === 'TENANT' && route.consumerScope.tenantId === tenantId && route.consumerScope.workspaceId === undefined
+            : route.consumerScope.kind === 'WORKSPACE' && route.consumerScope.tenantId === tenantId && route.consumerScope.workspaceId === scope.workspaceId;
+          if (!consumerMatch) throw new ModelGatewayError('CONFIG_INVALID');
           if (route.selection.mode === 'platform_managed') {
-            if (owner.kind !== 'PLATFORM' || route.consumerScope.kind !== 'WORKSPACE'
-              || route.consumerScope.tenantId !== workspaceNarrow.tenantId || route.consumerScope.workspaceId !== workspaceNarrow.workspaceId) throw new ModelGatewayError('CONFIG_INVALID');
-            actual = { ...parsed.data, tenantId: workspaceNarrow.tenantId, serviceMode: 'platform_managed', configurationScope: { kind: 'platform' } };
+            if (owner.kind !== 'PLATFORM') throw new ModelGatewayError('CONFIG_INVALID');
+            actual = { ...parsed.data, tenantId, serviceMode: 'platform_managed', configurationScope: { kind: 'platform' } };
           } else {
-            if (owner.kind !== 'TENANT' || owner.tenantId !== workspaceNarrow.tenantId
-              || route.consumerScope.kind !== 'WORKSPACE' || route.consumerScope.tenantId !== workspaceNarrow.tenantId
-              || route.consumerScope.workspaceId !== workspaceNarrow.workspaceId) throw new ModelGatewayError('CONFIG_INVALID');
-            actual = { ...parsed.data, tenantId: workspaceNarrow.tenantId, serviceMode: 'tenant_managed', configurationScope: { kind: 'tenant', tenantId: workspaceNarrow.tenantId } };
+            if (owner.kind !== 'TENANT' || owner.tenantId !== tenantId
+              || (scope.kind === 'tenant' && route.consumerScope.id !== owner.id)) throw new ModelGatewayError('CONFIG_INVALID');
+            actual = { ...parsed.data, tenantId, serviceMode: 'tenant_managed', configurationScope: { kind: 'tenant', tenantId } };
           }
         }
         if (!isGatewayConfig(actual)) { actual = undefined; throw new ModelGatewayError('CONFIG_INVALID'); }

@@ -13,6 +13,7 @@ import { ModelGatewayError, type WorkspaceGatewayContext } from './model-gateway
 import type { GatewayBudgetDenialObservation, GatewayInvocationObservation, UnifiedGatewayAudit } from './unified-ai-gateway.ports';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { aiPersistenceScopeColumns } from './persistence-scope';
+import { gatewayPreparationLogId } from './gateway-preparation-audit';
 
 type Db = Pick<PrismaClient, '$transaction' | 'operationLog' | 'aiScope' | 'aiTask' | 'aiGatewayInvocation'
   | 'aiGatewayAccountingReceipt' | 'aiInvocationAdmission' | 'aiBudgetReservation'>;
@@ -55,7 +56,7 @@ export class PrismaTaskGatewayAudit implements UnifiedGatewayAudit {
 
   async prepare(value: import('./unified-ai-gateway.ports').GatewayAuditPreparation, signal?: AbortSignal) {
     const input = structuredClone(value), context = input.context, profile = input.profile;
-    if (!('tenantId' in context) || !id.max(128).safeParse(input.callId).success
+    if (!('tenantId' in context) || !('workspaceId' in context) || !id.max(128).safeParse(input.callId).success
       || !['invoke', 'stream'].includes(input.mode) || !/^[a-f0-9]{64}$/u.test(input.intentHash)
       || !/^[a-f0-9]{64}$/u.test(input.requestHash) || !/^[a-f0-9]{64}$/u.test(input.configurationHash)
       || !profile || requestFingerprint(profile) !== input.configurationHash || !profile.enabled || profile.disabledAt !== null) throw denied();
@@ -104,9 +105,7 @@ export class PrismaTaskGatewayAudit implements UnifiedGatewayAudit {
       };
       const options = { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 };
       const source = await this.db.$transaction(load, options);
-      const digest = requestFingerprint({ version: 'ai-gateway-audit-intent-1', scopeId: before.resolved.scope.id,
-        invocationId: source.invocationId });
-      const auditId = `${digest.slice(0, 8)}-${digest.slice(8, 12)}-5${digest.slice(13, 16)}-a${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
+      const auditId = gatewayPreparationLogId(before.resolved.scope.id, source.invocationId);
       const data = { id: auditId, tenantId: context.tenantId, workspaceId: context.workspaceId,
         userId: before.principal.actorKind === 'USER' ? before.principal.actorId : null, action: 'ai.gateway.prepared',
         detail: { version: 'ai-gateway-audit-intent-1', ...source, callId: input.callId, mode: input.mode,

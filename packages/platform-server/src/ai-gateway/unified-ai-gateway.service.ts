@@ -135,8 +135,8 @@ export class UnifiedAiGatewayService {
   /** Platform calls carry no tenant/workspace attribution; the audit port
    * records null and the platform audit implementation owns its journal. */
   private attribution(context: Readonly<GatewayContext>): { tenantId: string | null; workspaceId: string | null } {
-    return 'tenantId' in context && 'workspaceId' in context
-      ? { tenantId: context.tenantId, workspaceId: context.workspaceId } : { tenantId: null, workspaceId: null };
+    return { tenantId: 'tenantId' in context ? context.tenantId : null,
+      workspaceId: 'workspaceId' in context ? context.workspaceId : null };
   }
   private async assertMediaCurrent(context: GatewayContext, request: UnresolvedRequest | UnresolvedProtocolRequest, signal: AbortSignal) {
     const references = request.messages.flatMap(message => typeof message.content === 'string' ? []

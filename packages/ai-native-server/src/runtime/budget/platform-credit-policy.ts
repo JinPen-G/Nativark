@@ -15,12 +15,14 @@ export const platformCreditScene = (sceneCode: string, association: AiUsageAssoc
  * old unknown holds across scenes and configuration versions. */
 export async function ensurePlatformCreditPolicy(db: Pick<PrismaClient, 'aiBudgetPolicy' | 'aiTenantAiAllowance'>,
   key: BudgetPolicyKey, association: AiUsageAssociationDraft, sceneCode: string, currency: string, entitled: boolean) {
-  if (!entitled || association.config.serviceMode !== 'platform_managed' || association.scope.kind !== 'workspace'
-    || !['TENANT', 'WORKSPACE'].includes(key.scopeKind) || key.sceneCode !== platformCreditScene(sceneCode, association)
+  if (!entitled || association.config.serviceMode !== 'platform_managed' || association.scope.kind === 'platform'
+    || (key.scopeKind !== 'TENANT' && (key.scopeKind !== 'WORKSPACE' || association.scope.kind !== 'workspace'))
+    || key.sceneCode !== platformCreditScene(sceneCode, association)
     || !/^[A-Z]{3}$/u.test(currency)) throw new BudgetError('FORBIDDEN');
   const account = await db.aiTenantAiAllowance.findUnique({ where: { tenantId_currency: { tenantId: association.scope.tenantId, currency } } });
   if (!account || account.grantedAmount.lte(0)
-    || new prismaRuntime.Decimal(creditAllocations(account.allocationsJson)[association.scope.workspaceId] ?? 0).lte(0)) throw new BudgetError('EXHAUSTED');
+    || association.scope.kind === 'workspace'
+      && new prismaRuntime.Decimal(creditAllocations(account.allocationsJson)[association.scope.workspaceId] ?? 0).lte(0)) throw new BudgetError('EXHAUSTED');
   const settings: AiUsageSettingsDraft = { draftVersion: 'ain-c07-draft-2', scope: { kind: 'tenant', tenantId: association.scope.tenantId },
     sceneCode, config: structuredClone(association.config), allowedModels: [association.config.model], allowedScenes: [sceneCode],
     gates: { platform: { enabled: entitled, revision: 1 }, tenant: { enabled: entitled, revision: 1 }, scene: { enabled: entitled, revision: 1 } },

@@ -11,6 +11,8 @@
 - [运输](routed-model-transport.ts)消费注册协议适配器及当前密钥来源，调用前后复验配置，核查结果中的敏感内容，并保留流终止与容量释放语义。
 - [账务端口](gateway-accounting.ports.ts)由原持久账参加者实现，Task/Run/Step、价格与原计量证据沿原记录关联。
 
+公共租户调用由[公共 Task Gateway](../../../ai-native-server/src/public-tenant-gateway.ts)显式启用。内部 `TENANT` 主体保留真实租户 ID，工作空间归属为空。它与原工作空间调用共用容量分组和租户去重，Provider 运输前须复核同一 Task、配置、原准入令牌和账务派发状态；用量、失败和 unknown 映射继续使用原合同。
+
 ## 业务参加者
 
 [工具格式端口](gateway-tool-policy.ports.ts)提供原严格请求 schema、所需定义、`validateToolRequest(value)` 与 `validateNativeToolCall(value)`。前者返回类型谓词，后者返回布尔值。统一执行器的 `invoke` 与 `stream` 在路由、准入和预算预留前确认工具参加者，缺少时返回 `CAPABILITY_UNSUPPORTED`。C03 facade 继续按受控场景声明允许的调用方式。

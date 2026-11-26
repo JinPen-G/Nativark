@@ -1,5 +1,4 @@
-import type { GatewayAccountingCall, UnifiedGatewayBudget } from '../gateway-accounting.ports';
-import { ModelGatewayError, type ModelUsage } from '../model-gateway.ports';
+import { ModelGatewayError, type GatewayAccountingCall, type UnifiedGatewayBudget, type ModelUsage } from '@rental-os/platform-server/ai-gateway';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { BudgetError } from './budget.ports';
 import type { BudgetGatewayLifecycle } from './budget-gateway-adapter';

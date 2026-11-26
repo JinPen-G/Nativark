@@ -1,4 +1,5 @@
 import type { AiExecutionContext } from '@rental-os/platform-contracts/ai-gateway';
+import type { TenantGatewayContext } from '@rental-os/platform-server/ai-gateway';
 import { isAiStepExecutionContext } from '../../execution-context-validation';
 import { BudgetError } from './budget.ports';
 
@@ -23,6 +24,12 @@ export function gatewayBudgetPrincipal(value: AiExecutionContext) {
         ? { actorId: context.actor.subjectId, actorKind: 'AUTOMATION' as const } : null;
   if (!subject) throw new BudgetError('FORBIDDEN');
   return { ...subject, tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId };
+}
+
+export function gatewayTenantBudgetPrincipal(value: AiExecutionContext): TenantGatewayContext & { actorKind: 'USER' } {
+  if (!isAiStepExecutionContext(value) || value.audience !== 'operator' || value.scope.kind !== 'tenant' || value.actor.kind !== 'user')
+    throw new BudgetError('FORBIDDEN');
+  return { scopeKind: 'TENANT', tenantId: value.scope.tenantId, actorId: value.actor.userId, actorKind: 'USER' };
 }
 
 /** Platform-scope counterpart of gatewayBudgetPrincipal for the SaaS operator

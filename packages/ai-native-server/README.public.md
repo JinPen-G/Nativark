@@ -16,6 +16,8 @@
 - `task-steps` 将原 Step 登记、转换和回执接到同一 Runner。实例要求宿主的原证据、当前动作与收据权限、明确发布的工具及版本。写入复用原事务和原 CAS，重开只观察已登记 Step；提交后撤权保留原操作待核对。
 - `task-measured-effects` 在实际调用前保存原开始标记，测量原注册工具的活动时间与正文 UTF-8 字节，并与同一 Runner 资源账结清。恢复只读原 Artifact。模型步骤须接原 Gateway 调用准备与同一账本的 `readDispatch`，该模块不会选供应商或派发模型。
 - `gateway-admission` 提供租户级原调用的 `admission` 和 `dispatch` 参加者。使用同一严格 Task 事务边界和当次 `identities`，新建与领取须先绑定原 Invocation、当前主体、配置及期限；只有原令牌可以记录其终态。实际发送仍需原 Gateway 的路由、单账和末次授权。
+- `public-tenant-gateway` 将已发布文本步骤的原输入、当前路由及预算接入 C03 和原单账。向 `createPublicTenantTaskGateway` 提供同一次已绑定的 `public-tenant-task-authority`、同一个 Task 边界、进程共享容量门、当前预算动作／权益判断、正式连接和注册协议适配器。将 `invocations`、`tools` 和 `dispatchEvidence` 交给原 Runner 测量。`recovery` 只按原调用读账，或按原已证明的未发／用量办理释放与结清。
+- `model-configuration` 的 `createPublicTenantInvocationConfiguration` 读取原租户模式和加密 BYOK 连接，平台托管连接沿 `PrismaPlatformModelConnection`。两者均需当次执行权。管理设置、正常请求路由、场景输入发布、有效能力证明及正式费率／输入上限由现有授权入口提供。
 - `public-tenant-task-authority` 用原签名请求、原主体锁和已保存的 Task action policy 提供当前动作与同事务复核。宿主必须固定实际权限、已发布场景和对象来源，注入真实 `assertTaskAction`、`assertReference` 和数据观察，并在请求结束关闭请求绑定。此入口不登记 HTTP 或任何默认场景。
 - `runtime/budget/public-budget-ledger` 供正式 Gateway 接入原预算账本。新预占和派发需要同一个 Task 事务边界；平台预算、费率和额度 HTTP 本身只管理原政策及人工操作收据。
 - `runtime/original-result-reads` 和 `runtime/original-task-recovery-read` 只观察真实原结果；租约、审批、原账和发布字段仍由原权威核对。缺当前授权或原证据时不可用。

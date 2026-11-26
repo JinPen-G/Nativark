@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import type { AiUsageSettingsDraft } from '@rental-os/platform-contracts/ai-usage';
-import { BudgetError, type BudgetPolicy, type BudgetPolicyKey, type BudgetQuote, type BudgetRecord, type BudgetReserveCommand, type BudgetTransactionRepository, type BudgetUsageEvidence } from './budget.ports';
+import { BudgetError, type BudgetPolicy, type BudgetPolicyKey, type BudgetQuote, type BudgetRecord, type BudgetReserveCommand, type BudgetRevalidate, type BudgetTransactionRepository, type BudgetUsageEvidence } from './budget.ports';
 import { quantityAtoms, sameUnit } from './budget-quantity';
 import { assertPlatformCreditLimit } from './platform-credit-limit';
 import { assertByokMeterLimits, byokMeterScene } from './byok-usage-meter';
@@ -26,6 +26,8 @@ export interface BudgetLedgerTransactionHooks {
       /** Covers the same request, settings authority, scope and configuration on this Native. */
       revalidatesSettingsInTransaction?: true } | undefined>;
   withTask<T>(tx: Tx, stepId: string, action: LedgerMutation, work: () => Promise<T>): Promise<T>;
+  /** Public callers must resolve their original action grant on this Native. */
+  nativeAuthorization?: true;
 }
 type StoredPolicy = { id: string; scopeId: string; scopeKind: string; sceneCode: string; configRevision: number; settingsJson: Prisma.JsonValue };
 const scopeKinds = ['PLATFORM', 'TENANT', 'WORKSPACE'] as const;
@@ -77,6 +79,49 @@ function sameLedgerPayload(existing: { kind: string; evidenceHash: string | null
     && (existing.calls ?? null) === ((incoming as { calls?: number }).calls ?? null)
     && (existing.moneyAmount?.toFixed(6) ?? null) === ((incoming as { moneyAmount?: string }).moneyAmount ?? null)
     && (existing.moneyCurrency ?? null) === ((incoming as { moneyCurrency?: string }).moneyCurrency ?? null);
+}
+
+function budgetRecord(row: { id: string; scopeId: string; scopeKind: string; actorId: string; unitKind: string; status: string; dispatchState: string; reservedTokens: bigint | null; reservedCalls: number | null; reservedMoney: Prisma.Decimal | null; moneyCurrency: string | null; actualTokens?: bigint | null; actualCalls?: number | null; actualMoney?: Prisma.Decimal | null; unknownReason: string | null; expiresAt: Date; updatedAt: Date; callId: string; idempotencyKey: string; sceneCode: string; configRevision: number }, association: BudgetRecord['association']): BudgetRecord {
+  // Persisted facts must not become zero or a known state through projection.
+  // Validate the meter before Decimal.toFixed can round malformed evidence.
+  if (!['reserved', 'settled', 'released', 'pending_reconciliation'].includes(row.status)
+    || !['not_dispatched', 'dispatched', 'unknown', 'completed'].includes(row.dispatchState)
+    || !['PLATFORM', 'TENANT', 'WORKSPACE'].includes(row.scopeKind)
+    || !['money', 'tokens', 'calls'].includes(row.unitKind)
+    || !(row.updatedAt instanceof Date) || !Number.isFinite(row.updatedAt.getTime())
+    || !(row.expiresAt instanceof Date) || !Number.isFinite(row.expiresAt.getTime())) throw new BudgetError('UNAVAILABLE');
+  const reservedValues = [row.reservedTokens, row.reservedCalls, row.reservedMoney];
+  const actualValues = [row.actualTokens, row.actualCalls, row.actualMoney];
+  const meter = ['tokens', 'calls', 'money'].indexOf(row.unitKind);
+  if (reservedValues.some((value, index) => (value !== null && value !== undefined) !== (index === meter))
+    || actualValues.some((value, index) => (value !== null && value !== undefined) !== (row.status === 'settled' && index === meter))
+    || (row.unitKind === 'money' ? typeof row.moneyCurrency !== 'string' || !/^[A-Z]{3}$/.test(row.moneyCurrency)
+      : row.moneyCurrency !== null)) throw new BudgetError('UNAVAILABLE');
+  for (const value of [row.reservedMoney, row.actualMoney]) {
+    if (value !== null && value !== undefined && (!prismaRuntime.Decimal.isDecimal(value)
+      || !value.isFinite() || value.isNegative() || value.decimalPlaces() > 6)) throw new BudgetError('UNAVAILABLE');
+  }
+  const tokenValue = row.reservedTokens === null ? null : Number(row.reservedTokens);
+  if (tokenValue !== null && !Number.isSafeInteger(tokenValue)) throw new BudgetError('UNAVAILABLE');
+  const reserved = tokenValue !== null ? { unit: 'tokens' as const, value: tokenValue } : row.reservedCalls !== null ? { unit: 'calls' as const, value: row.reservedCalls } : { unit: 'money' as const, amount: row.reservedMoney!.toFixed(6), currency: row.moneyCurrency!, scale: 6 as const };
+  const actualTokenValue = row.actualTokens === undefined || row.actualTokens === null ? null : Number(row.actualTokens);
+  if (actualTokenValue !== null && !Number.isSafeInteger(actualTokenValue)) throw new BudgetError('UNAVAILABLE');
+  const actual = actualTokenValue !== null ? { unit: 'tokens' as const, value: actualTokenValue } : row.actualCalls !== undefined && row.actualCalls !== null ? { unit: 'calls' as const, value: row.actualCalls } : row.actualMoney ? { unit: 'money' as const, amount: row.actualMoney.toFixed(6), currency: row.moneyCurrency ?? '', scale: 6 as const } : null;
+  try { quantityAtoms(reserved); if (actual !== null) quantityAtoms(actual); }
+  catch { throw new BudgetError('UNAVAILABLE'); }
+  return { id: row.id, scopeId: row.scopeId, scopeKind: row.scopeKind as BudgetRecord['scopeKind'], actorId: row.actorId, revision: row.configRevision, storageVersion: row.updatedAt, association, callId: row.callId, sceneCode: row.sceneCode, status: row.status as BudgetRecord['status'], reserved, actual, dispatched: ['dispatched', 'unknown', 'completed'].includes(row.dispatchState), unknownReason: row.unknownReason, expiresAt: row.expiresAt };
+}
+
+export async function readOriginalBudgetRecord(db: Pick<Tx, 'aiBudgetReservation'>, id: string, association: BudgetRecord['association']) {
+  const row = await db.aiBudgetReservation.findUnique({ where: { id }, select: { id: true, scopeId: true, scopeKind: true, actorId: true, unitKind: true, status: true, dispatchState: true, reservedTokens: true, reservedCalls: true, reservedMoney: true, moneyCurrency: true, actualTokens: true, actualCalls: true, actualMoney: true, unknownReason: true, expiresAt: true, updatedAt: true, callId: true, idempotencyKey: true, sceneCode: true, configRevision: true, configurationHash: true, tenantId: true, workspaceId: true, requestId: true, runId: true, stepId: true, actionId: true, priceVersion: true } });
+  if (!row || row.scopeKind !== association.scope.kind.toUpperCase() || !row.configurationHash
+    || row.configurationHash !== requestFingerprint(association.config)
+    || row.requestId !== association.requestId || row.runId !== association.runId || row.stepId !== association.stepId || row.actionId !== association.actionId
+    || row.idempotencyKey !== association.idempotencyKey || row.priceVersion !== association.priceVersion || row.configRevision !== association.config.configRevision
+    || (association.scope.kind !== 'platform' && row.tenantId !== association.scope.tenantId)
+    || (association.scope.kind === 'workspace' && row.workspaceId !== association.scope.workspaceId)
+    || (association.scope.kind === 'tenant' && row.workspaceId !== null)) return null;
+  return budgetRecord(row, association);
 }
 
 /** Prisma adapter for C01. Policy rows are locked in PLATFORM→TENANT→WORKSPACE
@@ -355,12 +400,13 @@ export class PrismaBudgetLedgerRepository implements BudgetTransactionRepository
     return { used, concurrent, runCalls: BigInt(runCalls) };
   }
 
-  async reserve(quote: BudgetQuote, command: BudgetReserveCommand, identityHash: string, revalidate: () => Promise<void>) {
+  async reserve(quote: BudgetQuote, command: BudgetReserveCommand, identityHash: string, revalidate: BudgetRevalidate) {
     quote = structuredClone(quote);
     command = structuredClone(command);
     quantityAtoms(quote.quantity);
     assertBudgetPolicyBinding(quote, command.sceneCode);
     const consumer = quote.consumerScope;
+    const recheck = (tx: Tx) => revalidate(this.hooks.nativeAuthorization ? tx : undefined);
     const tenantId = quote.association.scope.kind === 'platform' ? null : quote.association.scope.tenantId;
     const workspaceId = quote.association.scope.kind === 'workspace' ? quote.association.scope.workspaceId : null;
     const requestHash = hash({ identityHash, association: quote.association, callId: quote.callId, sceneCode: quote.sceneCode, model: quote.model, actorId: quote.actorId, consumerScope: quote.consumerScope, quantity: quote.quantity, policies: quote.policies, evidenceHash: quote.evidenceHash, expiresAt: quote.expiresAt.toISOString() });
@@ -400,9 +446,9 @@ return this.hooks.withTask(tx, quote.association.stepId, 'reserve', async () => 
             select: { policyId: true }, take: 4 });
           if (links.length !== rows.length || new Set(links.map(link => link.policyId)).size !== rows.length
             || links.some(link => !rows.some(row => row.id === link.policyId))) throw new BudgetError('PENDING_RECONCILIATION');
-          const replay = structuredClone(await this.readRecord(tx, existing.id, quote.association));
+          const replay = structuredClone(await readOriginalBudgetRecord(tx, existing.id, quote.association));
           if (!replay || replay.actorId !== quote.actorId || replay.callId !== quote.callId || replay.sceneCode !== quote.sceneCode) throw new BudgetError('IDEMPOTENCY_CONFLICT');
-          await revalidate();
+          await recheck(tx);
           callbackCompleted = true;
           return replay;
         }
@@ -434,13 +480,13 @@ return this.hooks.withTask(tx, quote.association.stepId, 'reserve', async () => 
           association: quote.association, actorId: quote.actorId, sceneCode: command.sceneCode,
           consumerScope: consumer, quantity: quote.quantity, policies: moneyPolicies.map(policy), phase: 'reserve'
         });
-        await revalidate();
+        await recheck(tx);
         assertFresh();
         const data = { id: randomUUID(), tenantId, workspaceId, billingMode: quote.association.config.serviceMode, scopeId: consumer.scopeId, scopeKind: consumer.scopeKind, sceneCode: command.sceneCode, actorId: quote.actorId, requestId: quote.association.requestId, runId: quote.association.runId, stepId: quote.association.stepId, actionId: quote.association.actionId, callId: quote.callId, idempotencyKey: quote.association.idempotencyKey, requestHash, configurationHash: requestFingerprint(quote.association.config), configRevision: quote.association.config.configRevision, priceVersion: quote.association.priceVersion, unitKind: quote.quantity.unit, ...quantityFields(quote.quantity, 'reserved'), status: 'reserved', dispatchState: 'not_dispatched', expiresAt: quote.expiresAt };
         const created = await tx.aiBudgetReservation.create({ data, select: { id: true, tenantId: true, workspaceId: true, scopeId: true, scopeKind: true, sceneCode: true, actorId: true, requestId: true, runId: true, stepId: true, actionId: true, callId: true, idempotencyKey: true, configRevision: true, priceVersion: true, unitKind: true, reservedTokens: true, reservedCalls: true, reservedMoney: true, moneyCurrency: true, actualTokens: true, actualCalls: true, actualMoney: true, status: true, dispatchState: true, unknownReason: true, expiresAt: true, updatedAt: true } });
-        const record = structuredClone(this.record(created, quote.association));
+        const record = structuredClone(budgetRecord(created, quote.association));
         await tx.aiBudgetAllocation.createMany({ data: rows.map(row => ({ reservationId: record.id, policyId: row.id, policyRevision: row.configRevision })) });
-        await revalidate();
+        await recheck(tx);
         assertFresh();
         callbackCompleted = true;
         return record;
@@ -475,63 +521,21 @@ return this.hooks.withTask(tx, quote.association.stepId, 'reserve', async () => 
     }
   }
 
-  private record(row: { id: string; scopeId: string; scopeKind: string; actorId: string; unitKind: string; status: string; dispatchState: string; reservedTokens: bigint | null; reservedCalls: number | null; reservedMoney: Prisma.Decimal | null; moneyCurrency: string | null; actualTokens?: bigint | null; actualCalls?: number | null; actualMoney?: Prisma.Decimal | null; unknownReason: string | null; expiresAt: Date; updatedAt: Date; callId: string; idempotencyKey: string; sceneCode: string; configRevision: number }, association: BudgetRecord['association']): BudgetRecord {
-    // Persisted facts must not become zero or a known state through projection.
-    // Validate the meter before Decimal.toFixed can round malformed evidence.
-    if (!['reserved', 'settled', 'released', 'pending_reconciliation'].includes(row.status)
-      || !['not_dispatched', 'dispatched', 'unknown', 'completed'].includes(row.dispatchState)
-      || !['PLATFORM', 'TENANT', 'WORKSPACE'].includes(row.scopeKind)
-      || !['money', 'tokens', 'calls'].includes(row.unitKind)
-      || !(row.updatedAt instanceof Date) || !Number.isFinite(row.updatedAt.getTime())
-      || !(row.expiresAt instanceof Date) || !Number.isFinite(row.expiresAt.getTime())) throw new BudgetError('UNAVAILABLE');
-    const reservedValues = [row.reservedTokens, row.reservedCalls, row.reservedMoney];
-    const actualValues = [row.actualTokens, row.actualCalls, row.actualMoney];
-    const meter = ['tokens', 'calls', 'money'].indexOf(row.unitKind);
-    if (reservedValues.some((value, index) => (value !== null && value !== undefined) !== (index === meter))
-      || actualValues.some((value, index) => (value !== null && value !== undefined) !== (row.status === 'settled' && index === meter))
-      || (row.unitKind === 'money' ? typeof row.moneyCurrency !== 'string' || !/^[A-Z]{3}$/.test(row.moneyCurrency)
-        : row.moneyCurrency !== null)) throw new BudgetError('UNAVAILABLE');
-    for (const value of [row.reservedMoney, row.actualMoney]) {
-      if (value !== null && value !== undefined && (!prismaRuntime.Decimal.isDecimal(value)
-        || !value.isFinite() || value.isNegative() || value.decimalPlaces() > 6)) throw new BudgetError('UNAVAILABLE');
-    }
-    const tokenValue = row.reservedTokens === null ? null : Number(row.reservedTokens);
-    if (tokenValue !== null && !Number.isSafeInteger(tokenValue)) throw new BudgetError('UNAVAILABLE');
-    const reserved = tokenValue !== null ? { unit: 'tokens' as const, value: tokenValue } : row.reservedCalls !== null ? { unit: 'calls' as const, value: row.reservedCalls } : { unit: 'money' as const, amount: row.reservedMoney!.toFixed(6), currency: row.moneyCurrency!, scale: 6 as const };
-    const actualTokenValue = row.actualTokens === undefined || row.actualTokens === null ? null : Number(row.actualTokens);
-    if (actualTokenValue !== null && !Number.isSafeInteger(actualTokenValue)) throw new BudgetError('UNAVAILABLE');
-    const actual = actualTokenValue !== null ? { unit: 'tokens' as const, value: actualTokenValue } : row.actualCalls !== undefined && row.actualCalls !== null ? { unit: 'calls' as const, value: row.actualCalls } : row.actualMoney ? { unit: 'money' as const, amount: row.actualMoney.toFixed(6), currency: row.moneyCurrency ?? '', scale: 6 as const } : null;
-    try { quantityAtoms(reserved); if (actual !== null) quantityAtoms(actual); }
-    catch { throw new BudgetError('UNAVAILABLE'); }
-    return { id: row.id, scopeId: row.scopeId, scopeKind: row.scopeKind as BudgetRecord['scopeKind'], actorId: row.actorId, revision: row.configRevision, storageVersion: row.updatedAt, association, callId: row.callId, sceneCode: row.sceneCode, status: row.status as BudgetRecord['status'], reserved, actual, dispatched: ['dispatched', 'unknown', 'completed'].includes(row.dispatchState), unknownReason: row.unknownReason, expiresAt: row.expiresAt };
-  }
-
-  private async readRecord(db: Pick<Tx, 'aiBudgetReservation'>, id: string, association: BudgetRecord['association']) {
-    const row = await db.aiBudgetReservation.findUnique({ where: { id }, select: { id: true, scopeId: true, scopeKind: true, actorId: true, unitKind: true, status: true, dispatchState: true, reservedTokens: true, reservedCalls: true, reservedMoney: true, moneyCurrency: true, actualTokens: true, actualCalls: true, actualMoney: true, unknownReason: true, expiresAt: true, updatedAt: true, callId: true, idempotencyKey: true, sceneCode: true, configRevision: true, configurationHash: true, tenantId: true, workspaceId: true, requestId: true, runId: true, stepId: true, actionId: true, priceVersion: true } });
-    if (!row || row.scopeKind !== association.scope.kind.toUpperCase() || !row.configurationHash
-      || row.configurationHash !== requestFingerprint(association.config)
-      || row.requestId !== association.requestId || row.runId !== association.runId || row.stepId !== association.stepId || row.actionId !== association.actionId
-      || row.idempotencyKey !== association.idempotencyKey || row.priceVersion !== association.priceVersion || row.configRevision !== association.config.configRevision
-      || (association.scope.kind !== 'platform' && row.tenantId !== association.scope.tenantId)
-      || (association.scope.kind === 'workspace' && row.workspaceId !== association.scope.workspaceId)) return null;
-    return this.record(row, association);
-  }
-
   async get(id: string, association: BudgetRecord['association']) {
-    return this.readRecord(this.db, id, structuredClone(association));
+    return readOriginalBudgetRecord(this.db, id, structuredClone(association));
   }
 
   /** Read the exact original event and payload under current read authority.
    * No policy locks, mutation replay or new ledger event. Missing is not rollback. */
-  async readMutation(record: BudgetRecord, input: { action: 'release' | 'reconcile'; eventKey: string; usage?: BudgetUsageEvidence }, revalidate: () => Promise<void>) {
+  async readMutation(record: BudgetRecord, input: { action: 'release' | 'reconcile'; eventKey: string; usage?: BudgetUsageEvidence }, revalidate: BudgetRevalidate) {
     record = structuredClone(record); input = structuredClone(input);
     if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(input.eventKey)
       || !['release', 'reconcile'].includes(input.action) || input.action === 'reconcile' && !input.usage
       || input.action === 'release' && input.usage || input.usage && !sameUnit(record.reserved, input.usage.quantity)) throw new BudgetError('INVALID');
     try {
       return await this.db.$transaction(async tx => {
-        await revalidate();
-        const current = await this.readRecord(tx, record.id, record.association);
+        await revalidate(this.hooks.nativeAuthorization ? tx : undefined);
+        const current = await readOriginalBudgetRecord(tx, record.id, record.association);
         if (!current || current.scopeId !== record.scopeId || current.scopeKind !== record.scopeKind
           || current.actorId !== record.actorId || current.callId !== record.callId) throw new BudgetError('FORBIDDEN');
         const event = await tx.aiBudgetLedgerEntry.findUnique({ where: { reservationId_eventKey: {
@@ -542,7 +546,7 @@ return this.hooks.withTask(tx, quote.association.stepId, 'reserve', async () => 
           || !sameLedgerPayload(event, input) || current.status !== (input.action === 'release' ? 'released' : 'settled')
           || input.action === 'release' && current.dispatched
           || input.usage && requestFingerprint(current.actual) !== requestFingerprint(input.usage.quantity))) throw new BudgetError('PENDING_RECONCILIATION');
-        await revalidate();
+        await revalidate(this.hooks.nativeAuthorization ? tx : undefined);
         return event ? structuredClone(current) : null;
       }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
     } catch (error) {
@@ -551,28 +555,29 @@ return this.hooks.withTask(tx, quote.association.stepId, 'reserve', async () => 
     }
   }
 
-  async mutate(record: BudgetRecord, input: { action: 'dispatch' | 'settle' | 'release' | 'unknown' | 'reconcile'; eventKey: string; usage?: BudgetUsageEvidence; reason?: string }, revalidate: () => Promise<void>) {
+  async mutate(record: BudgetRecord, input: { action: 'dispatch' | 'settle' | 'release' | 'unknown' | 'reconcile'; eventKey: string; usage?: BudgetUsageEvidence; reason?: string }, revalidate: BudgetRevalidate) {
     record = structuredClone(record);
     input = structuredClone(input);
     if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(input.eventKey)) throw new BudgetError('INVALID');
     if (input.usage && !sameUnit(record.reserved, input.usage.quantity)) throw new BudgetError('INVALID');
     if ((input.action === 'settle' || input.action === 'reconcile') && !input.usage) throw new BudgetError('INVALID');
     let callbackCompleted = false;
-    try { return await this.db.$transaction(async tx => {
+    const recheck = (tx: Tx) => revalidate(this.hooks.nativeAuthorization ? tx : undefined);
+    try { const recordAfter = await this.db.$transaction(async tx => {
 const originalWork = async () => {
-      await revalidate();
+      await recheck(tx);
       if (record.association.scope.kind !== 'platform')
         await this.lockTenantCapacity(tx, record.association.scope.tenantId);
       const { rows, links, moneyPolicies } = await this.lockReservationPolicies(tx, record, input.action === 'dispatch');
-      const current = await this.readRecord(tx, record.id, record.association);
+      const current = await readOriginalBudgetRecord(tx, record.id, record.association);
       if (!current || current.scopeId !== record.scopeId || current.scopeKind !== record.scopeKind
         || current.actorId !== record.actorId || current.callId !== record.callId || current.sceneCode !== record.sceneCode) throw new BudgetError('FORBIDDEN');
       const existing = await tx.aiBudgetLedgerEntry.findUnique({ where: { reservationId_eventKey: { reservationId: record.id, eventKey: input.eventKey } }, select: { kind: true, evidenceHash: true, reason: true, inputTokens: true, calls: true, moneyAmount: true, moneyCurrency: true } });
       if (existing) {
         if (!sameLedgerPayload(existing, input)) throw new BudgetError('IDEMPOTENCY_CONFLICT');
-        const replay = await this.readRecord(tx, record.id, record.association);
+        const replay = await readOriginalBudgetRecord(tx, record.id, record.association);
         if (!replay) throw new BudgetError('UNAVAILABLE');
-        await revalidate();
+        await recheck(tx);
         callbackCompleted = true;
         return replay;
       }
@@ -581,7 +586,7 @@ const originalWork = async () => {
       if (current.status === 'settled' || current.status === 'released'
         || input.action === 'release' && (current.dispatched || current.status !== 'reserved')
         || input.action === 'settle' && current.status === 'pending_reconciliation') throw new BudgetError('PENDING_RECONCILIATION');
-      await revalidate();
+      await recheck(tx);
       if (input.action === 'dispatch') {
         for (const row of rows) {
           if (links.find(link => link.policyId === row.id)?.policyRevision !== row.configRevision) throw new BudgetError('REVISION_CONFLICT');
@@ -602,15 +607,18 @@ const originalWork = async () => {
         ...(input.action === 'dispatch' ? { dispatchState: 'not_dispatched', expiresAt: { gt: this.clock() } } : {}) }, data: next });
       if (changed.count !== 1) throw new BudgetError('PENDING_RECONCILIATION');
       await tx.aiBudgetLedgerEntry.create({ data: { id: randomUUID(), reservationId: record.id, scopeId: record.scopeId, scopeKind: record.scopeKind, tenantId: record.association.scope.kind === 'platform' ? null : record.association.scope.tenantId, eventKey: input.eventKey, kind: input.action, evidenceHash: input.usage?.evidenceHash, reason: input.reason, ...(input.usage ? ledgerQuantityFields(input.usage.quantity) : {}) } });
-      const result = await this.readRecord(tx, record.id, record.association);
+      const result = await readOriginalBudgetRecord(tx, record.id, record.association);
       if (!result) throw new BudgetError('FORBIDDEN');
-      await revalidate();
+      await recheck(tx);
       callbackCompleted = true;
       return result;
 
 };
 return this.hooks.withTask(tx, record.association.stepId, input.action, originalWork);
-}, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 }); }
+}, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      if (this.hooks.nativeAuthorization) await revalidate();
+      return recordAfter;
+    }
     catch (error) {
       // A completed callback is not a COMMIT acknowledgement. This includes
       // exact replay reads; never turn an ambiguous transaction into a retry.

@@ -52,7 +52,7 @@ export class PrismaNativeToolCallBindings implements NativeToolCallBindingReader
       || !['operator', 'staff'].includes(resolved.context.audience)) throw denied();
     if ('scope' in context) {
       if (identity(context) !== identity(resolved.context)) throw denied();
-    } else if (!('tenantId' in context) || context.tenantId !== principal.tenantId
+    } else if (!('tenantId' in context) || !('workspaceId' in context) || context.tenantId !== principal.tenantId
       || context.workspaceId !== principal.workspaceId || context.actorId !== principal.actorId) throw denied();
     return { resolved, principal, hash: requestFingerprint({ identity: identity(resolved.context), scope: resolved.scope }) };
   }

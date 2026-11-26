@@ -63,7 +63,8 @@ export function tenantModelCredentialReference(tenantId: string, revision: numbe
 
 /** Server-only encrypted settings service. No public credential getter or automatic activation. */
 export class TenantModelConfigService<Context extends TenantConfigurationContext = WorkspaceGatewayContext> {
-  constructor(private readonly ports: TenantModelConfigPorts<Context>, private readonly secrets: SecretBox) {
+  constructor(private readonly ports: TenantModelConfigPorts<Context>, private readonly secrets: SecretBox,
+    private readonly tenantInvocation = false) {
     if (!ports || typeof ports.authorize !== "function" || typeof ports.repository?.read !== "function" || typeof ports.repository?.compareAndSwap !== "function" || !secrets) throw new ModelGatewayError("CONFIG_INVALID");
   }
 
@@ -78,7 +79,7 @@ export class TenantModelConfigService<Context extends TenantConfigurationContext
     }
     // Capture identity before yielding. A caller cannot mutate the original object
     // between authorization and a repository/vault operation.
-    if (action === "invoke" && context.workspaceId === undefined) throw new ModelGatewayError("FORBIDDEN");
+    if (action === "invoke" && (context.workspaceId === undefined) !== this.tenantInvocation) throw new ModelGatewayError("FORBIDDEN");
     const scope = Object.freeze({ tenantId: context.tenantId, actorId: context.actorId,
       ...(context.workspaceId === undefined ? {} : { workspaceId: context.workspaceId }) }) as Readonly<Context>;
     try { await this.ports.authorize(scope, action); } catch { throw new ModelGatewayError("FORBIDDEN"); }

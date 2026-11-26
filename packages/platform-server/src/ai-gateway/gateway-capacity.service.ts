@@ -2,14 +2,14 @@
  * deadline and never reserves money or dispatches work. Aggregate diagnostics
  * contain no tenant IDs, body, URL, secret or business-success assertion. */
 import { z } from 'zod';
-import { ModelGatewayError } from './model-gateway.ports';
+import { ModelGatewayError, tenantGatewayContextSchema } from './model-gateway.ports';
 import { gatewayTransportTermination, type GatewayTransportIterator } from './gateway-capacity.ports';
 import type { GatewayCapacityClock, GatewayCapacityLease, GatewayCapacityLimits,
   GatewayCapacityPort, GatewayCapacityRequest, GatewayCapacityStatistics } from './gateway-capacity.ports';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const workspace = z.object({ tenantId: id, workspaceId: id, actorId: id }).strict();
-const requestSchema = z.object({ context: z.union([workspace, z.object({ actorId: id }).strict()]),
+const requestSchema = z.object({ context: z.union([workspace, tenantGatewayContextSchema, z.object({ actorId: id }).strict()]),
   profile: z.object({ id: id, scopeId: id, scopeKind: z.enum(['PLATFORM', 'TENANT', 'WORKSPACE']),
     serviceMode: z.enum(['platform_managed', 'tenant_managed']),
     protocol: z.string().min(1).max(64), provider: z.string().min(1).max(128),

@@ -12,6 +12,7 @@
     "src/task-steps.ts",
     "src/task-measured-effects.ts",
     "src/gateway-admission.ts",
+    "src/public-tenant-gateway.ts",
     "src/public-tenant-task-authority.ts",
     "src/platform-transactions.ts",
     "src/tenant-configuration-transactions.ts",

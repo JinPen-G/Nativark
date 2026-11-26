@@ -2,7 +2,8 @@
 import { z } from 'zod';
 import { ModelResponseSecretGuard } from './model-response-secret';
 import { capabilityProfileFingerprint } from './capability-verification';
-import { ModelAdapterError, ModelGatewayError, modelProtocolRequestSchema, type GatewayContext, type ModelAdapter, type ModelProtocolRequest } from './model-gateway.ports';
+import { ModelAdapterError, ModelGatewayError, modelProtocolRequestSchema, tenantGatewayContextSchema,
+  type GatewayContext, type ModelAdapter, type ModelProtocolRequest } from './model-gateway.ports';
 import type { AiProviderProfileRecord } from './provider-profile.ports';
 import type { ProviderRouteDecision } from './provider-router.ports';
 import type { GatewayStreamEvent, GatewayUsageRecorder, GatewayTransportDispatchCheck, UnifiedGatewayTransport } from './unified-ai-gateway.ports';
@@ -31,7 +32,7 @@ export interface GatewayProbeDispatchAuthority {
 const connectionSchema = z.object({ profileFingerprint: z.string().regex(/^[0-9a-f]{64}$/u), baseUrl: z.string().min(1).max(2048),
   credential: z.string().min(1).max(8192).regex(/^[\x21-\x7e]+$/u), maxOutputTokens: z.number().int().min(1).max(32768) }).strict();
 const contextSchema = z.object({ tenantId: z.string().min(1).max(128), workspaceId: z.string().min(1).max(128), actorId: z.string().min(1).max(128) }).strict();
-const routedContextSchema = z.union([contextSchema, z.object({ actorId: z.string().min(1).max(128) }).strict()]);
+const routedContextSchema = z.union([contextSchema, tenantGatewayContextSchema, z.object({ actorId: z.string().min(1).max(128) }).strict()]);
 
 /** Protocol registry behind the authorized route. No supplier fallback, SDK-selected model, or secret in output. */
 export class RoutedModelTransport implements UnifiedGatewayTransport {
@@ -123,7 +124,7 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
       const prepared = await this.prepare(context, request, route, signal, false);
       // Preparing the connection includes awaited Vault/authorization reads.
       // Recheck the held server capacity at the actual adapter boundary.
-      if (this.requiresProviderGuard?.() && !this.beforeProvider) throw new ModelGatewayError('FORBIDDEN');
+      if ((this.requiresProviderGuard?.() || 'scopeKind' in context) && !this.beforeProvider) throw new ModelGatewayError('FORBIDDEN');
       await this.beforeProvider?.(context, prepared.request, signal);
       this.cancelled(signal); beforeDispatch?.();
       // Adapter-owned objects must not change while accounting or authorization awaits.
@@ -144,7 +145,7 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
       const native = parsed.data;
       const prepared = await this.prepare(context, request, route, signal, false, true);
       this.cancelled(signal); this.rejectSecret(native, prepared.secrets);
-      if (this.requiresProviderGuard?.() && !this.beforeProvider) throw new ModelGatewayError('FORBIDDEN');
+      if ((this.requiresProviderGuard?.() || 'scopeKind' in context) && !this.beforeProvider) throw new ModelGatewayError('FORBIDDEN');
       await this.beforeProvider?.(context, prepared.request, signal);
       this.cancelled(signal); beforeDispatch?.();
       const result = structuredClone(await prepared.adapter.generateNativeToolResult!({ ...structuredClone(prepared.request),
@@ -175,7 +176,7 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
     try {
       const prepared = await this.prepare(context, request, route, signal, true);
       let pending = '', terminal = false;
-      if (this.requiresProviderGuard?.() && !this.beforeProvider) throw new ModelGatewayError('FORBIDDEN');
+      if ((this.requiresProviderGuard?.() || 'scopeKind' in context) && !this.beforeProvider) throw new ModelGatewayError('FORBIDDEN');
       await this.beforeProvider?.(context, prepared.request, signal);
       this.cancelled(signal); beforeDispatch?.();
       const source = retainGatewayCapacityIterator(prepared.adapter.stream!({ ...structuredClone(prepared.request), signal, recordUsage, expectedInputBoundHash },

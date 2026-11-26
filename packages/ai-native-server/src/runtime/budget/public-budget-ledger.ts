@@ -16,12 +16,14 @@ export function createPublicBudgetLedger(input: {
   taskTransactions?: TaskTransactions;
   settingsTransactions?: Pick<BudgetLedgerTransactionHooks, 'beginSettings'>;
   recovery?: 'original_task';
+  nativeAuthorization?: true;
   clock?: () => Date;
 }) {
   const begin = input.settingsTransactions?.beginSettings.bind(input.settingsTransactions);
   const task = input.taskTransactions?.withAiTaskTransaction.bind(input.taskTransactions);
   const recoverOriginal = input.recovery === 'original_task';
   return new PrismaBudgetLedgerRepository(input.db, {
+    nativeAuthorization: input.nativeAuthorization,
     async beginSettings(tx, key, settings, operation) {
       const lease = await begin?.(tx, key, settings, operation);
       if (!lease || typeof lease.revalidate !== 'function' || typeof lease.close !== 'function') throw new BudgetError('UNAVAILABLE');

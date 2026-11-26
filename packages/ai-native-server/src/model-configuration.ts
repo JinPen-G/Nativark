@@ -13,6 +13,7 @@ import { AiModelConfigurationResultUnknownError } from './runtime/model-config-c
 import { TenantModelConfigService, type TenantModelConfigPorts } from './runtime/tenant-model-config.service';
 import { PrismaTenantModelProfileRepository } from './configuration/tenant-model-profile.repository';
 import { PrismaPlatformModelConnection, type PlatformConnectionAuthority } from './configuration/platform-model-connection';
+import { createPublicTenantModelConnection } from './configuration/tenant-model-connection';
 import { beginTenantConfigurationTransaction, type TenantConfigurationContext,
   type TenantConfigurationTransactionParticipant, type AiConfigurationTransactionLease } from './tenant-configuration-transactions';
 import { beginPlatformAiManagementTransaction, type PlatformAiManagementTransactionParticipant } from './platform-transactions';
@@ -20,8 +21,33 @@ import { beginPlatformAiManagementTransaction, type PlatformAiManagementTransact
 export type { TenantConfigurationContext, TenantConfigurationTransactionParticipant } from './tenant-configuration-transactions';
 export type { TenantModelConfigPorts } from './runtime/tenant-model-config.service';
 export type { PlatformConnectionAuthority } from './configuration/platform-model-connection';
+export { PrismaPlatformModelConnection } from './configuration/platform-model-connection';
 
 type ScopeDatabase = Pick<PrismaClient, '$transaction' | 'aiScope'>;
+
+/** Read-only configuration use for an authorized tenant Task. Management
+ * operations cannot borrow this authority, and absent settings stay disabled. */
+export function createPublicTenantInvocationConfiguration(input: {
+  db: ConstructorParameters<typeof PrismaTenantModelProfileRepository>[0] & ScopeDatabase;
+  authority: AiCurrentScopeAuthority;
+  secrets: SecretBox;
+  authorize(context: Readonly<TenantConfigurationContext>): Promise<void>;
+}) {
+  if (typeof input?.authority?.resolve !== 'function' || typeof input.authorize !== 'function')
+    throw new ModelGatewayError('CONFIG_INVALID');
+  const authorize: TenantModelConfigPorts<{ tenantId: string; actorId: string }>['authorize'] = async (caller, action) => {
+    if (action !== 'invoke') throw new ModelGatewayError('FORBIDDEN');
+    const current = await input.authority.resolve();
+    if (current.audience !== 'operator' || current.scope.kind !== 'tenant' || current.scope.tenantId !== caller.tenantId
+      || current.actor.kind !== 'user' || current.actor.userId !== caller.actorId) throw new ModelGatewayError('FORBIDDEN');
+    await input.authorize(caller);
+  };
+  const scopes = new AiScopeRepository(input.db, input.authority);
+  const repository = new PrismaTenantModelProfileRepository(input.db, authorize, async () => { throw new ModelGatewayError('FORBIDDEN'); });
+  const configuration = new TenantModelConfigService({ authorize, repository }, input.secrets, true);
+  return Object.freeze({ selectionForInvocation: configuration.selectionForInvocation.bind(configuration),
+    tenantConnection: createPublicTenantModelConnection(configuration, scopes) });
+}
 async function registerScope(db: ScopeDatabase, columns: ReturnType<typeof aiPersistenceScopeColumns>,
   begin: (transaction: Prisma.TransactionClient) => Promise<AiConfigurationTransactionLease>, current: () => Promise<void>) {
   await current();

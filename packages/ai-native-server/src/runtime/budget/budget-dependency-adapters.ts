@@ -1,8 +1,8 @@
 import type { BudgetEvidenceBinding, GatewayDispatchEvidenceSource } from './gateway-dispatch-evidence.ports';
-import type { AiExecutionContext } from '@rental-os/shared';
+import type { AiExecutionContext } from '@rental-os/platform-contracts/ai-gateway';
 import { BudgetError, isOriginalBudgetLifecycleAction, type BudgetAction, type BudgetAuthority, type BudgetGrant, type BudgetPolicyKey, type BudgetRecord, type BudgetUsageEvidence } from './budget.ports';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
-import { isAiStepExecutionContext } from '../task-contract-validation';
+import { isAiStepExecutionContext } from '../../execution-context-validation';
 import { quantityAtoms } from './budget-quantity';
 
 export interface BudgetAuthorizationSource {
