@@ -2,6 +2,7 @@
   "name": "@rental-os/mcp-server",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "exports": {
     ".": {
@@ -9,6 +10,14 @@
       "import": "./dist/index.js"
     },
     "./data-contribution.json": "./data-contribution.json",
+    "./data-capability": {
+      "types": "./dist/data-capability.d.ts",
+      "import": "./dist/data-capability.js"
+    },
+    "./mysql-data": {
+      "types": "./dist/mysql-data.d.ts",
+      "import": "./dist/mysql-data.js"
+    },
     "./host-router": {
       "types": "./dist/host-router.d.ts",
       "import": "./dist/host-router.js"
@@ -208,6 +217,7 @@
   },
   "files": [
     "dist",
+    "prisma/schema.prisma",
     "data-contribution.json",
     "mysql-oauth-schema.sql",
     "mysql-read-budget-schema.sql",
@@ -223,9 +233,21 @@
     "@modelcontextprotocol/server": "2.2.0"
   },
   "peerDependencies": {
+    "@rental-os/core-contracts": "0.1.0",
+    "@rental-os/core-host": "0.1.0",
+    "@rental-os/platform-core-host": "0.1.0",
     "@rental-os/shared": "0.1.0"
   },
   "peerDependenciesMeta": {
+    "@rental-os/core-contracts": {
+      "optional": true
+    },
+    "@rental-os/core-host": {
+      "optional": true
+    },
+    "@rental-os/platform-core-host": {
+      "optional": true
+    },
     "@rental-os/shared": {
       "optional": true
     }
@@ -237,6 +259,12 @@
   "types": "./dist/index.d.ts",
   "typesVersions": {
     "*": {
+      "data-capability": [
+        "dist/data-capability.d.ts"
+      ],
+      "mysql-data": [
+        "dist/mysql-data.d.ts"
+      ],
       "host-router": [
         "dist/host-router.d.ts"
       ],

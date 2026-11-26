@@ -1,0 +1,2 @@
+// MCP uses its fixed raw SQL through the original stores.
+// This contribution adds no Prisma models or relations to the host schema.

@@ -166,9 +166,39 @@ public-client 登记 / 审查由原当前 SaaS 管理身份办理。通知与准
 
 选用 MCP 时，发布工具应将归属、固定源提交、清单和五份原字节一起纳入比较。按数组顺序逐份比较文件及 SHA-256。新增、缺失、改名、重排、字节漂移和能力选择变化均进入数据变更核定。以固定 Git 对象或与其逐字一致的发行文件为准。Windows 检出若转换了换行，应回到固定 Git 字节取材。五份 SQL 的 DDL 依赖均在上表内。运行时原 Auth、审计、Core/AI 读取和宿主提供的持久率桶另有各自前置。原分类器使用 `client_api_rate_buckets`，该表及公共 API 的率桶均由原所属数据链核定。[原分类器](src/original-traffic-meter.ts)
 
-已有库须同时取得物理结构和原账证据。物理观察按五份 SQL 核对 30 张表的列、类型、空值、字符集/排序规则、主键、唯一键、检查约束、索引列序和外键目标及删除/更新规则。单独核对目录目标的三条跨表索引和 OAuth 自助查询索引。记录同一数据库的观察时间和结构指纹，只需读取元数据。原账观察按实际账名、原 checksum、先后顺序以及完成、失败和回滚状态核对。若宿主使用 Prisma，由现有观察器读取 `_prisma_migrations`。原来由人工部署的材料需要可核实的原执行记录和经核定的映射。表齐但缺账、部分应用、checksum 漂移或执行状态不明，都应阻止自动标记就绪、自动重跑初始化或补写成功收据。已有凭据族、grant、预算、调用、绑定、意图和历史收据沿原键保留。旧库差异需交原数据所有者核定前进和恢复方案。[原账观察器](../core-host/src/mysql-deployment.ts)
+#### 固定能力包与宿主接点
 
-这个出口可用于纳入数据差异比较。写入 `CoreDeploymentLock.dataCapabilities` 仍需按正式合同固定完整能力包与归档摘要、schema 文件、发行兼容版本和数据版本、正式迁移身份及数据前置。宿主还须提供对应的原迁移名和物理观察，再由 `requireDataCapabilityAvailable("mcp")` 判定就绪。[数据发行合同](../core-contracts/src/data-capability.ts) · [部署组合器](../core-contracts/src/deployment.ts)
+`@rental-os/mcp-server/data-capability` 的 `createMcpDataRelease({ files, source })` 从同一完整构建包生成 `CorePlatformDataCapabilityRelease`。`files` 是包内相对路径到原字节的 Map，须包含包元数据、README、LICENSE、本版全部 JS / 类型构建文件（含未直接导出的内部模块）、材料清单、schema 和五份 SQL；`source` 是该构建包实际固定的仓库与提交。发行的 `sha256` 是整个包经 `createCoreArchive(files)` 得到的归档摘要，`files[]` 则逐项固定文件摘要，不能用五份 SQL 的指纹代替。`readMcpDataPackage(files, release)` 和 `requireMcpDataPackage(directory, release)` 复用公共完整包及逐文件核验。已解析的数据材料、包和候选锁都不代表已经安装或执行。[能力包入口](src/data-capability.ts) · [公共合同](../core-contracts/src/data-capability.ts)
+
+本版能力实现及数据版本均为 `0.1.0`，数据可读范围为 `[0.1.0, 0.1.1)`；兼容平台 `[0.1.0, 0.2.0)`、Core 合同 `[0.1.1, 0.2.0)`、Node `[22.0.0, 25.0.0)`。已核定的公共数据前置为 `[0.1.9, 0.1.10)`，五份 DDL 不要求其他 Core 数据。需要该能力的 Core 可在原 `requires` 声明 `{ capability: "mcp", version: { minInclusive: "0.1.0", maxExclusive: "0.1.1" } }`；它只参与能力与数据准入，不授予 MCP 业务权。原 Auth、审计、业务读取、率桶和其他运行依赖仍由各自宿主提供。
+
+固定 [schema.prisma](prisma/schema.prisma) 只包含说明，不向宿主追加 Prisma 模型或关系；它的原字节 SHA-256 为 `8c3ad36c896693d3d056a9d1b067bf8c26cf222ed5aeadf7a1e367ae30fe7a63`。数据继续由原 SQL store 访问。正式新链的迁移 ID 和 Prisma 账名依次为：
+
+| 顺序 | 固定迁移 ID | 正式 Prisma migration_name |
+| --- | --- | --- |
+| 1 | `mcp.0001-oauth` | `platform-capability.mcp.0001-oauth` |
+| 2 | `mcp.0002-read-budget` | `platform-capability.mcp.0002-read-budget` |
+| 3 | `mcp.0003-catalog-goal` | `platform-capability.mcp.0003-catalog-goal` |
+| 4 | `mcp.0004-catalog-intent` | `platform-capability.mcp.0004-catalog-intent` |
+| 5 | `mcp.0005-catalog-adoption` | `platform-capability.mcp.0005-catalog-adoption` |
+
+正式发行前从固定提交取清单、schema 和五份原 Git 字节，连同该提交的完整构建产物及许可证形成 `files`，用实际来源调用上述发行入口，再把返回的 release 和同一 Map 交给 `CoreDeploymentLock.dataCapabilities`、包读取器与 `createCoreMigrationDeployment`。宿主用 `createMcpMysqlDataPlan({ files, release, tableCollation })` 构造只读计划，并将 `{ capabilityId: "mcp", ...plan }` 交给 `createMysqlCoreDeploymentObservation` 的 `dataCapabilities`；所选目录使用 `requireDataCapabilityAvailable("mcp")`。这些接点不执行 SQL、写账、注册服务或替代宿主最终装配。[物理计划](src/mysql-data.ts) · [部署组合器](../core-contracts/src/deployment.ts) · [原账观察器](../core-host/src/mysql-deployment.ts)
+
+原 SQL 没有指定表默认排序规则，部分 `ENUM` 会继承建表时的规则。`tableCollation` 必须由目标环境的原建表资料核定，并适用于这 30 张表；缺少证据或各表规则不一致时，本计划不可用。物理读取核表、列、类型、空值、排序规则、默认值、主键、唯一键、检查约束、索引列序、外键和动作，并返回实际观察时间及结构摘要。其内部仅将固定 SQL 语法转换为公共结构解析器的输入，转换结果不会作为迁移材料执行。宿主须确保观察期间相关 DDL 不并发变更。
+
+物理观察以 MySQL 8.4 的 `information_schema` 元数据及 `@prisma/client` 5.22 的只读查询接口为目标，宿主须具备对应元数据读取权；本入口不提供数据库连接或授权。本次包内夹具不证明其他 MySQL 版本或真实部署环境已经通过。
+
+新链默认使用上表账名。旧 Prisma 账只有在原执行记录可核实时，宿主才可按五份材料的原顺序传 `originalMigrationNames`；真实 checksum 和状态仍由原观察器读取，不从映射推导。人工部署而没有可核实原账的旧库须由原数据所有者处理，不能补造成功记录。已有凭据族、grant、预算、调用、绑定、意图和历史收据沿原键保留。
+
+| 实际观察 | 结果 |
+| --- | --- |
+| 锁未选择 MCP | `requireDataCapabilityAvailable("mcp")` 拒绝 |
+| 表缺失、部分结构、约束不符或结构不可读 | 物理观察缺失，数据门禁拒绝 |
+| 表齐但原账缺失、不可读或不完整 | 读取失败或原链不完整，数据门禁拒绝 |
+| 原账 checksum / 顺序不同，或执行失败、未知 | 原观察保留差异及状态，数据门禁拒绝 |
+| 结构与完整原账一致 | 数据门禁通过；身份、授权和业务运行仍须各自验证 |
+
+`data-capability` 与 `mysql-data` 使用现有 Core 合同、原账和公共物理观察子出口；独立包消费须提供声明的可选 peer 依赖。没有选择数据能力的旧锁和原 MCP 路径继续沿原组合；实际宿主、发布锁及依赖锁需由各自作者接入并核定。
 
 ### 原调用键只读核对
 
@@ -227,6 +257,7 @@ Resources 的额度 signal 与 endpoint / 协议信号相交，迟到读取停�
 
 | 现有入口 | 可核内容 | 证据边界 |
 | --- | --- | --- |
+| [data-capability](test/data-capability.test.cjs) | 完整包、正式迁移材料、物理观察与原账数据门禁 | 需可读取用例固定的 Git 材料对象；内存构建和元数据 / 账本替身，不连接 MySQL 或执行 SQL |
 | [mcp-foundation](../../tests/mcp-foundation.test.cjs) | 官方双代 SDK、正式 ESM / NodeNext、运输 / schema / 取消与各原结果候选 | 进程内 Request / Response，发布、计量、字段及身份 / DB 含明确夹具 |
 | [mcp-web-consent](../../tests/mcp-web-consent.test.cjs) | 原 host / Auth、同意 → grant / code / token、目录 / 目标 Web / 采用 | SQL、commit、适用 MFA / 发布 / release 为明确夹具，部分 API 为 transpileOnly |
 | [mcp-mysql-store](../../tests/mcp-mysql-store.test.cjs) | 具体 SQL store、预算 / binding / 结算与正式包声明 | 进程内 SQL 事务替身 |

@@ -1,0 +1,2 @@
+# The release pins the exact schema bytes.
+schema.prisma -text
