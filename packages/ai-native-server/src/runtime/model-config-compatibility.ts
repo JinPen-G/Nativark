@@ -1,4 +1,4 @@
-import { ModelGatewayError } from "./model-gateway.ports";
+import { ModelGatewayError } from "@rental-os/platform-server/ai-gateway";
 import type { TenantModelRecord } from "./tenant-model-config.service";
 /** A transaction reached its commit boundary but its acknowledgement/current
  * delivery authority is unknown. Never retry with another revision or assume

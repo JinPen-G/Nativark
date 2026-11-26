@@ -1,6 +1,5 @@
-import type { PrismaService } from './rental-adapters/prisma.service';
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
-import type { Prisma, AiProviderProfile } from '@prisma/client';
+import type { Prisma, PrismaClient, AiProviderProfile } from '@prisma/client';
 import { z } from 'zod';
 import { capabilityNameSchema } from './capability-verification';
 import type { AiProfileScope, AiProviderProfileRecord, CreateAiProviderProfile, ProviderProfileRepository, UpdateAiProviderProfile } from './provider-profile.ports';
@@ -25,8 +24,8 @@ export function parseAiProviderProfileRecord(value: AiProviderProfile): AiProvid
 }
 /** Real Prisma delegate adapter. Scope and revision predicates are always server-built. */
 export class PrismaProviderProfileRepository implements ProviderProfileRepository {
-  private readonly delegate: PrismaService['aiProviderProfile'];
-  constructor(prisma: Pick<PrismaService, 'aiProviderProfile'>) {
+  private readonly delegate: PrismaClient['aiProviderProfile'];
+  constructor(prisma: Pick<PrismaClient, 'aiProviderProfile'>) {
     this.delegate = prisma.aiProviderProfile;
     if (!this.delegate || typeof this.delegate.findMany !== 'function') throw new Error('AI_PROFILE_PRISMA_UNAVAILABLE');
   }

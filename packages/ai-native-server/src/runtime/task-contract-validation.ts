@@ -1,6 +1,6 @@
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
-import type { AiExecutionContext, AiStepStateDraft, AiTaskMetadataPageDraft,
+import type { AiStepStateDraft, AiTaskMetadataPageDraft,
   AiTaskSnapshotDraft, AiTaskEventPageDraft, AiTaskEventResetDraft, AiTaskOutcomeSampleDraft, AiTaskBudgetUsageSummaryDraft, AiTaskPerformanceObservationDraft, AiTaskClientVisibleReportDraft, AiTaskClientVisibleReceiptDraft, AiTaskClientVisibleObservationDraft } from "@rental-os/shared";
 import { AI_TASK_PERFORMANCE_SCHEMAS, AI_SCENE_REQUEST_DRAFT_SCHEMAS, AI_USAGE_DRAFT_SCHEMAS,
   validateAiTaskFaultObservationDraft } from '@rental-os/shared';
@@ -26,11 +26,11 @@ for (const [name, schema] of Object.entries({ ...AI_NATIVE_COMPONENT_SCHEMAS, ..
   ajv.addSchema(localRefs(schema) as object, `urn:rental:step:${name}`);
 }
 const step = ajv.getSchema<AiStepStateDraft>("urn:rental:step:AiStepStateDraft")!;
-const context = ajv.getSchema<AiExecutionContext>("urn:rental:step:AiExecutionContext")!;
+
 
 /** Validation only: a valid context or lifecycle record never grants execution permission. */
 export function isAiStepState(value: unknown): value is AiStepStateDraft { return step(value) === true; }
-export function isAiStepExecutionContext(value: unknown): value is AiExecutionContext { return context(value) === true; }
+export { isAiStepExecutionContext } from '../execution-context-validation';
 
 type Observations = { AiTaskMetadataPageDraft: AiTaskMetadataPageDraft; AiTaskSnapshotDraft: AiTaskSnapshotDraft;
   AiTaskEventsObservationDraft: AiTaskEventPageDraft | AiTaskEventResetDraft; AiTaskOutcomeSampleDraft: AiTaskOutcomeSampleDraft; AiTaskBudgetUsageSummaryDraft: AiTaskBudgetUsageSummaryDraft; AiTaskPerformanceObservationDraft: AiTaskPerformanceObservationDraft; AiTaskClientVisibleReportDraft: AiTaskClientVisibleReportDraft; AiTaskClientVisibleReceiptDraft: AiTaskClientVisibleReceiptDraft; AiTaskClientVisibleObservationDraft: AiTaskClientVisibleObservationDraft };

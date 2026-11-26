@@ -40,6 +40,15 @@
       ],
       "runtime/*": [
         "dist/runtime/*.d.ts"
+      ],
+      "tenant-configuration-transactions": [
+        "dist/tenant-configuration-transactions.d.ts"
+      ],
+      "model-configuration": [
+        "dist/model-configuration.d.ts"
+      ],
+      "execution-context-validation": [
+        "dist/execution-context-validation.d.ts"
       ]
     }
   },
@@ -83,6 +92,18 @@
     "./runtime/*": {
       "types": "./dist/runtime/*.d.ts",
       "default": "./dist/runtime/*.js"
+    },
+    "./tenant-configuration-transactions": {
+      "types": "./dist/tenant-configuration-transactions.d.ts",
+      "default": "./dist/tenant-configuration-transactions.js"
+    },
+    "./model-configuration": {
+      "types": "./dist/model-configuration.d.ts",
+      "default": "./dist/model-configuration.js"
+    },
+    "./execution-context-validation": {
+      "types": "./dist/execution-context-validation.d.ts",
+      "default": "./dist/execution-context-validation.js"
     }
   },
   "scripts": {

@@ -6,9 +6,9 @@ import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import { z } from 'zod';
 import { AI_USAGE_DRAFT_SCHEMAS, type AiTenantModelSettingsSummaryDraft, type AiPlatformModelSettingsSaveDraft,
-  type AiModelConfigurationOperationDraft } from '@rental-os/shared';
+  type AiModelConfigurationOperationDraft } from '@rental-os/platform-contracts/ai-usage';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
-import { ModelGatewayError } from './model-gateway.ports';
+import { ModelGatewayError } from '@rental-os/platform-server/ai-gateway';
 import { AiModelConfigurationRevisionConflictError } from './model-config-compatibility';
 
 export const modelConfigurationOperationKey = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);

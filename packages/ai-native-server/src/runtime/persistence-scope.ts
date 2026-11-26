@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AiExecutionScope } from "@rental-os/shared";
+import type { AiExecutionScope } from "@rental-os/platform-contracts/ai-gateway";
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const scopeSchema: z.ZodType<AiExecutionScope> = z.discriminatedUnion("kind", [

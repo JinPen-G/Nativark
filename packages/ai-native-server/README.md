@@ -20,7 +20,17 @@
 
 现有 Rental 仓储沿 [Task 兼容入口](src/runtime/task-transaction-authority.ts)共享同一个公共边界实例。[部署准入适配器](src/runtime/rental-adapters/task-deployment-admission.ts)保留原 Rental 停新/控制读取，[平台管理适配器](src/runtime/rental-adapters/platform-management-transaction.ts)保留所选 Rental 宿主的原主体与 Tenant 父锁。只有这些显式适配器识别旧宿主兼容选择；所选请求失活后继续拒绝。
 
-上述出口构成公共事务边界。当前整包构建仍选择 Rental-AI schema 并构建 Rental 前置包。租户配置、完整平台生产装配、公共数据贡献、HTTP 和 UI 的独立宿主闭包仍须继续拆分，完整发行方式以本页下方数据与构建说明为准。
+## 公共模型配置
+
+宿主从 [model-configuration](src/model-configuration.ts) 创建租户或平台的持久配置工厂，提供自己的当前动作授权、SecretBox、同一所选 Prisma Client 和显式事务参加者。租户配置上下文允许只有 tenantId、actorId；invoke 仍要求业务 workspace 及其授权。调用 `registerScope` 建立原 canonical TENANT 或 PLATFORM 元数据后，再使用返回的 `configuration` 读取、保存及核对原 operationKey。元数据注册和配置保存分别拥有原事务，元数据存在不表示模型可调用。
+
+[tenant-configuration-transactions](src/tenant-configuration-transactions.ts) 的 `createTenantConfigurationTransactions` 通过原 PlatformPrincipalAuthority 锁定租户、账号、角色和会话。requiredPermission 来自宿主登记，assertDataAvailable 在同一事务核所选 AI 数据，最后一次数据等待后再次复核会话和权限。此公共参加者接受无业务 workspace 的租户请求，Core 范围由该 Core 的参加者处理。
+
+[租户仓储](src/configuration/tenant-model-profile.repository.ts)和[平台仓储](src/configuration/platform-model-connection.ts)沿原加密、Profile CAS 和操作收据保存，提交前重核租约并在 finally 关闭。提交应答不明保留 unknown，按原键读取；公共工厂缺参加者时不可用。原 [Rental 租户构造器](src/runtime/tenant-model-profile.repository.ts)及[平台构造器](src/runtime/platform-model-connection.ts)只连接原宿主参加者，所有保存共用上述仓储实现。
+
+[execution-context-validation](src/execution-context-validation.ts) 使用原公共上下文 schema，保留 strict 校验且不修改输入。配置、用量和模型目录合同分别由 [platform-contracts/ai-usage](../platform-contracts/src/ai-usage.ts)及[ai-provider-discovery](../platform-contracts/src/ai-provider-discovery.ts)提供，shared 旧出口再导出同一对象。
+
+这些公共配置出口的源码和类型依赖闭包不加载 Rental 或混合 shared 总出口。当前整包构建仍选择 Rental-AI schema 并构建 Rental 前置包；公共配置 HTTP/Guard 宿主、平台预算/额度、公共数据贡献、UI 与完整发行闭包继续按下方现有数据与构建范围处理。
 
 完整原组合宿主从 [服务装配](../../apps/api/src/application-services.module.ts) 使用这些工厂。[独立 AI 宿主](../../apps/rental-api/src/ai-app.module.ts) 则显式选择 AI 数据贡献，由 [同实例装配](../../apps/rental-api/src/ai-composition.ts) 提供原 Auth、Guard、Core、数据库和文件权限。只有该宿主 [实际登记并审核的处理器](../../apps/rental-api/src/ai-http-policy.ts) 才发布为可调用能力；工厂、类型或合同存在不等于该宿主已开放全部 AI 路由。
 

@@ -1,8 +1,8 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
-import type { AiExecutionContext } from '@rental-os/shared';
+import type { AiExecutionContext } from '@rental-os/platform-contracts/ai-gateway';
 import type { AiProfileScope, AiProfileServiceMode } from './provider-profile.ports';
 import { aiPersistenceScopeColumns } from './persistence-scope';
-import { isAiStepExecutionContext } from './task-contract-validation';
+import { isAiStepExecutionContext } from '../execution-context-validation';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 export class AiScopeResolutionError extends Error {

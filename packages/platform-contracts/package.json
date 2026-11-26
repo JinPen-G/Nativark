@@ -66,6 +66,14 @@
     "./ai-gateway": {
       "types": "./dist/ai-gateway.d.ts",
       "default": "./dist/ai-gateway.js"
+    },
+    "./ai-usage": {
+      "types": "./dist/ai-usage.d.ts",
+      "default": "./dist/ai-usage.js"
+    },
+    "./ai-provider-discovery": {
+      "types": "./dist/ai-provider-discovery.d.ts",
+      "default": "./dist/ai-provider-discovery.js"
     }
   },
   "scripts": {
@@ -115,6 +123,12 @@
       ],
       "ai-gateway": [
         "dist/ai-gateway.d.ts"
+      ],
+      "ai-usage": [
+        "dist/ai-usage.d.ts"
+      ],
+      "ai-provider-discovery": [
+        "dist/ai-provider-discovery.d.ts"
       ]
     }
   },

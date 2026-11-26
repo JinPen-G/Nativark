@@ -1,13 +1,12 @@
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
-import { rentalPrismaNulls } from '@rental-os/rental-core/prisma-null-values';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import { ModelGatewayError } from './model-gateway.ports';
+import { ModelGatewayError } from '@rental-os/platform-server/ai-gateway';
 import { tenantModelMode } from './model-config-compatibility';
 import { tenantModelSettingsSchema, type TenantModelConfigPorts, type TenantModelRecord } from './tenant-model-config.service';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiModelConfigurationRevisionConflictError } from './model-config-compatibility';
-import type { GatewayContext } from './model-gateway.ports';
+import type { GatewayContext } from '@rental-os/platform-server/ai-gateway';
 import type { ModelConfigurationOperationWrite } from './model-configuration-operation';
 import { SECRET_BOX_ENVELOPE_PATTERN } from '@rental-os/platform-server/secret-box';
 
@@ -97,7 +96,7 @@ export class PrismaTenantModelConfigRepository implements TenantModelRepository 
     // Validation projects a detached snapshot before any asynchronous operation.
     const data = { mode: tenantModelMode(next), revision: next.revision,
       serviceEnabled: next.serviceEnabled ?? null,
-      settings: next.settings ? { ...next.settings } : rentalPrismaNulls.DbNull,
+      settings: next.settings ? { ...next.settings } : prismaRuntime.DbNull as unknown as Prisma.NullTypes.DbNull,
       credentialsEncrypted: next.credentialsEncrypted ?? null };
     if (expectedRevision === 0) {
       await this.assertNoUnconvertedLegacy(tenantId, legacy);

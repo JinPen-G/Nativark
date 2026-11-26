@@ -1,22 +1,23 @@
 import { normalizeModelBaseUrl as normalizeTenantModelBaseUrl } from '@rental-os/platform-server/ai-gateway';
 export { normalizeModelBaseUrl as normalizeTenantModelBaseUrl } from '@rental-os/platform-server/ai-gateway';
+import type { TenantConfigurationContext } from "../tenant-configuration-transactions";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import { AI_USAGE_DRAFT_SCHEMAS, AI_USAGE_DRAFT_VERSION,
-  type AiTenantModelSettingsInputDraft, type AiTenantModelSettingsSummaryDraft } from '@rental-os/shared';
+  type AiTenantModelSettingsInputDraft, type AiTenantModelSettingsSummaryDraft } from '@rental-os/platform-contracts/ai-usage';
 import { SecretBox } from "@rental-os/platform-server/secret-box";
 import { isPrivateOrLocalHost, parseOutboundUrl } from "@rental-os/platform-server/outbound-url";
-import { ModelGatewayError, type WorkspaceGatewayContext, type GatewayProfile } from "./model-gateway.ports";
+import { ModelGatewayError, type WorkspaceGatewayContext, type GatewayProfile } from "@rental-os/platform-server/ai-gateway";
 import { tenantModelMode, tenantModelServiceEnabled, AiModelConfigurationResultUnknownError,
   AiModelConfigurationRevisionConflictError } from "./model-config-compatibility";
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { capabilityNameSchema } from './capability-verification';
 import type { AiProfileCapability } from './provider-profile.ports';
 import { modelConfigurationOperationKey, type ModelConfigurationOperationWrite } from './model-configuration-operation';
-import type { AiModelConfigurationOperationDraft } from '@rental-os/shared';
-import type { AiLegacyModelConfigurationDraft } from '@rental-os/shared';
+import type { AiModelConfigurationOperationDraft } from '@rental-os/platform-contracts/ai-usage';
+import type { AiLegacyModelConfigurationDraft } from '@rental-os/platform-contracts/ai-usage';
 import type { LegacyModelConfigurationBasis, LegacyModelConfigurationSource } from './tenant-model-config.repository';
 import { NATIVE_MODEL_PROTOCOLS } from './native-model-protocols';
 
@@ -40,17 +41,17 @@ export interface TenantModelRecord { tenantId: string; revision: number; mode?: 
 const settingsAjv = new Ajv({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false });
 addFormats(settingsAjv);
 const validPublicSettings = settingsAjv.compile<AiTenantModelSettingsInputDraft>(AI_USAGE_DRAFT_SCHEMAS.AiTenantModelSettingsInputDraft);
-export interface TenantModelConfigPorts {
+export interface TenantModelConfigPorts<Context extends TenantConfigurationContext = WorkspaceGatewayContext> {
   /** Must validate fresh server identity, tenant membership, space access and action permission. */
-  authorize(context: WorkspaceGatewayContext, action: "read" | "manage" | "invoke"): Promise<void>;
+  authorize(context: Context, action: "read" | "manage" | "invoke"): Promise<void>;
   repository: {
     read(tenantId: string, legacy?: LegacyModelConfigurationBasis): Promise<TenantModelRecord | null>;
     readLegacyState?(tenantId: string): Promise<{ configured: boolean; source: LegacyModelConfigurationSource | null }>;
     /** Atomic compare-and-swap, including insert at revision zero. Never blind upsert. */
-    compareAndSwap(tenantId: string, expectedRevision: number, next: TenantModelRecord, context?: WorkspaceGatewayContext,
+    compareAndSwap(tenantId: string, expectedRevision: number, next: TenantModelRecord, context?: Context,
       operation?: ModelConfigurationOperationWrite, legacy?: LegacyModelConfigurationBasis): Promise<boolean>;
-    readOperation?(context: WorkspaceGatewayContext, operationKey: string, commandHash?: string): Promise<AiModelConfigurationOperationDraft>;
-    setAllowedCapabilities?(context: WorkspaceGatewayContext, expectedRevision: number, capabilities: readonly AiProfileCapability[]): Promise<{ revision: number; allowedCapabilities: readonly AiProfileCapability[] }>;
+    readOperation?(context: Context, operationKey: string, commandHash?: string): Promise<AiModelConfigurationOperationDraft>;
+    setAllowedCapabilities?(context: Context, expectedRevision: number, capabilities: readonly AiProfileCapability[]): Promise<{ revision: number; allowedCapabilities: readonly AiProfileCapability[] }>;
   };
 }
 
@@ -61,8 +62,8 @@ export function tenantModelCredentialReference(tenantId: string, revision: numbe
 }
 
 /** Server-only encrypted settings service. No public credential getter or automatic activation. */
-export class TenantModelConfigService {
-  constructor(private readonly ports: TenantModelConfigPorts, private readonly secrets: SecretBox) {
+export class TenantModelConfigService<Context extends TenantConfigurationContext = WorkspaceGatewayContext> {
+  constructor(private readonly ports: TenantModelConfigPorts<Context>, private readonly secrets: SecretBox) {
     if (!ports || typeof ports.authorize !== "function" || typeof ports.repository?.read !== "function" || typeof ports.repository?.compareAndSwap !== "function" || !secrets) throw new ModelGatewayError("CONFIG_INVALID");
   }
 
@@ -71,13 +72,15 @@ export class TenantModelConfigService {
     catch { throw new ModelGatewayError('CONFIG_INVALID'); }
   }
 
-  private async authorize(context: WorkspaceGatewayContext, action: "read" | "manage" | "invoke") {
-    if (!context || [context.tenantId, context.workspaceId, context.actorId].some(v => typeof v !== "string" || !/^[\w.:-]{1,128}$/u.test(v))) {
+  private async authorize(context: Context, action: "read" | "manage" | "invoke") {
+    if (!context || [context.tenantId, context.actorId, ...(context.workspaceId !== undefined ? [context.workspaceId] : [])].some(v => typeof v !== "string" || !/^[\w.:-]{1,128}$/u.test(v))) {
       throw new ModelGatewayError("INVALID_REQUEST");
     }
     // Capture identity before yielding. A caller cannot mutate the original object
     // between authorization and a repository/vault operation.
-    const scope = Object.freeze({ tenantId: context.tenantId, workspaceId: context.workspaceId, actorId: context.actorId });
+    if (action === "invoke" && context.workspaceId === undefined) throw new ModelGatewayError("FORBIDDEN");
+    const scope = Object.freeze({ tenantId: context.tenantId, actorId: context.actorId,
+      ...(context.workspaceId === undefined ? {} : { workspaceId: context.workspaceId }) }) as Readonly<Context>;
     try { await this.ports.authorize(scope, action); } catch { throw new ModelGatewayError("FORBIDDEN"); }
     return scope;
   }
@@ -116,7 +119,7 @@ export class TenantModelConfigService {
       mode: "tenant_managed" as const, revision: record.revision, keyConfigured: Boolean(record.credentialsEncrypted) };
   }
 
-  async get(context: WorkspaceGatewayContext) {
+  async get(context: Context) {
     context = await this.authorize(context, "read");
     const record = await this.readRecord(context.tenantId);
     await this.authorize(context, 'read');
@@ -125,7 +128,7 @@ export class TenantModelConfigService {
     return this.summary(record);
   }
 
-  async save(context: WorkspaceGatewayContext, value: unknown) {
+  async save(context: Context, value: unknown) {
     const request = this.snapshot(value);
     context = await this.authorize(context, "manage");
     const parsed = settingsSchema.safeParse(request);
@@ -178,7 +181,7 @@ export class TenantModelConfigService {
 
   /** Existing C07 management projection; identity comes from the actual request
    * authority. A configuration read does not attest capability or connection. */
-  async readSettings(context: WorkspaceGatewayContext): Promise<AiTenantModelSettingsSummaryDraft> {
+  async readSettings(context: Context): Promise<AiTenantModelSettingsSummaryDraft> {
     context = await this.authorize(context, 'read');
     const before = await this.readRecord(context.tenantId);
     await this.authorize(context, 'read');
@@ -190,7 +193,7 @@ export class TenantModelConfigService {
 
   /** Mode + independent service gate + retained/replaced/cleared credential
    * commit once with the existing Profile CAS. Never two sequential saves. */
-  async saveSettings(context: WorkspaceGatewayContext, value: unknown): Promise<AiTenantModelSettingsSummaryDraft> {
+  async saveSettings(context: Context, value: unknown): Promise<AiTenantModelSettingsSummaryDraft> {
     const request = this.snapshot(value);
     if (!validPublicSettings(request)) throw new ModelGatewayError('INVALID_REQUEST');
     const input = request;
@@ -243,7 +246,7 @@ export class TenantModelConfigService {
     } catch { throw new AiModelConfigurationResultUnknownError(); }
   }
 
-  async readSettingsOperation(context: WorkspaceGatewayContext, key: unknown): Promise<AiModelConfigurationOperationDraft> {
+  async readSettingsOperation(context: Context, key: unknown): Promise<AiModelConfigurationOperationDraft> {
     if (!modelConfigurationOperationKey.safeParse(key).success) throw new ModelGatewayError('INVALID_REQUEST');
     context = await this.authorize(context, 'read');
     if (!this.ports.repository.readOperation) throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
@@ -254,7 +257,7 @@ export class TenantModelConfigService {
 
   /** Review only: preserve the old object, expose no key/mask/log/prompt, and
    * never turn a historical connection success into current capability proof. */
-  async readLegacySettings(context: WorkspaceGatewayContext): Promise<AiLegacyModelConfigurationDraft> {
+  async readLegacySettings(context: Context): Promise<AiLegacyModelConfigurationDraft> {
     context = await this.authorize(context, 'read');
     if (!this.ports.repository.readLegacyState) throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
     const before = structuredClone(await this.ports.repository.readLegacyState(context.tenantId));
@@ -272,7 +275,7 @@ export class TenantModelConfigService {
       credential: 'replacement_required', conversion: 'explicit_disabled_replacement_only' };
   }
 
-  async profile(context: WorkspaceGatewayContext): Promise<GatewayProfile> {
+  async profile(context: Context): Promise<GatewayProfile> {
     context = await this.authorize(context, "invoke");
     const record = await this.readRecord(context.tenantId);
     await this.authorize(context, 'invoke');
@@ -284,7 +287,7 @@ export class TenantModelConfigService {
       maxConcurrent: record.settings.maxConcurrent, maxOutputTokens: record.settings.maxOutputTokens };
   }
 
-  async credential(reference: string, context: WorkspaceGatewayContext) {
+  async credential(reference: string, context: Context) {
     context = await this.authorize(context, "invoke");
     const record = await this.readRecord(context.tenantId);
     await this.authorize(context, 'invoke');
@@ -292,7 +295,7 @@ export class TenantModelConfigService {
     return this.decrypt(record);
   }
 
-  private async select(context: WorkspaceGatewayContext, action: 'read' | 'invoke') {
+  private async select(context: Context, action: 'read' | 'invoke') {
     context = await this.authorize(context, action);
     const record = await this.readRecord(context.tenantId);
     await this.authorize(context, action);
@@ -300,13 +303,13 @@ export class TenantModelConfigService {
     return { mode: tenantModelMode(record), revision: record?.revision ?? 0 };
   }
 
-  async selection(context: WorkspaceGatewayContext) { return this.select(context, 'read'); }
-  async selectionForInvocation(context: WorkspaceGatewayContext) { return this.select(context, 'invoke'); }
+  async selection(context: Context) { return this.select(context, 'read'); }
+  async selectionForInvocation(context: Context) { return this.select(context, 'invoke'); }
 
   /** Management diagnostics may reuse a saved secret only at the exact saved
    * destination and revision, even while disabled. No secret readback or grant
    * to dispatch. Every network boundary rechecks current identity/config. */
-  async inspectProvider<T>(context: WorkspaceGatewayContext, input: import('@rental-os/shared').AiProviderDiscoveryInputDraft,
+  async inspectProvider<T>(context: Context, input: import('@rental-os/platform-contracts/ai-provider-discovery').AiProviderDiscoveryInputDraft,
     inspect: (key: string, current: () => Promise<void>) => Promise<T>): Promise<T> {
     context = await this.authorize(context, 'manage');
     input = structuredClone(input);
@@ -335,7 +338,7 @@ export class TenantModelConfigService {
 
   /** Server application policy entry, not a model capability claim or public DTO.
    * Only the atomic config/Profile adapter can implement this operation. */
-  async setAllowedCapabilities(context: WorkspaceGatewayContext, value: unknown) {
+  async setAllowedCapabilities(context: Context, value: unknown) {
     const parsed = z.object({ expectedRevision: z.number().int().min(1).max(4294967294),
       allowedCapabilities: z.array(capabilityNameSchema).max(8).refine(items => new Set(items).size === items.length)
     }).strict().safeParse(this.snapshot(value));
@@ -346,7 +349,7 @@ export class TenantModelConfigService {
   }
 
   /** Mode selection is not a credential deletion operation. */
-  async changeMode(context: WorkspaceGatewayContext, value: unknown) {
+  async changeMode(context: Context, value: unknown) {
     const request = this.snapshot(value);
     context = await this.authorize(context, "manage");
     const input = z.object({ mode: z.enum(["platform_managed", "tenant_managed"]), expectedRevision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER - 2) }).strict().safeParse(request);

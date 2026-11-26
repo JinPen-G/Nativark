@@ -32,6 +32,8 @@ import { TenantStatus, type PlatformSessionContextResponse } from "@rental-os/pl
 
 AI上下文与C03 Gateway从 `@rental-os/platform-contracts/ai-gateway` 导入。调用、结果、事件和Gateway端口以已注册工具请求为泛型，默认不接工具；`createAiGatewayDraftSchemas()`只允许空工具数组，传入Core明确的严格schema后才接受对应工具结构。上下文、配置引用、用量与unknown使用原版本，结构校验不替代当前权限、批准或业务裁定。原shared继续以原订单解释契约特化，并生成完全相同的旧schema。[正式接点](src/ai-gateway.ts) · [工具槽与版本](src/ai-gateway-draft.ts) · [上下文schema](src/ai-context-schemas.ts) · [有限schema读取](src/ai-leaf-schema-validation.ts)
 
+模型配置、原操作收据和用量从 `@rental-os/platform-contracts/ai-usage` 导入，模型目录发现从 `@rental-os/platform-contracts/ai-provider-discovery` 导入。原 C07 版本、严格 schema、金额精度、凭据变更和目录仅元数据语义保持，shared 原出口再导出同一声明及 schema 对象。实际保存由宿主当前授权、原配置/Profile 事务和原键收据裁定。[配置与用量](src/ai-usage.ts) · [目录发现](src/ai-provider-discovery.ts) · [公共配置工厂](../ai-native-server/src/model-configuration.ts)
+
 阅读时从正式类型到 [公共服务](../platform-server/README.md)，再到 [公共宿主](../../apps/platform-api/README.md)。`PlatformTenantSummary.enabledBusinessLines` 是兼容字段，公共身份返回空集合；实际 Core 使用权从当前部署、租户授权及成员分配读取。租户、角色或公共文档存在不会赋予业务工具权限。
 
 构建使用 `npm run build -w @rental-os/platform-contracts`，类型检查使用本包 `lint`。字段变化须核原 shared 出口、生产者、HTTP DTO / OpenAPI 及直接消费者，按 [项目规则](../../AGENTS.md#业务与安全边界) 保存兼容与验证证据。
