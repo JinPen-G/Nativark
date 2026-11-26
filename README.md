@@ -276,7 +276,6 @@ Zelo/
 │   ├── tenant-website/               # [Rental 客户端] 租户对外预约网站
 │   ├── enterprise-portal/            # [Rental 客户端] 企业客户门户
 │   ├── miniprogram/ & staff-miniprogram/  # [Rental 客户端] 客户与员工微信小程序
-│   └── website/                     # 历史静态官网，独立新版见 Zelo-website
 ├── packages/
 │   ├── core-contracts/               # [底座] Core 清单/兼容/包校验/能力索引 CLI 与底座源码导出
 │   ├── core-host/                    # [底座] Core 注册目录、生命周期与移除预检内核
@@ -413,4 +412,3 @@ Zelo 公开发布的自有源码及配套说明文档采用 **[MIT License](LICE
 - **Motiq**：[许可证](packages/ui-motiq/LICENSE) · [来源与集成说明](packages/ui-motiq/README.md)
 - **Tablecn**：[集成说明](packages/ui-tablecn/README.md)
 - **Animate UI（侧栏组件）**：[许可证](packages/platform-admin/src/components/animate-sidebar/LICENSE.md) · [来源与适配说明](apps/admin/src/components/animate-sidebar/README.md)
-- **官网字体与视觉素材**：[来源与使用范围说明](apps/website/README.md)

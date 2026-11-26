@@ -6,7 +6,8 @@
   "workspaces": [
     "apps/*",
     "packages/*",
-    "!apps/website-next"
+    "!apps/website-next",
+    "!apps/website"
   ],
   "scripts": {
     "prepare:rental-workspace": "node scripts/prepare-rental-workspace.cjs",

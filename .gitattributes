@@ -9,6 +9,7 @@ docs/企业客户后台/历史归档/** -text whitespace=cr-at-eol
 /apps/deepseek-harness-original export-ignore
 /apps/primefold-clone export-ignore
 /apps/website-next export-ignore
+/apps/website export-ignore
 # The committed lock uses CRLF bytes; treat that EOL as content, not trailing whitespace.
 package-lock.json -text whitespace=cr-at-eol
 # Migration bytes are release evidence and must not follow checkout-specific EOL conversion.

@@ -59,6 +59,11 @@ function save(receipt) { fs.mkdirSync(path.dirname(RECEIPT), { recursive: true }
 
 async function apply(context) {
   if (context.workspace.id !== "ws_tenant_001" || context.workspace.code !== "default") throw new Error("Only the confirmed demo camera space may be seeded");
+  const image = [
+    '../apps/website/assets/images/industry-camera-neutral.png',
+    '../apps/website/assets/industry-camera.png',
+  ].map(relative => path.resolve(__dirname, relative)).find(file => fs.existsSync(file));
+  if (!image) throw new Error('缺少维护者本地演示交接图片，未创建或推进任何演示订单');
   const receipt = loadReceipt(context);
   save(receipt);
   const api = (route, method = "GET", body, key) => request(`/rental/v1/${route}`, context.token, method, body, key ? { "Idempotency-Key": key } : {});
@@ -108,7 +113,6 @@ async function apply(context) {
         if (!template) throw new Error("No applicable existing handover template; refusing to skip inspection");
         scenario.evidence ??= {};
         if (!scenario.evidence[stage]) {
-          const image = path.resolve(__dirname, "../apps/website/assets/industry-camera.png");
           const buffer = fs.readFileSync(image);
           const upload = await request("/files/upload-sessions", context.token, "POST", {
             businessModule: "rental-core", businessType: "rental_order", businessId: order.id,

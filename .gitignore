@@ -11,6 +11,7 @@ node_modules/
 /apps/deepseek-harness-original/
 /apps/primefold-clone/
 /apps/website-next/
+/apps/website/
 
 # Build output
 dist/

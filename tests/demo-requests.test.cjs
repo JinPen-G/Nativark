@@ -1,8 +1,8 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const { randomUUID } = require("node:crypto");
-const fs = require("node:fs");
 const path = require("node:path");
+const { execFileSync } = require("node:child_process");
 require("reflect-metadata");
 require("ts-node").register({
   transpileOnly: true,
@@ -224,7 +224,10 @@ test("CORS allows only explicit secure origins plus local HTTP preview", () => {
 });
 
 test("website links stay local or disabled and all demo entry points open the dialog", () => {
-  const html = fs.readFileSync(path.join(__dirname, "../apps/website/2.0/index.html"), "utf8");
+  // The old static site is no longer distributed with Zelo. Keep its original assertions on fixed historical bytes.
+  const readLegacyWebsite = file => execFileSync("git", ["show", `2bbe41ba50c8a4c85023171d2a5e4740dde75fd7:apps/website/2.0/${file}`],
+    { cwd: path.resolve(__dirname, ".."), encoding: "utf8" });
+  const html = readLegacyWebsite("index.html");
   const anchors = [...html.matchAll(/<a\b[^>]*>/g)].map(([tag]) => tag);
   assert.ok(anchors.length > 20);
   for (const tag of anchors) {
@@ -242,7 +245,7 @@ test("website links stay local or disabled and all demo entry points open the di
   assert.equal(new Set(versions).size, 1);
   assert.match(html, /id="demo-name"[^>]*required/);
   assert.match(html, /id="demo-contact"[^>]*required/);
-  const js = fs.readFileSync(path.join(__dirname, "../apps/website/2.0/js/demo-request.js"), "utf8");
+  const js = readLegacyWebsite("js/demo-request.js");
   assert.doesNotMatch(js, /(?:localStorage|sessionStorage)\s*\.\s*[a-zA-Z_$]/);
   assert.match(js, /credentials: "omit"/);
   assert.match(js, /result\?\.data\?\.received !== true/);

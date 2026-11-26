@@ -79,26 +79,31 @@ async function uploadItemGroupImage(token, itemGroupId, imagePath) {
 async function ensureItemGroupImages(token, workspaceCode, groups) {
   const imageByWorkspace = {
     default: [
+      path.join(ROOT, "apps", "website", "assets", "images", "industry-camera-neutral.png"),
       path.join(ROOT, "apps", "website", "public", "images", "hero-camera.png"),
       path.join(ROOT, "apps", "website", "assets", "industry-camera.png")
     ],
     camping: [
+      path.join(ROOT, "apps", "website", "assets", "images", "industry-camping-neutral.png"),
       path.join(ROOT, "apps", "website", "public", "images", "camping.png"),
       path.join(ROOT, "apps", "website", "assets", "industry-camping.png")
     ],
     vehicle: [
+      path.join(ROOT, "apps", "website", "assets", "images", "industry-vehicle-neutral.png"),
       path.join(ROOT, "apps", "website", "public", "images", "vehicle.png"),
       path.join(ROOT, "apps", "website", "assets", "industry-car.png")
     ],
     construction: [
+      path.join(ROOT, "apps", "website", "assets", "images", "industry-equipment-neutral.png"),
       path.join(ROOT, "apps", "website", "public", "images", "construction.png"),
       path.join(ROOT, "apps", "website", "assets", "industry-excavator.png")
     ]
   };
+  const needsImage = groups.filter(group => !Array.isArray(group.images) || group.images.length === 0);
+  if (!needsImage.length) return;
   const imagePath = imageByWorkspace[workspaceCode]?.find((candidate) => fs.existsSync(candidate));
-  if (!imagePath) throw new Error(`${workspaceCode} 缺少演示图片资源`);
-  for (const group of groups) {
-    if (Array.isArray(group.images) && group.images.length > 0) continue;
+  if (!imagePath) return; // The demo photos are optional and kept locally by their owner.
+  for (const group of needsImage) {
     await uploadItemGroupImage(token, group.id, imagePath);
   }
 }

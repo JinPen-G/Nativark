@@ -276,7 +276,6 @@ Zelo/
 │   ├── tenant-website/               # [Rental Client] Tenant booking storefront
 │   ├── enterprise-portal/            # [Rental Client] Enterprise customer portal
 │   ├── miniprogram/ & staff-miniprogram/  # [Rental Client] Customer & staff WeChat Mini Programs
-│   └── website/                     # Legacy static site; active site in Zelo-website
 ├── packages/
 │   ├── core-contracts/               # [Base] Core manifests, compatibility, check CLI, capability CLI & source exporter
 │   ├── core-host/                    # [Base] Core registry, lifecycle & removal preflight engine
@@ -412,4 +411,3 @@ Third-party open-source components and assets remain under their respective lice
 - **Motiq**: [License](packages/ui-motiq/LICENSE) · [Source & Integration Notes](packages/ui-motiq/README.md)
 - **Tablecn**: [Integration Notes](packages/ui-tablecn/README.md)
 - **Animate UI (Sidebar)**: [License](packages/platform-admin/src/components/animate-sidebar/LICENSE.md) · [Source & Adapter Notes](apps/admin/src/components/animate-sidebar/README.md)
-- **Marketing Site Fonts & Visual Assets**: [Attribution & Usage Scope](apps/website/README.md)
