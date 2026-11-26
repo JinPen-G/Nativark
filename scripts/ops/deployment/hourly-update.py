@@ -39,7 +39,7 @@ SOURCE_PATHS = (
     "apps/api", "apps/admin", "apps/enterprise-portal/package.json",
     "apps/miniprogram/package.json", "apps/staff-miniprogram/package.json",
     "apps/tenant-website/package.json", "apps/website-next/package.json",
-    "packages", "assets", "config", "scripts/ops/deployment",
+    "packages", "config", "scripts/ops/deployment",
     "tests/fixtures/ai-native/prisma-offline-preload.cjs",
     "scripts/build-selected-prisma.cjs", "scripts/miniprogram-shared-types.cjs",
 )

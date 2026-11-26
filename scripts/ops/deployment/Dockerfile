@@ -41,7 +41,6 @@ COPY apps/api apps/api
 COPY apps/admin apps/admin
 COPY packages packages
 COPY scripts/build-selected-prisma.cjs scripts/miniprogram-shared-types.cjs scripts/
-COPY assets assets
 COPY tests/fixtures/ai-native/prisma-offline-preload.cjs tests/fixtures/ai-native/prisma-offline-preload.cjs
 # 原离线守卫只允许生成器写本层专用临时目录。包编译显式消费这份 Client
 # 的声明，旧 Nest 宿主运行携带同字节副本；编译结束才删除临时目录。
