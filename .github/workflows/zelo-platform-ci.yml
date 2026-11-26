@@ -1,0 +1,106 @@
+name: Zelo 零 Core 构建与启动
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  platform:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      mysql:
+        image: mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb
+        env:
+          MYSQL_RANDOM_ROOT_PASSWORD: 'yes'
+          MYSQL_DATABASE: zelo_platform_ci
+          MYSQL_USER: zelo_ci
+          MYSQL_PASSWORD: zelo_ci_database_only
+        ports:
+          - 127.0.0.1:3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 --silent"
+          --health-interval=5s --health-timeout=3s --health-retries=30
+    env:
+      DATABASE_URL: mysql://zelo_ci:zelo_ci_database_only@127.0.0.1:3306/zelo_platform_ci
+      CI_DIR: output/.tmp/zelo-platform-ci
+    steps:
+      - name: 检出本次提交
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          path: ${{ env.CI_DIR }}/source
+          persist-credentials: false
+      - name: 固定 Node 工具链
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.13.0
+      - name: 导出不含业务的底座源码
+        working-directory: ${{ env.CI_DIR }}/source
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$GITHUB_WORKSPACE/$CI_DIR"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          npm ci --workspace @rental-os/core-contracts --include-workspace-root --ignore-scripts \
+            --no-audit --no-fund --cache "$task/npm-cache"
+          npm run build -w @rental-os/core-contracts
+          node packages/core-contracts/dist/export-platform.js --repo . \
+            --repository https://github.com/JinPen-G/Nativark --commit "$GITHUB_SHA" --out "$task/platform.tgz"
+          tar -tzf "$task/platform.tgz" > "$task/archive.list"
+          if grep -Eq '(^|/)(docs|node_modules|output|deepseek-harness-clone|deepseek-harness-original|primefold-clone)(/|$)|^(apps/(api|rental-api|rental-admin)|packages/(rental-core|rental-mcp-host|shared))(/|$)' "$task/archive.list"; then
+            echo '底座归档含私有资料或业务实现' >&2
+            exit 1
+          fi
+          mkdir "$task/platform"
+          tar -xzf "$task/platform.tgz" -C "$task/platform"
+      - name: 独立安装、构建和登录
+        working-directory: ${{ env.CI_DIR }}/platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$GITHUB_WORKSPACE/$CI_DIR"
+          export AUTH_TOKEN_SECRET="$(openssl rand -hex 32)" SEED_PLATFORM_PASSWORD="ZeloCi9-$(openssl rand -hex 12)"
+          export API_PORT=3091 API_PROXY_TARGET=http://127.0.0.1:3091 VITE_API_BASE_URL=/api DATABASE_CONNECT_ON_START=true
+          npm ci --ignore-scripts --no-audit --no-fund --cache "$task/npm-cache"
+          node node_modules/@prisma/engines/scripts/postinstall.js
+          npm run db:generate
+          npm run build
+          npm run db:migrate:deploy
+          npm run db:initialize
+          node apps/platform-api/dist/main.js > "$task/api.log" 2>&1 &
+          api_pid=$!
+          trap 'kill "$api_pid" ${web_pid:+"$web_pid"} 2>/dev/null || true; wait || true' EXIT
+          node node_modules/vite/bin/vite.js preview apps/platform-admin --host 127.0.0.1 --port 5191 --strictPort > "$task/web.log" 2>&1 &
+          web_pid=$!
+          if ! curl -fsS --retry 15 --retry-connrefused --max-time 5 http://127.0.0.1:5191/api/health -o "$task/health.json"; then
+            tail -n 30 "$task/api.log" "$task/web.log"
+            exit 1
+          fi
+          node --input-type=module <<'NODE'
+          import { strict as assert } from 'node:assert';
+          const web = 'http://127.0.0.1:5191';
+          async function request(path, init) {
+            const response = await fetch(web + path, { ...init, signal: AbortSignal.timeout(8000) });
+            assert(response.ok, `${path}: HTTP ${response.status}`);
+            return response;
+          }
+          const body = async (path, init) => { const json = await (await request(path, init)).json(); return json.data ?? json; };
+          assert.equal((await body('/api/health')).service, 'nativark-platform-api');
+          const login = await (await request('/login')).text();
+          const entry = /<script\b[^>]*\bsrc="(\/assets\/[^"/]+\.js)"/.exec(login)?.[1];
+          assert(entry, '独立后台缺少正式编译入口');
+          assert.match((await request(entry)).headers.get('content-type') ?? '', /javascript/);
+          const session = await body('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tenantCode: 'platform', account: 'admin', password: process.env.SEED_PLATFORM_PASSWORD }) });
+          assert(typeof session.accessToken === 'string' && session.accessToken.length > 0, '独立公共登录未返回会话');
+          const me = await body('/api/auth/session-context', { headers: { Authorization: `Bearer ${session.accessToken}` } });
+          assert.equal(me.tenant.code, 'platform');
+          assert.equal(me.user.account, 'admin');
+          console.log('零 Core：独立 MySQL 迁移、公共后台产物、代理、登录及真实会话通过');
+          NODE
