@@ -4,6 +4,7 @@ import { ModelGatewayError } from '@rental-os/platform-server/ai-gateway';
 import { hasEffectivePermission } from '@rental-os/platform-server/permission-match';
 import type { PlatformPrincipalAuthority } from '@rental-os/platform-server/principal';
 import type { PlatformAuthTransaction } from '@rental-os/platform-server/auth-store';
+import type { SystemUserRow } from '@rental-os/platform-contracts';
 import { captureAiRequestBinding } from './request-binding';
 
 export interface TenantConfigurationContext { tenantId: string; actorId: string; workspaceId?: string; }
@@ -46,6 +47,7 @@ export function createTenantConfigurationTransactions<Transaction extends Platfo
   principalAuthority: Pick<PlatformPrincipalAuthority<Transaction>, 'lock'>;
   requiredPermission: string;
   assertDataAvailable(transaction: Transaction): Promise<void>;
+  assertCurrentUser?(user: SystemUserRow): void;
 }): TenantConfigurationTransactionParticipant<Transaction> {
   if (typeof input?.principalAuthority?.lock !== 'function' || typeof input.requiredPermission !== 'string'
     || !input.requiredPermission || typeof input.assertDataAvailable !== 'function')
@@ -67,6 +69,7 @@ export function createTenantConfigurationTransactions<Transaction extends Platfo
         check();
         if (user.id !== context.actorId || user.tenantId !== context.tenantId || !user.isActive
           || user.isSaasAdmin || user.mustChangePassword || !hasEffectivePermission(user.permissions, input.requiredPermission)) throw denied();
+        input.assertCurrentUser?.(user);
       };
       const revalidate = async () => {
         check();

@@ -1,5 +1,5 @@
 import { isIP } from "node:net";
-import { ModelGatewayError } from "./model-gateway.ports";
+import { ModelGatewayError } from "@rental-os/platform-server/ai-gateway";
 /** Deployment policy only. No request-controlled private-network switch. */
 export function modelEgressUrl(value: string): URL {
   try {

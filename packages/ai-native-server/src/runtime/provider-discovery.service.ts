@@ -2,8 +2,8 @@
  * listing and inference probes (internal/provider/{models,detect}.go, MIT).
  * Never sends prompts or confuses a shared /models endpoint with Responses /
  * Chat capability. Real inference validation remains the original probe task. */
-import { AI_PROVIDER_DISCOVERY_PROTOCOLS, type AiProviderDiscoveryInputDraft, type AiProviderDiscoveryResultDraft } from '@rental-os/shared';
-import { ModelGatewayError } from './model-gateway.ports';
+import { AI_PROVIDER_DISCOVERY_PROTOCOLS, type AiProviderDiscoveryInputDraft, type AiProviderDiscoveryResultDraft } from '@rental-os/platform-contracts/ai-provider-discovery';
+import { ModelGatewayError } from '@rental-os/platform-server/ai-gateway';
 import { ModelResponseSecretGuard } from './model-response-secret';
 import { modelEgressUrl } from './model-egress-policy';
 import type { ModelEgressTransport } from './model-egress.transport';

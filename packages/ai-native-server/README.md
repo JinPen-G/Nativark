@@ -40,6 +40,12 @@
 
 [公共平台财务模块](src/public-platform-finance.ts)使用同一个 Auth、Guard、Client 与数据准入，提供平台预算读取、保存和原操作收据，原费率审阅和原收据，以及额度队列、人工审批和原决定收据。[公共安装说明](README.public.md)列出 API、Guard 和同源 OpenAPI 的装配入口。预算政策、费率记录和额度采用原表；提交未知按各自原键读取，Gateway 预占、Task 累计和租户空间分配仍由各自原消费者控制。
 
+### 选装公共租户 AI 设置
+
+从 [`public-tenant-model-settings`](src/public-tenant-model-settings.ts) 取得 `PublicTenantModelSettingsModule`、`withPublicTenantModelSettingsHttpAccess` 和 `createPublicTenantModelSettingsOpenApi`。原六个设置动作继续复用同一个 Controller、注入令牌和请求合同。公共租户身份使用已有 `system:params:manage`，由签名会话确定租户和操作者，使用 `TENANT` Scope，无经营空间依赖。保存须携带原 `operationKey`；配置、默认 Profile、密文及收据在原 CAS 事务中提交。写入时以同一事务中的主体租约和数据观察复核权威，响应交付前再核当前会话。
+
+组装时传入同一个公共服务模块与数据库模块，工厂返回 `{ db, assertDataAvailable }`。已有 SaaS 模型／财务 OpenAPI 时，在其后合入租户文档。供应商目录和协议识别复用原受控模型出网与响应限制，只返回候选元数据。设置不启用任务、验证模型能力、授予额度或消费业务 Core。旧 Rental 设置仍核原经营空间，历史操作按创建时的主体与空间读取。实际宿主和后台须显式选择这些接点。
+
 ### 公共发行构建
 
 [公共包清单](package.public.json)发布已拆公共出口，[公共 TypeScript 工程](tsconfig.public.json)编译实际 JS 和声明。按[公共安装说明](README.public.md)先核宿主专属 Client，再由[公共装包入口](public-package.cjs)从同次输出收集所有出口及所需依赖文件。旧混合包继续使用原 `package.json`、构建和历史数据锁。

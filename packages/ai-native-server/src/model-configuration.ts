@@ -60,7 +60,9 @@ export function createPublicTenantModelConfiguration<Context extends TenantConfi
   const begin = (transaction: Prisma.TransactionClient, context: Context) =>
     beginTenantConfigurationTransaction(transaction, context, input.transactionParticipant);
   const configuration = new TenantModelConfigService<Context>({ authorize: input.authorize,
-    repository: new PrismaTenantModelProfileRepository<Context>(input.db, input.authorize, begin) }, input.secrets);
+    repository: new PrismaTenantModelProfileRepository<Context>(input.db, input.authorize, async (transaction, context) => ({
+      ...await begin(transaction, context), revalidatesConfigurationInTransaction: true
+    })) }, input.secrets);
   return Object.freeze({ configuration, async registerScope(value: Context) {
     const context = Object.freeze(structuredClone(value));
     const current = () => input.authorize(context, 'manage');

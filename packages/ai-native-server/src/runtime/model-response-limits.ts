@@ -1,4 +1,4 @@
-import { ModelGatewayError } from "./model-gateway.ports";
+import { ModelGatewayError } from "@rental-os/platform-server/ai-gateway";
 export const MODEL_REQUEST_BYTES = 1_048_576;
 export const MODEL_RESPONSE_BYTES = 1_048_576;
 export const MODEL_HEADER_BYTES = 16_384;

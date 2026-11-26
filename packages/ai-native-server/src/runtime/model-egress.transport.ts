@@ -1,10 +1,17 @@
 import type { ClientRequest, IncomingMessage } from "node:http";
 import type { RequestOptions } from "node:https";
 import { isIP } from "node:net";
-import type { ModelJsonTransport } from "./chat-completions.adapter";
-import { ModelGatewayError } from "./model-gateway.ports";
+import { ModelGatewayError } from "@rental-os/platform-server/ai-gateway";
 import { modelEgressUrl, publicModelAddress } from "./model-egress-policy";
 import { MODEL_HEADER_BYTES, MODEL_REQUEST_BYTES, modelByteLimit, ModelResponseBuffer, ModelResponseStreamValidator } from "./model-response-limits";
+
+/** Server transport for validated public destinations, bounded responses and cancellation. */
+export interface ModelJsonTransport {
+  post(request: { url: string; headers: Readonly<Record<string, string>>; body: string;
+    signal: AbortSignal; maxResponseBytes: number; redirects: "error" }): Promise<{ status: number; body: string }>;
+  postStream?(request: Parameters<ModelJsonTransport["post"]>[0]): AsyncIterable<
+    { kind: "headers"; status: number } | { kind: "chunk"; bytes: Uint8Array }>;
+}
 const nativeTransports = new WeakSet<object>();
 export function modelEgressEvidence(transport: ModelJsonTransport): 'live' | 'mock' {
   return nativeTransports.has(transport) ? 'live' : 'mock';

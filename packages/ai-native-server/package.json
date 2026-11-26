@@ -50,6 +50,9 @@
       "public-platform-model-settings": [
         "dist/public-platform-model-settings.d.ts"
       ],
+      "public-tenant-model-settings": [
+        "dist/public-tenant-model-settings.d.ts"
+      ],
       "public-platform-finance": [
         "dist/public-platform-finance.d.ts"
       ],
@@ -110,6 +113,10 @@
     "./public-platform-model-settings": {
       "types": "./dist/public-platform-model-settings.d.ts",
       "default": "./dist/public-platform-model-settings.js"
+    },
+    "./public-tenant-model-settings": {
+      "types": "./dist/public-tenant-model-settings.d.ts",
+      "default": "./dist/public-tenant-model-settings.js"
     },
     "./public-platform-finance": {
       "types": "./dist/public-platform-finance.d.ts",

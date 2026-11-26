@@ -8,7 +8,7 @@ import Ajv, { type ValidateFunction } from 'ajv';
 import { AI_CONTRACT_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import { AI_NATIVE_COMPONENT_SCHEMAS } from './contracts/ai-native-schemas';
 import type { ModelResponsePolicy, ProtocolToolCall } from './model-gateway.ports';
-import { modelEgressEvidence } from './model-egress.transport';
+import { modelEgressEvidence, type ModelJsonTransport } from './model-egress.transport';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { encodeNativeToolResultBody, nativeToolResultInputHash } from './native-tool-result.encoding';
 import type { ResolvedNativeToolResult } from './model-input/native-tool-result.ports';
@@ -97,16 +97,7 @@ export class ChatProtocolPolicy implements ModelResponsePolicy {
   }
 }
 
-/** Required server transport: resolve/check ALL addresses, pin chosen public IP through TLS,
- * retain hostname certificate validation, forbid redirects/proxies, bound response bytes,
- * honour AbortSignal. No fetch fallback: unconfigured safe egress fails closed.
- * This slice supplies protocol logic, not a claim that an arbitrary transport is safe. */
-export interface ModelJsonTransport {
-  post(request: { url: string; headers: Readonly<Record<string, string>>; body: string;
-    signal: AbortSignal; maxResponseBytes: number; redirects: "error" }): Promise<{ status: number; body: string }>;
-  postStream?(request: Parameters<ModelJsonTransport["post"]>[0]): AsyncIterable<
-    { kind: "headers"; status: number } | { kind: "chunk"; bytes: Uint8Array }>;
-}
+export type { ModelJsonTransport } from './model-egress.transport';
 const responseSchema = z.object({
   choices: z.array(z.object({ message: z.object({ content: z.string().nullable(), refusal: z.string().nullable().optional(), tool_calls: z.array(z.object({ id: z.string(), type: z.literal('function'), function: z.object({ name: z.string(), arguments: z.string() }).strict() }).strict()).max(8).optional() }),
     finish_reason: z.string().nullable().optional() })).length(1),

@@ -22,10 +22,11 @@ const contextSchema = z.object({ tenantId: identifier, workspaceId: identifier.o
  * Only the existing single-model tenant configuration is projected here.
  */
 type Repository<Context extends TenantConfigurationContext> = TenantModelConfigPorts<Context>['repository'];
+type ConfigurationLease = AiConfigurationTransactionLease & { revalidatesConfigurationInTransaction?: true };
 export class PrismaTenantModelProfileRepository<Context extends TenantConfigurationContext = WorkspaceGatewayContext> implements Repository<Context> {
   private readonly records: PrismaTenantModelConfigRepository;
   constructor(private readonly db: Db, private readonly authorize: TenantModelConfigPorts<Context>['authorize'],
-    private readonly beginTransaction: (transaction: Prisma.TransactionClient, context: Context) => Promise<AiConfigurationTransactionLease | undefined>) {
+    private readonly beginTransaction: (transaction: Prisma.TransactionClient, context: Context) => Promise<ConfigurationLease | undefined>) {
     if ([db?.$transaction, db?.aiScope?.findFirst, db?.aiProviderProfile?.findFirst,
       db?.aiProviderProfile?.updateMany, db?.aiProviderProfile?.create, authorize]
       .some(method => typeof method !== 'function')) throw new ModelGatewayError('CONFIG_INVALID');
@@ -95,12 +96,14 @@ export class PrismaTenantModelProfileRepository<Context extends TenantConfigurat
     try {
       const committed = await this.db.$transaction(async tx => {
         const participant = await this.beginTransaction(tx, context);
+        const native = participant?.revalidatesConfigurationInTransaction ? participant : undefined;
+        const currentInWrite = () => native ? native.revalidate() : current();
         try {
         // Config CAS is the common write lock for all saves/mode changes. The
         // existing config-only adapter is reused ONLY inside this transaction.
         const records = new PrismaTenantModelConfigRepository(tx);
         if (!await records.compareAndSwap(tenantId, expectedRevision, next, undefined, undefined, legacy)) return false;
-        await current();
+        await currentInWrite();
         const columns = aiPersistenceScopeColumns({ kind: 'tenant', tenantId });
         const scope = await tx.aiScope.findFirst({ where: columns });
         if (!scope || !/^[A-Za-z0-9][\w.:-]{0,35}$/u.test(scope.id)
@@ -127,8 +130,8 @@ export class PrismaTenantModelProfileRepository<Context extends TenantConfigurat
         if (operation) await appendModelConfigurationOperation(tx, { scopeId: scope.id, scopeKind: 'TENANT',
           targetId: tenantId, actorId: context.actorId, workspaceId: context.workspaceId ?? null }, operation);
         if (legacy) await records.assertLegacySource(tenantId, legacy);
-        await current();
-        await participant?.revalidate();
+        await currentInWrite();
+        if (!native) await participant?.revalidate();
         callbackCompleted = true;
         return true;
         } finally { participant?.close(); }
