@@ -3,7 +3,7 @@
  * Platform mode pins the configured Profile; tenant mode takes only the
  * server-discovered live Profile, while its historical journal binds the old ID. */
 import type { AiGatewayPriceReviewDraft, AiGatewayPriceReviewReadDraft, AiGatewayPriceReviewResponseDraft,
-  AiGatewayReviewedPriceBillingDraft, AiGatewayPriceConfigurationDraft } from '@rental-os/shared/ai-admin';
+  AiGatewayReviewedPriceBillingDraft, AiGatewayPriceConfigurationDraft } from '@rental-os/platform-contracts/ai-finance';
 import { formSnapshotFingerprint } from '@rental-os/platform-admin/forms';
 
 const row = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);

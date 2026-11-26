@@ -2,11 +2,11 @@
  * execution grants or automatic write retries. */
 import { AI_BUDGET_MANAGEMENT_HTTP_DRAFT as routes, type AiBudgetSettingsReadDraft,
   type AiBudgetSettingsChangeDraft, type AiBudgetSettingsInitializeDraft,
-  type AiBudgetSettingsRefreshConfigurationDraft } from '@rental-os/shared/ai-admin';
-import type { AiBudgetSettingsOperationReadDraft } from '@rental-os/shared/ai-admin';
-import type { AiGatewayPriceReviewDraft, AiGatewayPriceReviewReadDraft, AiGatewayPriceConfigurationReadDraft } from '@rental-os/shared/ai-admin';
-import type { AiGatewayPlatformPriceAdoptionDraft, AiGatewayPlatformPriceAdoptionReadDraft } from '@rental-os/shared/ai-admin';
-import type { AiPlatformBudgetSettingsReadDraft, AiPlatformBudgetSettingsSaveDraft, AiPlatformBudgetSettingsOperationReadDraft } from '@rental-os/shared/ai-admin';
+  type AiBudgetSettingsRefreshConfigurationDraft } from '@rental-os/platform-contracts/ai-finance';
+import type { AiBudgetSettingsOperationReadDraft } from '@rental-os/platform-contracts/ai-finance';
+import type { AiGatewayPriceReviewDraft, AiGatewayPriceReviewReadDraft, AiGatewayPriceConfigurationReadDraft } from '@rental-os/platform-contracts/ai-finance';
+import type { AiGatewayPlatformPriceAdoptionDraft, AiGatewayPlatformPriceAdoptionReadDraft } from '@rental-os/platform-contracts/ai-finance';
+import type { AiPlatformBudgetSettingsReadDraft, AiPlatformBudgetSettingsSaveDraft, AiPlatformBudgetSettingsOperationReadDraft } from '@rental-os/platform-contracts/ai-finance';
 import type { AiAdminHost } from "../host";
 import { createAiSettingsRequest } from "./request";
 

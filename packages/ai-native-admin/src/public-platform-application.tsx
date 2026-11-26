@@ -3,9 +3,11 @@
 import type { AdminRuntime } from "@rental-os/platform-admin/runtime";
 import { canManagePublicResource } from "@rental-os/platform-admin/access";
 import { AiAdminHostProvider, createAiAdminHost } from "./host";
+import { PlatformModelSettingsPage } from "./platform-model-settings/PlatformModelSettingsPage";
 import { PlatformModelSettingsView } from "./platform-model-settings/PlatformModelSettingsView";
 
-export function createPublicPlatformModelSettingsPage(runtime: AdminRuntime) {
+export function createPublicPlatformModelSettingsPage(runtime: AdminRuntime, options: { finance?: boolean } = {}) {
+  const Page = options.finance === true ? PlatformModelSettingsPage : PlatformModelSettingsView;
   const host = createAiAdminHost({
     runtime,
     getSession: () => {
@@ -18,6 +20,6 @@ export function createPublicPlatformModelSettingsPage(runtime: AdminRuntime) {
     },
   });
   return function SelectedPlatformModelSettingsPage() {
-    return <AiAdminHostProvider host={host}><PlatformModelSettingsView /></AiAdminHostProvider>;
+    return <AiAdminHostProvider host={host}><Page /></AiAdminHostProvider>;
   };
 }

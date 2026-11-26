@@ -1,14 +1,16 @@
 {
   "name": "@rental-os/ai-native-admin",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "license": "MIT",
   "type": "module",
-  "description": "Zelo 公共后台 SaaS 模型设置源码包",
+  "description": "Zelo 公共后台 SaaS 模型、费率、预算和额度设置源码包",
   "exports": {
     "./host": "./src/host.tsx",
     "./platform-model-settings/public-application": "./src/public-platform-application.tsx",
-    "./source/platform-model-settings/platformAiSettings": "./src/platform-model-settings/platformAiSettings.ts"
+    "./source/platform-model-settings/platformAiSettings": "./src/platform-model-settings/platformAiSettings.ts",
+    "./source/platform-model-settings/aiBudgetSettings": "./src/platform-model-settings/aiBudgetSettings.ts",
+    "./source/platform-model-settings/aiCredit": "./src/platform-model-settings/aiCredit.ts"
   },
   "files": [
     "README.md", "LICENSE",
@@ -16,6 +18,11 @@
     "src/platform-model-settings/PlatformCapabilityObservation.tsx", "src/platform-model-settings/PlatformModelSettingsView.tsx",
     "src/platform-model-settings/model-runtime.ts", "src/platform-model-settings/platform-model-settings-session.ts",
     "src/platform-model-settings/platformAiSettings.ts", "src/platform-model-settings/request.ts",
+    "src/platform-model-settings/PlatformModelSettingsPage.tsx", "src/platform-model-settings/PlatformBudgetSettings.tsx",
+    "src/platform-model-settings/PlatformPriceReview.tsx", "src/platform-model-settings/AiCreditSettings.tsx",
+    "src/platform-model-settings/aiBudgetSettings.ts", "src/platform-model-settings/aiCredit.ts", "src/platform-model-settings/runtime.ts",
+    "src/platform-model-settings/budget-settings-session.ts", "src/platform-model-settings/platform-budget-settings-session.ts",
+    "src/platform-model-settings/platform-price-review-session.ts", "src/platform-model-settings/credit-operation-reference.ts",
     "src/ai-native/AiManagement.module.css", "src/ai-native/safe-display.ts", "src/ai-native/formatters.ts",
     "src/ai-native/management-locale.ts", "src/ai-native/platform-management-locale.ts"
   ],

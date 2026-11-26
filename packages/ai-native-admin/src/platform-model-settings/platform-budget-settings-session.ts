@@ -1,7 +1,7 @@
 /** SaaS policy editing over the original budget service. One durable original
  * key/hash across unknown replies; current policy is never the old receipt. */
 import type { AiPlatformBudgetSettingsReadDraft, AiPlatformBudgetSettingsSaveDraft, AiPlatformBudgetSettingsSummaryDraft,
-  AiPlatformBudgetSettingsOperationReadDraft } from '@rental-os/shared/ai-admin';
+  AiPlatformBudgetSettingsOperationReadDraft } from '@rental-os/platform-contracts/ai-finance';
 import { budgetPolicyFields, commandHash, prepareBudgetFields, type BudgetForm } from './budget-settings-session';
 
 const row = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);

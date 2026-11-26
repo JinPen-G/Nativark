@@ -1,5 +1,5 @@
-import type { AiExecutionContext } from '@rental-os/shared';
-import { isAiStepExecutionContext } from '../task-contract-validation';
+import type { AiExecutionContext } from '@rental-os/platform-contracts/ai-gateway';
+import { isAiStepExecutionContext } from '../../execution-context-validation';
 import { BudgetError } from './budget.ports';
 
 /** Explicit SaaS/platform budget principal. No tenant/workspace fields exist to

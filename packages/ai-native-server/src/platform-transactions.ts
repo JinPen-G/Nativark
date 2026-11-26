@@ -52,10 +52,14 @@ export function createPlatformAiManagementTransactions<Transaction extends Platf
   principalAuthority: Pick<PlatformPrincipalAuthority<Transaction>, 'lock'>;
   requiredPermission: string;
   assertDataAvailable(transaction: Transaction): Promise<void>;
+  /** Server-resolved target of an existing record. The participant can lock a
+   * frozen target for historical decisions; new writes check its own state. */
+  targetTenantId?: string;
   clock?: () => number;
 }): PlatformAiManagementTransactionParticipant<Transaction> {
   if (typeof input?.principalAuthority?.lock !== 'function' || typeof input.requiredPermission !== 'string' || !input.requiredPermission
     || typeof input.assertDataAvailable !== 'function') throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
+  const targetTenantId = input.targetTenantId;
   return Object.freeze({ async begin(transaction: Transaction, actorId: string) {
     const denied = () => new ModelGatewayError('FORBIDDEN');
     const binding = captureAiRequestBinding(denied), identity = getRequestIdentity()!;
@@ -75,8 +79,9 @@ export function createPlatformAiManagementTransactions<Transaction extends Platf
     };
     try {
       check();
-      const lease = await input.principalAuthority.lock(transaction,
-        { tenantId: identity.tenantId!, subjectId: actorId, audience: 'operator' }, identity.tenantId!);
+      const principal = { tenantId: identity.tenantId!, subjectId: actorId, audience: 'operator' as const };
+      const lease = targetTenantId === undefined ? await input.principalAuthority.lock(transaction, principal, principal.tenantId)
+        : await input.principalAuthority.lock(transaction, principal, targetTenantId, undefined, false);
       verify(lease.user);
       const revalidate = async () => {
         check();

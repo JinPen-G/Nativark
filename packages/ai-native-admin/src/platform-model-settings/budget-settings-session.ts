@@ -1,8 +1,9 @@
 /** One current-scope policy editor. Unknown writes remain locked across reload;
  * a current policy read is not an immutable receipt for an earlier save. */
-import type { AiBudgetLimitDraft, AiUsageQuantityDraft, AiBudgetSettingsReadDraft, AiBudgetSettingsSummaryDraft,
-  AiBudgetSettingsChangeDraft, AiBudgetSettingsInitializeDraft, AiBudgetSettingsRefreshConfigurationDraft } from '@rental-os/shared/ai-admin';
-import type { AiBudgetSettingsOperationReadDraft } from '@rental-os/shared/ai-admin';
+import type { AiBudgetLimitDraft, AiUsageQuantityDraft } from '@rental-os/platform-contracts/ai-usage';
+import type { AiBudgetSettingsReadDraft, AiBudgetSettingsSummaryDraft,
+  AiBudgetSettingsChangeDraft, AiBudgetSettingsInitializeDraft, AiBudgetSettingsRefreshConfigurationDraft } from '@rental-os/platform-contracts/ai-finance';
+import type { AiBudgetSettingsOperationReadDraft } from '@rental-os/platform-contracts/ai-finance';
 
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const integer = (v: unknown, min: number, max: number): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= min && v <= max;

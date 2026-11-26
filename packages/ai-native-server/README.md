@@ -36,7 +36,9 @@
 
 宿主选用此模块时，将 `withPublicPlatformModelSettingsHttpAccess(existingCoreHttp)` 作为原 `PlatformServerModule.register` 的 `coreHttpProvider` 结果，并用 `createPlatformModelSettingsOpenApi(document)` 合入同版文档。`PublicPlatformModelSettingsModule.register({ imports, inject, useFactory })` 的 `imports` 复用同一个已登记平台模块，`useFactory` 给出原数据库及 `assertDataAvailable`。可从[公共数据装配](../ai-native-data/src/public-data-admission.ts)沿选定归档、原锁和物理/原迁移观察构造该函数，接同一原 Client 或当前事务。首次安装作业显式选用公共 AI schema，并沿受权角色维护入口登记 `PLATFORM_AI_MODEL_SETTINGS_PERMISSIONS`；选择模型设置本身不会授予角色。
 
-[原平台后台](../ai-native-admin/README.md#组合原平台模型配置)沿 `platformAiPage` 接现有页面和会话，候选未安装时保留正常公共宿主。默认公共启动装配由宿主维护者按所选数据与许可接入。公共设置源码与类型依赖闭包可独立于 Rental 和混合 shared。旧全量构建仍沿原 Rental-AI 组合；预算、额度、租户设置 HTTP 与完整公开发行各有独立装配边界。
+[原平台后台](../ai-native-admin/README.md#组合原平台模型配置)沿 `platformAiPage` 接现有页面和会话，默认公共启动由宿主维护者按所选数据与许可装配。旧全量构建继续沿原 Rental-AI 组合。
+
+[公共平台财务模块](src/public-platform-finance.ts)使用同一个 Auth、Guard、Client 与数据准入，提供平台预算读取、保存和原操作收据，原费率审阅和原收据，以及额度队列、人工审批和原决定收据。[公共安装说明](README.public.md)列出 API、Guard 和同源 OpenAPI 的装配入口。预算政策、费率记录和额度采用原表；提交未知按各自原键读取，Gateway 预占、Task 累计和租户空间分配仍由各自原消费者控制。
 
 ### 公共发行构建
 

@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import type { AiGatewayConfigReferenceDraft, AiUsageQuantityDraft } from '@rental-os/shared';
-import { isGatewayConfig } from '../gateway-contract-validation';
+import type { AiGatewayConfigReferenceDraft } from '@rental-os/platform-contracts/ai-gateway';
+import type { AiUsageQuantityDraft } from '@rental-os/platform-contracts/ai-usage';
+import { isGatewayConfig, modelUsageSchema, type ModelUsage } from '@rental-os/platform-server/ai-gateway';
 import { BudgetError } from './budget.ports';
 import { quantityAtoms } from './budget-quantity';
-import { modelUsageSchema, type ModelUsage } from '../model-gateway.ports';
 
 const key = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u);
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);

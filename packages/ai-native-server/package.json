@@ -50,6 +50,9 @@
       "public-platform-model-settings": [
         "dist/public-platform-model-settings.d.ts"
       ],
+      "public-platform-finance": [
+        "dist/public-platform-finance.d.ts"
+      ],
       "execution-context-validation": [
         "dist/execution-context-validation.d.ts"
       ]
@@ -107,6 +110,10 @@
     "./public-platform-model-settings": {
       "types": "./dist/public-platform-model-settings.d.ts",
       "default": "./dist/public-platform-model-settings.js"
+    },
+    "./public-platform-finance": {
+      "types": "./dist/public-platform-finance.d.ts",
+      "default": "./dist/public-platform-finance.js"
     },
     "./execution-context-validation": {
       "types": "./dist/execution-context-validation.d.ts",

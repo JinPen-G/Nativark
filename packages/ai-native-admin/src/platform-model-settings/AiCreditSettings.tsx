@@ -3,7 +3,7 @@
 import type { AiCreditApi } from "./aiCredit";
 import { usePlatformModelSettingsRuntime } from "./runtime";
 import { useEffect, useId, useRef, useState } from 'react';
-import type { AiCreditRequest, AiCreditSummary } from '@rental-os/shared/ai-admin';
+import type { AiCreditRequest, AiCreditSummary } from '@rental-os/platform-contracts/ai-finance';
 import { useAiManagementLocale as useLocale } from '../ai-native/management-locale';
 import styles from '../ai-native/AiManagement.module.css';
 import { ActionButton, Alert, ConfirmAction, EmptyScene, FormSection, Input, Select } from '@rental-os/platform-admin/ui';

@@ -11,17 +11,14 @@ import type { AiScopeRepository } from '../ai-scope.repository';
 import type { BudgetAuthorizationSource } from './budget-dependency-adapters';
 import { BudgetError } from './budget.ports';
 import { gatewayBudgetPrincipal } from './gateway-budget-principal';
-import { gatewayPriceEvidenceSchema, gatewayPriceBillingSchema } from './gateway-pricing-evidence';
+import { gatewayPriceEvidenceSchema } from './gateway-pricing-evidence';
 import { PrismaGatewayPricingRecords, type GatewayPricingRecordDb } from './prisma-gateway-pricing-records';
 import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 
 type Db = GatewayPricingRecordDb & Pick<PrismaClient, '$transaction' | 'operationLog' | 'aiTenantModelConfiguration'>;
+import { reviewedGatewayPriceInput, reviewedGatewayPriceReadInput } from './reviewed-gateway-price-input';
+export { reviewedGatewayPriceInput, reviewedGatewayPriceReadInput } from './reviewed-gateway-price-input';
 const key = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u);
-export const reviewedGatewayPriceInput = z.object({ sceneCode: key, operationKey: key, configId: key.max(36),
-  expectedConfigRevision: z.number().int().min(1).max(4294967295), priceVersion: key.max(64),
-  validFrom: z.string().datetime({ offset: true }), expiresAt: z.string().datetime({ offset: true }),
-  billing: gatewayPriceBillingSchema, confirmReviewedRate: z.literal(true) }).strict();
-export const reviewedGatewayPriceReadInput = z.object({ sceneCode: key, operationKey: key }).strict();
 const configurationRead = z.object({ sceneCode: key }).strict();
 const stable = ({ authorizedAt: _at, requestId: _request, ...context }: AiExecutionContext) => hash(context);
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));

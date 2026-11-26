@@ -1,19 +1,15 @@
 /** Opt-in SaaS model management on the host's verified session and selected Client.
  * The original Guard owns ingress; current Auth and the original principal lock
  * fence observations and saves. The module neither installs AI nor calls a model. */
-import { ForbiddenException, Module, type DynamicModule, type FactoryProvider, type ModuleMetadata } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { Module, type DynamicModule, type FactoryProvider, type ModuleMetadata } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
-import { z } from 'zod';
 import { PlatformAuthenticationRepository, PlatformAuthService, PlatformPrincipalAuthority, PLATFORM_AUTH_DATA_STORE,
   type RegisteredCoreHttpAccess } from '@rental-os/platform-server';
-import { getRequestIdentity } from '@rental-os/platform-server/request-identity';
-import { hasEffectivePermission } from '@rental-os/platform-server/permission-match';
 import { SecretBox } from '@rental-os/platform-server/secret-box';
-import { AI_CONTRACT_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/platform-contracts/ai-gateway';
+import type { AiExecutionContext } from '@rental-os/platform-contracts/ai-gateway';
 import { ModelGatewayError } from '@rental-os/platform-server/ai-gateway';
 import { AiTaskRunnerError, callAiTaskRunnerDependency } from '@rental-os/platform-server/ai-runtime';
-import { captureAiRequestBinding } from './request-binding';
+import { bindPlatformAiRequest, withPlatformAiHttpAccess } from './configuration/platform-ai-request';
 import { createPlatformAiManagementTransactions } from './platform-transactions';
 import { createPublicPlatformModelConfiguration } from './model-configuration';
 import { AiModelConfigurationResultUnknownError } from './runtime/model-config-compatibility';
@@ -29,21 +25,7 @@ export { createPlatformModelSettingsOpenApi, PLATFORM_AI_MODEL_SETTINGS_PERMISSI
 
 /** Extend the existing ingress registration with only these five SaaS actions. */
 export function withPublicPlatformModelSettingsHttpAccess(original?: RegisteredCoreHttpAccess): RegisteredCoreHttpAccess {
-  return Object.freeze({
-    registered(method: string, path: string, audience: 'operator') {
-      return audience === 'operator' && !!platformModelSettingsRoute(method, path) || original?.registered(method, path, audience) === true;
-    },
-    async authorize(method: string, path: string) {
-      const route = platformModelSettingsRoute(method, path);
-      if (!route) {
-        if (!original) throw new ForbiddenException('接口未登记');
-        return original.authorize(method, path);
-      }
-      const current = getRequestIdentity();
-      if (!current?.isSaasAdmin || current.audience !== 'operator' || current.staffApi || !current.accessSession
-        || !hasEffectivePermission(current.permissions ?? [], route.permission)) throw new ForbiddenException('缺少当前平台 AI 配置权限');
-    }
-  });
+  return withPlatformAiHttpAccess((method, path) => platformModelSettingsRoute(method, path)?.permission, original);
 }
 
 type SettingsDatabase = Parameters<typeof createPublicPlatformModelConfiguration>[0]['db'] & PlatformSettingsEvidenceDatabase;
@@ -57,7 +39,6 @@ type Dependencies = PublicPlatformModelSettingsHost & {
   principals: Pick<PlatformPrincipalAuthority<Prisma.TransactionClient>, 'lock'>;
   secrets: SecretBox;
 };
-const bearer = z.string().max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
 const denied = () => new ModelGatewayError('FORBIDDEN');
 const invalid = () => new ModelGatewayError('INVALID_REQUEST');
 
@@ -68,29 +49,10 @@ export function createPublicPlatformModelSettingsRequests(dependencies: Dependen
 
   async function request<T>(source: PlatformModelSettingsHttpRequest, write: boolean, signal: AbortSignal | undefined,
     action: (authority: { resolve(): Promise<AiExecutionContext>; assertDataAvailable: Dependencies['assertDataAvailable'] }) => Promise<T>) {
-    const header = bearer.safeParse(source?.headers?.authorization);
-    if (!header.success || signal?.aborted) throw denied();
-    const binding = captureAiRequestBinding(denied), identity = binding.identity, requestId = randomUUID();
     const permission = write ? PLATFORM_AI_MODEL_MANAGE : PLATFORM_AI_MODEL_VIEW;
-    const assertActive = () => { binding.assertCurrent(); if (signal?.aborted) throw denied(); };
+    const { assertActive, resolve, close } = bindPlatformAiRequest(dependencies.auth, source, permission, signal);
     const assertDataAvailable: Dependencies['assertDataAvailable'] = async db => {
       assertActive(); await dependencies.assertDataAvailable(db); assertActive();
-    };
-    const resolve = async (): Promise<AiExecutionContext> => {
-      assertActive();
-      const session = identity.accessSession;
-      if (identity.isSaasAdmin !== true || identity.audience !== 'operator' || identity.staffApi || identity.workspaceId !== undefined
-        || !identity.tenantId || !identity.userId || !session || session.expiresAt <= Date.now() / 1000
-        || !hasEffectivePermission(identity.permissions ?? [], permission)) throw denied();
-      const current = await dependencies.auth.resolveAccessContext(header.data);
-      assertActive();
-      const user = current?.tenantUser, currentSession = current?.accessSession;
-      if (!user || user.id !== identity.userId || user.tenantId !== identity.tenantId || user.isSaasAdmin !== true
-        || !user.isActive || user.mustChangePassword || !currentSession || currentSession.sessionId !== session.sessionId
-        || currentSession.expiresAt !== session.expiresAt || currentSession.expiresAt <= Date.now() / 1000
-        || currentSession.workspaceId !== session.workspaceId || !hasEffectivePermission(user.permissions, permission)) throw denied();
-      return { contractVersion: AI_CONTRACT_DRAFT_VERSION, audience: 'operator', actor: { kind: 'saas_admin', userId: user.id },
-        scope: { kind: 'platform' }, permissions: [...user.permissions], requestId, authorizedAt: new Date().toISOString() };
     };
     try {
       return await callAiTaskRunnerDependency(async () => {
@@ -102,7 +64,7 @@ export function createPublicPlatformModelSettingsRequests(dependencies: Dependen
       if (error instanceof AiTaskRunnerError && ['AI_RESULT_UNKNOWN', 'AI_RUN_LIMIT'].includes(error.code) && write)
         throw new AiModelConfigurationResultUnknownError();
       throw error;
-    } finally { binding.close(); }
+    } finally { close(); }
   }
 
   const target = (id: unknown) => {

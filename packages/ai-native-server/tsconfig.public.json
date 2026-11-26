@@ -11,6 +11,8 @@
     "src/execution-context-validation.ts",
     "src/model-configuration.ts",
     "src/public-platform-model-settings.ts",
+    "src/public-platform-finance.ts",
+    "src/runtime/budget/public-budget-ledger.ts",
     "src/runtime/original-result-reads.ts",
     "src/runtime/original-task-recovery-read.ts"
   ]

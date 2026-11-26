@@ -1,6 +1,6 @@
 import type { AiUsageSettingsDraft } from '@rental-os/platform-contracts/ai-usage';
 import { z } from 'zod';
-import { BudgetError } from './budget.ports';
+import { BudgetError, type BudgetPolicy } from './budget.ports';
 import { assertPositiveQuantity, quantityAtoms } from './budget-quantity';
 
 export const taskMoneyLimitSchema = z.object({ unit: z.literal('money'),
@@ -56,3 +56,10 @@ export function assertBudgetSettingsPermit(value: AiUsageSettingsDraft, model: s
   if (!Object.values(value.gates).every(gate => gate.enabled) || value.budget.state !== 'limited' || value.maxConcurrent === 0 || value.maxCallsPerRun === 0
     || !value.allowedModels.includes(model) || !value.allowedScenes.includes(scene)) throw new BudgetError('EXHAUSTED');
 }
+
+export const presentPlatformBudgetSettings = (sceneCode: string, policy: BudgetPolicy | null) => !policy
+  ? { scope: 'platform' as const, sceneCode, state: 'not_configured' as const, revision: null,
+    settings: null, admission: 'not_granted' as const }
+  : { scope: 'platform' as const, sceneCode, state: 'configured' as const, revision: policy.revision,
+    settings: { ...presentBudgetSettingsFields(policy.settings), allowedModels: [...policy.settings.allowedModels] },
+    admission: 'not_granted' as const };

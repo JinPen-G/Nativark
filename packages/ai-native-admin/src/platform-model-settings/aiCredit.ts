@@ -1,5 +1,5 @@
 /** 原额度申请、分配、审批与收据沿同一宿主运输；金额不换算，写入不重发。 */
-import { AI_CREDIT_HTTP, type AiCreditRequest, type AiCreditSummary, type AiTenantCallRecords } from '@rental-os/shared/ai-admin';
+import { AI_CREDIT_HTTP, type AiCreditRequest, type AiCreditSummary, type AiTenantCallRecords } from '@rental-os/platform-contracts/ai-finance';
 import type { AiAdminHost } from "../host";
 import { createAiSettingsRequest } from "./request";
 

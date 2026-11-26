@@ -91,4 +91,4 @@
 
 [原完整组合](src/platform-application.tsx)继续使用 `createPlatformModelSettingsPage(runtime)`，从相同模型配置视图插入原预算、费率和额度办理。模型配置合同来自 [platform-contracts/ai-usage](../platform-contracts/src/ai-usage.ts)，原完整组合继续消费原财务合同。入口需实际服务器完成数据选择、当前角色及对应配置授权。
 
-[公共源码发行清单](package.public.json)单独包含原模型页的源码、样式和窄出口。使用[公共装包入口](../ai-native-server/public-package.cjs)取其闭包，由公共后台原构建消费。[公共安装说明](README.public.md)
+[公共源码发行清单](package.public.json)包含原模型、费率、预算和额度页的源码、样式及原请求器。宿主登记[公共财务模块](../ai-native-server/src/public-platform-finance.ts)后，使用 `createPublicPlatformModelSettingsPage(session.runtime, { finance: true })` 选装原财务入口。使用[公共装包入口](../ai-native-server/public-package.cjs)取其闭包，由公共后台原构建消费。[公共安装说明](README.public.md)

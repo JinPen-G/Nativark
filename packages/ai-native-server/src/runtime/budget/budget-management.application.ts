@@ -6,8 +6,8 @@ import { createAuthorizedPersistedGatewayBudget, createPersistedGatewayBudget } 
 import { createAuthorizedPlatformBudgetSettings } from './platform-budget-settings.composition';
 import { PrismaTaskBudgetAuthorizationSource } from './prisma-task-budget-authorization.source';
 import { PrismaGatewayCallPricing } from './prisma-gateway-call-pricing';
-import { BudgetError, type BudgetPolicy } from './budget.ports';
-import { presentBudgetSettingsFields, taskMoneyLimitSchema } from './budget-settings';
+import { BudgetError } from './budget.ports';
+import { presentPlatformBudgetSettings, taskMoneyLimitSchema } from './budget-settings';
 import type { SecretBox } from '@rental-os/platform-server/secret-box';
 import { createPersistedTenantModelConfiguration } from '../tenant-model-config.composition';
 import { TenantModelConfigurationAuthority } from '../tenant-model-config.authority';
@@ -74,13 +74,6 @@ export type BudgetManagementDependencies = {
 };
 export type BudgetManagementRequest = { headers: { authorization?: unknown } };
 const bearer = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
-const platformView = (sceneCode: string, policy: BudgetPolicy | null) => !policy
-  ? { scope: 'platform' as const, sceneCode, state: 'not_configured' as const, revision: null,
-    settings: null, admission: 'not_granted' as const }
-  : { scope: 'platform' as const, sceneCode, state: 'configured' as const, revision: policy.revision,
-    settings: { ...presentBudgetSettingsFields(policy.settings), allowedModels: [...policy.settings.allowedModels] },
-    admission: 'not_granted' as const };
-
 /** Request-bound management consumer, inert until explicit server enablement.
  * Credentials come only from the actual HTTP request. Original Guard/ALS,
  * entitlement/CAS and one financial root remain mandatory; no task/model call.
@@ -380,14 +373,14 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
     platformRead: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => call(request, value, async (credentials, value) => {
       const parsed = platformRead.safeParse(value);
       if (!parsed.success) throw new BudgetError('INVALID');
-      return platformView(parsed.data.sceneCode, await platformRoot(credentials).read(parsed.data));
+      return presentPlatformBudgetSettings(parsed.data.sceneCode, await platformRoot(credentials).read(parsed.data));
     }, false, signal),
     platformReadOperation: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => call(request, value,
       (credentials, value) => platformRoot(credentials).readOperation(value), false, signal),
     platformSave: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => call(request, value, async (credentials, value) => {
       const parsed = platformSave.safeParse(value);
       if (!parsed.success) throw new BudgetError('INVALID');
-      return platformView(parsed.data.sceneCode, await platformRoot(credentials).save(parsed.data));
+      return presentPlatformBudgetSettings(parsed.data.sceneCode, await platformRoot(credentials).save(parsed.data));
     }, true, signal)
   });
 }
