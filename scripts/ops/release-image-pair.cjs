@@ -12,7 +12,7 @@ const repositories = {
   rental: ["JinPen-G/nativark-rental-core", "JinPen-G/Zelo-rental-core"],
 };
 
-function requireReleaseTag(source, version, role, run) {
+function requireReleaseTag(source, version, role, run = execFileSync) {
   const urls = repositories[role].map(repo => `https://github.com/${repo}`);
   if (!urls.some(url => url.toLowerCase() === source.repository.toLowerCase())
     || typeof version !== "string" || !/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/u.test(version)) {
@@ -48,14 +48,17 @@ function buildImagePair(directory, inputSha256, env, run = execFileSync) {
   const inputBytes = readOrdinary(path.join(inputRoot, "input.json"));
   if (sha256(inputBytes) !== inputSha256) throw new Error("镜像交接清单与独立核收摘要不一致");
   const input = readJson(inputBytes, "正式镜像交接清单");
-  if (input?.format !== "rental-image-input-1" || !isSha256(input.contextSha256)
+  if (input.format !== "rental-image-input-1" || input.sourceMode !== "release"
+    || input.releaseApproved !== false || input.serverUpdateEligible !== false || !isSha256(input.contextSha256)
     || !isSha256(input.identitySha256) || !isSha256(input.webFilesSha256)) {
     throw new Error("缺少正式宿主、双仓候选身份或 Web 构建产物摘要");
   }
   const host = path.join(inputRoot, "api"), web = path.join(inputRoot, "web");
   const candidate = readPrepared(host, input.contextSha256, { requireFixedBuild: true });
   const { identity, identitySha256, versions } = candidate;
-  if (identitySha256 !== input.identitySha256 || identity.platform.commit !== platformCommit || identity.rental.commit !== rentalCommit) {
+  if (identitySha256 !== input.identitySha256 || identity.platform.commit !== platformCommit || identity.rental.commit !== rentalCommit
+    || input.platformCommit !== platformCommit || input.rentalCommit !== rentalCommit || input.toolCommit !== platformCommit
+    || input.deploymentLockSha256 !== identity.deploymentLockSha256 || input.npmLockSha256 !== identity.npmLocks.projected) {
     throw new Error("镜像交接与正式双仓候选身份不一致");
   }
   requireReleaseTag(identity.platform, versions.platform, "platform", run);
@@ -116,4 +119,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { buildImagePair };
+module.exports = { buildImagePair, requireReleaseTag };

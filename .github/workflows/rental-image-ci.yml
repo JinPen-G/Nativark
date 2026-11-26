@@ -15,6 +15,10 @@ on:
         description: 同次已核镜像交接清单的 SHA-256
         required: true
         type: string
+      retain_images:
+        description: 保留两镜像的已核归档
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -27,6 +31,7 @@ jobs:
       ZELO_COMMIT: ${{ inputs.platform_commit }}
       RENTAL_COMMIT: ${{ inputs.rental_commit }}
       INPUT_SHA256: ${{ inputs.input_sha256 }}
+      CALLER_WORKFLOW_REF: ${{ github.workflow_ref }}
       GIT_TERMINAL_PROMPT: '0'
     steps:
       - name: 检查正式调用范围
@@ -35,6 +40,7 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = JinPen-G/Zelo
           test "$GITHUB_REF" = refs/heads/main
+          test "$CALLER_WORKFLOW_REF" = JinPen-G/Zelo/.github/workflows/rental-release-candidate.yml@refs/heads/main
           test "$GITHUB_EVENT_NAME" = push || test "$GITHUB_EVENT_NAME" = workflow_dispatch
           [[ "$ZELO_COMMIT" =~ ^[a-f0-9]{40}$ && "$RENTAL_COMMIT" =~ ^[a-f0-9]{40}$ && "$INPUT_SHA256" =~ ^[a-f0-9]{64}$ ]]
           test "$GITHUB_SHA" = "$ZELO_COMMIT"
@@ -58,10 +64,29 @@ jobs:
           task="$GITHUB_WORKSPACE/output/.tmp/rental-image-ci"
           node scripts/ops/release-image-pair.cjs "$task/input" "$INPUT_SHA256" > "$task/image-pair.json"
           cat "$task/image-pair.json"
+      - name: 留存同组镜像与原字节摘要
+        if: inputs.retain_images
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/output/.tmp/rental-image-ci"
+          tags=()
+          for role in api web; do
+            tag="zelo-rental-$role:ci-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+            expected=$(node -p 'require("./image-pair.json").imageIds[process.argv[1]]' "$role")
+            test "$(docker image inspect --format '{{.Id}}' "$tag")" = "$expected"
+            tags+=("$tag")
+          done
+          docker image save "${tags[@]}" | gzip -n > rental-images.tar.gz
+          sha256sum image-pair.json rental-images.tar.gz > SHA256SUMS
       - name: 保留双镜像核验记录
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: rental-image-pair-${{ github.run_id }}-${{ github.run_attempt }}
-          path: output/.tmp/rental-image-ci/image-pair.json
+          path: |
+            output/.tmp/rental-image-ci/image-pair.json
+            output/.tmp/rental-image-ci/rental-images.tar.gz
+            output/.tmp/rental-image-ci/SHA256SUMS
           if-no-files-found: error
+          compression-level: 0
           retention-days: 7

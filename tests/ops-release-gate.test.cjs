@@ -317,8 +317,10 @@ function verifyImagePair(archive, candidate, initialPolicy, run, imageIds) {
   const manifestPath = path.join(root, "input.json"), indexPath = path.join(root, "web", "index.html");
   const web = buf("<html>fixture</html>");
   const disk = new Map([...archive].map(([file, bytes]) => [path.join(root, "api", file), bytes]));
-  const manifest = { format: "rental-image-input-1", contextSha256: candidate.identity.contextSha256,
-    identitySha256: candidate.identitySha256,
+  const manifest = { format: "rental-image-input-1", sourceMode: "release", releaseApproved: false, serverUpdateEligible: false,
+    contextSha256: candidate.identity.contextSha256, identitySha256: candidate.identitySha256, platformCommit: candidate.identity.platform.commit,
+    rentalCommit: candidate.identity.rental.commit, toolCommit: candidate.identity.platform.commit,
+    deploymentLockSha256: candidate.identity.deploymentLockSha256, npmLockSha256: candidate.identity.npmLocks.projected,
     webFilesSha256: facts.digestFiles([{ path: "index.html", contents: web, bytes: web.length }]).digest };
   disk.set(manifestPath, json(manifest));
   disk.set(indexPath, web);
@@ -368,6 +370,8 @@ function verifyImagePair(archive, candidate, initialPolicy, run, imageIds) {
     assert.throws(() => buildImagePair(root, "0".repeat(64), env, simulate), /交接清单/u);
     disk.set(manifestPath, json({ ...manifest, format: "rental-development-build-1" }));
     assert.throws(build, /缺少正式宿主/u);
+    disk.set(manifestPath, json({ ...manifest, npmLockSha256: "0".repeat(64) }));
+    assert.throws(build, /候选身份不一致/u);
     disk.set(manifestPath, json(manifest));
     wrongTag = true;
     assert.throws(build, /正式 Tag/u);
