@@ -14,6 +14,18 @@ export interface TenantConfigurationTransactionParticipant<Transaction extends o
   begin(transaction: Transaction, context: Context): Promise<AiConfigurationTransactionLease>;
 }
 
+/** Match public tenant administration: the fixed tenant admin or a base role
+ * with the setting permission and full tenant scope. Never use a Core role. */
+export function mayManageTenantConfiguration(subject: {
+  isSaasAdmin?: boolean;
+  isPlatformAdmin?: boolean;
+  dataScope?: SystemUserRow['dataScope'];
+  permissions?: readonly string[];
+}, permission: string): boolean {
+  return subject.isSaasAdmin !== true && (subject.isPlatformAdmin === true
+    || subject.dataScope === 'all' && hasEffectivePermission(subject.permissions ?? [], permission));
+}
+
 export async function beginTenantConfigurationTransaction<Transaction extends object, Context extends TenantConfigurationContext>(
   transaction: Transaction, context: Context, participant: TenantConfigurationTransactionParticipant<Transaction, Context>
 ) {
@@ -59,7 +71,8 @@ export function createTenantConfigurationTransactions<Transaction extends Platfo
       binding.assertCurrent();
       if ('$transaction' in transaction || context.workspaceId !== undefined || source.workspaceId !== undefined
         || source.tenantId !== context.tenantId || source.userId !== context.actorId
-        || source.isSaasAdmin !== false || source.audience !== 'operator' || source.staffApi) throw denied();
+        || source.isSaasAdmin !== false || source.audience !== 'operator' || source.staffApi
+        || !mayManageTenantConfiguration(source, input.requiredPermission)) throw denied();
     };
     try {
       check();
@@ -68,7 +81,7 @@ export function createTenantConfigurationTransactions<Transaction extends Platfo
       const verify = (user: typeof lease.user) => {
         check();
         if (user.id !== context.actorId || user.tenantId !== context.tenantId || !user.isActive
-          || user.isSaasAdmin || user.mustChangePassword || !hasEffectivePermission(user.permissions, input.requiredPermission)) throw denied();
+          || user.mustChangePassword || !mayManageTenantConfiguration(user, input.requiredPermission)) throw denied();
         input.assertCurrentUser?.(user);
       };
       const revalidate = async () => {

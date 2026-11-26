@@ -6,7 +6,6 @@ import { z } from 'zod';
 import { PlatformAuthenticationRepository, PlatformAuthService, PlatformPrincipalAuthority, PLATFORM_AUTH_DATA_STORE,
   matchableRequestPath, type RegisteredCoreHttpAccess } from '@rental-os/platform-server';
 import { getRequestIdentity } from '@rental-os/platform-server/request-identity';
-import { hasEffectivePermission } from '@rental-os/platform-server/permission-match';
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import { SecretBox } from '@rental-os/platform-server/secret-box';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
@@ -16,7 +15,7 @@ import { AiTaskRunnerError, callAiTaskRunnerDependency } from '@rental-os/platfo
 import { ModelGatewayError } from '@rental-os/platform-server/ai-gateway';
 import { captureAiRequestBinding } from './request-binding';
 import { createPublicTenantModelConfiguration } from './model-configuration';
-import { createTenantConfigurationTransactions } from './tenant-configuration-transactions';
+import { createTenantConfigurationTransactions, mayManageTenantConfiguration } from './tenant-configuration-transactions';
 import { createNativeModelEgressTransport, type ModelEgressTransport } from './runtime/model-egress.transport';
 import { discoverProviderMetadata } from './runtime/provider-discovery.service';
 import { AiModelConfigurationResultUnknownError } from './runtime/model-config-compatibility';
@@ -36,7 +35,11 @@ type Identity = ReturnType<typeof getRequestIdentity>;
 function tenantSettingsIdentity(identity: Identity) {
   return Boolean(identity?.tenantId && identity.userId && identity.audience === 'operator' && identity.isSaasAdmin === false
     && !identity.staffApi && identity.workspaceId === undefined && identity.accessSession && identity.accessSession.expiresAt > Date.now() / 1000
-    && hasEffectivePermission(identity.permissions ?? [], permission));
+    && mayManageTenantConfiguration(identity, permission));
+}
+function tenantSettingsAuthorityKey(subject: Pick<NonNullable<Identity>, 'permissions' | 'dataScope' | 'isPlatformAdmin'>) {
+  return requestFingerprint({ permissions: [...(subject.permissions ?? [])].sort(),
+    dataScope: subject.dataScope, isPlatformAdmin: subject.isPlatformAdmin === true });
 }
 export function withPublicTenantModelSettingsHttpAccess(original?: RegisteredCoreHttpAccess): RegisteredCoreHttpAccess {
   const own = (method: string, path: string) => method.toUpperCase() === 'POST' && paths.has(matchableRequestPath(path));
@@ -95,16 +98,15 @@ export function createPublicTenantModelSettingsRequests(dependencies: Dependenci
       active();
       const context = Object.freeze({ tenantId: identity.tenantId!, actorId: identity.userId! });
       const session = identity.accessSession!;
-      const permissionsOf = (values: readonly string[]) => requestFingerprint([...values].sort());
-      const authority = async () => {
+      const expectedAuthority = tenantSettingsAuthorityKey(identity);
+      const recheck = async () => {
         active();
         const current = await auth.resolveAccessContext(header.data), user = current?.tenantUser, evidence = current?.accessSession;
         active();
-        if (!user || user.tenantId !== context.tenantId || user.id !== context.actorId || user.isSaasAdmin
-          || !user.isActive || user.mustChangePassword || !hasEffectivePermission(user.permissions, permission)
+        if (!user || user.tenantId !== context.tenantId || user.id !== context.actorId || !user.isActive || user.mustChangePassword
+          || !mayManageTenantConfiguration(user, permission) || tenantSettingsAuthorityKey(user) !== expectedAuthority
           || evidence?.sessionId !== session.sessionId || evidence.expiresAt !== session.expiresAt
           || evidence.workspaceId !== session.workspaceId || evidence.expiresAt <= Date.now() / 1000) throw denied();
-        return permissionsOf(user.permissions);
       };
       let command: unknown;
       try {
@@ -112,8 +114,7 @@ export function createPublicTenantModelSettingsRequests(dependencies: Dependenci
         if (Buffer.byteLength(JSON.stringify(command) ?? '', 'utf8') > 32768) throw invalid();
       } catch { throw invalid(); }
       return await callAiTaskRunnerDependency(async () => {
-        const expectedPermissions = await authority();
-        const recheck = async () => { if (await authority() !== expectedPermissions) throw denied(); };
+        await recheck();
         const participant = createTenantConfigurationTransactions<Prisma.TransactionClient>({ principalAuthority: principals,
           requiredPermission: permission,
           async assertDataAvailable(database) {
@@ -121,7 +122,7 @@ export function createPublicTenantModelSettingsRequests(dependencies: Dependenci
           },
           assertCurrentUser(user) {
             active();
-            if (permissionsOf(user.permissions) !== expectedPermissions) throw denied();
+            if (tenantSettingsAuthorityKey(user) !== expectedAuthority) throw denied();
           } });
         active(); await dependencies.assertDataAvailable(db); active();
         const application = createPublicTenantModelConfiguration({ db, secrets, transactionParticipant: participant,
@@ -222,7 +223,8 @@ export function createPublicTenantModelSettingsOpenApi<T extends { paths: Record
       responses: { '200': { description: '原租户 AI 设置结果', content: body({ type: 'object', required: ['data', 'requestId'],
         properties: { data: responseSchema, requestId: { type: 'string' } } }) },
         '400': { description: '输入不符合原合同' }, '401': { description: '原会话失效' },
-        '403': { description: '当前租户权限不足' }, '409': { description: '修订冲突或结果未知，按原键核对' },
+        '403': { description: '需要当前租户管理员身份，或参数管理权限和完整租户数据范围' },
+        '409': { description: '修订冲突或结果未知，按原键核对' },
         '503': { description: '所选数据或依赖不可用' } } };
   }
   return result;
