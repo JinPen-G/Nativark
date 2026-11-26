@@ -25,7 +25,7 @@
 
 Domain applications plug into the base as standalone **Cores (business packages)**, each owning its own domain schema, SQL migrations, admin UI contributions, and optional AI tools. **The base starts, builds, and exports cleanly with zero Cores installed.** This repository also includes the lightweight starter **Example Tickets Core** and the first official business Core—**[Rental Core](#built-in-business-core-examples)** (also published independently at [JinPen-G/nativark-rental-core](https://github.com/JinPen-G/nativark-rental-core))—as runnable demos and reference implementations for building CRM, TMS, ticketing, or any vertical SaaS Core.
 
-> **Quick Navigation**: [Why Zelo](#why-zelo) · [Core Capabilities](#core-capabilities) · [Architecture & Core Model](#architecture--core-extension-model) · [5-Step Core Integration](#integrate-your-business-core-in-5-steps) · [Built-in Core Examples](#built-in-business-core-examples) · [Quick Start](#quick-start) · [Repository Structure](#repository-structure) · [Developer Guide](#developer-guide) · [Verification](#verification--testing) · [Contributing](#contributing)
+> **Quick Navigation**: [Why Zelo](#why-zelo) · [Core Capabilities](#core-capabilities) · [Architecture & Core Model](#architecture--core-extension-model) · [5-Step Core Integration](#integrate-your-business-core-in-5-steps) · [Core Ecosystem & Monetization](#build-the-core-ecosystem--monetize-extensions) · [Built-in Core Examples](#built-in-business-core-examples) · [Quick Start](#quick-start) · [Repository Structure](#repository-structure) · [Developer Guide](#developer-guide) · [Verification](#verification--testing) · [Contributing](#contributing)
 
 ---
 
@@ -128,6 +128,28 @@ npm run export:platform -- --repo . --repository https://github.com/JinPen-G/Nat
 ```
 
 > **Online Core Discovery & Distribution**: Make your standalone Core repository public on GitHub, add the topic **`nativark-core`**, and attach your standard `.tgz` artifact to a GitHub Release. Any Zelo base can then discover it online in **Core Packages (`/platform/core-packages`)**, verify compatibility and SHA-256 digests, and stage installation. See [Core Package Host Integration](packages/platform-core-host/README.md#core-包管理接入) · [Admin Package Console](packages/platform-admin/src/features/core-packages/README.md).
+
+---
+
+## Build the Core Ecosystem & Monetize Extensions
+
+Zelo exists so engineering teams across industries no longer have to rebuild auth, multi-tenancy, RBAC, subscriptions, and admin consoles from scratch. **We warmly invite vertical developers, indie teams, and ISVs to build and open-source more industry Core packages on Zelo**—from CRM, ERP, WMS, TMS, and ticketing to scheduling, education, healthcare, asset maintenance, and multi-store retail—to grow a thriving open SaaS ecosystem together.
+
+### Why Build Your Business Core on Zelo
+
+- **Zero Coupling, Independent Cadence**: Every Core owns its own repository, SQL migrations, admin UI pages, and release schedule without being tied to Zelo base releases.
+- **Enterprise Readiness Out of the Box**: Inherit multi-tenancy, org RBAC trees, subscription enforcement, encrypted credentials, messaging primitives, and optional governed AI Native / MCP—so you focus 100% on domain logic.
+- **Built-in Discovery & Distribution**: Tag a public GitHub Core repository with **`nativark-core`** and attach a standard `.tgz` release asset to make it discoverable directly inside `/platform/core-packages` on any Zelo deployment.
+
+### Open-Friendly Commercialization & Paid Extensions
+
+Because the Zelo base is released under the permissive **[MIT License](LICENSE)**, **you keep full ownership over your Core's license and business model**. We welcome open-source collaboration and equally support sustainable developer monetization:
+
+- **Open Core + Paid Extensions**: Open-source your base vertical Core to grow community adoption, while selling **paid extension modules, vertical add-ons, branded client apps (web portals / Mini Programs / mobile), deep ERP/accounting/IoT connectors, or specialized AI workflow packs** on top of your own Core.
+- **Standalone Commercial Cores**: Build and distribute proprietary or commercially licensed vertical Cores through per-tenant licensing, SaaS subscriptions, or private on-prem delivery.
+- **Implementation & Managed Services**: Offer private deployment, custom integration, data migration, and enterprise SLA support around the Cores you maintain.
+
+> Note: As long as you retain Zelo's MIT copyright notice and follow standard Core isolation contracts, you are free to define your own license terms, entitlement checks, and pricing for your Cores and commercial extensions. Once you publish an open-source or open-core package, tag it with `nativark-core` and share it via GitHub Issues or Discussions so the community can discover it.
 
 ---
 
@@ -373,7 +395,7 @@ Before deploying your chosen base and Core assembly to production, verify:
 
 ## Contributing
 
-Issues, Pull Requests, documentation improvements, and community-built open-source Cores on Zelo are welcome:
+Issues, Pull Requests, and documentation improvements to the Zelo base are always welcome. **We especially encourage developers across industries to build and publish independent open-source or open-core business packages (including commercial extension modules)** to expand the open SaaS ecosystem:
 
 1. Fork this repository and branch cleanly from `main`.
 2. Keep the base strictly industry-agnostic: `platform-*`, `core-contracts`, and `core-host` must never depend on any specific business Core. Shared contract updates must flow through official package exports with matching OpenAPI, producer, and consumer updates.

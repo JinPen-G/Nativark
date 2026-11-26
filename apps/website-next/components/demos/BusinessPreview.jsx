@@ -137,8 +137,8 @@ export function BusinessPreview() {
         [
           text('Core 扩展与自动化', 'Core extensions & automation'),
           text(
-            '按标准契约开发并接入 CRM、工单等业务 Core，选装 AI 后按配置推进周期任务。',
-            'Develop and connect CRM, ticketing, or other business Cores through standard contracts, with configured recurring tasks when AI is enabled.',
+            '按标准契约开发、开源或商业化分发 CRM、工单等业务 Core 与扩展功能，选装 AI 后按配置推进周期任务。',
+            'Build, open-source, or commercially distribute CRM, ticketing, and custom Cores or extensions via standard contracts.',
           ),
         ],
       ],
