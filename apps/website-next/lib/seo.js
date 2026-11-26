@@ -27,6 +27,7 @@ export function siteMetadata(locale) {
     icons: siteIcons,
     title,
     description: descriptions[locale],
+    verification: { google: "AZ63OefU7l2vMjMZopaHwwJ1alKRaJ8ldtdRdBd27NY" },
     alternates: { canonical: url, languages: languageUrls },
     openGraph: {
       type: "website",
