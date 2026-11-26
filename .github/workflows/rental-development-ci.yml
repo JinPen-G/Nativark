@@ -2,7 +2,7 @@ name: Rental 双仓开发构建
 
 on:
   push:
-    branches: [codex/op-config]
+    branches: [main, codex/op-config]
     paths:
       - .github/workflows/rental-development-ci.yml
       - scripts/ops/release-rental-development.cjs
@@ -12,8 +12,8 @@ permissions:
   contents: read
 
 env:
-  ZELO_COMMIT: bf48a7ffcd3ee3f5f024aa30a92fa1fe5ec56694
-  RENTAL_COMMIT: 67736fd25093c6af16ba59148f4ef94d19bae799
+  ZELO_COMMIT: cd227c54d1d069996c6823832922258a98d12604
+  RENTAL_COMMIT: 61ea2f72b00c6a5c9196936bc6d75f0e39fe1265
   BUILD_DIR: output/.tmp/rental-development-ci
 
 jobs:
@@ -36,7 +36,7 @@ jobs:
       - name: 检出固定 Rental 输入
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          repository: JinPen-G/nativark-rental-core
+          repository: JinPen-G/Zelo-rental-core
           ref: ${{ env.RENTAL_COMMIT }}
           path: ${{ env.BUILD_DIR }}/rental
           persist-credentials: false
