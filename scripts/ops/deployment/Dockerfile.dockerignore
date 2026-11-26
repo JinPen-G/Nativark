@@ -12,4 +12,5 @@
 output
 clients
 worktree
+.worktree
 docs

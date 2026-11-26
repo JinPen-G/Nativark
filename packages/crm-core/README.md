@@ -27,7 +27,7 @@ Agent 工具和销售策略由本 Core 提供，宿主通过公开出口组合�
 
 ## 宿主装配
 
-按固定版本的[公开 Core 接入手册](https://github.com/JinPen-G/Zelo/blob/bdf4956b79e18b37d6d2cc3ce184b49ba8c5cee7/packages/core-contracts/README.md)准备公共底座和显式部署锁。首片尚未提供独立 `apps/crm-api` / `apps/crm-admin` 运行入口；本包提供以下真实装配接点，不默认加载到零 Core 应用。
+按固定版本的[公开 Core 接入手册](https://github.com/JinPen-G/Zelo/blob/bdf4956b79e18b37d6d2cc3ce184b49ba8c5cee7/packages/core-contracts/README.md)准备公共底座和显式部署锁。仓库提供独立 [CRM API 宿主](../../apps/crm-api/README.md)与 [CRM 管理端宿主](../../apps/crm-admin/README.md)，在组合层选择本包；本包不默认加载到零 Core 应用。宿主源码接线与离线验证不替代真实安装、数据库和浏览器验收。
 
 1. 从已检查的 CRM 标准包取得清单；对当前代码使用 `createCrmManifest` 时，必须传真实固定源码仓库和提交。使用 `createCrmHttpContribution` 登记受控 HTTP 政策，数据库观察接入 `readCrmPhysicalData`。
 2. 使用 `composeCrmPlatformHost`，注入公共数据库、用户、审计、订阅与部署可用性；`deploymentForTransaction` 复用当前原事务，避免持锁时重新等待根连接。

@@ -1,0 +1,38 @@
+{
+  "name": "@rental-os/crm-admin",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "公共后台与独立 CRM Core 页面组成的单 Core 宿主",
+  "scripts": {
+    "predev": "npm run build -w @rental-os/platform-core-host",
+    "dev": "vite --host 127.0.0.1 --strictPort",
+    "prebuild": "npm run build -w @rental-os/platform-core-host",
+    "build": "tsc -p tsconfig.json && vite build",
+    "prelint": "npm run build -w @rental-os/platform-core-host",
+    "lint": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@rental-os/platform-admin": "0.1.0",
+    "@rental-os/platform-contracts": "0.1.0",
+    "@rental-os/core-contracts": "0.1.0",
+    "@rental-os/crm-core": "0.1.0",
+    "@tanstack/react-query": "5.101.4",
+    "lucide-react": "^1.49.0",
+    "motion": "14.6.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-router-dom": "7.18.2"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@types/node": "22.20.1",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.0.5",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3",
+    "vite": "8.2.1"
+  }
+}
