@@ -7,7 +7,9 @@ import type { Prisma } from '@prisma/client';
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import { z } from 'zod';
+import type { SystemUserRow } from '@rental-os/platform-contracts';
 import { AI_PLATFORM_FINANCE_ROUTES as routes, type AiPlatformFinanceAction } from '@rental-os/platform-contracts/ai-finance';
+import type { AiExecutionContext } from '@rental-os/platform-contracts/ai-gateway';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { PlatformAuthService, PlatformAuthenticationRepository, PlatformPrincipalAuthority, PLATFORM_AUTH_DATA_STORE }
   from '@rental-os/platform-server';
@@ -24,6 +26,7 @@ import { bindPlatformAiRequest } from './configuration/platform-ai-request';
 import { platformModelProfileId } from './configuration/platform-model-settings-transport';
 import { PLATFORM_AI_MODEL_MANAGE } from './configuration/platform-model-settings-policy';
 import { platformFinanceHttpSchemas, platformFinancePermission } from './configuration/platform-finance-http-policy';
+import { assertPlatformFinanceScope } from './configuration/platform-finance-scope';
 
 export { createPlatformFinanceOpenApi, withPublicPlatformFinanceHttpAccess } from './configuration/platform-finance-http-policy';
 
@@ -91,9 +94,16 @@ export function createPublicPlatformFinanceRequests(dependencies: Dependencies) 
         try {
           return await callAiTaskRunnerDependency(async () => {
             const initial = await authority.resolve();
-            if (initial.actor.kind !== 'saas_admin') throw new BudgetError('FORBIDDEN');
-            const identity = ({ requestId: _request, authorizedAt: _time, ...rest }: typeof initial) => requestFingerprint(rest);
+            if (initial.actor.kind !== 'saas_admin' || !('permissions' in initial)) throw new BudgetError('FORBIDDEN');
+            const identity = ({ requestId: _request, authorizedAt: _time, ...rest }: AiExecutionContext) => requestFingerprint(rest);
             const fingerprint = identity(initial);
+            const actorId = initial.actor.userId;
+            const permissions = requestFingerprint(initial.permissions);
+            const assertCurrentUser = (user: SystemUserRow) => {
+              authority.assertActive();
+              if (user.id !== actorId || requestFingerprint(user.permissions) !== permissions)
+                throw new BudgetError('FORBIDDEN');
+            };
             const resolve = async () => {
               const current = await authority.resolve();
               if (identity(current) !== fingerprint) throw new BudgetError('FORBIDDEN');
@@ -106,7 +116,7 @@ export function createPublicPlatformFinanceRequests(dependencies: Dependencies) 
             let result: unknown;
             if (action === 'budgetRead' || action === 'budgetSave' || action === 'budgetReceipt') {
               const budget = createPublicPlatformBudgetSettings({ db, profileId, authority: { resolve, resolveRead: resolve },
-                principalAuthority: principals, assertDataAvailable });
+                principalAuthority: principals, assertDataAvailable, assertCurrentUser });
               if (action === 'budgetReceipt') result = await budget.readOperation(command);
               else {
                 const policy = await (action === 'budgetRead' ? budget.read(command) : budget.save(command));
@@ -117,12 +127,16 @@ export function createPublicPlatformFinanceRequests(dependencies: Dependencies) 
               if (action === 'priceReview' || action === 'priceReceipt') {
                 const scopes = new AiScopeRepository(db, { resolve });
                 const participant = createPlatformAiManagementTransactions<Prisma.TransactionClient>({
-                  principalAuthority: principals, requiredPermission: PLATFORM_AI_MODEL_MANAGE, assertDataAvailable });
+                  principalAuthority: principals, requiredPermission: PLATFORM_AI_MODEL_MANAGE, assertDataAvailable, assertCurrentUser });
                 const prices = new PlatformReviewedGatewayPriceService(db, { read: scopes, write: scopes }, profileId, recheck,
-                  (tx, actorId) => beginPlatformAiManagementTransaction(tx, actorId, participant));
+                  async (tx, actorId, scopeId) => {
+                    const lease = await beginPlatformAiManagementTransaction(tx, actorId, participant);
+                    return { close: lease.close, revalidatesReviewInTransaction: true,
+                      async revalidate() { await assertPlatformFinanceScope(tx, scopeId); await lease.revalidate(); } };
+                  });
                 result = await (action === 'priceReview' ? prices.review(command) : prices.receipt(command));
               } else {
-                const credit = createPublicPlatformCredit({ db, actorId: initial.actor.userId, recheck, principals, assertDataAvailable });
+                const credit = createPublicPlatformCredit({ db, actorId, recheck, principals, assertDataAvailable, assertCurrentUser });
                 result = await (action === 'creditRead' ? credit.read(command)
                   : action === 'creditReceipt' ? credit.receipt(command) : credit.decide(command));
               }

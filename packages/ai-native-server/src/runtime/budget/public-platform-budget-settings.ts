@@ -3,9 +3,12 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import type { PlatformPrincipalAuthority } from '@rental-os/platform-server/principal';
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
+import type { SystemUserRow } from '@rental-os/platform-contracts';
 import type { AiExecutionContext } from '@rental-os/platform-contracts/ai-gateway';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { beginPlatformAiManagementTransaction, createPlatformAiManagementTransactions } from '../../platform-transactions';
 import type { AiCurrentScopeAuthority } from '../ai-scope.repository';
+import { assertPlatformFinanceScope } from '../../configuration/platform-finance-scope';
 import { createPublicBudgetLedger, BudgetError } from './public-budget-ledger';
 import { createPlatformBudgetSettings } from './platform-budget-settings.service';
 import type { BudgetLedgerDatabase } from './prisma-budget-ledger.repository';
@@ -17,6 +20,7 @@ export function createPublicPlatformBudgetSettings(input: {
   authority: AiCurrentScopeAuthority & { resolveRead(): Promise<AiExecutionContext> };
   principalAuthority: Pick<PlatformPrincipalAuthority<Prisma.TransactionClient>, 'lock'>;
   assertDataAvailable(database: Pick<Prisma.TransactionClient, '$queryRaw'>): Promise<void>;
+  assertCurrentUser?(user: SystemUserRow): void;
   clock?: () => Date;
 }) {
   if (typeof input?.authority?.resolve !== 'function' || typeof input.authority.resolveRead !== 'function'
@@ -24,7 +28,7 @@ export function createPublicPlatformBudgetSettings(input: {
   const { db, profileId, clock } = input;
   const participant = createPlatformAiManagementTransactions<Prisma.TransactionClient>({
     principalAuthority: input.principalAuthority, requiredPermission: 'system:ai-provider:manage',
-    assertDataAvailable: input.assertDataAvailable
+    assertDataAvailable: input.assertDataAvailable, assertCurrentUser: input.assertCurrentUser
   });
   const resolve = async (write: boolean) => {
     const current = () => write ? input.authority.resolve() : input.authority.resolveRead();
@@ -47,17 +51,15 @@ export function createPublicPlatformBudgetSettings(input: {
             SELECT id FROM ai_provider_profiles WHERE id = ${profileId} AND scopeId = ${target.scopeId}
               AND scopeKind = 'PLATFORM' AND serviceMode = 'platform_managed' FOR UPDATE`);
           if (rows.length !== 1 || rows[0].id !== profileId) throw new BudgetError('UNAVAILABLE');
-          const config = settings.config, revalidate = async () => {
+          const revalidate = async () => {
+            await assertPlatformFinanceScope(tx, target.scopeId);
             const current = await tx.aiProviderProfile.findFirst({ where: { id: profileId, scopeId: target.scopeId,
               scopeKind: 'PLATFORM', serviceMode: 'platform_managed' } });
-            if (!current || current.id !== profileId || current.scopeId !== target.scopeId || current.scopeKind !== 'PLATFORM'
-              || current.serviceMode !== 'platform_managed' || current.configRevision !== config.configRevision
-              || current.protocol !== config.protocol || current.provider !== config.provider || current.model !== config.model
-              || current.credentialRef !== config.credentialRef) throw new BudgetError('REVISION_CONFLICT');
+            if (!current || requestFingerprint(current) !== target.profileFingerprint) throw new BudgetError('REVISION_CONFLICT');
             await lease.revalidate();
           };
           await revalidate();
-          return { revalidate, close: lease.close };
+          return { revalidate, close: lease.close, revalidatesSettingsInTransaction: true };
         } catch (error) { lease.close(); throw error; }
       } } } : {})
     })

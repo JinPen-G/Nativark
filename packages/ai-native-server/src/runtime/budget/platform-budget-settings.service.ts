@@ -30,7 +30,7 @@ export function createPlatformBudgetSettings(input: {
   /** Actual server-selected Profile, never a caller's configuration. */
   profileId: string;
   /** Original repository scoped to the current pre-commit authority. */
-  repository(platform?: { actorId: string; scopeId: string }): BudgetTransactionRepository;
+  repository(platform?: { actorId: string; scopeId: string; profileFingerprint: string }): BudgetTransactionRepository;
   requireOperationKey?: boolean;
   clock?: () => Date;
 }) {
@@ -62,7 +62,7 @@ export function createPlatformBudgetSettings(input: {
         entitled: after.context.actor.kind === 'saas_admin' && after.context.scope.kind === 'platform' };
     }
   };
-  const service = (platform?: { actorId: string; scopeId: string }) => new BudgetService(
+  const service = (platform?: { actorId: string; scopeId: string; profileFingerprint: string }) => new BudgetService(
     input.repository(platform), authority, { quote: denied }, { dispatch: denied, usage: denied }, clock);
   const target = async (sceneCode: string, write = true) => {
     const before = await current(write);
@@ -131,7 +131,7 @@ export function createPlatformBudgetSettings(input: {
       const settings = { ...command.settings, draftVersion: AI_USAGE_DRAFT_VERSION, scope: { kind: 'platform' },
         sceneCode: command.sceneCode, config } as AiUsageSettingsDraft;
       if (selected.context.actor.kind !== 'saas_admin') throw new BudgetError('FORBIDDEN');
-      const result = await service({ actorId: selected.context.actor.userId, scopeId: selected.key.scopeId })
+      const result = await service({ actorId: selected.context.actor.userId, scopeId: selected.key.scopeId, profileFingerprint: observed })
         .saveSettings(selected.key, settings, command.expectedRevision, revalidateConfiguration, operation);
       try { await selected.recheck(); } catch { throw new BudgetError('PENDING_RECONCILIATION'); }
       return result;

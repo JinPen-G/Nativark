@@ -22,7 +22,9 @@ type Tx = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
 type LedgerMutation = 'reserve' | 'dispatch' | 'settle' | 'release' | 'unknown' | 'reconcile';
 export interface BudgetLedgerTransactionHooks {
   beginSettings(tx: Tx, key: BudgetPolicyKey, settings: AiUsageSettingsDraft, operation?: BudgetSettingsOperation):
-    Promise<{ revalidate(): Promise<void>; close(): void } | undefined>;
+    Promise<{ revalidate(): Promise<void>; close(): void;
+      /** Covers the same request, settings authority, scope and configuration on this Native. */
+      revalidatesSettingsInTransaction?: true } | undefined>;
   withTask<T>(tx: Tx, stepId: string, action: LedgerMutation, work: () => Promise<T>): Promise<T>;
 }
 type StoredPolicy = { id: string; scopeId: string; scopeKind: string; sceneCode: string; configRevision: number; settingsJson: Prisma.JsonValue };
@@ -117,6 +119,9 @@ export class PrismaBudgetLedgerRepository implements BudgetTransactionRepository
     try {
       return await this.db.$transaction(async tx => {
         const participant = await this.hooks.beginSettings(tx, key, settings, operation);
+        // Only a complete, explicitly selected Native authority can replace
+        // the external preflight callback while this transaction owns a slot.
+        const revalidateWrite = participant?.revalidatesSettingsInTransaction ? () => participant.revalidate() : revalidate;
         try {
           // A policy CAS changes available capacity too. It must not hold the
           // policy write lock while waiting for admission's canonical tenant lock.
@@ -138,7 +143,7 @@ export class PrismaBudgetLedgerRepository implements BudgetTransactionRepository
               await tx.aiModelConfigurationOperation.create({ data: { id: randomUUID(), ...platformBudgetOperationWhere(key, operation.operationKey),
                 actorId: operation.actorId, workspaceId: null, expectedRevision, resultRevision: saved.revision, commandHash: operation.commandHash,
                 result: json(detail.data), resultHash: requestFingerprint(detail.data), recordedAt: this.clock() } });
-              await revalidate();
+              await revalidateWrite();
               return;
             }
             const detail = budgetSettingsReceiptSchema.safeParse({ ...operation, version: 'budget-settings-save-1',
@@ -148,7 +153,7 @@ export class PrismaBudgetLedgerRepository implements BudgetTransactionRepository
             await tx.operationLog.create({ data: { id: settingsOperationId(key, operation.operationKey),
               tenantId: operation.tenantId, workspaceId: operation.workspaceId, userId: operation.actorId,
               action: 'ai.budget.settings.saved', detail: json(detail.data), createdAt: this.clock() } });
-            await revalidate();
+            await revalidateWrite();
           };
           const where = policyWhere(key);
           if (expectedRevision === 0) {
@@ -156,16 +161,16 @@ export class PrismaBudgetLedgerRepository implements BudgetTransactionRepository
               id: randomUUID(), ...where, configRevision: 1, enabled: policyEnabled(settings), allowedModels: json(settings.allowedModels), allowedScenes: json(settings.allowedScenes), settingsJson: json(settings), ...policyMeterFields(settings),
               maxConcurrent: settings.maxConcurrent, maxCallsPerRun: settings.maxCallsPerRun, priceVersion: undefined
             }, select: { id: true, scopeId: true, scopeKind: true, sceneCode: true, configRevision: true, settingsJson: true } });
-            await revalidate();
+            await revalidateWrite();
             const saved = policy(created);
             await receipt(saved);
-            await participant?.revalidate();
+            if (!participant?.revalidatesSettingsInTransaction) await participant?.revalidate();
             callbackCompleted = true;
             return saved;
           }
           const changed = await tx.aiBudgetPolicy.updateMany({ where: { ...where, configRevision: expectedRevision }, data: { configRevision: { increment: 1 }, enabled: policyEnabled(settings), allowedModels: json(settings.allowedModels), allowedScenes: json(settings.allowedScenes), settingsJson: json(settings), ...policyMeterFields(settings), maxConcurrent: settings.maxConcurrent, maxCallsPerRun: settings.maxCallsPerRun, priceVersion: undefined } });
           if (changed.count !== 1) throw new BudgetError('REVISION_CONFLICT');
-          await revalidate();
+          await revalidateWrite();
           const next = await tx.aiBudgetPolicy.findUnique({ where: { scopeId_scopeKind_sceneCode: where }, select: { id: true, scopeId: true, scopeKind: true, sceneCode: true, configRevision: true, settingsJson: true } });
           if (!next) throw new BudgetError('UNAVAILABLE');
           if (settings.budget.state === 'limited') {
@@ -182,10 +187,10 @@ export class PrismaBudgetLedgerRepository implements BudgetTransactionRepository
               ] } }, select: { reservationId: true } });
             if (incompatible) throw new BudgetError('REVISION_CONFLICT');
           }
-          await revalidate();
+          await revalidateWrite();
           const saved = policy(next);
           await receipt(saved);
-          await participant?.revalidate();
+          if (!participant?.revalidatesSettingsInTransaction) await participant?.revalidate();
           callbackCompleted = true;
           return saved;
         } finally { participant?.close(); }

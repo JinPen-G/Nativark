@@ -15,6 +15,7 @@ import { requestFingerprint as hash } from '@rental-os/platform-contracts/reques
 
 
 type Db = GatewayPricingRecordDb & Pick<PrismaClient, '$transaction'>;
+type ReviewLease = { revalidate(): Promise<void>; close(): void; revalidatesReviewInTransaction?: true };
 const profileSelect = { id: true, scopeId: true, scopeKind: true, serviceMode: true, configRevision: true,
   provider: true, protocol: true, model: true, credentialRef: true } satisfies Prisma.AiProviderProfileSelect;
 const stable = ({ requestId: _id, authorizedAt: _at, ...value }: AiExecutionContext) => hash(value);
@@ -25,7 +26,7 @@ export class PlatformReviewedGatewayPriceService {
   constructor(private readonly db: Db, private readonly scopes: { read: Pick<AiScopeRepository, 'resolveCurrent'>;
     write: Pick<AiScopeRepository, 'resolveCurrent'> }, private readonly profileId: string,
     private readonly requestActive: () => Promise<unknown>,
-    private readonly begin: (tx: Prisma.TransactionClient, actorId: string) => Promise<{ revalidate(): Promise<void>; close(): void } | undefined>,
+    private readonly begin: (tx: Prisma.TransactionClient, actorId: string, scopeId: string) => Promise<ReviewLease | undefined>,
     private readonly clock: () => Date = () => new Date()) {
     this.records = new PrismaGatewayPricingRecords(db);
   }
@@ -87,7 +88,8 @@ export class PlatformReviewedGatewayPriceService {
     let attempted = false;
     try {
       await this.db.$transaction(async tx => {
-        const lease = await this.begin(tx, before.actorId);
+        const lease = await this.begin(tx, before.actorId, before.scope.id);
+        const recheckInWrite = () => lease?.revalidatesReviewInTransaction ? lease.revalidate() : this.recheck(before, true);
         try {
           await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_provider_profiles WHERE id = ${this.profileId} FOR UPDATE`);
           if (!isDeepStrictEqual(await load(tx), profile)) throw new BudgetError('REVISION_CONFLICT');
@@ -98,19 +100,19 @@ export class PlatformReviewedGatewayPriceService {
             if (!original || !version || original.id !== id || version.id !== id || version.scopeId !== before.scope.id
               || version.sourceReference !== reference || version.payloadHash !== payloadHash || hash(version.payload) !== payloadHash)
               throw new BudgetError('IDEMPOTENCY_CONFLICT');
-            await this.recheck(before, true);
-            await lease?.revalidate();
+            await recheckInWrite();
+            if (!lease?.revalidatesReviewInTransaction) await lease?.revalidate();
             return;
           }
           // The Profile lock may have waited behind another configuration
           // writer. Recheck current management authority before this append.
-          await this.recheck(before, true);
+          await recheckInWrite();
           if (Date.parse(command.expiresAt) <= this.clock().getTime()) throw new BudgetError('INVALID');
           attempted = true;
           await tx.aiGatewayPriceRecord.create({ data: { id, scopeId: before.scope.id, configurationHash,
             priceVersion: command.priceVersion, sourceReference: reference, payloadHash, payload: json(payload) } });
-          await this.recheck(before, true);
-          await lease?.revalidate();
+          await recheckInWrite();
+          if (!lease?.revalidatesReviewInTransaction) await lease?.revalidate();
         } finally { lease?.close(); }
       }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
       const result = await this.records.price(before.scope.id, configurationHash, command.priceVersion);

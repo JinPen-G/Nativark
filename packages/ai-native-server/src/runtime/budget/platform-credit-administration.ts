@@ -68,20 +68,21 @@ export async function readPlatformCreditReceipt(db: CreditQueries, actorId: stri
 }
 
 export async function decidePlatformCredit(db: CreditQueries, actorId: string, input: z.output<typeof decisionSchema>,
-  recheck: () => Promise<void>, write: (work: (tx: Prisma.TransactionClient) => Promise<AiCreditRequest>, target: AiCreditDecisionTarget) => Promise<AiCreditRequest>) {
+  recheck: () => Promise<void>, write: (work: (tx: Prisma.TransactionClient, recheckInWrite: () => Promise<void>) => Promise<AiCreditRequest>,
+    target: AiCreditDecisionTarget) => Promise<AiCreditRequest>) {
   const decisionHash = digest({ actorId, requestId: input.requestId,
     operationKey: input.operationKey, decision: input.decision, amount: input.amount?.toFixed(6) ?? null });
   const target = await db.aiTenantAiCreditRequest.findUnique({ where: { id: input.requestId }, select: { tenantId: true } });
   await recheck();
   if (!target?.tenantId) fail('AI_RESOURCE_UNAVAILABLE', 404);
   const targetAuthority = { tenantId: target.tenantId, enabling: false };
-  return write(async tx => {
+  return write(async (tx, recheckInWrite) => {
     const reused = await tx.aiTenantAiCreditRequest.findFirst({ where: { decidedBy: actorId, decisionOperationKey: input.operationKey }, select: { id: true } });
     if (reused && reused.id !== input.requestId) fail('AI_REVISION_CONFLICT');
     await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_tenant_ai_credit_requests WHERE id = ${input.requestId} FOR UPDATE`);
     const row = await tx.aiTenantAiCreditRequest.findUnique({ where: { id: input.requestId }, include: requestInclude });
     if (!row || row.tenantId !== target.tenantId) fail('AI_RESOURCE_UNAVAILABLE', 404);
-    if (row.state !== 'pending') { if (row.decisionHash !== decisionHash) fail('AI_REVISION_CONFLICT'); await recheck(); return present(row); }
+    if (row.state !== 'pending') { if (row.decisionHash !== decisionHash) fail('AI_REVISION_CONFLICT'); await recheckInWrite(); return present(row); }
     if (row.revision !== input.expectedRevision) fail('AI_REVISION_CONFLICT');
     // A frozen target may still expose the same committed decision. Only a
     // new grant requires an active target through the final transaction check.
@@ -97,7 +98,7 @@ export async function decidePlatformCredit(db: CreditQueries, actorId: string, i
         create: { tenantId: row.tenantId, currency: row.currency, grantedAmount: input.amount!, allocationsJson: {} },
         update: { grantedAmount: { increment: input.amount! }, revision: { increment: 1 } } });
     }
-    await recheck();
+    await recheckInWrite();
     const changed = await tx.aiTenantAiCreditRequest.updateMany({ where: { id: row.id, state: 'pending', revision: input.expectedRevision },
       data: { state: input.decision === 'approve' ? 'approved' : 'rejected', grantedAmount: input.amount ?? null,
         decidedBy: actorId, decisionOperationKey: input.operationKey, decisionHash, decidedAt: new Date(), revision: { increment: 1 } } });

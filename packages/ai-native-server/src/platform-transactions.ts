@@ -52,6 +52,8 @@ export function createPlatformAiManagementTransactions<Transaction extends Platf
   principalAuthority: Pick<PlatformPrincipalAuthority<Transaction>, 'lock'>;
   requiredPermission: string;
   assertDataAvailable(transaction: Transaction): Promise<void>;
+  /** Compare the fresh Native principal with the authority captured before the write. */
+  assertCurrentUser?(user: SystemUserRow): void;
   /** Server-resolved target of an existing record. The participant can lock a
    * frozen target for historical decisions; new writes check its own state. */
   targetTenantId?: string;
@@ -76,6 +78,7 @@ export function createPlatformAiManagementTransactions<Transaction extends Platf
       if (user.id !== actorId || user.tenantId !== identity.tenantId || !user.isActive
         || !user.isSaasAdmin || user.mustChangePassword || !hasEffectivePermission(user.permissions, input.requiredPermission))
         throw denied();
+      input.assertCurrentUser?.(user);
     };
     try {
       check();

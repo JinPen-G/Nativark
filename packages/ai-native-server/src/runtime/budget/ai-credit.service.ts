@@ -433,6 +433,6 @@ export class AiCreditService {
   async platformDecide(authorization: string | undefined, raw: unknown) {
     const command = snapshotCommand(decisionSchema, raw);
     return this.call(authorization, true, (actor, recheck) => decidePlatformCredit(this.db, actor.userId, command(), recheck,
-      (work, target) => this.write(work, { actor, authorization, recheck, target })), true, true);
+      (work, target) => this.write(tx => work(tx, recheck), { actor, authorization, recheck, target })), true, true);
   }
 }
