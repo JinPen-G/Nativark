@@ -13,6 +13,7 @@
 - `task-persistence` 复用原 Task/Run 仓储和结果读取。宿主注入当前动作权限、原输入和独立收据权威，使用与原预算账相同的 `createAiTaskTransactionBoundary()`。新建和领取受当次事务约束；原结果继续由宿主按来源和字段权限投影，读取不会启动任务。
 - `task-resource-ledger` 以同一严格事务边界维护 Task 的累计步骤数、调用数、活动耗时和输出字节。注入当前 Scope、已保存的计划上限及原计量证据。宿主须分别核新工作和原结清的权限，并在写入时复用传入事务。此出口可供 Runner 装配；Gateway 继续拥有模型金额账。
 - `task-runner-resources` 将原计划、准备、预占和计量接到 `createPersistentAiTaskRunner` 的 `plan` 与 `resources`。使用同一严格事务边界和当前请求的 `resourceScopes`，通过 `bindEffectEvidence` 绑定原计量证据。领取恢复与释放租约也使用当次 Task 事务权威。实际工具、步骤转换与唯一 Gateway 仍由宿主显式登记。
+- `task-steps` 将原 Step 登记、转换和回执接到同一 Runner。实例要求宿主的原证据、当前动作与收据权限、明确发布的工具及版本。写入复用原事务和原 CAS，重开只观察已登记 Step；提交后撤权保留原操作待核对。
 - `public-tenant-task-authority` 用原签名请求、原主体锁和已保存的 Task action policy 提供当前动作与同事务复核。宿主必须固定实际权限、已发布场景和对象来源，注入真实 `assertTaskAction`、`assertReference` 和数据观察，并在请求结束关闭请求绑定。此入口不登记 HTTP 或任何默认场景。
 - `runtime/budget/public-budget-ledger` 供正式 Gateway 接入原预算账本。新预占和派发需要同一个 Task 事务边界；平台预算、费率和额度 HTTP 本身只管理原政策及人工操作收据。
 - `runtime/original-result-reads` 和 `runtime/original-task-recovery-read` 只观察真实原结果；租约、审批、原账和发布字段仍由原权威核对。缺当前授权或原证据时不可用。

@@ -3,6 +3,7 @@
  * JSON 结构校验不是身份验证、资源授权或业务校验；没有任何执行 handler。
  */
 import { AI_EXECUTION_CONTEXT_SCHEMAS } from "@rental-os/platform-contracts/ai-gateway";
+import { AI_TASK_FACT_SCHEMA } from '@rental-os/platform-contracts/ai-task';
 import { AI_CONTRACT_DRAFT_VERSION, AI_ERROR_CODES, AI_TOOL_CODES, AI_TOOL_DRAFT_VERSION } from "@rental-os/shared";
 import { aiLeafToOpenApi30 } from '@rental-os/rental-core/http-openapi';
 import type { AiToolContractDraft } from "@rental-os/shared";
@@ -58,16 +59,7 @@ export const AI_NATIVE_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     ...closed(toolProperties),
     description: "DRAFT metadata only. All tools unavailable; schema references and metadata are not executable authority. Tool-specific schemas and activation evidence remain pending."
   },
-  AiFactReference: closed({
-    scope: ref("AiExecutionScope"), resourceType: choice("order", "quote", "configuration", "report", "inspection", "knowledge"),
-    resourceId: id(), observedAt: timestamp,
-    basis: { oneOf: [
-      closed({ kind: choice("current") }),
-      closed({ kind: choice("snapshot"), version: id() }),
-      closed({ kind: choice("missing"), reason: choice("snapshot_missing", "source_unavailable") }),
-      closed({ kind: choice("legacy_current_fallback"), reason: choice("snapshot_missing") })
-    ] }
-  }),
+  AiFactReference: aiLeafToOpenApi30(AI_TASK_FACT_SCHEMA, 'AiFactReference'),
   AiToolError: { oneOf: [knownError, unknownError] },
   AiToolFailure: {
     oneOf: [

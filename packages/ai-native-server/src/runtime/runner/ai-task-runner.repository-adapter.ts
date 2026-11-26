@@ -1,8 +1,8 @@
 import type { AiTaskRunnerDependencies, AiTaskRunnerLease, AiTaskRunnerPlanPort, AiTaskRunnerStepCommit, AiTaskRunnerStepPlan, AiTaskRunnerStepPort, AiTaskRunnerStepRef, AiTaskRunnerConfirmationContinuation } from "@rental-os/platform-server/ai-runtime";
-import type { AiTaskRepository } from "../ai-task.repository";
-import { AiStepOriginalRegistrationUnavailableError, type AiStepRegistrationCommand, type AiStepRegistrationRepository } from "../ai-step-registration.repository";
-import type { AiStepTransitionCommand, AiStepTransitionRepository } from "../ai-step-transition.repository";
-import { AI_STEP_STATUSES_DRAFT, AI_TASK_STATUSES_DRAFT, AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiTaskStatusDraft, type AiTaskEventDraft, type AiStepStatusDraft } from "@rental-os/shared";
+import type { TaskPersistenceRepository } from "../task-persistence.repository";
+import { AiStepOriginalRegistrationUnavailableError, type AiStepRegistrationCommand, type TaskStepRegistrationRepository } from "../task-step-registration.repository";
+import type { AiStepTransitionCommand, TaskStepTransitionRepository } from "../task-step-transition.repository";
+import { AI_STEP_STATUSES_DRAFT, AI_TASK_STATUSES_DRAFT, AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiTaskStatusDraft, type AiTaskEventDraft, type AiStepStatusDraft } from "@rental-os/platform-contracts/ai-task";
 import { AiTaskRunnerError, AiTaskRunnerOriginalStepUnavailableError } from '@rental-os/platform-server/ai-runtime';
 
 /**
@@ -28,10 +28,10 @@ export interface AiTaskRunnerConfirmationCheckpointPort {
 }
 
 export interface AiTaskRunnerRepositoryAdapters {
-  tasks: Pick<AiTaskRepository, "readMetadata" | "claimRun" | "claimRecoveryRun" | "releaseRun"> & Partial<Pick<AiTaskRepository, 'assertRecoveryRun'>>;
-  registrations: Pick<AiStepRegistrationRepository, "register">;
-  replays?: Pick<AiStepRegistrationRepository, "readReplay">;
-  transitions: Pick<AiStepTransitionRepository, "transition">;
+  tasks: Pick<TaskPersistenceRepository, "readMetadata" | "claimRun" | "claimRecoveryRun" | "releaseRun"> & Partial<Pick<TaskPersistenceRepository, 'assertRecoveryRun'>>;
+  registrations: Pick<TaskStepRegistrationRepository, "register">;
+  replays?: Pick<TaskStepRegistrationRepository, "readReplay">;
+  transitions: Pick<TaskStepTransitionRepository, "transition">;
   commands: AiTaskRunnerRepositoryCommandFactory;
   confirmation?: AiTaskRunnerConfirmationCheckpointPort;
 }
@@ -179,7 +179,7 @@ export function createAiTaskRunnerRepositoryPorts(adapters: AiTaskRunnerReposito
       },
       claimRun: input => adapters.tasks.claimRun(input),
       claimRecoveryRun: input => adapters.tasks.claimRecoveryRun(input),
-      ...(typeof adapters.tasks.assertRecoveryRun === 'function' ? { assertRecoveryRun: (lease: Parameters<AiTaskRepository['assertRecoveryRun']>[0]) => adapters.tasks.assertRecoveryRun!(lease) } : {}),
+      ...(typeof adapters.tasks.assertRecoveryRun === 'function' ? { assertRecoveryRun: (lease: Parameters<TaskPersistenceRepository['assertRecoveryRun']>[0]) => adapters.tasks.assertRecoveryRun!(lease) } : {}),
       releaseRun: input => adapters.tasks.releaseRun(input)
     },
     steps

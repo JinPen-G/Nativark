@@ -42,6 +42,7 @@ export * from "./ai-task-center-recovery-draft";
 export * from "./ai-workbench-model-control-draft";
 export * from "./ai-conversation-draft";
 export * from "./ai-task-draft";
+export type { AiStepStateDraft, AiTaskStateDraft } from "./ai-task-draft";
 export * from "./ai-task-input-draft";
 export { AI_TASK_INPUT_DRAFT_SCHEMAS } from "./ai-task-input-draft-schemas";
 export * from "./ai-scene-request-draft";

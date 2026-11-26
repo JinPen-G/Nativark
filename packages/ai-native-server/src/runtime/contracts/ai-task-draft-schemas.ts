@@ -1,4 +1,5 @@
-import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT, AI_TASK_TRANSITION_REASONS_DRAFT, AI_TASK_STEP_CODES, AI_ERROR_CODES } from "@rental-os/shared";
+import { createAiStepDraftSchemas } from '@rental-os/platform-contracts/ai-task';
+import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT, AI_TASK_TRANSITION_REASONS_DRAFT, AI_TASK_STEP_CODES } from "@rental-os/shared";
 import type { SchemaObject } from "@rental-os/rental-core/http-openapi";
 import { AI_TASK_OBSERVATION_DRAFT_SCHEMAS } from '@rental-os/shared';
 import { aiLeafToOpenApi30 } from '@rental-os/rental-core/http-openapi';
@@ -13,12 +14,6 @@ const time: SchemaObject = { type: "string", format: "date-time", maxLength: 40 
 const version = choice(AI_TASK_DRAFT_VERSION);
 const status = choice(...AI_TASK_STATUSES_DRAFT);
 const reason = choice(...AI_TASK_TRANSITION_REASONS_DRAFT);
-const errorProperties = {
-  message: { type: "string", minLength: 1, maxLength: 512, pattern: "\\S" } as SchemaObject,
-  missingFields: { ...list({ type: "string", minLength: 1, maxLength: 128, pattern: "^[A-Za-z][A-Za-z0-9_.\\[\\]-]*$" }, 32), uniqueItems: true }
-};
-const unknownError = closed({ ...errorProperties, code: choice("AI_RESULT_UNKNOWN"), retryable: { type: "boolean", enum: [false] }, nextAction: choice("reconcile") });
-const knownError = closed({ ...errorProperties, code: choice(...AI_ERROR_CODES.filter(code => code !== "AI_RESULT_UNKNOWN")), retryable: { type: "boolean" }, nextAction: choice("none", "clarify", "reconfirm", "reauthorize", "reconcile", "retry_later", "manual") });
 const positiveCursor: SchemaObject = { type: "string", minLength: 1, maxLength: 20, pattern: "^[1-9][0-9]*$" };
 
 /** Shared task shapes, including the owner-only read transport. Execution and
@@ -73,19 +68,8 @@ export const AI_TASK_DRAFT_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     { status: choice('unknown', 'not_observed'), kind: choice('order', 'settings'), retryable: { type: 'boolean', enum: [false] } }
   ] as Array<Record<string, SchemaObject>>).map(result => closed({ taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, stepId: { ...id(), maxLength: 36 },
     observedAt: time, execution: choice('read_only_no_start_no_reconnect_side_effect'), payment: choice('not_inferred'), fulfillment: choice('not_inferred'), ...result })) },
-  AiStepOutcomeDraft: { oneOf: [
-    closed({ status: choice("pending", "cancelled"), effect: choice("none") }),
-    closed({ status: choice("running"), effect: choice("none", "possible") }),
-    closed({ status: choice("succeeded"), effect: choice("none"), facts: list(ref("AiFactReference"), 64) }),
-    closed({ status: choice("succeeded"), effect: choice("committed"), facts: list(ref("AiFactReference"), 64, 1) }),
-    closed({ status: choice("failed"), effect: choice("none"), error: knownError }),
-    closed({ status: choice("unknown"), effect: choice("possible"), error: unknownError })
-  ] },
-  AiStepStateDraft: closed({
-    stepId: id(), runId: id(), sequence: revision, revision, toolCode: choice(...AI_TASK_STEP_CODES), toolVersion: id(),
-    actionId: id(), requestFingerprint: { type: "string", minLength: 64, maxLength: 64, pattern: "^[0-9a-f]{64}$" },
-    outcome: ref("AiStepOutcomeDraft")
-  }),
+  ...Object.fromEntries(Object.entries(createAiStepDraftSchemas({ type: 'string', enum: [...AI_TASK_STEP_CODES] }))
+    .map(([name, schema]) => [name, aiLeafToOpenApi30(schema, name)])),
   AiTaskStateDraft: {
     ...closed({ contractVersion: version, taskId: id(), revision, status, createdContext: ref("AiExecutionContext"), steps: list(ref("AiStepStateDraft"), 1000) }),
     description: "Internal draft state only. Creation context is not renewable authority. Duplicate action/step IDs and run-sequence pairs require application/DB constraints."

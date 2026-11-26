@@ -7,7 +7,7 @@ import {
   type AiTaskStatusDraft, type AiTaskStateDraft, type AiTaskTransitionRequestDraft,
   type AiTaskTransitionDecisionDraft, type AiRunLeaseDraft, type AiTaskEventPageDraft,
   type AiStepStateDraft, type AiStepStatusDraft, type AiStepTransitionReasonDraft
-} from "@rental-os/shared";
+} from "@rental-os/platform-contracts/ai-task";
 
 const transitions: Record<AiTaskStatusDraft, readonly AiTaskStatusDraft[]> = {
   queued: ["running", "cancel_requested"],

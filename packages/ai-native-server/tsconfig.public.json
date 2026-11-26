@@ -9,6 +9,7 @@
     "src/task-persistence.ts",
     "src/task-resource-ledger.ts",
     "src/task-runner-resources.ts",
+    "src/task-steps.ts",
     "src/public-tenant-task-authority.ts",
     "src/platform-transactions.ts",
     "src/tenant-configuration-transactions.ts",

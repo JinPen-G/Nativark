@@ -6,7 +6,9 @@
 export { AI_CONTRACT_DRAFT_VERSION } from "@rental-os/platform-contracts/ai-gateway";
 export type { AiAudience, AiPlatformScope, AiTenantScope, AiWorkspaceScope, AiExecutionScope, AiLocationScope, AiOperatorAccess, AiContextBase, AiExecutionContext } from "@rental-os/platform-contracts/ai-gateway";
 import { AI_CONTRACT_DRAFT_VERSION, type AiAudience, type AiExecutionScope } from "@rental-os/platform-contracts/ai-gateway";
-export const AI_TOOL_DRAFT_VERSION = "draft-1" as const;
+import { AI_TOOL_DRAFT_VERSION, type AiErrorCode, type AiToolError } from '@rental-os/platform-contracts/ai-task';
+export { AI_TOOL_DRAFT_VERSION, AI_ERROR_CODES } from '@rental-os/platform-contracts/ai-task';
+export type { AiFactReference, AiErrorCode, AiRecoveryAction, AiToolError } from '@rental-os/platform-contracts/ai-task';
 export const AI_TOOL_CODES = Object.freeze([
   "rental.order.explain", "rental.catalog.search", "rental.availability.check",
   "membership.customer.resolve", "rental.quote.preview", "rental.order.propose",
@@ -69,38 +71,6 @@ export interface AiToolContractDraft {
   ownerModule: string;
   blockers: string[];
 }
-
-/** 来源是资源引用而非任意下载 URL；打开时重新鉴权，不把引用本身当能力令牌。 */
-export interface AiFactReference {
-  scope: AiExecutionScope;
-  resourceType: "order" | "quote" | "configuration" | "report" | "inspection" | "knowledge";
-  resourceId: string;
-  observedAt: string;
-  /** 缺历史依据不能伪装为当前规则或已冻结快照；兼容办理建议须显式标记来源。 */
-  basis:
-    | { kind: "current" }
-    | { kind: "snapshot"; version: string }
-    | { kind: "missing"; reason: "snapshot_missing" | "source_unavailable" }
-    | { kind: "legacy_current_fallback"; reason: "snapshot_missing" };
-}
-
-export const AI_ERROR_CODES = Object.freeze([
-  "AI_DISABLED", "AI_PROVIDER_UNAVAILABLE", "AI_BUDGET_EXCEEDED", "AI_TOOL_UNAVAILABLE",
-  "AI_SCOPE_CHANGED", "AI_APPROVAL_EXPIRED", "AI_PROPOSAL_STALE", "AI_RESULT_UNKNOWN",
-  "AI_INVALID_INPUT", "AI_UNSUPPORTED_VERSION", "AI_ACCESS_DENIED", "AI_BUSINESS_REJECTED"
-] as const);
-export type AiErrorCode = typeof AI_ERROR_CODES[number];
-export type AiRecoveryAction = "none" | "clarify" | "reconfirm" | "reauthorize" | "reconcile" | "retry_later" | "manual";
-interface AiToolErrorDetails {
-  /** 服务端面向当前受众的安全文案，不含堆栈/密钥/越权对象是否存在的提示。 */
-  message: string;
-  missingFields: string[];
-}
-/** 独立消费错误时也必须保留未知结果的核对语义，不能只由外层状态封套约束。 */
-export type AiToolError = AiToolErrorDetails & (
-  | { code: Exclude<AiErrorCode, "AI_RESULT_UNKNOWN">; retryable: boolean; nextAction: AiRecoveryAction }
-  | { code: "AI_RESULT_UNKNOWN"; retryable: false; nextAction: "reconcile" }
-);
 
 /** 结果未知不是失败后可直接重试；必须先核对已发生的业务副作用。 */
 export type AiToolFailure = {
