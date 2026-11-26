@@ -424,7 +424,7 @@ npm run lint -w @rental-os/rental-core
 
 独立公开仓库从实际发行提交构建标准包，清单、Tag 和 Release 资产须对应同一来源。公开包声明 `/api/cores/rental/v1` 下已审定的业务操作，部署后的规范路径和原路径进入同一 Controller。包准备、实际部署、注册和租户授权沿现有流程完成。见[规范路径和文档共用入口](src/http-portable.ts)与[宿主接入说明](../../apps/rental-api/README.md)。
 
-当前组合使用 Base `0.1.17`，源码 `3fee227517a2b20e18a426e853f18cdf37cb63ff`，以及 Rental `0.1.14`，独立源码 `2cada4c9bb7e7c4baa1affe66b72f5750e8431e6`。安装和独立更新按所选固定包摘要及部署锁办理。`0.1.14` 将订单报价总额的原 Token 样式随 Core 页面加载，不修改业务逻辑、数据版本或迁移；原 `0.1.13` 的六表升级与回退限制仍适用。[Base 0.1.17](https://github.com/JinPen-G/Zelo/releases/tag/v0.1.17) · [Rental 0.1.14](https://github.com/JinPen-G/nativark-rental-core/releases/tag/v0.1.14)
+当前组合使用 Base `0.1.17`，源码 `3fee227517a2b20e18a426e853f18cdf37cb63ff`，以及 Rental `0.1.14`，独立源码 `2cada4c9bb7e7c4baa1affe66b72f5750e8431e6`。安装和独立更新按所选固定包摘要及部署锁办理。`0.1.14` 将订单报价总额的原 Token 样式随 Core 页面加载，不修改业务逻辑、数据版本或迁移；原 `0.1.13` 的六表升级与回退限制仍适用。[Base 0.1.17](https://github.com/JinPen-G/Zelo/releases/tag/v0.1.17) · [Rental 0.1.14](https://github.com/JinPen-G/Zelo-rental-core/releases/tag/v0.1.14)
 
 底座按独立仓库默认分支的清单发现版本，并按对应 Release 锁定来源和资产摘要。新版本的源码合并、发行包发布和默认清单更新分别核对；不能只凭版本标签认定可安装。已发布的 Base17/Rental13 组合宿主仍固定原版本，更新到 `0.1.14` 须重新准备所选 Core 与部署锁，不把旧宿主归档改名为新版。
 

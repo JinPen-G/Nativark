@@ -488,7 +488,7 @@ node packages/core-contracts/dist/github-release.js prepare <固定Release JSON>
 
 Node专用出口 `@rental-os/core-contracts/github` 提供 `inspectGitHubCoreRelease`、`prepareGitHubCoreRelease` 及两份输入 schema。两条命令成功退出0，失败退出1；成功stdout只有JSON，失败stderr不包含响应正文、签名下载URL或凭据。下载有时间/大小上限，仅跟随GitHub受支持的HTTPS资产地址，失败没有落地半包。固定内容的检查不证明发布者或代码已经审核。
 
-仓库可添加 `nativark-core` Topic供发现入口检索；**Topic本身不发布版本、不安装也不授权**。GitHub行为依据[按Tag读取Release](https://docs.github.com/en/rest/releases/releases#get-a-release-by-tag-name)、[资产与摘要](https://docs.github.com/en/rest/releases/assets#get-a-release-asset)、[读取引用](https://docs.github.com/en/rest/git/refs#get-a-reference)和[附注Tag](https://docs.github.com/en/rest/git/tags#get-a-tag)。[公开 Rental Core](https://github.com/JinPen-G/nativark-rental-core)提供同一标准的固定发行，可用 `inspect JinPen-G/nativark-rental-core rental 0.1.12` 读取。包准备成功后，继续按所选[宿主说明](../../apps/rental-api/README.md)构建、准备数据并启动，再授权租户及成员；候选目录本身不代表业务已安装可用。
+仓库可添加 `zelo-core` Topic供发现入口检索；**Topic本身不发布版本、不安装也不授权**。GitHub行为依据[按Tag读取Release](https://docs.github.com/en/rest/releases/releases#get-a-release-by-tag-name)、[资产与摘要](https://docs.github.com/en/rest/releases/assets#get-a-release-asset)、[读取引用](https://docs.github.com/en/rest/git/refs#get-a-reference)和[附注Tag](https://docs.github.com/en/rest/git/tags#get-a-tag)。[公开 Rental Core](https://github.com/JinPen-G/Zelo-rental-core)提供同一标准的固定发行，可用 `inspect JinPen-G/Zelo-rental-core rental <版本>` 读取（注：`0.1.14` 及更早历史发行包内部来源仍记录改名前的 `nativark-rental-core`，自改名后新版本起与 `Zelo-rental-core` 一致）。包准备成功后，继续按所选[宿主说明](../../apps/rental-api/README.md)构建、准备数据并启动，再授权租户及成员；候选目录本身不代表业务已安装可用。
 
 ## 发现公开 Core 仓库
 
@@ -496,7 +496,7 @@ Node专用出口 `@rental-os/core-contracts/github` 提供 `inspectGitHubCoreRel
 node packages/core-contracts/dist/github-release.js discover [关键词] [页码]
 ```
 
-命令只搜索公开、未归档且带 `nativark-core` Topic的仓库。关键词用于名称/简介，不接受其他GitHub查询表达式；每页20条、最多读取GitHub搜索允许的1000个结果。返回来源、许可信息、更新时间、查询时间、下一页和不完整结果标记；描述仅作为普通文本显示，不能渲染成HTML。候选的`review=unreviewed`与`package=unchecked`不能替代平台确认和包检查。
+命令只搜索公开、未归档且带 `zelo-core` Topic的仓库。关键词用于名称/简介，不接受其他GitHub查询表达式；每页20条、最多读取GitHub搜索允许的1000个结果。返回来源、许可信息、更新时间、查询时间、下一页和不完整结果标记；描述仅作为普通文本显示，不能渲染成HTML。候选的`review=unreviewed`与`package=unchecked`不能替代平台确认和包检查。
 
 宿主从同一 `@rental-os/core-contracts/github` 出口创建一个 `createGitHubCoreDiscovery()` 实例并复用它，再调用 `discover({ text, page }, refresh)`。实例缓存最近50页，每页5分钟；并发相同查询共用一次读取，`refresh=true`跳过缓存。缓存只含公开元数据，进程退出可以丢弃，命令每次运行不会保存磁盘缓存。
 

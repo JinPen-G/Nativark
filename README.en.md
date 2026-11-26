@@ -23,7 +23,7 @@
 
 **Zelo** is a standalone, open-source, multi-tenant SaaS foundation. It distills the infrastructure nearly every B2B SaaS product has to rebuild from scratch—authentication, multi-tenancy and organizational RBAC, SaaS subscriptions, a shared admin console, encrypted external integrations, an optional governed AI Native / MCP runtime, and a standardized **pluggable Core lifecycle with independent upgrades**—into a clean, industry-agnostic base.
 
-Domain applications plug into the base as standalone **Cores (business packages)**, each owning its own domain schema, SQL migrations, admin UI contributions, and optional AI tools. **The base starts, builds, and exports cleanly with zero Cores installed.** This repository also includes the lightweight starter **Example Tickets Core** and the first official business Core—**[Rental Core](#built-in-business-core-examples)** (also published independently at [JinPen-G/nativark-rental-core](https://github.com/JinPen-G/nativark-rental-core))—as runnable demos and reference implementations for building CRM, TMS, ticketing, or any vertical SaaS Core.
+Domain applications plug into the base as standalone **Cores (business packages)**, each owning its own domain schema, SQL migrations, admin UI contributions, and optional AI tools. **The base starts, builds, and exports cleanly with zero Cores installed.** This repository also includes the lightweight starter **Example Tickets Core** and the first official business Core—**[Rental Core](#built-in-business-core-examples)** (also published independently at [JinPen-G/Zelo-rental-core](https://github.com/JinPen-G/Zelo-rental-core))—as runnable demos and reference implementations for building CRM, TMS, ticketing, or any vertical SaaS Core.
 
 > **Quick Navigation**: [Why Zelo](#why-zelo) · [Core Capabilities](#core-capabilities) · [Architecture & Core Model](#architecture--core-extension-model) · [5-Step Core Integration](#integrate-your-business-core-in-5-steps) · [Core Ecosystem & Monetization](#build-the-core-ecosystem--monetize-extensions) · [Built-in Core Examples](#built-in-business-core-examples) · [Quick Start](#quick-start) · [Repository Structure](#repository-structure) · [Developer Guide](#developer-guide) · [Verification](#verification--testing) · [Contributing](#contributing)
 
@@ -32,7 +32,7 @@ Domain applications plug into the base as standalone **Cores (business packages)
 ## Why Zelo
 
 - **Zero-Core Standalone Runtime & One-Command Source Export**: Ships with standalone `platform-api` and `platform-admin` backed by 41 shared platform models and 14 base migrations. Run `npm run export:platform` to produce a clean base source archive containing zero industry business code.
-- **Standardized Core Contracts & Independent Upgrades**: Every business Core declares its manifest, permissions, UI routes, OpenAPI schema, and raw SQL migrations through `@rental-os/core-contracts`. The built-in **Core Packages Console (`/platform/core-packages`)** discovers public packages by GitHub Topic (`nativark-core`), verifies release SHA-256 digests, and locks deployments so **the base and each Core upgrade or roll back independently**.
+- **Standardized Core Contracts & Independent Upgrades**: Every business Core declares its manifest, permissions, UI routes, OpenAPI schema, and raw SQL migrations through `@rental-os/core-contracts`. The built-in **Core Packages Console (`/platform/core-packages`)** discovers public packages by GitHub Topic (`zelo-core`), verifies release SHA-256 digests, and locks deployments so **the base and each Core upgrade or roll back independently**.
 - **Multi-Tenancy & Admin Shell**: Includes two-tier SaaS/tenant identity, organizations and RBAC permission trees, email member invitations, security baselines, dictionaries and numbering rules, subscription windows, AES-GCM credential encryption, email/SMS/file/payment primitives, and a modern React 19 + UIArc admin shell.
 - **Optional, Strictly Governed AI Native & MCP**: AI is an opt-in capability layer—standard business flows run without it. When enabled, it provides unified task orchestration and recovery, a single Model Gateway, financial budget ledgers, knowledge ACLs, human approval linkage, original-receipt reconciliation, and RFC-compliant OAuth-protected MCP transport with a Harness client plugin.
 - **Built for Developers & AI Coding Agents**: Provides a [5-Step Integration Guide](packages/core-contracts/README.md#五步快速接入), a copy-ready [Agent Task Template](packages/core-contracts/README.md#交给开发agent的任务模板), a static Core package verifier (`check.js`), and a unified capability index CLI (`capabilities.js`) to inspect existing base components, pages, APIs, and exports in one command.
@@ -127,7 +127,7 @@ node packages/core-contracts/dist/check.js <unpacked-core-dir> --host <host-vers
 npm run export:platform -- --repo . --repository https://github.com/JinPen-G/Nativark --commit <full-sha> --out zelo-platform.tgz
 ```
 
-> **Online Core Discovery & Distribution**: Make your standalone Core repository public on GitHub, add the topic **`nativark-core`**, and attach your standard `.tgz` artifact to a GitHub Release. Any Zelo base can then discover it online in **Core Packages (`/platform/core-packages`)**, verify compatibility and SHA-256 digests, and stage installation. See [Core Package Host Integration](packages/platform-core-host/README.md#core-包管理接入) · [Admin Package Console](packages/platform-admin/src/features/core-packages/README.md).
+> **Online Core Discovery & Distribution**: Make your standalone Core repository public on GitHub, add the topic **`zelo-core`**, and attach your standard `.tgz` artifact to a GitHub Release. Any Zelo base can then discover it online in **Core Packages (`/platform/core-packages`)**, verify compatibility and SHA-256 digests, and stage installation. See [Core Package Host Integration](packages/platform-core-host/README.md#core-包管理接入) · [Admin Package Console](packages/platform-admin/src/features/core-packages/README.md).
 
 ---
 
@@ -139,7 +139,7 @@ Zelo exists so engineering teams across industries no longer have to rebuild aut
 
 - **Zero Coupling, Independent Cadence**: Every Core owns its own repository, SQL migrations, admin UI pages, and release schedule without being tied to Zelo base releases.
 - **Enterprise Readiness Out of the Box**: Inherit multi-tenancy, org RBAC trees, subscription enforcement, encrypted credentials, messaging primitives, and optional governed AI Native / MCP—so you focus 100% on domain logic.
-- **Built-in Discovery & Distribution**: Tag a public GitHub Core repository with **`nativark-core`** and attach a standard `.tgz` release asset to make it discoverable directly inside `/platform/core-packages` on any Zelo deployment.
+- **Built-in Discovery & Distribution**: Tag a public GitHub Core repository with **`zelo-core`** and attach a standard `.tgz` release asset to make it discoverable directly inside `/platform/core-packages` on any Zelo deployment.
 
 ### Open-Friendly Commercialization & Paid Extensions
 
@@ -149,7 +149,7 @@ Because the Zelo base is released under the permissive **[MIT License](LICENSE)*
 - **Standalone Commercial Cores**: Build and distribute proprietary or commercially licensed vertical Cores through per-tenant licensing, SaaS subscriptions, or private on-prem delivery.
 - **Implementation & Managed Services**: Offer private deployment, custom integration, data migration, and enterprise SLA support around the Cores you maintain.
 
-> Note: As long as you retain Zelo's MIT copyright notice and follow standard Core isolation contracts, you are free to define your own license terms, entitlement checks, and pricing for your Cores and commercial extensions. Once you publish an open-source or open-core package, tag it with `nativark-core` and share it via GitHub Issues or Discussions so the community can discover it.
+> Note: As long as you retain Zelo's MIT copyright notice and follow standard Core isolation contracts, you are free to define your own license terms, entitlement checks, and pricing for your Cores and commercial extensions. Once you publish an open-source or open-core package, tag it with `zelo-core` and share it via GitHub Issues or Discussions so the community can discover it.
 
 ---
 
@@ -165,7 +165,7 @@ Alongside the pure platform base, this repository ships two business Cores of di
 ### 2. Rental Core (Official Production Business Core)
 - **Purpose**: Zelo's first full-featured vertical Core, serving as a comprehensive architectural reference for complex domains—**it is a pluggable business package on top of the base, not the base itself**.
 - **Demonstrates**: End-to-end rental workflows across 4 categories (photography gear, camping equipment, vehicles, construction machinery)—catalog, assets, inventory, pricing strategies, quotes, orders, dispatch, return, inspection, settlement, and enterprise credit—supporting both non-AI and optional AI Native assemblies, paired with 4 client apps (tenant storefront, enterprise portal, customer & staff WeChat Mini Programs).
-- **Standalone Repository & Releases**: Also open-sourced at **[JinPen-G/nativark-rental-core](https://github.com/JinPen-G/nativark-rental-core)** with standard release packages on [GitHub Releases](https://github.com/JinPen-G/nativark-rental-core/releases) discoverable directly via the base's GitHub Topic workflow.
+- **Standalone Repository & Releases**: Also open-sourced at **[JinPen-G/Zelo-rental-core](https://github.com/JinPen-G/Zelo-rental-core)** with standard release packages on [GitHub Releases](https://github.com/JinPen-G/Zelo-rental-core/releases) discoverable directly via the base's GitHub Topic (`zelo-core`) workflow.
 - **In-Repo Entrypoints**: [Rental Core Guide](packages/rental-core/README.md) · [Rental API Host](apps/rental-api/README.md) · [Rental Admin Host](apps/rental-admin/README.md)
 
 ### 3. Multi-Core Composite Host (Dual-Core Reference)
@@ -346,7 +346,7 @@ Zelo/
 | `apps/api`, `apps/admin`, `packages/shared` | Legacy composite entrypoints and compatibility barrel consuming the split packages | [API Module](apps/api/src/app.module.ts) · [Admin Rules](apps/admin/AGENTS.md) · [Shared Index](packages/shared/src/index.ts) |
 | `apps/website`, `apps/website-next` | Static marketing site and Next.js marketing site | [Static Site](apps/website/README.md) · [Next.js Site](apps/website-next/README.md) |
 
-> **Compatibility Naming Note**: The brand and main repository are now **Zelo** (`JinPen-G/Zelo`). Future official base releases retain `https://github.com/JinPen-G/Nativark` as their stable `source.repository`; use the Zelo URL to clone and browse the source. The independent Rental Core repository, `nativark-core` discovery topic, historical packages, deployment locks, and source receipts retain their original values. Do not rewrite old packages or edit a lock to replace its source. The updater continues to reject different sources; see [Stable Release Source After Renaming](packages/core-contracts/README.md#stable-release-source) for export and existing-installation update steps. Workspace package scopes (`@rental-os/*`) and certain environment prefixes (`RENTAL_*`) remain for migration and client compatibility without affecting zero-Core export or standalone execution.
+> **Compatibility Naming Note**: The brand, main repository, and standalone companion repositories now follow the **Zelo** naming (`JinPen-G/Zelo`, official Rental Core `JinPen-G/Zelo-rental-core`, and marketing site `JinPen-G/Zelo-website`), and the GitHub Core discovery topic is now **`zelo-core`**. Future official base releases retain `https://github.com/JinPen-G/Nativark` as their stable `source.repository` (use the Zelo URL to clone and browse the source), while historical packages, deployment locks, and source receipts remain immutable—do not rewrite old packages or hand-edit locks; see [Stable Release Source After Renaming](packages/core-contracts/README.md#stable-release-source) for export and update steps. Workspace package scopes (`@rental-os/*`) and certain environment prefixes (`RENTAL_*`) remain for migration and client compatibility without affecting zero-Core export or standalone execution.
 
 ---
 

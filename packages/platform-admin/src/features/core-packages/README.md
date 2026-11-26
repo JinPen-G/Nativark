@@ -4,13 +4,13 @@
 
 ## 公开 Rental Core 的五步
 
-已公开验证的组合使用 Zelo 测试底座 `0.1.16` 和 Rental Core `0.1.12`。Rental 要求底座 `>=0.1.12 <0.2.0`、接入合同 `>=0.1.1 <0.2.0`、Node `>=22.12.0 <25.0.0`。[底座发行](https://github.com/JinPen-G/Zelo/releases/tag/v0.1.16) · [Rental 发行](https://github.com/JinPen-G/nativark-rental-core/releases/tag/v0.1.12)
+已公开验证的组合使用 Zelo 测试底座 `0.1.16` 和 Rental Core `0.1.12`。Rental 要求底座 `>=0.1.12 <0.2.0`、接入合同 `>=0.1.1 <0.2.0`、Node `>=22.12.0 <25.0.0`。[底座发行](https://github.com/JinPen-G/Zelo/releases/tag/v0.1.16) · [Rental 发行](https://github.com/JinPen-G/Zelo-rental-core/releases/tag/v0.1.12)
 
-标准资产为 `rental-0.1.12.tgz`，SHA-256 为 `7179a27231aed503ab294639093d3bb7f101a51cf63c5c3e984d43329c835574`，发行源码为 `50ba3335592893a3b7a4d440ba85b764b2ca8e24`。
+标准资产为 `rental-0.1.12.tgz`，SHA-256 为 `7179a27231aed503ab294639093d3bb7f101a51cf63c5c3e984d43329c835574`，发行源码为 `50ba3335592893a3b7a4d440ba85b764b2ca8e24`（注：`0.1.12`–`0.1.14` 历史归档构建于仓库更名前；更名后的新版本使用 `JinPen-G/Zelo-rental-core` 来源与 `zelo-core` Topic 发现）。
 
 | 步骤 | 操作与核对结果 |
 | --- | --- |
-| 1. 发现 | SaaS 管理员进入 `/platform/core-packages` 的“发现 Core”，搜索 `rental`，选择 `JinPen-G/nativark-rental-core`。 |
+| 1. 发现 | SaaS 管理员进入 `/platform/core-packages` 的“发现 Core”，搜索 `rental`，选择 `JinPen-G/Zelo-rental-core`。 |
 | 2. 下载与校验 | 在 `v0.1.12` 详情点“选择版本”，核对上面的来源和摘要，保存固定发行引用，再按预览确认“准备候选”。成功回执显示“候选已准备，待部署”。 |
 | 3. 部署注册 | 部署人员按[Rental 宿主步骤](../../../../../apps/rental-api/README.md)使用固定包与部署锁，完成构建、迁移和启动，在“当前目录”核对注册来源及版本。首次准入按[正式管理步骤](../../../../platform-core-host/README.md#部署准入与存量切换)读取当前状态并登记 `accepting`。 |
 | 4. 租户授权 | SaaS 管理员进入 `/platform/core-access` 的“租户 Core 授权”，选目标租户与 `rental`，核对当前修订并保存授权。租户列表的“Core 授权”动作也进入此页。 |

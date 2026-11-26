@@ -9,7 +9,7 @@ export const GitHubCoreDiscoveryQuerySchema = z.object({
   text: z.string().trim().max(80).regex(/^[\p{L}\p{N} _.-]*$(?![\s\S])/u, "搜索只填写名称或简介关键词，不传GitHub查询表达式").default(""),
   page: z.number().int().min(1).max(50).default(1)
 }).strict();
-const topic = "nativark-core", pageSize = 20, ttl = 5 * 60_000, maxCachedPages = 50;
+const topic = "zelo-core", pageSize = 20, ttl = 5 * 60_000, maxCachedPages = 50;
 const repositoryName = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9-]*\/[a-zA-Z0-9_.-]+$(?![\s\S])/);
 const responseSchema = z.object({
   total_count: z.number().int().nonnegative(), incomplete_results: z.boolean(),
@@ -22,7 +22,7 @@ const responseSchema = z.object({
 });
 
 export interface GitHubCoreDiscoveryPage {
-  topic: "nativark-core";
+  topic: "zelo-core";
   query: z.infer<typeof GitHubCoreDiscoveryQuerySchema>;
   pageSize: 20;
   checkedAt: string;

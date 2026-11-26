@@ -109,7 +109,7 @@ function schemas(): CoreOpenApiContribution["schemas"] {
     dataCapabilities: list(object({ locked: ref("CapabilityRelease"), current: nullableObject("CapabilityRelease"), availability: ref("Availability") }))
   }, ["status", "platform", "cores"]));
   const catalogue = object({ checkedAt: timestamp, registered: list(ref("RegisteredCore")), versions: ref("Versions") });
-  const discoveryPage = object({ topic: values("nativark-core"), query: ref("DiscoveryQuery"), pageSize: values(20),
+  const discoveryPage = object({ topic: values("zelo-core"), query: ref("DiscoveryQuery"), pageSize: values(20),
     checkedAt: timestamp, total: { ...integer, minimum: 0 }, incomplete: flag, nextPage: { ...integer, nullable: true },
     repositories: { ...list(object({ id: { ...integer, minimum: 1, maximum: Number.MAX_SAFE_INTEGER }, name: text, repository: ref("RepositoryURL"),
       description: { ...text, nullable: true }, license: { ...text, nullable: true }, updatedAt: timestamp,
