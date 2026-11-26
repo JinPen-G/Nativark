@@ -2,7 +2,7 @@
 import { hasEffectivePermission } from '@rental-os/platform-server/permission-match';
 import type { AiExecutionContext } from '@rental-os/platform-contracts/ai-gateway';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
-import type { AiTaskRepositoryAuthority, AiTaskRepositoryOperation } from './ai-task.repository';
+import type { AiTaskRepositoryAuthority, AiTaskRepositoryOperation } from './task-persistence.repository';
 import { AiTaskRepositoryError } from '../task-errors';
 import type { AiCurrentScopeAuthority } from './ai-scope.repository';
 

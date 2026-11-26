@@ -1,0 +1,120 @@
+/** Bind public tenant Tasks to the same signed request and Native principal.
+ * The host must register real scene/source, entitlement and publication gates. */
+import { randomUUID } from 'node:crypto';
+import type { Prisma } from '@prisma/client';
+import { z } from 'zod';
+import type { PlatformAuthService, PlatformPrincipalAuthority } from '@rental-os/platform-server';
+import { hasEffectivePermission } from '@rental-os/platform-server/permission-match';
+import { AI_CONTRACT_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/platform-contracts/ai-gateway';
+import type { SystemUserRow } from '@rental-os/platform-contracts';
+import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
+import { captureAiRequestBinding } from './request-binding';
+import { isAiStepExecutionContext } from './execution-context-validation';
+import { AiTaskRepositoryError } from './task-errors';
+import type { AiTaskTransactionAuthority, AiTaskTransactionReference } from './task-transactions';
+import type { AiTaskRepositoryOperation } from './runtime/task-persistence.repository';
+import { createPublicTaskActionAuthority, type PublicTenantTaskContext as TenantContext } from './task-policy-authorization';
+
+type Tx = Prisma.TransactionClient;
+type Action = AiTaskRepositoryOperation;
+type TenantIdentity = Pick<Tx, 'aiScope' | 'aiTask' | 'aiTaskActionPolicy' | '$queryRaw'>;
+type Permission = (operation: Action) => string | undefined;
+const bearer = z.string().max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
+const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
+const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+const subjectKey = ({ requestId: _request, authorizedAt: _at, ...value }: AiExecutionContext) => requestFingerprint(value);
+
+export function createPublicTenantTaskAuthority(input: {
+  db: TenantIdentity;
+  auth: Pick<PlatformAuthService, 'resolveAccessContext'>;
+  principals: Pick<PlatformPrincipalAuthority<Tx>, 'lock'>;
+  entryPermission: Permission;
+  creationPermission: string;
+  assertDataAvailable(database: Pick<Tx, '$queryRaw'>): Promise<void>;
+  /** Allow only the exact scene, publication and original object for this action. */
+  assertTaskAction(database: TenantIdentity, identity: TenantContext, taskId: string, operation: Action): Promise<void>;
+  /** Check the exact source, entitlement and current policy in the owning Native. */
+  assertReference(transaction: Tx, identity: TenantContext, reference: AiTaskTransactionReference): Promise<void>;
+  clock?: () => Date;
+}) {
+  if (typeof input?.db?.$queryRaw !== 'function' || typeof input.auth?.resolveAccessContext !== 'function'
+    || typeof input.principals?.lock !== 'function' || typeof input.entryPermission !== 'function'
+    || typeof input.assertReference !== 'function' || typeof input.assertTaskAction !== 'function'
+    || typeof input.assertDataAvailable !== 'function'
+    || typeof input.creationPermission !== 'string' || !input.creationPermission) throw unavailable();
+  const { db, auth, principals, entryPermission, creationPermission } = input, clock = input.clock ?? (() => new Date());
+  return Object.freeze({ async bind(request: { headers: { authorization?: unknown } }, signal?: AbortSignal) {
+    const header = bearer.safeParse(request?.headers?.authorization);
+    if (!header.success || signal?.aborted) throw denied();
+    const binding = captureAiRequestBinding(denied), identity = binding.identity;
+    const { tenantId, userId, accessSession } = identity, requestId = randomUUID();
+    const active = () => {
+      binding.assertCurrent();
+      if (signal?.aborted || !tenantId || !userId || !accessSession || identity.isSaasAdmin !== false
+        || identity.audience !== 'operator' || identity.staffApi || identity.workspaceId !== undefined
+        || accessSession.expiresAt <= clock().getTime() / 1000) throw denied();
+    };
+    const project = (user: SystemUserRow): TenantContext => {
+      active();
+      if (user.tenantId !== tenantId || user.id !== userId || !user.isActive || user.isSaasAdmin || user.mustChangePassword) throw denied();
+      // Public Task scope has no business location grants. Business scopes
+      // remain separate participants and must not inherit this projection.
+      const context = { contractVersion: AI_CONTRACT_DRAFT_VERSION, audience: 'operator', requestId, authorizedAt: clock().toISOString(),
+        actor: { kind: 'user', userId }, scope: { kind: 'tenant', tenantId }, access: {
+          permissions: [...user.permissions].sort(), dataScope: user.dataScope, locationScope: { mode: 'selected', locationIds: [] },
+          ...(user.organizationId ? { organizationId: user.organizationId } : {})
+        } };
+      if (!isAiStepExecutionContext(context) || context.scope.kind !== 'tenant') throw denied();
+      return context as TenantContext;
+    };
+    const resolveRoot = async () => {
+      active();
+      const current = await auth.resolveAccessContext(header.data), session = current?.accessSession;
+      if (!current || !session || session.sessionId !== accessSession!.sessionId || session.expiresAt !== accessSession!.expiresAt
+        || session.workspaceId !== accessSession!.workspaceId) throw denied();
+      return project(current.tenantUser);
+    };
+    try {
+      const initial = await resolveRoot(), currentKey = subjectKey(initial);
+      const current = (value: TenantContext) => {
+        active();
+        if (subjectKey(value) !== currentKey) throw denied();
+        return value;
+      };
+      const available = async (reader: Pick<Tx, '$queryRaw'>) => {
+        active(); await input.assertDataAvailable(reader); active();
+      };
+      const identities = { async resolve() {
+        await available(db);
+        return current(await resolveRoot());
+      } };
+      const actionsFor = (reader: TenantIdentity, trusted: typeof identities) => createPublicTaskActionAuthority({
+        db: reader, identities: trusted, entryPermission, clock,
+        assertTaskAction: (context, taskId, operation) => input.assertTaskAction(reader, context, taskId, operation)
+      });
+      const actions = actionsFor(db, identities);
+      const transaction: AiTaskTransactionAuthority<Tx> = Object.freeze({ binding: requestFingerprint([requestId, currentKey, accessSession]),
+        async begin(tx: Tx, reference: AiTaskTransactionReference) {
+          active();
+          if (!tx || '$transaction' in tx) throw denied();
+          await available(tx);
+          const lease = await principals.lock(tx, { tenantId: tenantId!, subjectId: userId!, audience: 'operator' }, tenantId!);
+          const nativeIdentity = { async resolve() { return current(project(await lease.revalidate())); } };
+          const nativeActions = actionsFor(tx, nativeIdentity);
+          const verify = async (next: AiTaskTransactionReference) => {
+            await available(tx);
+            const principal = await nativeIdentity.resolve();
+            if (next.kind === 'creation' && !hasEffectivePermission(principal.access.permissions, creationPermission)) throw denied();
+            if (next.kind === 'task') await nativeActions.resolve(next.taskId, 'claim_run');
+            // The host owns the exact control purpose, object and immutable
+            // source. A generic 'task_control' ref does not choose a verb.
+            await input.assertReference(tx, principal, structuredClone(next));
+            await nativeIdentity.resolve();
+          };
+          await verify(reference);
+          return { verifyReference: verify, revalidate: () => verify(reference) };
+        } });
+      return Object.freeze({ identities, actions, transaction, close: binding.close });
+    } catch (error) { binding.close(); throw error; }
+  } });
+}

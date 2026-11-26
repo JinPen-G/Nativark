@@ -38,6 +38,9 @@
       "task-persistence": [
         "dist/task-persistence.d.ts"
       ],
+      "public-tenant-task-authority": [
+        "dist/public-tenant-task-authority.d.ts"
+      ],
       "platform-transactions": [
         "dist/platform-transactions.d.ts"
       ],
@@ -100,6 +103,10 @@
     "./task-persistence": {
       "types": "./dist/task-persistence.d.ts",
       "default": "./dist/task-persistence.js"
+    },
+    "./public-tenant-task-authority": {
+      "types": "./dist/public-tenant-task-authority.d.ts",
+      "default": "./dist/public-tenant-task-authority.js"
     },
     "./platform-transactions": {
       "types": "./dist/platform-transactions.d.ts",

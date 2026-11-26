@@ -26,6 +26,8 @@
 
 创建只保存 Task 和首个 Run。恢复读取和原租约控制按各自的当前动作权威执行；读取结果按原 Task、Run、Step、action 与摘要核定，未知不会交付正文。返回的结果只供已授权宿主进行后续来源和字段投影，不是可直接公开的 HTTP 响应。任务执行仍由原 Runner、累计资源、已发布工具及唯一 Gateway 装配。
 
+[公共租户请求权威](src/public-tenant-task-authority.ts)从原 Guard 已核对的请求及签名会话建立租户身份，供 `task-persistence` 消费。同一 Client 的当前 Task owner、原动作政策、当前角色和期限必须同时通过。新建和领取 Run 使用原主体锁中的 Native 读取，提交前核原会话、数据、策略和注册来源。宿主明确给出入口权限、场景／对象的 `assertTaskAction` 与同事务 `assertReference`，并在请求结束关闭绑定。没有已发布场景或原政策时保持不可用；公共租户的空地点投影不能授予 Core 业务权限。
+
 ## 公共模型配置
 
 宿主从 [model-configuration](src/model-configuration.ts) 创建租户或平台的持久配置工厂，提供自己的当前动作授权、SecretBox、同一所选 Prisma Client 和显式事务参加者。租户配置上下文允许只有 tenantId、actorId；invoke 仍要求业务 workspace 及其授权。调用 `registerScope` 建立原 canonical TENANT 或 PLATFORM 元数据后，再使用返回的 `configuration` 读取、保存及核对原 operationKey。元数据注册和配置保存分别拥有原事务，元数据存在不表示模型可调用。
