@@ -3,6 +3,8 @@ import { z } from 'zod';
 import type { AuthService } from '../rental-adapters/auth.service';
 import type { ApiAuthGuard } from '../rental-adapters/api-auth.guard';
 import { getRequestIdentity, runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
+import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
+import type { TenantModelConfigurationTransactions } from '../tenant-model-config-transactions';
 import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
 import { HumanAutomationPolicyManagementService } from './human-automation-policy-management.service';
@@ -17,6 +19,7 @@ export type HumanAutomationPolicyRequestDependencies = {
   db: ConstructorParameters<typeof HumanAutomationPolicyManagementService>[0];
   auth: Pick<AuthService, 'resolveAccessContext'>;
   guard: Pick<ApiAuthGuard, 'canActivate'>;
+  transactions?: TenantModelConfigurationTransactions;
   clock?: () => Date;
 };
 const bearer = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
@@ -29,7 +32,7 @@ const requirePort = (port: unknown, methods: string[]) => {
 export class HumanAutomationPolicyRequestFactory {
   private readonly dependencies: HumanAutomationPolicyRequestDependencies;
   constructor(input: HumanAutomationPolicyRequestDependencies) {
-    if (!input || Object.keys(input).some(key => !['db', 'auth', 'guard', 'clock'].includes(key))
+    if (!input || Object.keys(input).some(key => !['db', 'auth', 'guard', 'transactions', 'clock'].includes(key))
       || input.clock !== undefined && typeof input.clock !== 'function') throw unavailable();
     requirePort(input.auth, ['resolveAccessContext']);
     requirePort(input.guard, ['canActivate']);
@@ -76,7 +79,10 @@ export class HumanAutomationPolicyRequestFactory {
     } };
     const identity = new AiTaskCurrentIdentityAuthority(auth, credentials, clock);
     const guard: Pick<ApiAuthGuard, 'canActivate'> = { canActivate: async execution => {
-      await identity.resolve();
+      // The original system-rules authority verifies in a fresh ALS store.
+      // Its Guard must populate that store before selected identity checks.
+      await credentials.current();
+      if (!hasRentalBusinessTenantFence()) await identity.resolve();
       if (await server.guard.canActivate(execution) !== true) throw unavailable();
       const context = await identity.resolve(), stored = getRequestIdentity();
       if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace' || !('access' in context)
@@ -86,9 +92,10 @@ export class HumanAutomationPolicyRequestFactory {
       return true;
     } };
     try {
-      return await waitForTaskApplicationDependency(() => runWithRequestIdentity({}, async () => {
+      const consume = async () => {
         await identity.resolve();
-        const service = new HumanAutomationPolicyManagementService(server.db, { auth, guard, credentials }, clock);
+        const service = new HumanAutomationPolicyManagementService(server.db,
+          { auth, guard, credentials, transactions: server.transactions }, clock);
         const stable = async <T>(read: () => Promise<T>): Promise<T> => {
           const result = await read();
           if (hash(result) !== hash(await read())) throw conflict();
@@ -133,7 +140,11 @@ export class HumanAutomationPolicyRequestFactory {
         writeReturned = write;
         await identity.resolve();
         return result;
-      }), write, signal);
+      };
+      // Selected requests keep the host Guard's original identity object for
+      // the owning transaction. Legacy callers retain their isolated scope.
+      return await waitForTaskApplicationDependency(() => hasRentalBusinessTenantFence()
+        ? consume() : runWithRequestIdentity({}, consume), write, signal);
     } catch (error) {
       if (writeReturned || error instanceof Error && 'code' in error && error.code === 'AI_RESULT_UNKNOWN') throw new AutomationManagementError('result_unknown');
       throw error;

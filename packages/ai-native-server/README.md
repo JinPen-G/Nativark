@@ -57,6 +57,10 @@ Core 停用后的已有回答及模型结果核对，由宿主 [只读处理器�
 
 `readCapabilityReceipt` 可能保存能力证据，按写入处理。手动释放和核账仅消费原调用的未派发或用量事实，并在原账务事务中复核当前主体及任务关联；已派发调用的自动计量与结算继续由原善后路径负责。完整的停用配置保留原八项读取，原收据不授权新发布或派发。启动与恢复从原请求的服务器响应观察断连，正常 body 完成不会触发取消，返回结果仍交宿主处理。
 
+经营政策由[原请求工厂](src/runtime/automation/human-automation-policy-request.composition.ts)进入[政策管理服务](src/runtime/automation/human-automation-policy-management.service.ts)。所选宿主保留最初 Guard 的请求身份，内部配置权限核验先由原 Guard 填充自己的验证作用域，再核当前主体与范围。确认授权和政策写入共用原事务，复用 Auth/Tenant/Core 参加者、政策 CAS 和原操作键，提交前复核当前权限及所有嵌套准备的期限。
+
+发现、预览与原收据读取不签发执行权。显式准备和提交记录政策边界，重复或丢失提交应答沿原键核对；原影子/人工确认约束、过期政策停用及旧宿主兼容路径继续由原管理服务裁定。直接消费者是[经营政策客户端](../rental-core/admin/task-center/api/aiAutomationPolicies.ts)，宿主从[实际处理器](../../apps/rental-api/src/ai-http-policy.ts)发布十个操作及三项停用后原读取。
+
 当前租户页面的额度申请、空间分配及调用记录经[租户额度 Controller](../../apps/rental-api/src/ai-credit-http.ts)进入[原额度服务](src/runtime/budget/ai-credit.service.ts)。所选宿主绑定最初 Guard 的同一 ALS 身份，申请与分配在原事务中复用[Auth/Tenant/Core 参加者](src/runtime/tenant-model-config-transactions.ts)，提交前复验权限，丢应答只核原操作收据。历史调用在有界快照中读取原 invocation、usage 和账务依据，BYOK 不生成金额，缺用量不补零，查询和游标继续核当前租户及空间范围。平台批准保留独立管理授权与原增额语义。
 
 [平台模型设置](src/runtime/platform-model-settings.application.ts)保留所选宿主最初 Guard 的原请求身份，继续由原平台配置权威区分查看和管理权限。Scope 初始化及[加密配置保存](src/runtime/platform-model-connection.ts)的原事务通过[平台事务参加者](src/runtime/platform-management-transaction.ts)锁定当前 SaaS 主体、会话和所选数据依据，提交前再次复核。未选择独立宿主时沿原隔离请求作用域。目录和能力证据按有界查询读取，保存保留原 CAS、操作收据及未知结果语义；前端通过[同源客户端工厂](../ai-native-admin/src/platform-model-settings/platformAiSettings.ts)消费五个操作，写请求关闭认证刷新后的自动重发。

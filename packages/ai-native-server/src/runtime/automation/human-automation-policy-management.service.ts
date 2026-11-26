@@ -1,3 +1,5 @@
+/** Human policy metadata and its original CAS receipts. Confirmed grants and
+ * changes share one transaction; publication does not execute model or business work. */
 import { hasEffectivePermission } from '@rental-os/platform-server/permission-match';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
@@ -11,6 +13,8 @@ import { requestFingerprint as hash } from '@rental-os/platform-contracts/reques
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
 import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import { TenantModelConfigurationAuthority } from '../tenant-model-config.authority';
+import { beginTenantModelConfigurationTransaction, createTenantModelConfigurationTransactions,
+  type TenantModelConfigurationTransactionParticipant, type TenantModelConfigurationTransactions } from '../tenant-model-config-transactions';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 import { aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
 import { AutomationManagementError, managementParse as parse, managementId, managementHash, managementRevision, policyChange,
@@ -18,7 +22,8 @@ import { AutomationManagementError, managementParse as parse, managementId, mana
 import { recordOriginalAutomationPolicyBoundary, readOriginalAutomationPolicyBoundary,
   readRecordedAutomationPolicyBoundaryForManagement } from './automation-policy-boundary';
 
-export type AutomationManagementDependencies = { auth: Pick<AuthService, 'resolveAccessContext'>; guard: Pick<ApiAuthGuard, 'canActivate'>; credentials: AiTaskCredentialSource };
+export type AutomationManagementDependencies = { auth: Pick<AuthService, 'resolveAccessContext'>; guard: Pick<ApiAuthGuard, 'canActivate'>;
+  credentials: AiTaskCredentialSource; transactions?: TenantModelConfigurationTransactions };
 type ReadDb = Pick<PrismaClient, 'aiScope' | 'businessWorkspace' | 'rentalFulfillmentLocation' | 'aiTaskPlanPolicy' | 'aiAutomationSubject'
   | 'aiAutomationPolicy' | 'aiAutomationManagementGrant' | 'aiAutomationPolicyPreparation' | 'aiAutomationPolicyManagementOperation' | 'operationLog'>;
 type Access = Awaited<ReturnType<HumanAutomationPolicyManagementService['access']>>;
@@ -37,14 +42,16 @@ const constraintsFor = (boundary: NonNullable<Awaited<ReturnType<typeof readOrig
 export class HumanAutomationPolicyManagementService {
   private readonly identity: AiTaskCurrentIdentityAuthority;
   private readonly original: TenantModelConfigurationAuthority;
-  private readonly transactions = new AsyncLocalStorage<Prisma.TransactionClient>();
+  private readonly transactionParticipant: TenantModelConfigurationTransactionParticipant;
+  private readonly transactions = new AsyncLocalStorage<{ db: Prisma.TransactionClient; checks: (() => void)[] }>();
   constructor(private readonly storage: ReadDb & Pick<PrismaClient, '$transaction'>, input: AutomationManagementDependencies,
     private readonly clock: () => Date = () => new Date()) {
     this.identity = new AiTaskCurrentIdentityAuthority(input.auth, input.credentials, clock);
     this.original = new TenantModelConfigurationAuthority(input.guard, input.credentials, this.identity);
+    this.transactionParticipant = createTenantModelConfigurationTransactions(input);
   }
   private get db(): ReadDb & Pick<PrismaClient, '$transaction'> {
-    const tx = this.transactions.getStore();
+    const tx = this.transactions.getStore()?.db;
     if (!tx) return this.storage;
     return new Proxy(this.storage, { get(target, key) {
       // Confirmed metadata commands join their caller-owned transaction. No
@@ -52,6 +59,30 @@ export class HumanAutomationPolicyManagementService {
       if (key === '$transaction') return (work: (native: Prisma.TransactionClient) => Promise<unknown>) => work(tx);
       return Reflect.get(tx, key) ?? Reflect.get(target, key);
     } });
+  }
+
+  private async writeTransaction<T>(access: Access, work: (tx: Prisma.TransactionClient) => Promise<T>, check?: () => void): Promise<T> {
+    const inherited = this.transactions.getStore();
+    if (inherited) {
+      if (check) inherited.checks.push(check);
+      return work(inherited.db);
+    }
+    return this.storage.$transaction(async tx => {
+      const lease = await beginTenantModelConfigurationTransaction(tx,
+        { ...access.scope, actorId: access.person.actorId }, this.transactionParticipant);
+      try {
+        return await this.transactions.run({ db: tx, checks: check ? [check] : [] }, async () => {
+          await this.sameAccess(access, 'manage');
+          const result = await work(tx);
+          await this.sameAccess(access, 'manage');
+          await lease?.revalidate();
+          // Nested confirmed grants/changes keep their original deadlines
+          // through the final authority wait in the same owning transaction.
+          for (const assertCurrent of this.transactions.getStore()!.checks) assertCurrent();
+          return result;
+        });
+      } finally { lease?.close(); }
+    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
   }
 
   private async access(action: 'read' | 'manage') {
@@ -167,7 +198,7 @@ export class HumanAutomationPolicyManagementService {
     const key = { scopeId: access.scopeId, actorId: access.person.actorId, audience: access.person.audience, action, resourceHash };
     let attempted = false;
     try {
-      await this.db.$transaction(async tx => {
+      await this.writeTransaction(access, async tx => {
         await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_scopes WHERE id = ${access.scopeId} FOR UPDATE`);
         await this.sameAccess(access, 'manage');
         const existing = await tx.aiAutomationManagementGrant.findFirst({ where: key });
@@ -183,7 +214,7 @@ export class HumanAutomationPolicyManagementService {
           action: 'ai_native_automation_confirmed_management_grant', detail: { payload, payloadHash: hash(payload) } } });
         await this.grant(access, action, resourceHash, tx);
         await this.sameAccess(access, 'manage');
-      }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      }, () => { if (expiresAt <= this.clock()) throw unavailable(); });
       await this.sameAccess(access, 'manage');
     } catch (error) { if (attempted) throw new AutomationManagementError('result_unknown'); throw error; }
   }
@@ -206,7 +237,7 @@ export class HumanAutomationPolicyManagementService {
     if (!command.policyId || command.policy.mode !== 'disabled') deadlines.push(Date.parse(command.policy.expiresAt));
     const limit = Math.min(...deadlines);
     try {
-      const prepared = await this.storage.$transaction(tx => this.transactions.run(tx, async () => {
+      const prepared = await this.writeTransaction(access, async () => {
         await this.issueConfirmedGrant('prepare', preview.prepareResourceHash, access, new Date(limit));
         const current = await this.preview(command);
         if (current.changeHash !== input.changeHash || current.sourceHash !== input.sourceHash) throw conflict();
@@ -214,7 +245,7 @@ export class HumanAutomationPolicyManagementService {
         if (result.state === 'unknown') throw new AutomationManagementError('result_unknown');
         await this.sameAccess(access, 'manage');
         return result;
-      }), { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      });
       await this.sameAccess(access, 'manage');
       return prepared;
     } catch (error) {
@@ -234,14 +265,14 @@ export class HumanAutomationPolicyManagementService {
     const access = await this.access('manage');
     if (access.scopeId !== reader.scopeId || access.identityHash !== reader.identityHash) throw unavailable();
     try {
-      const result = await this.storage.$transaction(tx => this.transactions.run(tx, async () => {
+      const result = await this.writeTransaction(access, async () => {
         await this.issueConfirmedGrant('commit', prepared.row.commitResourceHash, access, prepared.row.expiresAt);
         const result = await this.commit({ preparationId: input.preparationId, changeHash: input.changeHash,
           confirm: 'apply_automation_policy_change' });
         if (result.state === 'unknown') throw new AutomationManagementError('result_unknown');
         await this.sameAccess(access, 'manage');
         return result;
-      }), { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      });
       await this.sameAccess(access, 'manage');
       return result;
     } catch (error) {
@@ -363,7 +394,7 @@ export class HumanAutomationPolicyManagementService {
     const expiresAt = new Date(Math.min(...deadlines));
     const core = { id, subjectId, policyId, expiresAt, changeHash, sourceHash: source.sourceHash };
     try {
-      await this.db.$transaction(async tx => {
+      await this.writeTransaction(access, async tx => {
         await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_automation_management_grants WHERE id = ${grant.id} FOR UPDATE`);
         if ((await this.grant(access, 'prepare', prepareResourceHash, tx)).authorizationHash !== grant.authorizationHash
           || (await this.sources(command, access, tx)).sourceHash !== source.sourceHash) throw conflict();
@@ -371,7 +402,11 @@ export class HumanAutomationPolicyManagementService {
           operationKey: command.operationKey, expectedSubjectRevision: command.expectedSubjectRevision, expectedPolicyRevision: command.expectedPolicyRevision,
           commandJson: command, commitResourceHash: this.commitHash(core), prepareGrantId: grant.id, prepareGrantRevision: grant.revision, authorizationHash: grant.authorizationHash } });
         if ((await this.grant(access, 'prepare', prepareResourceHash, tx)).authorizationHash !== grant.authorizationHash) throw unavailable();
-      }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      }, () => {
+        if (expiresAt <= this.clock()
+          || (!command.policyId || command.policy.mode !== 'disabled') && Date.parse(source.before.scene.expiresAt) <= this.clock().getTime()) throw unavailable();
+        this.restrictions(command, access, true);
+      });
     } catch (error) {
       if (error instanceof AutomationManagementError) throw error;
       const latest = await this.access('read');
@@ -431,7 +466,7 @@ export class HumanAutomationPolicyManagementService {
     if (access.identityHash !== reader.identityHash || access.scopeId !== reader.scopeId) throw unavailable();
     let attempted = false, acknowledged = false;
     try {
-      const result = await this.db.$transaction(async tx => {
+      const result = await this.writeTransaction(access, async tx => {
         await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_automation_policy_preparations WHERE id = ${prepared.id} FOR UPDATE`);
         const { row, command } = await this.prepared(prepared.id, access, tx);
         const replay = await tx.aiAutomationPolicyManagementOperation.findFirst({ where: key });
@@ -442,6 +477,11 @@ export class HumanAutomationPolicyManagementService {
         const source = await this.sources(command, access, tx);
         if (source.sourceHash !== row.sourceHash) throw conflict();
         const grant = await this.grant(access, 'commit', row.commitResourceHash, tx);
+        this.transactions.getStore()!.checks.push(() => {
+          if (row.expiresAt <= this.clock() || grant.expiresAt <= this.clock()
+            || (!command.policyId || command.policy.mode !== 'disabled') && Date.parse(source.before.scene.expiresAt) <= this.clock().getTime()) throw unavailable();
+          this.restrictions(command, access, true);
+        });
         await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_automation_management_grants WHERE id = ${grant.id} FOR UPDATE`);
         if ((await this.grant(access, 'commit', row.commitResourceHash, tx)).authorizationHash !== grant.authorizationHash) throw unavailable();
         const now = this.clock(), enabled = { enabledBy: access.person.actorId, enabledAudience: access.person.audience, enabledAt: now };
@@ -485,7 +525,7 @@ export class HumanAutomationPolicyManagementService {
           result: outcome, resultHash: hash(outcome), grantId: grant.id, grantRevision: grant.revision, authorizationHash: grant.authorizationHash } });
         if ((await this.grant(access, 'commit', row.commitResourceHash, tx)).authorizationHash !== grant.authorizationHash) throw unavailable();
         return this.receipt(operation, row, access);
-      }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      });
       acknowledged = true;
       await this.sameAccess(access, 'manage');
       return result;

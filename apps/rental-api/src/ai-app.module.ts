@@ -51,7 +51,7 @@ export function createRentalAiHostModule<Additional = unknown>(options: RentalAi
               if (!host.ai) throw new Error("AI 实际装配缺少原参加者");
               return host.ai;
             }, inspectionOperations: RENTAL_AI_INSPECTION_OPERATIONS,
-            httpPublication: { isMounted: token => typeof token === "symbol" && RENTAL_AI_MOUNTED_REQUESTS.includes(token) } });
+            httpPublication: { isMounted: token => RENTAL_AI_MOUNTED_REQUESTS.includes(token) } });
           return { module: RentalAiHttpModule, imports: [composition], controllers: [...RENTAL_AI_CONTROLLERS],
             providers: [{ provide: RENTAL_STAFF_INSPECTION_EVIDENCE, inject: [RENTAL_AI_INSPECTION_BINDING],
               useFactory: (binding: RentalAiInspectionBinding): RentalStaffInspectionEvidence => ({

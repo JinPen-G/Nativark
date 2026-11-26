@@ -31,6 +31,10 @@ import { AiGatewayPricingHistoryController, AI_BUDGET_MANAGEMENT, AI_GATEWAY_PRI
   from "@rental-os/ai-native-server/runtime/budget/budget-management.module";
 import { TextCapabilityProbeController, TEXT_CAPABILITY_PROBE_REQUESTS }
   from "@rental-os/ai-native-server/runtime/text-capability-probe.controller";
+import { HumanAutomationPolicyRequestController }
+  from "@rental-os/ai-native-server/runtime/automation/human-automation-policy-request.controller";
+import { HumanAutomationPolicyRequestFactory }
+  from "@rental-os/ai-native-server/runtime/automation/human-automation-policy-request.composition";
 
 export const RENTAL_AI_INSPECTION_OPERATIONS = Object.freeze([
   "fulfillment-receipt-read", "history-read", "receipt-host-read", "host-read", "template-read",
@@ -38,6 +42,7 @@ export const RENTAL_AI_INSPECTION_OPERATIONS = Object.freeze([
   "draft-operation", "input-prepare", "input-receipt", "result-read", "result-save", "result-save-receipt", "submission-review", "submission-prepare", "submission-preparation", "submission-submit", "submission-read"
 ]);
 export const RENTAL_AI_CONTROLLERS = Object.freeze([
+  HumanAutomationPolicyRequestController,
   TextCapabilityProbeController,
   AiPlatformModelSettingsController,
   RentalTenantCreditController, RentalPlatformCreditController,
@@ -49,7 +54,8 @@ export const RENTAL_AI_CONTROLLERS = Object.freeze([
   AiScenePlanPolicyController, AiOriginalTaskActionPolicyController, AiConversationController, AiTaskOrderHandoffController,
   RentalWebsiteClientEntryController, RentalWechatClientEntryController
 ]);
-export const RENTAL_AI_MOUNTED_REQUESTS: readonly symbol[] = Object.freeze([
+export const RENTAL_AI_MOUNTED_REQUESTS: readonly (symbol | Function)[] = Object.freeze([
+  HumanAutomationPolicyRequestFactory,
   TEXT_CAPABILITY_PROBE_REQUESTS,
   AI_NATIVE_PLATFORM_MODEL_SETTINGS_REQUESTS,
   AI_BUDGET_MANAGEMENT, AI_GATEWAY_PRICING_HISTORY,
@@ -69,6 +75,7 @@ const orders = AiOriginalOrderReadController.prototype;
 const plans = AiScenePlanPolicyController.prototype, actions = AiOriginalTaskActionPolicyController.prototype;
 const conversations = AiConversationController.prototype;
 const capabilityProbe = TextCapabilityProbeController.prototype;
+const automationPolicy = HumanAutomationPolicyRequestController.prototype;
 const inspection = RentalStaffInspectionAssistController.prototype, recognition = InspectionRecognitionTaskController.prototype;
 const accounting = StaffInspectionAccountingController.prototype;
 const budget = RentalTenantBudgetController.prototype, pricing = AiGatewayPricingHistoryController.prototype;
@@ -77,6 +84,12 @@ const platformSettings = AiPlatformModelSettingsController.prototype;
 const platformBudget = RentalPlatformBudgetController.prototype;
 const platformCredit = RentalPlatformCreditController.prototype;
 const declarations: readonly RentalHttpAccessDeclaration[] = [
+  ...reviewed(HumanAutomationPolicyRequestController, [automationPolicy.discover, automationPolicy.read,
+    automationPolicy.preview, automationPolicy.preparation, automationPolicy.review, automationPolicy.operation], "buffered-read",
+  "current workspace configuration manager observes bounded policy metadata or original preparation/operation receipts with final identity recheck; preview grants no publication or execution"),
+  ...reviewed(HumanAutomationPolicyRequestController, [automationPolicy.prepare, automationPolicy.prepareConfirmed,
+    automationPolicy.commit, automationPolicy.commitConfirmed], "transactional-write",
+  "original confirmed grant/preparation/policy CAS transactions acquire current Auth/Tenant/Core before metadata locks, revalidate before commit and retain original deadlines and operation keys; no model or business dispatch"),
   ...reviewed(TextCapabilityProbeController, [capabilityProbe.prepare, capabilityProbe.readOriginal,
     capabilityProbe.readTask, capabilityProbe.inspect, capabilityProbe.readHistory, capabilityProbe.preflight,
     capabilityProbe.readTaskAction, capabilityProbe.readTaskActionReceipt, capabilityProbe.readAccounting,
@@ -282,6 +295,7 @@ export function rentalAiPlatformManagementSelector(policy: ReturnType<typeof cre
  * recover/reconcile 仍由原 lease/receipt 仓储裁定，不能据此创建或重新派发。 */
 export function rentalAiDeploymentContinuationSelector(policy: ReturnType<typeof createRentalAiHttpPolicy>) {
   const selected = new Map<Function, readonly Function[]>([
+    [HumanAutomationPolicyRequestController, [automationPolicy.preparation, automationPolicy.review, automationPolicy.operation]],
     [TextCapabilityProbeController, [capabilityProbe.readOriginal, capabilityProbe.readTask, capabilityProbe.inspect,
       capabilityProbe.readTaskAction, capabilityProbe.readTaskActionReceipt, capabilityProbe.readHistory,
       capabilityProbe.readAccounting, capabilityProbe.readAccountingOperation, capabilityProbe.cancel,
@@ -372,6 +386,7 @@ export function rentalAiRouteSelector(policy: ReturnType<typeof createRentalAiHt
  * 从真实controller/handler闭集取路由，并要求只读审定；请求标志不能扩展此集合。 */
 export function rentalAiOriginalReceiptSelector(policy: ReturnType<typeof createRentalAiHttpPolicy>) {
   const selected = new Map<Function, readonly Function[]>([
+    [HumanAutomationPolicyRequestController, [automationPolicy.preparation, automationPolicy.review, automationPolicy.operation]],
     [TextCapabilityProbeController, [capabilityProbe.readOriginal, capabilityProbe.readTask, capabilityProbe.inspect,
       capabilityProbe.readTaskAction, capabilityProbe.readTaskActionReceipt, capabilityProbe.readHistory,
       capabilityProbe.readAccounting, capabilityProbe.readAccountingOperation]],

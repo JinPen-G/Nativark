@@ -64,6 +64,10 @@ AI 选装宿主通过 [原收据选择器](src/ai-http-policy.ts) 从实际处�
 
 原请求发布、Task/动作策略、能力证据及显式账务恢复复用当前 Auth/Tenant/Core 和原事务，提交前复验身份、原引用与期限。模型启动保留唯一 Gateway、原预算预占和累计用量，丢失提交应答只核原操作。部署停新保留十二项原读取/控制，Core 停用保留其中八项原读取，精确集合见[处理器政策](src/ai-http-policy.ts)。前端十九个操作沿相同公共合同，九项写入关闭认证刷新后的自动重发，当前会话变化会撤回迟到结果。
 
+经营政策页通过[原八方法客户端](../../packages/rental-core/admin/task-center/api/aiAutomationPolicies.ts)消费发现、预览、明确准备、明确提交及原收据。[政策 Controller](../../packages/ai-native-server/src/runtime/automation/human-automation-policy-request.controller.ts)另保留两个要求原管理授权的兼容方法，十条路由共用宿主 OpenAPI 和精确读写声明。请求工厂的类令牌与实际挂载集合绑定，目录仅发布已挂载工厂。
+
+政策的确认授权、准备、版本变更及操作收据沿同一原事务提交，先核当前 Auth/Tenant/Core，最后一次授权等待后再核有效期。政策保存只改变管理配置，模型和业务动作仍走各自正式入口。部署停新或 Core 停用后保留 preparation、review、operation 三项原读取，仍核当前会话、成员权限及原操作归属。
+
 SaaS 平台模型设置复用[原五操作 Controller](../../packages/ai-native-server/src/runtime/platform-model-settings.application.ts)，包括目录、配置、保存、原操作收据及能力证据观察。[平台管理选择器](src/ai-http-policy.ts)从实际挂载处理器生成方法和路径闭集，经原 SaaS 会话权威及所选数据可用性核验，支持没有经营空间的当前平台管理员。[原事务参加者](../../packages/ai-native-server/src/runtime/platform-management-transaction.ts)在 Scope 初始化和 Vault/Profile/CAS 保存的各自事务内复核同一请求身份及权限；失应答按原操作键核对。能力观察返回已有证据，配置白名单和保存成功均不证明供应商能力已通过。宿主 OpenAPI 统一原合同与 Nest 的参数模板后，只发布实际挂载的方法。
 
 平台预算与费率审阅沿[原管理应用](../../packages/ai-native-server/src/runtime/budget/budget-management.application.ts)的五个操作，消费原[设置客户端](../../packages/ai-native-admin/src/platform-model-settings/aiBudgetSettings.ts)。预算政策与收据、费率审阅记录各自在原事务内锁定当前 SaaS 主体和所选数据，提交前复核权限及配置修订。当前平台查看权限可以读取政策与原键收据，写入要求平台管理权限；提交失应答保留原操作定位。

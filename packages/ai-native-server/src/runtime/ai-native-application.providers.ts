@@ -248,7 +248,7 @@ export const AI_NATIVE_BUSINESS_FAILURE_PROVIDERS: FactoryProvider[] = [{
   }
 }, {
   provide: HumanAutomationPolicyRequestFactory, inject: [AI_NATIVE_BODY_DATABASE, AuthService, ApiAuthGuard],
-  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard) => new HumanAutomationPolicyRequestFactory({ db, auth, guard })
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard) => new HumanAutomationPolicyRequestFactory({ db, auth, guard, transactions: { auth } })
 }];
 
 /** Original notification changes only, not a generic settings executor. The
