@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: 构建 API 和 Web 发布镜像
+      - name: 构建旧组合 API 和 Web 发布镜像
         shell: bash
         run: |
           set -euo pipefail

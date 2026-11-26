@@ -103,7 +103,7 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function startApi(cloneUrl, port, secrets) {
   const entry = path.join(API_DIR, "dist", "main.js");
   if (!fs.existsSync(entry)) {
-    throw new OpsTargetError("缺少 apps/api/dist/main.js，先跑 npm run build（OPS-01B 门禁也会检查产物）");
+    throw new OpsTargetError("缺少 apps/api/dist/main.js，先跑 npm run build:legacy（OPS-01B 门禁也会检查产物）");
   }
   const child = spawn(process.execPath, [entry], {
     cwd: API_DIR,

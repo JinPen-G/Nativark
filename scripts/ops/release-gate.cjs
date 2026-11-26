@@ -85,7 +85,7 @@ void (async () => {
     record(
       `构建产物存在并可摘要：${build.name}`,
       build.fileCount > 0 && Boolean(build.digest),
-      build.fileCount ? `${build.fileCount} 个文件 / ${build.totalBytes} 字节 / ${build.digest.slice(0, 16)}…` : "产物缺失，先跑 npm run build"
+      build.fileCount ? `${build.fileCount} 个文件 / ${build.totalBytes} 字节 / ${build.digest.slice(0, 16)}…` : "产物缺失，先跑 npm run build:legacy"
     );
   }
   // 清单里只保留总摘要与计数，不逐文件展开：几千行文件表会把清单变成噪声。

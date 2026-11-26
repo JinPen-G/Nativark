@@ -1,6 +1,7 @@
 ﻿[CmdletBinding()]
 # UTF-8 BOM is required by Windows PowerShell 5.1 for the Chinese diagnostics.
 param(
+  [switch]$Legacy,
   [switch]$SkipDocker,
   [switch]$SkipDatabaseChecks,
   [switch]$ApplyMigrations
@@ -9,7 +10,13 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $helper = Join-Path $root "scripts/ops/local-dev-preflight.cjs"
-$logRoot = Join-Path $root "output/runtime/rental-os-dev"
+$profile = if ($Legacy) { 'legacy' } else { 'platform' }
+$profileLabel = if ($Legacy) { '旧 Rental 组合' } else { '公共底座' }
+$apiSource = if ($Legacy) { 'apps/api' } else { 'apps/platform-api' }
+$healthService = if ($Legacy) { 'rental-os-api' } else { 'nativark-platform-api' }
+$clientDirectory = Join-Path $root $(if ($Legacy) { 'node_modules/.prisma/client' } else { 'apps/platform-api/generated/client' })
+$databasePrefix = if ($Legacy) { 'db:legacy' } else { 'db' }
+$logRoot = Join-Path $root $(if ($Legacy) { 'output/runtime/rental-os-dev' } else { 'output/runtime/zelo-platform-dev' })
 $composeProjectName = "rental-os"
 Set-Location $root
 
@@ -20,7 +27,7 @@ function Require-Command([string]$name, [string]$hint) {
 }
 
 function Invoke-Preflight([string]$command) {
-  $result = & $script:nodeExe $helper $command
+  $result = & $script:nodeExe $helper $profile $command
   if ($LASTEXITCODE -ne 0) { throw "本地启动预检失败（$command），请处理上方具体原因。" }
   return ($result | ConvertFrom-Json)
 }
@@ -31,7 +38,8 @@ function Invoke-Npm([string]$scriptName) {
 }
 
 function Get-Listeners([int]$port) {
-  return @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
+  # A single CimInstance has no Count property in Windows PowerShell 5.1.
+  return ,@(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
 }
 
 function Test-ProjectProcess($process, $processes) {
@@ -41,10 +49,10 @@ function Test-ProjectProcess($process, $processes) {
     $seen[[int]$process.ProcessId] = $true
     $command = ([string]$process.CommandLine).Replace('/', '\').ToLowerInvariant()
     foreach ($entry in @(
-      "scripts\ops\local-dev-preflight.cjs", "apps\api\dist\main",
+      "scripts\ops\local-dev-preflight.cjs", "$apiSource/dist/main",
       "node_modules\vite\bin\vite.js", "node_modules\@nestjs\cli\bin\nest.js"
     )) {
-      $target = (Join-Path $root $entry).ToLowerInvariant()
+      $target = (Join-Path $root $entry).Replace('/', '\').ToLowerInvariant()
       # npm 的 .bin 启动行可能保留 ..；先匹配正式入口，也兼容同树 .bin 前缀。
       if ($command.Contains($target)) { return $true }
     }
@@ -98,18 +106,21 @@ function Get-NodeInvocation($process) {
 }
 
 function Get-ProjectApiProcesses($processes = @(Get-CimInstance Win32_Process)) {
-  $apiMain = Join-Path $root 'apps\api\dist\main'
+  $apiMain = Join-Path $root "$apiSource/dist/main"
   $nestEntry = Join-Path $root 'node_modules\@nestjs\cli\bin\nest.js'
   foreach ($process in $processes) {
     $invocation = Get-NodeInvocation $process
     if ($null -eq $invocation) { continue }
     $arguments = $invocation.Arguments
-    if (($invocation.Entry -eq $helper -and $arguments.Count -eq 2 -and $arguments[0] -eq 'run' -and $arguments[1] -in @('dev', 'dev:api')) -or
-        $invocation.Entry -in @($apiMain, "$apiMain.js")) {
+    $profileLaunch = $invocation.Entry -eq $helper -and $arguments.Count -eq 3 -and
+      $arguments[0] -eq $profile -and $arguments[1] -eq 'run' -and $arguments[2] -in @('dev', 'dev:api')
+    $oldLaunch = $Legacy -and $invocation.Entry -eq $helper -and $arguments.Count -eq 2 -and
+      $arguments[0] -eq 'run' -and $arguments[1] -in @('dev', 'dev:api')
+    if ($profileLaunch -or $oldLaunch -or $invocation.Entry -in @($apiMain, "$apiMain.js")) {
       $process
       continue
     }
-    if ($invocation.Entry -ne $nestEntry -or $arguments -notcontains 'start' -or $arguments -notcontains '--watch') { continue }
+    if (-not $Legacy -or $invocation.Entry -ne $nestEntry -or $arguments -notcontains 'start' -or $arguments -notcontains '--watch') { continue }
     # 同树 Nest CLI 也可能运行纯底座；须沿仍有效的父链确认原组合 API 的 npm workspace。
     $seen = @{}
     $child = $process
@@ -138,9 +149,9 @@ function Assert-ApiNotRunning([int]$port) {
 
 function Test-ApiHealth([int]$port) {
   try {
-    $response = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/health" -Method Get -TimeoutSec 4
+    $response = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/health" -UseBasicParsing -Method Get -TimeoutSec 4
     $payload = if ($null -ne $response.data) { $response.data } else { $response }
-    return $payload.status -eq "ok" -and $payload.service -eq "rental-os-api"
+    return $payload.status -eq 'ok' -and $payload.service -eq $healthService
   } catch { return $false }
 }
 
@@ -161,7 +172,10 @@ function Wait-ForExistingApi([int]$port) {
 
 function Test-AdminHealth([int]$port) {
   $script:adminFailure = ""
-  foreach ($route in @('/login', '/src/main.tsx', '/src/app/App.tsx', '/src/app/queryClient.ts', '/src/api/http.ts', '/src/app/navigation.tsx', '/src/features/ai-operator/legacy-host.tsx')) {
+  $routes = if ($Legacy) {
+    @('/login', '/src/main.tsx', '/src/app/App.tsx', '/src/app/queryClient.ts', '/src/api/http.ts', '/src/app/navigation.tsx', '/src/features/ai-operator/legacy-host.tsx')
+  } else { @('/login', '/src/start.tsx', '/src/main.tsx', '/src/App.tsx', '/src/session.ts') }
+  foreach ($route in $routes) {
     try {
       $response = Invoke-WebRequest -Uri "http://127.0.0.1:$port$route" -UseBasicParsing -Method Get -TimeoutSec 8
       $isModule = $route -ne '/login'
@@ -182,8 +196,8 @@ function Assert-ClientNotInUse {
   if (@(Get-ProjectApiProcesses $processes).Count -gt 0) {
     throw '本树 API 启动或 watch 进程尚在运行；不覆盖在用的 Prisma Client，请先正常关闭该任务再生成。'
   }
-  $apiEntry = (Join-Path $root 'apps\api\').ToLowerInvariant()
-  $clientEntry = (Join-Path $root 'node_modules\.prisma\client').ToLowerInvariant()
+  $apiEntry = (Join-Path $root $apiSource).Replace('/', '\').ToLowerInvariant() + '\'
+  $clientEntry = $clientDirectory.Replace('/', '\').ToLowerInvariant()
   foreach ($process in $processes) {
     $command = ([string]$process.CommandLine).Replace('/', '\').ToLowerInvariant()
     $generating = $command.Contains((Join-Path $root 'node_modules\').ToLowerInvariant()) -and $command -match 'prisma.*generate'
@@ -191,7 +205,6 @@ function Assert-ClientNotInUse {
       throw "当前树的 API/Client 相关进程 PID $($process.ProcessId) 尚在运行；不覆盖在用的 Prisma Client，请先正常关闭该任务再生成。"
     }
   }
-  $clientDirectory = Join-Path $root 'node_modules/.prisma/client'
   if (Test-Path -LiteralPath $clientDirectory) {
     foreach ($engine in @(Get-ChildItem -LiteralPath $clientDirectory -File -Filter '*.node')) {
       try {
@@ -224,7 +237,7 @@ function Start-DevProcess([string]$scriptName) {
   $label = $scriptName.Replace(':', '-')
   $stdout = Join-Path $logRoot "$label-$stamp-$PID.stdout.log"
   $stderr = Join-Path $logRoot "$label-$stamp-$PID.stderr.log"
-  $process = Start-Process -FilePath $script:nodeExe -ArgumentList @("`"$helper`"", 'run', $scriptName) -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+  $process = Start-Process -FilePath $script:nodeExe -ArgumentList @("`"$helper`"", $profile, 'run', $scriptName) -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
   Write-Host "[Zelo] 启动 PID $($process.Id)，日志：$stdout" -ForegroundColor DarkGray
   return $process
 }
@@ -256,7 +269,7 @@ try {
   try { $ownsLock = $startupLock.WaitOne(0) } catch [Threading.AbandonedMutexException] { $ownsLock = $true }
   if (-not $ownsLock) { throw '当前工作树另一个启动脚本正在运行，请等待该次启动完成。' }
 
-  Write-Host "[Zelo] 原完整组合工作树：$root" -ForegroundColor Cyan
+  Write-Host "[Zelo] $profileLabel 工作树：$root" -ForegroundColor Cyan
   $dependencies = Invoke-Preflight 'repair-links'
   if ($dependencies.repaired -gt 0) { Write-Host "[Zelo] 已恢复 $($dependencies.repaired) 个锁定的本树 workspace 链接。" -ForegroundColor Cyan }
   $settings = Invoke-Preflight 'settings'
@@ -274,27 +287,29 @@ try {
   foreach ($name in @('RENTAL_PRISMA_CLIENT', 'RENTAL_PRISMA_LEGACY', 'PRISMA_GENERATE_SKIP_AUTOINSTALL', 'NATIVARK_NPM_CLI')) {
     $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
   }
-  $env:RENTAL_PRISMA_CLIENT = Join-Path $root 'node_modules/.prisma/client/index.d.ts'
-  $env:RENTAL_PRISMA_LEGACY = '1'
+  if ($Legacy) {
+    $env:RENTAL_PRISMA_CLIENT = Join-Path $clientDirectory 'index.d.ts'
+    $env:RENTAL_PRISMA_LEGACY = '1'
+  }
   $env:PRISMA_GENERATE_SKIP_AUTOINSTALL = '1'
   $env:NATIVARK_NPM_CLI = $npmCli
 
   $client = Invoke-Preflight 'client'
   if (-not $client.ready) {
-    if ($SkipDatabaseChecks) { throw '当前原组合 Prisma Client 缺失或与 schema 不同；请去掉 -SkipDatabaseChecks 后重试。' }
+    if ($SkipDatabaseChecks) { throw '当前宿主 Prisma Client 缺失或与 schema 不同，请先准备对应 Client。' }
     Assert-ClientNotInUse
     foreach ($engine in @('schema-engine-windows.exe', 'query_engine-windows.dll.node')) {
       if (-not (Test-Path -LiteralPath (Join-Path $root "node_modules/@prisma/engines/$engine"))) {
         throw '本树 Prisma 引擎未准备好；不自动下载，请先准备锁定依赖。'
       }
     }
-    Invoke-Npm 'db:generate'
+    Invoke-Npm "${databasePrefix}:generate"
     $client = Invoke-Preflight 'client'
-    if (-not $client.ready) { throw '生成的 Client 仍未对应当前原组合 schema，停止启动。' }
-  } else { Write-Host '[Zelo] 复用与原组合 schema 一致的 Client，不覆盖在用产物。' -ForegroundColor DarkGray }
-  if (-not $SkipDatabaseChecks) { Invoke-Npm 'db:validate' }
+    if (-not $client.ready) { throw '生成的 Client 与当前宿主 schema 不一致，停止启动。' }
+  } else { Write-Host '[Zelo] 复用与当前宿主 schema 一致的 Client。' -ForegroundColor DarkGray }
+  if (-not $SkipDatabaseChecks) { Invoke-Npm "${databasePrefix}:validate" }
 
-  if (-not $SkipDocker -and -not $apiHealthy) {
+  if ($Legacy -and -not $SkipDocker -and -not $apiHealthy) {
     $null = Require-Command 'docker' '请启动 Docker Desktop，或用 -SkipDocker 复用已配置的本地数据库。'
     $composeArgs = @('compose', '--project-name', $composeProjectName)
     if ($env:RENTAL_ENV_FILE) { $composeArgs += @('--env-file', $env:RENTAL_ENV_FILE) }
@@ -303,7 +318,11 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Docker 本地依赖启动失败。' }
   }
   if (-not $SkipDatabaseChecks -and -not $apiHealthy) { Wait-ForLocalDatabase ([int]$settings.mysqlPort) }
-  if ($ApplyMigrations) { Assert-ApiNotRunning $apiPort; Invoke-Npm 'db:migrate:deploy' }
+  if ($ApplyMigrations) {
+    Assert-ApiNotRunning $apiPort
+    if (-not $Legacy) { Invoke-Npm 'build:platform-api' }
+    Invoke-Npm "${databasePrefix}:migrate:deploy"
+  }
 
   $launcher = $null
   if (-not $apiHealthy) { $apiHealthy = Wait-ForExistingApi $apiPort }

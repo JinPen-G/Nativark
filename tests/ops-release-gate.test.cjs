@@ -618,7 +618,7 @@ void (() => {
   assert.match(gate, /inspectBuildProvenance\(readBuildProvenance\(\), head, buildSummary\)/u,
     "只读门禁必须把现有产物绑定到当前提交，不能只认旧 dist 摘要");
   const builder = fs.readFileSync(path.join(ROOT, "scripts/ops/release-build.cjs"), "utf8");
-  assert.match(builder, /run\("npm", \["run", "build"\]/u, "显式发布构建必须真的执行完整 build");
+  assert.match(builder, /run\("npm", \["run", "build:legacy"\]/u, "旧组合发布必须真的执行完整 build:legacy");
   assert.match(builder, /runPackageCommand\("npm"/u, "Windows 构建不得依赖直接 spawn npm.cmd");
   assert.match(builder, /worktree\.clean/u, "发布构建前必须拒绝脏工作区");
   assert.match(builder, /BUILD_PROVENANCE_FILE/u, "发布构建必须写出当前提交的来源证明");
