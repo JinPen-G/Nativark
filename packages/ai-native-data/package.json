@@ -32,6 +32,9 @@
       "public-data": [
         "dist/public-data.d.ts"
       ],
+      "public-data-admission": [
+        "dist/public-data-admission.d.ts"
+      ],
       "public-data-package": [
         "dist/public-data-package.d.ts"
       ],
@@ -68,6 +71,10 @@
     "./public-data": {
       "types": "./dist/public-data.d.ts",
       "default": "./dist/public-data.js"
+    },
+    "./public-data-admission": {
+      "types": "./dist/public-data-admission.d.ts",
+      "default": "./dist/public-data-admission.js"
     },
     "./public-data-package": {
       "types": "./dist/public-data-package.d.ts",

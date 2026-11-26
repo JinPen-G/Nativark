@@ -25,16 +25,17 @@ const rowShape = z.object({
   details: z.record(z.unknown()).nullish().transform(value => value ?? undefined)
 });
 
-export class ProviderCapabilityService {
+/** The read side shares the original verifier without receiving a write port. */
+export class ProviderCapabilityReader {
   private readonly allowMock: boolean;
   private readonly verifyLive?: AiLiveCapabilityEvidenceVerifier['verify'];
 
   constructor(
-    private readonly repository: ProviderCapabilityEvidenceRepository,
+    private readonly repository: Pick<ProviderCapabilityEvidenceRepository, 'list'>,
     options: { allowMock?: boolean; liveEvidenceVerifier?: AiLiveCapabilityEvidenceVerifier } = {},
     private readonly clock: () => Date = () => new Date()
   ) {
-    if (!repository || typeof repository.list !== 'function' || typeof repository.upsert !== 'function'
+    if (!repository || typeof repository.list !== 'function'
       || !options || typeof options !== 'object' || Array.isArray(options) || typeof clock !== 'function'
       || Object.keys(options).some(key => key !== 'allowMock' && key !== 'liveEvidenceVerifier')
       || (options.allowMock !== undefined && typeof options.allowMock !== 'boolean')
@@ -45,11 +46,11 @@ export class ProviderCapabilityService {
     this.verifyLive = options.liveEvidenceVerifier?.verify.bind(options.liveEvidenceVerifier);
   }
 
-  private snapshot<T>(value: T): T {
+  protected snapshot<T>(value: T): T {
     try { return structuredClone(value); } catch { throw new ModelGatewayError('CONFIG_INVALID'); }
   }
 
-  private now(): Date {
+  protected now(): Date {
     try {
       const value = this.clock();
       if (!(value instanceof Date) || !Number.isFinite(value.getTime())) throw Error();
@@ -57,18 +58,18 @@ export class ProviderCapabilityService {
     } catch { throw new ModelGatewayError('CONFIG_INVALID'); }
   }
 
-  private profile(value: AiProviderProfileRecord): AiProviderProfileRecord {
+  protected profile(value: AiProviderProfileRecord): AiProviderProfileRecord {
     const parsed = profileShape.safeParse(this.snapshot(value));
     if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
     if (!parsed.data.enabled || parsed.data.disabledAt) throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
     return parsed.data;
   }
 
-  private fresh(input: Pick<RecordCapabilityEvidenceInput, 'checkedAt' | 'expiresAt'>, now: Date): boolean {
+  protected fresh(input: Pick<RecordCapabilityEvidenceInput, 'checkedAt' | 'expiresAt'>, now: Date): boolean {
     return input.checkedAt <= now && input.expiresAt != null && input.expiresAt > now && input.expiresAt > input.checkedAt;
   }
 
-  private async verified(input: RecordCapabilityEvidenceInput): Promise<boolean> {
+  protected async verified(input: RecordCapabilityEvidenceInput): Promise<boolean> {
     const proof = capabilityVerificationSchema.safeParse(input.details?.verification);
     if (input.source !== 'connection_test' || !proof.success || proof.data.capability !== input.capability
       || proof.data.profileFingerprint !== capabilityProfileFingerprint(input.profile)
@@ -76,18 +77,6 @@ export class ProviderCapabilityService {
     if (proof.data.evidence === 'mock') return this.allowMock;
     if (!this.verifyLive) return false;
     try { return await this.verifyLive(this.snapshot(input)) === true; } catch { throw new ModelGatewayError('CONFIG_INVALID'); }
-  }
-
-  async record(value: RecordCapabilityEvidenceInput) {
-    const parsed = inputShape.safeParse(this.snapshot(value));
-    if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
-    const input: RecordCapabilityEvidenceInput = parsed.data;
-    input.profile = this.profile(input.profile);
-    if (input.checkedAt > this.now() || (input.expiresAt != null && input.expiresAt <= input.checkedAt)) throw new ModelGatewayError('CONFIG_INVALID');
-    if (input.status === 'supported' && (!this.fresh(input, this.now()) || !await this.verified(input) || !this.fresh(input, this.now()))) {
-      input.status = 'unverified';
-    }
-    try { return await this.repository.upsert(input); } catch { throw new ModelGatewayError('CONFIG_INVALID'); }
   }
 
   private async evidence(profile: AiProviderProfileRecord) {
@@ -144,5 +133,25 @@ export class ProviderCapabilityService {
     const result = await this.preflight(profile, required);
     if (!result.allowed) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
     return result;
+  }
+}
+
+export class ProviderCapabilityService extends ProviderCapabilityReader {
+  constructor(private readonly writer: ProviderCapabilityEvidenceRepository,
+    options: ConstructorParameters<typeof ProviderCapabilityReader>[1] = {}, clock?: () => Date) {
+    super(writer, options, clock);
+    if (typeof writer.upsert !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+  }
+
+  async record(value: RecordCapabilityEvidenceInput) {
+    const parsed = inputShape.safeParse(this.snapshot(value));
+    if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
+    const input: RecordCapabilityEvidenceInput = parsed.data;
+    input.profile = this.profile(input.profile);
+    if (input.checkedAt > this.now() || (input.expiresAt != null && input.expiresAt <= input.checkedAt)) throw new ModelGatewayError('CONFIG_INVALID');
+    if (input.status === 'supported' && (!this.fresh(input, this.now()) || !await this.verified(input) || !this.fresh(input, this.now()))) {
+      input.status = 'unverified';
+    }
+    try { return await this.writer.upsert(input); } catch { throw new ModelGatewayError('CONFIG_INVALID'); }
   }
 }

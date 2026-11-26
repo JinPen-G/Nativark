@@ -47,6 +47,7 @@
     "./source/api/aiRequestTiming": "./src/api/aiRequestTiming.ts",
     "./platform-model-settings": "./src/platform-model-settings/index.ts",
     "./platform-model-settings/application": "./src/platform-application.tsx",
+    "./platform-model-settings/public-application": "./src/public-platform-application.tsx",
     "./source/platform-model-settings/AiCreditSettings": "./src/platform-model-settings/AiCreditSettings.tsx",
     "./source/platform-model-settings/PlatformBudgetSettings": "./src/platform-model-settings/PlatformBudgetSettings.tsx",
     "./source/platform-model-settings/PlatformCapabilityObservation": "./src/platform-model-settings/PlatformCapabilityObservation.tsx",

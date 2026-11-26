@@ -1,7 +1,7 @@
 /** Explicit platform evidence read, not a probe launcher, enable switch or tenant host. */
-import { usePlatformModelSettingsRuntime } from "./runtime";
+import { usePlatformModelRuntime } from "./model-runtime";
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AiPlatformModelCapabilityObservationDraft } from '@rental-os/shared/ai-admin';
+import type { AiPlatformModelCapabilityObservationDraft } from '@rental-os/platform-contracts/ai-usage';
 import { useAiManagementLocale as useLocale } from '../ai-native/management-locale';
 import { ActionButton, Alert, DataTableStatus, DataTableText, Table } from '@rental-os/platform-admin/ui';
 import { formatTimestamp } from '../ai-native/formatters';
@@ -13,7 +13,7 @@ const capabilities = ['text', 'streaming', 'tools', 'structured_output', 'vision
 export const platformCapabilityLabels = { text: '文本', streaming: '流式', tools: '工具调用', structured_output: '结构化输出',
   vision: '视觉', audio: '音频', embedding: '向量', reasoning: '推理' };
 export function PlatformCapabilityObservation({ profileId, identity }: { profileId: string; identity: string }) {
-  const { getSession, currentSessionEpoch, platformAiSettingsApi, runtime } = usePlatformModelSettingsRuntime();
+  const { getSession, currentSessionEpoch, platformAiSettingsApi, runtime } = usePlatformModelRuntime();
   const { t } = useLocale();
   // A new owner hides old evidence on its first render, before effect cleanup.
   const owner = useMemo(() => ({}), [profileId, identity]);

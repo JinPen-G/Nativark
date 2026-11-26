@@ -1,6 +1,6 @@
 /** Platform Profile management journal. Current observations and original save
  * receipts are separate. Never stores a key, grants dispatch or probes a host. */
-import type { AiPlatformModelSettingsInputDraft, AiPlatformModelSettingsSummaryDraft } from "@rental-os/shared/ai-admin";
+import type { AiPlatformModelSettingsInputDraft, AiPlatformModelSettingsSummaryDraft } from "@rental-os/platform-contracts/ai-usage";
 import { readSettingsReference, retainSettingsReference, clearSettingsReference } from '@rental-os/platform-admin/forms';
 type Row = Record<string, unknown>;
 const row = (v: unknown): v is Row => !!v && typeof v === "object" && !Array.isArray(v);

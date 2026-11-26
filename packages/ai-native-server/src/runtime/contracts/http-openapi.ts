@@ -28,7 +28,8 @@ import { AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_PLATFORM_CAPABILITY_HTTP_DRAFT, AI_PL
 import { AI_COUNTING_HTTP_DRAFT, AI_COUNTING_HTTP_OPERATIONS } from '@rental-os/shared';
 import { AI_BUDGET_MANAGEMENT_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_CREDIT_COMPONENT_SCHEMAS, AI_CREDIT_OPERATIONS } from './ai-credit';
-import { AI_MODEL_SETTINGS_HTTP_DRAFT, AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_MODEL_SETTINGS_HTTP_DRAFT } from '@rental-os/shared';
+import { PLATFORM_AI_MODEL_SETTINGS_OPERATIONS } from '../../configuration/platform-model-settings-policy';
 import { AI_PROVIDER_DISCOVERY_INPUT_SCHEMA, AI_PROVIDER_DISCOVERY_RESULT_SCHEMA } from '@rental-os/shared';
 import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_CONVERSATION_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_TASK_CENTER_RECOVERY_HTTP, AI_TASK_CENTER_RECOVERY_CONTRACTS } from '@rental-os/shared';
@@ -424,28 +425,7 @@ export const AI_HTTP_OPERATIONS: ContractOperation[] = [
     operationId: `manageCurrentAiKnowledgePolicy_${action}`, permissions: ['system:params:manage'],
     summary: 'Current tenant manager plus persisted exact management authority, participants and resource basis required. No default root/policy, file access, model execution or business approval is created. Unknown writes require original operation observation.',
     requestSchema, responseSchema })),
-{ method: 'get', path: `/api/${AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT.basePath}`, tag: 'AI Native',
-    operationId: 'listPlatformAiModelConfigurations', permissions: ['system:ai-provider:view'],
-    summary: 'Current SaaS viewer only. Keyset page of at most 50 platform-owned configuration metadata records; no credentials, base URLs, capability proof or execution grant.',
-    parameters: [{ name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 50 } },
-      { name: 'after', in: 'query', required: false, schema: { type: 'string', minLength: 1, maxLength: 36, pattern: '^[A-Za-z0-9][\\w.:-]{0,35}$' } }],
-    responseSchema: 'AiPlatformModelDirectoryDraft' },
-{ method: 'get', path: `/api/${AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT.basePath}/{profileId}`, tag: 'AI Native',
-    operationId: 'readPlatformAiModelConfiguration', permissions: ['system:ai-provider:view'],
-    summary: 'Current explicitly authorized SaaS platform viewer. Masked current configuration, not an original save receipt, write permission or connection/capability proof.',
-    responseSchema: 'AiPlatformModelSettingsSummaryDraft' },
-{ method: 'get', path: `/api/${AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT.basePath}/{profileId}/capabilities`, tag: 'AI Native',
-    operationId: 'readPlatformAiCapabilityEvidence', permissions: ['system:ai-provider:view'],
-    summary: 'Current SaaS viewer and platform-owned Profile only. Eight bounded capability observations: configured whitelist, original evidence metadata and current verified readiness are distinct. Uses original receipt verifier, no credentials, connection test, task start, budget mutation or dispatch grant. Missing/mocked/expired evidence never certifies support; inactive configuration retains historical metadata only. Identity, configuration and evidence are revalidated before delivery.',
-    responseSchema: 'AiPlatformModelCapabilityObservationDraft' },
-{ method: 'put', path: `/api/${AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT.basePath}/{profileId}`, tag: 'AI Native',
-    operationId: 'savePlatformAiModelConfiguration', permissions: ['system:ai-provider:manage'],
-    summary: 'SaaS platform manager CAS + encrypted Vault/Profile transaction. Revision zero provisions only the first DEFAULT profile; no policy, capability evidence or budget is granted. Lost acknowledgement requires observing current configuration, never automatic retry.',
-    requestSchema: 'AiPlatformModelSettingsInputDraft', responseSchema: 'AiPlatformModelSettingsSaveDraft' },
-{ method: 'get', path: `/api/${AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT.basePath}/{profileId}/operations/{operationKey}`, tag: 'AI Native',
-    operationId: 'readOriginalPlatformModelConfigurationSave', permissions: ['system:ai-provider:view'],
-    summary: 'Current SaaS viewer and original actor only. Exact immutable save receipt, independent of later config rotations; missing is unknown, not rollback or permission to resend. No credential or execution grant.',
-    responseSchema: 'AiModelConfigurationOperationDraft' },
+...PLATFORM_AI_MODEL_SETTINGS_OPERATIONS,
 ...Object.entries(AI_TASK_CENTER_RECOVERY_CONTRACTS).map(([action, contract]) => ({
     method: 'post' as const, path: `/api/${AI_TASK_CENTER_RECOVERY_HTTP.basePath}/${AI_TASK_CENTER_RECOVERY_HTTP[action as keyof typeof AI_TASK_CENTER_RECOVERY_CONTRACTS]}`,
     tag: 'AI Native', operationId: `aiTaskCenterRecovery_${action}`, permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS],

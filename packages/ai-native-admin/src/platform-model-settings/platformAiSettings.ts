@@ -5,7 +5,7 @@ import {
   type AiPlatformModelDirectoryQueryDraft,
   type AiPlatformModelDirectoryDraft,
   type AiPlatformModelCapabilityObservationDraft,
-} from "@rental-os/shared/ai-admin";
+} from "@rental-os/platform-contracts/ai-usage";
 import type { AiAdminHost } from "../host";
 import { createAiSettingsRequest } from "./request";
 

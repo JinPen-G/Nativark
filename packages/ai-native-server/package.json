@@ -47,6 +47,9 @@
       "model-configuration": [
         "dist/model-configuration.d.ts"
       ],
+      "public-platform-model-settings": [
+        "dist/public-platform-model-settings.d.ts"
+      ],
       "execution-context-validation": [
         "dist/execution-context-validation.d.ts"
       ]
@@ -100,6 +103,10 @@
     "./model-configuration": {
       "types": "./dist/model-configuration.d.ts",
       "default": "./dist/model-configuration.js"
+    },
+    "./public-platform-model-settings": {
+      "types": "./dist/public-platform-model-settings.d.ts",
+      "default": "./dist/public-platform-model-settings.js"
     },
     "./execution-context-validation": {
       "types": "./dist/execution-context-validation.d.ts",

@@ -30,7 +30,13 @@
 
 [execution-context-validation](src/execution-context-validation.ts) 使用原公共上下文 schema，保留 strict 校验且不修改输入。配置、用量和模型目录合同分别由 [platform-contracts/ai-usage](../platform-contracts/src/ai-usage.ts)及[ai-provider-discovery](../platform-contracts/src/ai-provider-discovery.ts)提供，shared 旧出口再导出同一对象。
 
-这些公共配置出口的源码和类型依赖闭包不加载 Rental 或混合 shared 总出口。当前整包构建仍选择 Rental-AI schema 并构建 Rental 前置包；公共配置 HTTP/Guard 宿主、平台预算/额度、公共数据贡献、UI 与完整发行闭包继续按下方现有数据与构建范围处理。
+### 选装 SaaS 模型设置
+
+[公共设置模块](src/public-platform-model-settings.ts)从 `@rental-os/ai-native-server/public-platform-model-settings` 提供原目录、配置读取、原键收据、保存和能力证据五条路由。它使用同一 `PlatformServerModule` 的签名 Auth、原 Guard、SecretBox 和数据库对象。保存沿原会话/租户/角色锁，在 Profile、凭据库和原键收据的同一事务里复核所选数据与当前授权。能力只读观察复用原探测收据和财务事实的核验；既有证明缺失、配置失效或伪造记录不会成为可用能力。
+
+宿主选用此模块时，将 `withPublicPlatformModelSettingsHttpAccess(existingCoreHttp)` 作为原 `PlatformServerModule.register` 的 `coreHttpProvider` 结果，并用 `createPlatformModelSettingsOpenApi(document)` 合入同版文档。`PublicPlatformModelSettingsModule.register({ imports, inject, useFactory })` 的 `imports` 复用同一个已登记平台模块，`useFactory` 给出原数据库及 `assertDataAvailable`。可从[公共数据装配](../ai-native-data/src/public-data-admission.ts)沿选定归档、原锁和物理/原迁移观察构造该函数，接同一原 Client 或当前事务。首次安装作业显式选用公共 AI schema，并沿受权角色维护入口登记 `PLATFORM_AI_MODEL_SETTINGS_PERMISSIONS`；选择模型设置本身不会授予角色。
+
+[原平台后台](../ai-native-admin/README.md#组合原平台模型配置)沿 `platformAiPage` 接现有页面和会话，候选未安装时保留正常公共宿主。默认公共启动装配由宿主维护者按所选数据与许可接入。公共设置源码与类型依赖闭包可独立于 Rental 和混合 shared。旧全量构建仍沿原 Rental-AI 组合；预算、额度、租户设置 HTTP 与完整公开发行各有独立装配边界。
 
 完整原组合宿主从 [服务装配](../../apps/api/src/application-services.module.ts) 使用这些工厂。[独立 AI 宿主](../../apps/rental-api/src/ai-app.module.ts) 则显式选择 AI 数据贡献，由 [同实例装配](../../apps/rental-api/src/ai-composition.ts) 提供原 Auth、Guard、Core、数据库和文件权限。只有该宿主 [实际登记并审核的处理器](../../apps/rental-api/src/ai-http-policy.ts) 才发布为可调用能力；工厂、类型或合同存在不等于该宿主已开放全部 AI 路由。
 

@@ -100,3 +100,11 @@ export type AiGatewayStreamEventDraft<TToolRequest = never> = {
   | { kind: "text_delta"; delta: string }
   | { kind: "terminal"; result: AiGatewayResultDraft<TToolRequest> }
 );
+
+/** Capability names are a closed selection vocabulary, not implemented probe
+ * methods or support evidence. Server policy may expose fewer kinds; absent
+ * objective protocol evidence stays unverified and grants no dispatch. */
+export const AI_CAPABILITY_PROBE_KINDS_DRAFT = Object.freeze([
+  'text', 'streaming', 'vision', 'audio', 'structured_output', 'tools', 'embedding', 'reasoning'
+] as const);
+export type AiCapabilityProbeKindDraft = typeof AI_CAPABILITY_PROBE_KINDS_DRAFT[number];

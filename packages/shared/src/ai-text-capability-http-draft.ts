@@ -2,13 +2,8 @@ import { leafClosed as obj, leafEnum as choice, leafInt as int, leafText as text
   leafTime as time, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
 import type { AiTaskBudgetUsageRecordDraft } from './ai-scene-request-draft';
 
-/** Capability names are a closed selection vocabulary, not implemented probe
- * methods or support evidence. Server policy may expose fewer kinds; absent
- * objective protocol evidence stays unverified and grants no dispatch. */
-export const AI_CAPABILITY_PROBE_KINDS_DRAFT = Object.freeze([
-  'text', 'streaming', 'vision', 'audio', 'structured_output', 'tools', 'embedding', 'reasoning'
-] as const);
-export type AiCapabilityProbeKindDraft = typeof AI_CAPABILITY_PROBE_KINDS_DRAFT[number];
+import { AI_CAPABILITY_PROBE_KINDS_DRAFT, type AiCapabilityProbeKindDraft } from '@rental-os/platform-contracts/ai-gateway';
+export { AI_CAPABILITY_PROBE_KINDS_DRAFT, type AiCapabilityProbeKindDraft } from '@rental-os/platform-contracts/ai-gateway';
 
 /** Opt-in request contract. Publication does not enable the HTTP module. */
 export const AI_TEXT_CAPABILITY_HTTP_DRAFT = Object.freeze({

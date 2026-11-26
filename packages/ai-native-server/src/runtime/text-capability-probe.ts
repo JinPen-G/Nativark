@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import type { AiGatewayIntentDraft, AiGatewayConfigReferenceDraft } from '@rental-os/shared';
-import { AI_CONTRACT_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, AI_CAPABILITY_PROBE_KINDS_DRAFT,
-  type AiCapabilityProbeKindDraft } from '@rental-os/shared';
+import type { AiGatewayIntentDraft, AiGatewayConfigReferenceDraft } from '@rental-os/platform-contracts/ai-gateway';
+import { AI_CONTRACT_DRAFT_VERSION, AI_CAPABILITY_PROBE_KINDS_DRAFT,
+  type AiCapabilityProbeKindDraft } from '@rental-os/platform-contracts/ai-gateway';
 import type { AiProviderProfileRecord } from './provider-profile.ports';
 import { capabilityProfileFingerprint } from './capability-verification';
 import { prepareGatewayTextIntent, prepareGatewayEmbeddingProbeIntent } from './gateway-intent';
-import { ModelGatewayError, modelUsageSchema, modelReasoningEvidenceSchema, modelEmbeddingEvidenceSchema } from './model-gateway.ports';
+import { ModelGatewayError, modelUsageSchema, modelReasoningEvidenceSchema, modelEmbeddingEvidenceSchema } from '@rental-os/platform-server/ai-gateway';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { visionCapabilityChallenge, VISION_PROBE_METHOD } from './vision-capability-challenge';
 import { audioCapabilityChallenge, AUDIO_PROBE_METHOD } from './audio-capability-challenge';
@@ -132,8 +132,9 @@ export function textProbeIntent(operationId: string, scopeId: string, capability
   }
   if (capability === 'tools') {
     const key = requestFingerprint({ method: TOOLS_PROBE_METHOD, scopeId, operationId }), orderId = `PROBE_${key.slice(0, 16)}`;
+    // Keep the original Rental format challenge attestation without loading a business tool.
     const expected = JSON.stringify([{ contractVersion: AI_CONTRACT_DRAFT_VERSION, toolCode: 'rental.order.explain',
-      toolVersion: AI_TOOL_DRAFT_VERSION, input: { orderId } }]);
+      toolVersion: 'draft-1', input: { orderId } }]);
     const intent: AiGatewayIntentDraft = { draftVersion: 'ain-c03-draft-2', requestId: `capability:${key}`, sceneCode: TEXT_PROBE_SCENE,
       messages: [{ role: 'user', content: [{ kind: 'text', text: `Call rental_order_explain exactly once with orderId ${orderId}. This is a format-only challenge; no business tool is executed. Return no prose.` }] }],
       requiredFeatures: ['text', 'tools'], optionalFeatures: [], maxOutputTokens: 32 };

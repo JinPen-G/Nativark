@@ -78,14 +78,13 @@ export function createPlatformAiManagementTransactions<Transaction extends Platf
       const lease = await input.principalAuthority.lock(transaction,
         { tenantId: identity.tenantId!, subjectId: actorId, audience: 'operator' }, identity.tenantId!);
       verify(lease.user);
-      await input.assertDataAvailable(transaction);
-      check();
-      return Object.freeze({ async revalidate() {
+      const revalidate = async () => {
         check();
-        verify(await lease.revalidate());
         await input.assertDataAvailable(transaction);
-        check();
-      }, close: binding.close });
+        verify(await lease.revalidate());
+      };
+      await revalidate();
+      return Object.freeze({ revalidate, close: binding.close });
     } catch (error) { binding.close(); throw error; }
   } });
 }

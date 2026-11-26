@@ -6,3 +6,4 @@ export * from "./ai-gateway-schemas";
 export * from "./ai-scope-schemas";
 export * from "./ai-context-schemas";
 export * from "./ai-leaf-schema-validation";
+export * from "./ai-leaf-openapi";
