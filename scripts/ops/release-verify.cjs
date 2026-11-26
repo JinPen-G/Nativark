@@ -4,7 +4,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
-const { isFullCommit, isSha256, CONTEXT_FILE, MCP_MANIFEST, MCP_SQL, isPackagePath, sha256,
+const { isFullCommit, isSha256, CONTEXT_FILE, MCP_MANIFEST, MCP_SQL, isPackagePath, readJson, sha256,
   verifyPreparedRental, comparePreparedRental, verifyMcpSql, compareEntries } = require("./release-composition.cjs");
 
 const FILE_LIMIT = 32 * 1024 * 1024;
@@ -17,29 +17,32 @@ function readOrdinary(file) {
   return bytes;
 }
 
-function readPrepared(directory, expectedDigest, options) {
-  if (!isSha256(expectedDigest)) throw new Error("须提供已核宿主收据的 SHA-256");
+function readReleaseFiles(directory, expectedDigest) {
   const root = path.resolve(directory);
   for (let current = root; ; current = path.dirname(current)) {
     const stat = fs.lstatSync(current);
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("宿主材料路径须为普通目录");
     if (current === path.dirname(current)) break;
   }
-  let receipt;
-  try {
-    receipt = readOrdinary(path.join(root, CONTEXT_FILE));
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-    throw new Error("缺少正式 prepared 宿主收据，旧组合须先核定原库桥接");
+  const files = new Map();
+  let totalBytes = 0;
+  if (expectedDigest !== undefined) {
+    let receipt;
+    try {
+      receipt = readOrdinary(path.join(root, CONTEXT_FILE));
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+      throw new Error("缺少正式 prepared 宿主收据，旧组合须先核定原库桥接");
+    }
+    if (sha256(receipt) !== expectedDigest) throw new Error("宿主收据与已核摘要不一致");
+    files.set(CONTEXT_FILE, receipt);
+    totalBytes = receipt.length;
   }
-  if (sha256(receipt) !== expectedDigest) throw new Error("宿主收据与已核摘要不一致");
-  const files = new Map([[CONTEXT_FILE, receipt]]);
-  let totalBytes = receipt.length;
   function visit(directory, prefix) {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const relative = prefix + entry.name;
       if (!isPackagePath(relative) || entry.isSymbolicLink()) throw new Error("宿主目录含不支持的路径或链接");
-      if (relative === CONTEXT_FILE) continue;
+      if (relative === CONTEXT_FILE && expectedDigest !== undefined) continue;
       const absolute = path.join(directory, entry.name);
       if (entry.isDirectory()) {
         visit(absolute, relative + "/");
@@ -52,7 +55,12 @@ function readPrepared(directory, expectedDigest, options) {
     }
   }
   visit(root, "");
-  return verifyPreparedRental(files, expectedDigest, options);
+  return files;
+}
+
+function readPrepared(directory, expectedDigest, options) {
+  if (!isSha256(expectedDigest)) throw new Error("须提供已核宿主收据的 SHA-256");
+  return verifyPreparedRental(readReleaseFiles(directory, expectedDigest), expectedDigest, options);
 }
 
 function readFixedMcp(repo, commit) {
@@ -103,16 +111,29 @@ function main(args) {
     const candidate = readFixedMcp(values[0], values[2]);
     return { scope: "mcp-source-comparison", ...scope, previous, candidate, changes: compareEntries(previous.entries, candidate.entries) };
   }
-  throw new Error("用法：release-verify.cjs candidate <候选目录> <收据SHA256>，prepared <基线目录> <基线收据SHA256> <候选目录> <候选收据SHA256>，或 mcp <本地Git目录> <基线SHA> <候选SHA>");
+  if (mode === "paired-review" && values.length === 5) {
+    const [directory, digest, baseline, baselineDigest, evidenceDir] = values;
+    const candidate = readPrepared(directory, digest, { requireFixedBuild: true });
+    const previous = baseline === "legacy-combined" ? baseline : readPrepared(baseline, baselineDigest);
+    const read = name => readOrdinary(path.join(evidenceDir, name));
+    const { reviewPairedUpdate } = require("./release-build-evidence.cjs");
+    return reviewPairedUpdate(previous, candidate, readJson(read("policy.json"), "固定 CI 核收策略"), {
+      run: readJson(read("run.json"), "GitHub CI 运行证据"), buildRecord: read("image-pair.json"),
+      inspectedImageIds: readJson(read("images.json"), "实际镜像观察"),
+    });
+  }
+  throw new Error("用法：release-verify.cjs candidate <候选目录> <收据SHA256>，prepared <基线目录> <基线收据SHA256> <候选目录> <候选收据SHA256>，mcp <Git目录> <基线SHA> <候选SHA>，或 paired-review <候选目录> <收据SHA256> <基线目录或legacy-combined> <基线收据SHA256或-> <证据目录>");
 }
 
 if (require.main === module) {
   try {
     const result = main(process.argv.slice(2));
     process.stdout.write(`${JSON.stringify(result)}\n`);
-    process.exitCode = result.changes?.different ? 2 : 0;
+    process.exitCode = result.scope === "paired-update-review" || result.changes?.different ? 2 : 0;
   } catch (error) {
     process.stderr.write(`${error.code ? "无法读取本地发布材料" : error.message}\n`);
     process.exitCode = 1;
   }
 }
+
+module.exports = { readOrdinary, readReleaseFiles, readPrepared };

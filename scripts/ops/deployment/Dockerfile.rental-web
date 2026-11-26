@@ -1,0 +1,6 @@
+# syntax=docker/dockerfile:1
+FROM nginx:1.28-alpine
+COPY . /usr/share/nginx/html/
+COPY --from=release_config nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=release_config streams.conf /etc/nginx/streams.conf
+RUN printf '\ninclude /etc/nginx/streams.conf;\n' >> /etc/nginx/nginx.conf

@@ -1,7 +1,8 @@
 "use strict";
 
 /** 比较已独立核收的候选、CI 运行、构建记录和镜像观察。调用方负责证据来源与记录摘要的核收。 */
-const { isSha256, isVerifiedFixedBuildCandidate } = require("./release-composition.cjs");
+const { isDeepStrictEqual } = require("node:util");
+const { isSha256, readJson, sha256, isVerifiedFixedBuildCandidate, comparePreparedRental } = require("./release-composition.cjs");
 
 const isGitHubId = value => Number.isSafeInteger(value) && value > 0;
 const isImageId = value => typeof value === "string" && /^sha256:[a-f0-9]{64}$/u.test(value);
@@ -42,4 +43,26 @@ function verifyPairedBuildEvidence(candidate, policy, evidence) {
     buildProvenanceSha256, imageIds: { api, web }, releaseApproved: false, databaseChecked: false };
 }
 
-module.exports = { verifyPairedBuildEvidence };
+function reviewPairedUpdate(previous, candidate, policy, { run, buildRecord, inspectedImageIds } = {}) {
+  const recordSha256 = Buffer.isBuffer(buildRecord) && sha256(buildRecord);
+  if (!recordSha256 || recordSha256 !== policy?.buildRecordSha256) {
+    throw new Error("双镜像构建记录原文与独立核收摘要不同");
+  }
+  const record = readJson(buildRecord, "双镜像构建记录");
+  const identity = candidate?.identity;
+  if (record?.format !== "rental-image-pair-1" || record.releaseApproved !== false || record.serverUpdateEligible !== false
+    || !isSha256(record.inputSha256) || !isSha256(record.webFilesSha256) || !isDeepStrictEqual(record.selection, identity?.selection)
+    || record.buildProvenanceSha256 !== identity?.buildProvenanceSha256 || record.deploymentLockSha256 !== identity?.deploymentLockSha256
+    || record.npmLockSha256 !== identity?.npmLocks?.projected) {
+    throw new Error("双镜像记录与候选选择、固定宿主证明、部署锁或投影锁不一致");
+  }
+  const images = verifyPairedBuildEvidence(candidate, policy, { run,
+    verifiedBuild: { ...record, sha256: recordSha256 }, inspectedImageIds });
+  const legacy = previous === "legacy-combined";
+  const changes = legacy ? null : comparePreparedRental(previous, candidate);
+  const status = legacy || changes.requiresAiDataBridge ? "awaiting-migration-bridge"
+    : changes.different ? "awaiting-migration-approval" : "awaiting-release-approval";
+  return { ...images, scope: "paired-update-review", status, selection: identity.selection, changes, serverUpdateEligible: false };
+}
+
+module.exports = { verifyPairedBuildEvidence, reviewPairedUpdate };

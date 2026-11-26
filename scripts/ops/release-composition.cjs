@@ -348,7 +348,8 @@ function verifyPreparedRental(files, expectedContextSha256, { requireFixedBuild 
     npmLocks, deploymentLockSha256, contextSha256: expectedContextSha256 };
   const buildProvenanceSha256 = verifyBuildProvenance(files, context, source, identity, lock, migrations, digests, requireFixedBuild);
   if (buildProvenanceSha256) identity.buildProvenanceSha256 = buildProvenanceSha256;
-  const result = { identity, identitySha256: sha256(JSON.stringify(identity)), migrations };
+  const result = { identity, identitySha256: sha256(JSON.stringify(identity)), migrations,
+    versions: { platform: source.platform.version, rental: source.core.version } };
   if (buildProvenanceSha256) verifiedCandidates.set(result, result.identitySha256);
   return result;
 }
@@ -402,5 +403,5 @@ function verifyMcpSql(files) {
   });
 }
 
-module.exports = { isFullCommit, isSha256, CONTEXT_FILE, MCP_MANIFEST, MCP_SQL, isPackagePath, sha256,
+module.exports = { isFullCommit, isSha256, CONTEXT_FILE, MCP_MANIFEST, MCP_SQL, isPackagePath, readJson, sha256,
   verifyPreparedRental, isVerifiedFixedBuildCandidate, comparePreparedRental, verifyMcpSql, compareEntries };
