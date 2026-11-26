@@ -2,6 +2,14 @@
  * Fixed public AI and Rental inputs are mandatory. SQL execution ordering stays
  * with the deployment host; this module does not manufacture migration receipts. */
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
+import { sqltag as sql } from "@prisma/client/runtime/library";
+import { CorePhysicalDataObservationSchema, CoreSourceSchema, checkCoreCombination, checkPlatformDataCapabilities,
+  coreDeploymentHostVersions, isCoreVersionSupported, type CoreManifest } from "@rental-os/core-contracts";
+import { CorePhasedMigrationLockSchema, corePostCapabilityPrismaMigrationName,
+  corePrismaMigrationName } from "@rental-os/core-contracts/deployment";
+import { CoreAccessError } from "@rental-os/core-host";
+import type { CoreMysqlDataPlan } from "@rental-os/core-host/mysql-deployment";
 import type { CoreHostSqlTransaction } from "@rental-os/core-host/mysql";
 import { composeCorePrismaSchema, type CorePrismaContribution } from "@rental-os/core-contracts/prisma";
 import { mysqlForeignKeyExtension, mysqlMigrationStatements, mysqlStructureFromMigrations,
@@ -9,6 +17,7 @@ import { mysqlForeignKeyExtension, mysqlMigrationStatements, mysqlStructureFromM
 import { readMysqlPhysicalData } from "@rental-os/platform-core-host/mysql-physical";
 import { RENTAL_PRISMA_PUBLIC_RELATIONS } from "@rental-os/rental-core/prisma-schema";
 import { composePublicAiPrismaSchema, PUBLIC_AI_DATA_VERSION, type PublicAiDataContribution } from "@rental-os/ai-native-data/public-data";
+import { readPublicAiDataPackage } from "@rental-os/ai-native-data/public-data-package";
 import { createPublicAiMysqlDataPlan } from "@rental-os/ai-native-data/public-mysql-data";
 
 export const RENTAL_AI_EXTENSION_FILES = [
@@ -181,6 +190,88 @@ export function createRentalAiMysqlPlans(ai: PublicAiDataContribution, extension
       installation: "fresh-public" as const, owner: extension.owner, migration: { ...RENTAL_AI_EXTENSION_MIGRATION },
       prerequisites: structuredClone(RENTAL_AI_EXTENSION_PREREQUISITES), sql: extension.sql,
       readPhysical: (database: Pick<CoreHostSqlTransaction, "$queryRaw">) => readMysqlPhysicalData(database, expected, PUBLIC_AI_DATA_VERSION)
+    }
+  };
+}
+
+type OriginalMigrationReceipt = { migrationName: string; checksum: string; finishedAt: Date | null; rolledBackAt: Date | null };
+const validDate = (value: unknown): value is Date => value instanceof Date && Number.isFinite(value.getTime());
+
+/** Data gate for the selected fresh installation. The caller supplies plans and
+ * extension provenance from its fixed build and reuses its current SQL reader. */
+export function createFreshRentalAiDataAvailability(input: {
+  lock: unknown;
+  platform: CoreMysqlDataPlan;
+  rental: CoreMysqlDataPlan;
+  publicAiFiles: ReadonlyMap<string, Uint8Array>;
+  extension: { source: CoreManifest["source"]; files: ReadonlyMap<string, Uint8Array> };
+}): (database: Pick<CoreHostSqlTransaction, "$queryRaw">) => Promise<void> {
+  const { base, postCapability } = CorePhasedMigrationLockSchema.parse(input.lock);
+  const [pin] = base.cores, [release] = base.dataCapabilities ?? [], [post] = postCapability;
+  if (base.cores.length !== 1 || pin.manifest.id !== "rental" || base.dataCapabilities?.length !== 1
+    || release.id !== "ai-native" || postCapability.length !== 1 || post.coreId !== "rental"
+    || checkPlatformDataCapabilities(base).length
+    || checkCoreCombination([pin.manifest], coreDeploymentHostVersions(base)).issues.length)
+    throw new Error("Rental AI 新装锁必须选择单一 Rental、公共 AI 及其后置扩展");
+
+  const { contribution } = readPublicAiDataPackage(input.publicAiFiles, release);
+  const [publicMigration] = contribution.data.migrations;
+  const { publicAi, rental } = RENTAL_AI_EXTENSION_PREREQUISITES;
+  const { initial, ...rentalVersion } = rental;
+  const extensionSource = CoreSourceSchema.parse(input.extension.source);
+  if (!isDeepStrictEqual(post.migration, { ...RENTAL_AI_EXTENSION_MIGRATION, source: extensionSource })
+    || !isDeepStrictEqual(post.prerequisites, { core: { version: rentalVersion, migration: initial },
+      capability: { id: release.id, version: publicAi, migration: { id: publicMigration.id, sha256: publicMigration.sha256 } } })
+    || !isCoreVersionSupported(pin.manifest.data.version, rentalVersion)
+    || !pin.manifest.data.migrations.some(item => item.id === initial.id && item.sha256 === initial.sha256))
+    throw new Error("Rental AI 新装扩展的固定来源、原迁移或数据前置不一致");
+  const platformNames = base.platform.data.migrations.map(item => /^prisma\/migrations\/([^/]+)\/migration\.sql$/u.exec(item.file)?.[1]);
+  const rentalNames = pin.manifest.data.migrations.map(item => corePrismaMigrationName("rental", item.id));
+  if (!isDeepStrictEqual(base.platform.data, input.platform.data) || !isDeepStrictEqual(pin.manifest.data, input.rental.data)
+    || platformNames.some(name => !name) || !isDeepStrictEqual(input.platform.migrationNames, platformNames)
+    || !isDeepStrictEqual(input.rental.migrationNames, rentalNames))
+    throw new Error("Rental AI 新装原账计划与固定底座或 Rental 不一致");
+
+  const ai = createRentalAiMysqlPlans(contribution, readRentalAiDataExtension(input.extension.files));
+  const basePlans = [input.platform, input.rental, ai.publicAi];
+  const migrationName = corePostCapabilityPrismaMigrationName(post.coreId, post.migration.id);
+  const expected = [...basePlans.flatMap(plan => plan.data.migrations.map((item, index) => ({
+    name: plan.migrationNames[index], checksum: item.sha256
+  }))), { name: migrationName, checksum: post.migration.sha256 }];
+  const checksums = new Map(expected.map(item => [item.name, item.checksum]));
+  if (checksums.size !== expected.length) throw new Error("Rental AI 新装原迁移名称冲突");
+
+  const physical = [...basePlans.map(plan => ({ version: plan.data.version, read: plan.readPhysical.bind(plan) })),
+    { version: PUBLIC_AI_DATA_VERSION, read: ai.extension.readPhysical }];
+  const unavailable = () => new CoreAccessError("core_unavailable", "Rental AI 新装的原迁移账或物理结构尚未核定");
+  return async database => {
+    try {
+      // Preserve the database order across phases. A v1, extra or mixed receipt
+      // cannot be projected away to make this fresh installation look complete.
+      const receipts = await database.$queryRaw<OriginalMigrationReceipt[]>(sql`
+        SELECT migration_name AS migrationName, checksum, finished_at AS finishedAt, rolled_back_at AS rolledBackAt
+        FROM _prisma_migrations ORDER BY started_at, id`);
+      if (!Array.isArray(receipts)) throw unavailable();
+      let applied = 0;
+      for (const receipt of receipts) {
+        const checksum = checksums.get(receipt?.migrationName);
+        if (checksum === undefined || checksum !== receipt.checksum) throw unavailable();
+        if (receipt.rolledBackAt !== null) {
+          if (!validDate(receipt.rolledBackAt)) throw unavailable();
+          continue;
+        }
+        if (receipt.migrationName !== expected[applied]?.name || !validDate(receipt.finishedAt))
+          throw unavailable();
+        applied++;
+      }
+      if (applied !== expected.length) throw unavailable();
+      for (const plan of physical) {
+        const observed = CorePhysicalDataObservationSchema.safeParse(await plan.read(database));
+        if (!observed.success || observed.data.version !== plan.version) throw unavailable();
+      }
+    } catch (error) {
+      if (error instanceof CoreAccessError) throw error;
+      throw unavailable();
     }
   };
 }

@@ -8,7 +8,9 @@
 
 [Rental 扩展](../../apps/rental-api/src/ai-data-extension.ts)通过 `@rental-os/rental-api/ai-data-extension` 贡献 12 个模型、1 个枚举及 [31 条 SQL](../../apps/rental-api/prisma/ai-extension/20261126000000-initial.sql)，包括报价选单、批准重准备、预约交接、履约检查和业务失败出箱。它把原 Rental 关系接回同一 Prisma Client。公共 41 + 公共 AI 74 + Rental 121 + Rental AI 12，组合为 **248 模型、35 枚举**。公共 AI 物理观察在该组合中同时核对扩展对公共 AI 表追加的六条原外键。[扩展来源表](../../apps/rental-api/prisma/ai-extension/provenance.json)
 
-公共新安装可以用现有平台数据能力合同准备迁移。新 Rental 组合需要在 Rental 基线和公共 AI 都完成后才应用扩展。当前[通用迁移组合](../core-contracts/src/deployment.ts)将普通 Core 迁移排在平台能力前，不能直接登记扩展。扩展模块提供固定材料、前置、schema 和只读结构计划，完整扩展迁移登记由所选部署宿主处理。旧混合安装仍使用下文的 58 份迁移及原收据。
+公共新安装可以用现有平台数据能力合同准备迁移。[新装 Rental 准备入口](../../apps/rental-api/src/ai-fresh-deployment.ts)生成 `lockVersion: 2`，执行次序为公共底座、原 Rental、公共 AI、Rental 扩展。扩展保留自身账名 `post-capability.rental.rental.20261126000000-ai-extension`。
+
+固定宿主可以从 `@rental-os/rental-api/ai-data-extension` 调用 [`createFreshRentalAiDataAvailability`](../../apps/rental-api/src/ai-data-extension.ts)，传入完整 v2 锁、底座及 Rental 原数据计划、公共 AI 归档字节、固定 Rental 扩展来源和字节。返回的只读准入函数使用调用者选定的 Client 或原事务，按顺序核对四段原 Prisma 账及实际物理结构。当前 Rental 标准入口尚未消费 v2，原混合安装仍沿下文的 58 份迁移及原收据。
 
 零 Core 宿主可从 [public-data-admission](src/public-data-admission.ts) 创建选装数据观察函数。它读取真实选定锁及固定公共归档，结合原公共数据计划和当前数据库或同一事务的原 Prisma 账与结构来核可用性。它是宿主装配入口，公共数据发行归档仍由原三条窄出口构成。
 
