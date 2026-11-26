@@ -1,4 +1,4 @@
-import type { AiUsageSettingsDraft } from '@rental-os/shared';
+import type { AiUsageSettingsDraft } from '@rental-os/platform-contracts/ai-usage';
 import { z } from 'zod';
 import { BudgetError } from './budget.ports';
 import { assertPositiveQuantity, quantityAtoms } from './budget-quantity';

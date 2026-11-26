@@ -1,4 +1,4 @@
-import type { AiUsageQuantityDraft } from '@rental-os/shared';
+import type { AiUsageQuantityDraft } from '@rental-os/platform-contracts/ai-usage';
 import { BudgetError } from './budget.ports';
 
 /** Integer atoms only: money uses micro-units, never Number/float or FX. */

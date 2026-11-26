@@ -1,4 +1,5 @@
-import type { AiExecutionContext, AiUsageAssociationDraft, AiUsageQuantityDraft, AiUsageSettingsDraft } from '@rental-os/shared';
+import type { AiExecutionContext } from '@rental-os/platform-contracts/ai-gateway';
+import type { AiUsageAssociationDraft, AiUsageQuantityDraft, AiUsageSettingsDraft } from '@rental-os/platform-contracts/ai-usage';
 
 export type BudgetAction = 'settings_read' | 'settings_write' | 'reserve' | 'dispatch' | 'read' | 'settle' | 'release' | 'unknown' | 'reconcile';
 /** Original reservation lifecycle only. These actions cannot admit a new call;

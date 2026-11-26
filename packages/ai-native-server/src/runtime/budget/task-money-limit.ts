@@ -1,8 +1,8 @@
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma } from '@prisma/client';
-import type { AiUsageAssociationDraft, AiUsageQuantityDraft } from '@rental-os/shared';
+import type { AiUsageAssociationDraft, AiUsageQuantityDraft } from '@rental-os/platform-contracts/ai-usage';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
-import { isGatewayConfig } from '../gateway-contract-validation';
+import { isGatewayConfig } from '@rental-os/platform-server/ai-gateway';
 import { BudgetError, type BudgetPolicy, type BudgetPolicyKey } from './budget.ports';
 import { quantityAtoms } from './budget-quantity';
 

@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
-import type { AiExecutionContext, AiUsageAssociationDraft, AiUsageSettingsDraft } from '@rental-os/shared';
-import { isAiStepExecutionContext } from '../task-contract-validation';
+import type { AiExecutionContext } from '@rental-os/platform-contracts/ai-gateway';
+import type { AiUsageAssociationDraft, AiUsageSettingsDraft } from '@rental-os/platform-contracts/ai-usage';
+import { isAiStepExecutionContext } from '../../execution-context-validation';
 import { BudgetError, isOriginalBudgetLifecycleAction, type BudgetAction, type BudgetAuthority, type BudgetEvidencePort, type BudgetGrant, type BudgetPolicyKey, type BudgetQuotePort, type BudgetRecord, type BudgetReserveCommand, type BudgetTransactionRepository } from './budget.ports';
 import { assertPositiveQuantity, quantityAtoms } from './budget-quantity';
 import { validateBudgetSettings } from './budget-settings';
-import { modelRequestSchema } from '../model-gateway.ports';
+import { modelRequestSchema } from '@rental-os/platform-server/ai-gateway';
 import type { BudgetSettingsOperation } from './budget.ports';
 import { assertBudgetPolicyBinding } from './budget-policy-binding';
 
