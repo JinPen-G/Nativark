@@ -50,6 +50,9 @@
       "task-measured-effects": [
         "dist/task-measured-effects.d.ts"
       ],
+      "gateway-admission": [
+        "dist/gateway-admission.d.ts"
+      ],
       "public-tenant-task-authority": [
         "dist/public-tenant-task-authority.d.ts"
       ],
@@ -131,6 +134,10 @@
     "./task-measured-effects": {
       "types": "./dist/task-measured-effects.d.ts",
       "default": "./dist/task-measured-effects.js"
+    },
+    "./gateway-admission": {
+      "types": "./dist/gateway-admission.d.ts",
+      "default": "./dist/gateway-admission.js"
     },
     "./public-tenant-task-authority": {
       "types": "./dist/public-tenant-task-authority.d.ts",

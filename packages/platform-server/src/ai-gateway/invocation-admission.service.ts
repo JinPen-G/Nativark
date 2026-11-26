@@ -5,11 +5,11 @@ import type { AdmissionRepository, AiAdmissionStatus, AiInvocationAdmissionRecor
 import { admissionCallIdSchema, admissionInputSchema, admissionPatchSchema, admissionRecordSchema, admissionScopeSchema, admissionStatusSchema } from './invocation-admission.validation';
 
 const terminal = new Set<AiAdmissionStatus>(['revoked', 'cancelled', 'completed']);
-/** Internal workspace admission bookkeeping, not an identity resolver or dispatch permit.
- * Actor kind/audience, platform admission and single-winner dispatch require the next contract slice.
- */
+/** Original admission bookkeeping. The host owns current actor/scope authority;
+ * a stored admission never replaces the separate dispatch claim. */
 export class InvocationAdmissionService {
-  constructor(private readonly repository: AdmissionRepository, private readonly clock: () => Date = () => new Date()) {
+  constructor(private readonly repository: AdmissionRepository, private readonly clock: () => Date = () => new Date(),
+    private readonly consumer: 'tenant' | 'legacy' = 'legacy') {
     if (!repository || [repository.get, repository.create, repository.transition].some(fn => typeof fn !== 'function')) throw new ModelGatewayError('CONFIG_INVALID');
   }
 
@@ -34,7 +34,8 @@ export class InvocationAdmissionService {
 
   async admit(value: CreateAiInvocationAdmission): Promise<AiInvocationAdmissionRecord> {
     const parsed = admissionInputSchema.safeParse(value);
-    if (!parsed.success || parsed.data.expiresAt <= this.now()) throw new ModelGatewayError('INVALID_REQUEST');
+    if (!parsed.success || (parsed.data.scope.kind === 'TENANT') !== (this.consumer === 'tenant')
+      || parsed.data.expiresAt <= this.now()) throw new ModelGatewayError('INVALID_REQUEST');
     // Copy before any await: callers and repository implementations cannot replace the binding mid-flight.
     const input = structuredClone(parsed.data);
     let existing: AiInvocationAdmissionRecord | null;
@@ -47,7 +48,13 @@ export class InvocationAdmissionService {
     catch (error) {
       // Only a definite uniqueness failure is safe to resolve by reading a winner.
       // A timeout/disconnect may have committed; do not conceal it or retry the write.
-      if (!(error instanceof prismaRuntime.PrismaClientKnownRequestError) || error.code !== 'P2002') throw new ModelGatewayError('CONFIG_INVALID');
+      if (!(error instanceof prismaRuntime.PrismaClientKnownRequestError) || error.code !== 'P2002') {
+        if (input.scope.kind === 'TENANT') {
+          if (error instanceof ModelGatewayError && error.code === 'FORBIDDEN') throw error;
+          throw new ModelGatewayError('ACCOUNTING_PENDING');
+        }
+        throw new ModelGatewayError('CONFIG_INVALID');
+      }
       let raced: AiInvocationAdmissionRecord | null;
       try { raced = await this.repository.get(structuredClone(input.scope), input.callId); }
       catch { throw new ModelGatewayError('CONFIG_INVALID'); }
@@ -59,7 +66,8 @@ export class InvocationAdmissionService {
 
   async transition(scope: AiProfileScope, callId: string, from: AiAdmissionStatus, to: AiAdmissionStatus, patch?: { dispatchId?: string | null; unknownReason?: string | null }) {
     const parsedScope = admissionScopeSchema.safeParse(scope), parsedPatch = admissionPatchSchema.safeParse(patch ?? {});
-    if (!parsedScope.success || !admissionCallIdSchema.safeParse(callId).success || !admissionStatusSchema.safeParse(from).success
+    if (!parsedScope.success || parsedScope.data.kind === 'TENANT' || this.consumer === 'tenant'
+      || !admissionCallIdSchema.safeParse(callId).success || !admissionStatusSchema.safeParse(from).success
       || !admissionStatusSchema.safeParse(to).success || !parsedPatch.success) throw new ModelGatewayError('INVALID_REQUEST');
     if (from === 'unknown' && to !== 'completed' && to !== 'cancelled') throw new ModelGatewayError('ACCOUNTING_PENDING');
     if (terminal.has(from) || (to !== 'revoked' && to !== 'cancelled' && to !== 'completed' && to !== 'unknown')) throw new ModelGatewayError('CONFIG_INVALID');

@@ -18,6 +18,8 @@
 
 通用执行和模型运输继续从 [platform-server/ai-runtime](../platform-server/src/ai-runtime/index.ts)及 [platform-server/ai-gateway](../platform-server/src/ai-gateway/index.ts)取得原 Runner、Gateway 和错误类。宿主提供唯一财务账、Task 累计资源及真实业务执行端口，公共事务出口不会派发模型或自行建立事务。
 
+[gateway-admission](src/gateway-admission.ts) 将公共租户调用接到[原准入和领取仓储](src/runtime/invocation-admission-persistence.repository.ts)。以当次公共租户 `identities` 及同一个严格 Task 边界组合，创建和领取必须在原事务中验证当前主体及已登记 Invocation。超时或失应答不允许再领取。原令牌的终态记录不要求新执行权。Rental 沿[原兼容入口](src/runtime/invocation-admission.repository.ts)保留工作空间及平台归属。
+
 现有 Rental 仓储沿 [Task 兼容入口](src/runtime/task-transaction-authority.ts)共享同一个公共边界实例。[部署准入适配器](src/runtime/rental-adapters/task-deployment-admission.ts)保留原 Rental 停新/控制读取，[平台管理适配器](src/runtime/rental-adapters/platform-management-transaction.ts)保留所选 Rental 宿主的原主体与 Tenant 父锁。只有这些显式适配器识别旧宿主兼容选择；所选请求失活后继续拒绝。
 
 ## 公共 Task 持久层

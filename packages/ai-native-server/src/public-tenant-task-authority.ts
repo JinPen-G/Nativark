@@ -130,6 +130,8 @@ export function createPublicTenantTaskAuthority(input: {
             if (next.kind === 'creation' && !hasEffectivePermission(principal.access.permissions, creationPermission)) throw denied();
             if (next.kind === 'task') await nativeActions.resolve(next.taskId, 'claim_run');
             if (next.kind === 'task_control' && next.operation) await nativeActions.resolve(next.taskId, next.operation);
+            if (next.kind === 'invocation' && next.tenantSubject && (next.tenantSubject.tenantId !== principal.scope.tenantId
+              || next.tenantSubject.actorId !== principal.actor.userId)) throw denied();
             // The host owns the exact control purpose, object and immutable
             // source. A generic 'task_control' ref does not choose a verb.
             await input.assertReference(tx, principal, structuredClone(next));

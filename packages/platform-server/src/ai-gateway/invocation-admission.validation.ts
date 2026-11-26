@@ -1,10 +1,11 @@
 import { z } from 'zod';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
-// Workspace admissions keep the legacy shape; the explicit PLATFORM member
-// carries the single platform scope with no tenant attribution to borrow.
+// Tenant admissions have no workspace field. Platform has neither tenant nor
+// workspace attribution. Storage and the host still check current authority.
 export const admissionScopeSchema = z.union([
   z.object({ id, kind: z.literal('WORKSPACE'), tenantId: id, workspaceId: id }).strict(),
+  z.object({ id, kind: z.literal('TENANT'), tenantId: id }).strict(),
   z.object({ id, kind: z.literal('PLATFORM') }).strict()
 ]);
 export const admissionStatusSchema = z.enum(['admitted', 'revoked', 'cancelled', 'completed', 'unknown']);

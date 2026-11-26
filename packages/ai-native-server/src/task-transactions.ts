@@ -9,7 +9,7 @@ export type AiTaskTransactionReference =
   | { kind: 'task'; taskId: string }
   | { kind: 'task_control'; taskId: string; operation?: 'claim_recovery_run' | 'release_run' }
   | { kind: 'step'; stepId: string }
-  | { kind: 'invocation'; callId: string };
+  | { kind: 'invocation'; callId: string; tenantSubject?: { tenantId: string; actorId: string } };
 export interface AiTaskTransactionAuthority<Transaction extends object> {
   readonly binding: string;
   begin(transaction: Transaction, reference: AiTaskTransactionReference): Promise<{
