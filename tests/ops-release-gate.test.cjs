@@ -24,6 +24,7 @@ const json = value => buf(JSON.stringify(value));
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
 const deploymentRoot = "apps/rental-api/prisma-deployment/";
 const contextFile = "rental-host.context.json";
+const buildFile = "rental-host.build-provenance.json";
 
 function packReceipt(files, context) {
   context.files = [...files].filter(([file]) => file !== contextFile).map(([file, bytes]) => ({ file, sha256: hash(bytes) }));
@@ -141,6 +142,40 @@ function verifyFixture(files) {
   return verifyPreparedRental(files, hash(files.get(contextFile)));
 }
 
+function fixedBuildFixture(edit = () => {}, { ai = false } = {}) {
+  const files = preparedFixture({ ai });
+  const context = JSON.parse(files.get(contextFile));
+  const sourceFile = context.sourceProvenance.file;
+  const source = JSON.parse(files.get(sourceFile));
+  const lock = JSON.parse(files.get(deploymentRoot + "core.deployment.lock.json"));
+  const configs = ["packages/platform-contracts/tsconfig.json", "packages/rental-core/tsconfig.contracts.json",
+    "packages/shared/tsconfig.json", "packages/shared/tsconfig.agent-desktop.json", "packages/rental-core/tsconfig.json",
+    ...(ai ? ["packages/ai-native-data/tsconfig.json"] : []), "apps/rental-api/tsconfig.json",
+    ...(ai ? ["packages/ai-native-server/tsconfig.json", "apps/rental-api/tsconfig.ai.json"] : [])];
+  const publicConfigs = ["packages/platform-contracts", "packages/core-contracts", "packages/core-host", "packages/platform-server",
+    "packages/platform-core-host", "apps/platform-api"].map(directory => `${directory}/tsconfig.json`);
+  const compiler = { version: "5.9.3", sha256: hash(buf("compiler fixture")) };
+  const clients = context.clients.map(({ directory, mode, schemaSha256 }) => ({ host: directory.split("/")[1].replace("-api", ""),
+    mode, schemaSha256, declarationsSha256: hash(buf(`declarations for ${mode}`)) }));
+  source.files = [source.npmLocks.projected, ...[...new Set([...configs, ...publicConfigs])].map(path => ({ path, bytes: 2, sha256: hash(buf("{}")) }))];
+  if (ai) source.files.push({ path: "packages/ai-native-data/package.json", bytes: 2, sha256: hash(buf("{}")) });
+  files.set(sourceFile, json(source));
+  context.sourceProvenance.sha256 = hash(files.get(sourceFile));
+  const platformOutput = "apps/platform-api/dist/main.js";
+  files.set(platformOutput, buf("public build fixture"));
+  context.platformBuild = { ...context.platformBuild, release: lock.platform, compiler: { name: "typescript", ...compiler },
+    client: { ...clients[0], generatedSchemaSha256: clients[0].schemaSha256 },
+    projects: publicConfigs.map(project => ({ project, inputsSha256: hash(buf(`inputs for ${project}`)) })) };
+  const proof = { format: "rental-host-fixed-build-1", sourceSha256: context.sourceProvenance.sha256, npmLockSha256: source.npmLocks.projected.sha256,
+    platform: source.platform.source, rental: source.core.source, deploymentLockSha256: context.deploymentLockSha256, compiler, clients,
+    projects: configs.map(config => ({ config, roots: 1, sourceFiles: 1, outputs: 2, diagnostics: 0 })),
+    files: [platformOutput, context.entry].map(file => ({ file, sha256: hash(files.get(file)) })) };
+  edit(proof, files);
+  files.set(buildFile, json(proof));
+  context.buildProvenance = { file: buildFile, sha256: hash(files.get(buildFile)) };
+  return packReceipt(files, context);
+}
+
 function verifyIndependentRelease() {
   const files = preparedFixture(), before = verifyFixture(files);
   assert.deepEqual(before.identity.selection, { host: "rental", profile: "host", coreIds: ["rental"], ai: false, mcp: false });
@@ -216,7 +251,30 @@ function verifyIndependentRelease() {
 }
 
 function verifyBuildEvidence() {
-  const candidate = verifyFixture(preparedFixture());
+  const archive = fixedBuildFixture();
+  const candidate = verifyPreparedRental(archive, hash(archive.get(contextFile)), { requireFixedBuild: true });
+  assert.equal(candidate.identity.buildProvenanceSha256, hash(archive.get(buildFile)));
+  assert.equal(verifyFixture(fixedBuildFixture(undefined, { ai: true })).identity.selection.ai, true);
+  assert.throws(() => verifyFixture(fixedBuildFixture(proof => { proof.projects.pop(); }, { ai: true })), /编译项目/u);
+  const legacy = preparedFixture();
+  const comparison = verifyFixture(legacy);
+  assert.equal(comparison.identity.buildProvenanceSha256, undefined);
+  assert.equal(comparePreparedRental(comparison, candidate).different, false);
+  assert.throws(() => verifyPreparedRental(legacy, hash(legacy.get(contextFile)), { requireFixedBuild: true }), /缺少固定宿主构建证明/u);
+  for (const field of ["sourceSha256", "npmLockSha256", "deploymentLockSha256"]) {
+    assert.throws(() => verifyFixture(fixedBuildFixture(proof => { proof[field] = "0".repeat(64); })), /双仓来源、投影锁或部署锁不一致/u);
+  }
+  assert.throws(() => verifyFixture(fixedBuildFixture(proof => { proof.rental.commit = "c".repeat(40); })), /双仓来源/u);
+  assert.throws(() => verifyFixture(fixedBuildFixture(proof => { proof.projects.pop(); })), /编译项目/u);
+  assert.throws(() => verifyFixture(fixedBuildFixture(proof => { proof.compiler.sha256 = "0".repeat(64); })), /编译器证据/u);
+  assert.throws(() => verifyFixture(fixedBuildFixture(proof => { proof.clients[0].declarationsSha256 = "0".repeat(64); })), /Client 声明/u);
+  assert.throws(() => verifyFixture(fixedBuildFixture(proof => { proof.clients[1].schemaSha256 = "0".repeat(64); })), /Client 声明/u);
+  assert.throws(() => verifyFixture(fixedBuildFixture(proof => { proof.files[1] = proof.files[0]; })), /产物缺失、重复/u);
+  assert.throws(() => verifyFixture(fixedBuildFixture(proof => { proof.files.pop(); })), /产物集合/u);
+  assert.throws(() => verifyFixture(fixedBuildFixture((proof, files) => { files.set(proof.files[1].file, buf("unbound build fixture")); })), /产物缺失、重复或摘要/u);
+  const wrongReference = JSON.parse(archive.get(contextFile));
+  wrongReference.buildProvenance.sha256 = "0".repeat(64);
+  assert.throws(() => verifyFixture(packReceipt(new Map(archive), wrongReference)), /构建证明引用/u);
   const policy = { origin: "automatic", headSource: "platform", repositoryId: 10, workflowId: 37,
     workflowPath: ".github/workflows/fixture.yml", runId: 5, runAttempt: 2, buildRecordSha256: hash(buf("build record fixture")) };
   const run = { id: 5, run_attempt: 2, workflow_id: 37, path: policy.workflowPath, repository: { id: 10 }, head_repository: { id: 10 },
@@ -227,8 +285,11 @@ function verifyBuildEvidence() {
   const evidence = { run, verifiedBuild, inspectedImageIds: { ...imageIds } };
   const checked = verifyPairedBuildEvidence(candidate, policy, evidence);
   assert.equal(checked.origin, "automatic");
+  assert.equal(checked.buildProvenanceSha256, candidate.identity.buildProvenanceSha256);
   assert.equal(checked.releaseApproved, false);
   assert.equal(checked.databaseChecked, false);
+  assert.throws(() => verifyPairedBuildEvidence(comparison, policy, evidence), /固定构建证明/u);
+  assert.throws(() => verifyPairedBuildEvidence(structuredClone(candidate), policy, evidence), /固定构建证明/u);
   const manual = { ...policy, origin: "manual", headSource: "rental" };
   assert.equal(verifyPairedBuildEvidence(candidate, manual, { ...evidence,
     run: { ...run, event: "workflow_dispatch", head_sha: candidate.identity.rental.commit } }).origin, "manual");

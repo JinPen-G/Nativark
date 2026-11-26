@@ -8,7 +8,14 @@ const { isDeepStrictEqual } = require("node:util");
 const CONTEXT_FILE = "rental-host.context.json";
 const SOURCE_FILE = "development.workspace.json";
 const DEPLOYMENT_FILE = "rental-host.deployment-provenance.json";
+const BUILD_FILE = "rental-host.build-provenance.json";
 const DEPLOYMENT_ROOT = "apps/rental-api/prisma-deployment/";
+const verifiedCandidates = new WeakMap();
+const CONTRACT_PROJECTS = ["packages/platform-contracts/tsconfig.json", "packages/rental-core/tsconfig.contracts.json",
+  "packages/shared/tsconfig.json", "packages/shared/tsconfig.agent-desktop.json", "packages/rental-core/tsconfig.json"];
+const PLATFORM_PROJECTS = ["packages/platform-contracts", "packages/core-contracts", "packages/core-host",
+  "packages/platform-server", "packages/platform-core-host", "apps/platform-api"].map(directory => `${directory}/tsconfig.json`);
+const RUNTIME_OUTPUT = /^(?:apps|packages)\/[^/]+\/dist(?:-[^/]+)?\/.*\.(?:js|cjs|json|d\.ts)$/u;
 const MCP_MANIFEST = "data-contribution.json";
 const MCP_SQL = /^mysql-[a-z0-9-]+\.sql$/u;
 const CAPABILITY_ROOTS = { "ai-native": "packages/ai-native-data/", mcp: "packages/mcp-server/" };
@@ -211,7 +218,65 @@ function verifyDeployment(files, deployment, lock, capabilities, digests) {
     entries: expected.map(({ owner, id, originalPath, directory, file, ledger }) => ({ owner, id, originalPath, directory, sha256: file.sha256, ledger })) };
 }
 
-function verifyPreparedRental(files, expectedContextSha256) {
+function verifyBuildProvenance(files, context, source, identity, lock, migrations, digests, requireFixedBuild) {
+  const reference = context.buildProvenance;
+  if (reference === undefined && !digests.has(BUILD_FILE) && !requireFixedBuild) return;
+  requireEvidence(reference?.file === BUILD_FILE && isSha256(reference.sha256) && digests.get(BUILD_FILE) === reference.sha256,
+    "缺少固定宿主构建证明引用、文件或对应摘要");
+  const proof = readJson(files.get(BUILD_FILE), BUILD_FILE);
+  requireEvidence(proof.format === "rental-host-fixed-build-1" && proof.sourceSha256 === digests.get(SOURCE_FILE)
+    && proof.npmLockSha256 === identity.npmLocks.projected && proof.deploymentLockSha256 === identity.deploymentLockSha256
+    && isDeepStrictEqual(proof.platform, identity.platform) && isDeepStrictEqual(proof.rental, identity.rental),
+    "固定宿主构建证明的双仓来源、投影锁或部署锁不一致");
+
+  const platformBuild = context.platformBuild;
+  const { version, sha256: compilerSha256 } = proof.compiler ?? {};
+  requireEvidence(isDeepStrictEqual(platformBuild.release, lock.platform) && typeof version === "string"
+    && version.length > 0 && isSha256(compilerSha256)
+    && isDeepStrictEqual(platformBuild.compiler, { name: "typescript", version, sha256: compilerSha256 }),
+    "固定宿主构建的底座发行或编译器证据不一致");
+  requireEvidence(Array.isArray(source.files), "缺少固定构建的双仓源码文件表");
+  const sourceFiles = new Map(source.files.map(item => [item?.path, item]));
+  const hasSource = file => {
+    const item = sourceFiles.get(file);
+    return isSha256(item?.sha256) && Number.isSafeInteger(item.bytes) && item.bytes > 0;
+  };
+  const projected = sourceFiles.get("package-lock.json");
+  requireEvidence(sourceFiles.size === source.files.length && projected?.sha256 === proof.npmLockSha256
+    && projected.bytes === source.npmLocks.projected.bytes, "固定宿主构建与来源文件表的投影锁不一致");
+  const projects = [...CONTRACT_PROJECTS,
+    ...(sourceFiles.has("packages/ai-native-data/package.json") ? ["packages/ai-native-data/tsconfig.json"] : []),
+    "apps/rental-api/tsconfig.json",
+    ...(source.ai ? ["packages/ai-native-server/tsconfig.json", "apps/rental-api/tsconfig.ai.json"] : [])];
+  requireEvidence(!source.mcp, "当前固定构建合同尚无正式 MCP 宿主编译证明");
+  requireEvidence(Array.isArray(proof.projects) && isDeepStrictEqual(proof.projects.map(item => item?.config), projects)
+    && proof.projects.every(item => hasSource(item.config) && item.diagnostics === 0
+      && [item.roots, item.sourceFiles, item.outputs].every(value => Number.isSafeInteger(value) && value > 0))
+    && Array.isArray(platformBuild.projects) && isDeepStrictEqual(platformBuild.projects.map(item => item?.project), PLATFORM_PROJECTS)
+    && platformBuild.projects.every(item => hasSource(item.project) && isSha256(item.inputsSha256)),
+    "固定宿主构建的编译项目、源码配置或诊断不一致");
+
+  const platformClient = platformBuild.client;
+  requireEvidence(Array.isArray(proof.clients) && proof.clients.length === 2 && proof.clients.every(item => isSha256(item?.declarationsSha256))
+    && proof.clients.some(item => item.host === "platform" && item.mode === "platform" && item.schemaSha256 === migrations.platformSchemaSha256
+      && platformClient?.mode === item.mode && platformClient.schemaSha256 === item.schemaSha256
+      && platformClient.generatedSchemaSha256 === item.schemaSha256 && platformClient.declarationsSha256 === item.declarationsSha256)
+    && proof.clients.some(item => item.host === "rental" && item.mode === (source.ai ? "rental-ai" : "rental")
+      && item.schemaSha256 === migrations.schemaSha256), "固定宿主构建的 Client 声明、schema 或选择不一致");
+
+  const expectedOutputs = new Map([...digests].filter(([file]) => RUNTIME_OUTPUT.test(file)
+    && !file.startsWith("packages/rental-core/") && !(source.ai && file.startsWith(CAPABILITY_ROOTS["ai-native"]))));
+  requireEvidence(Array.isArray(proof.files) && proof.files.length === expectedOutputs.size && expectedOutputs.has(context.entry),
+    "固定宿主构建证明与实际入包产物集合不一致");
+  for (const item of proof.files) {
+    requireEvidence(isSha256(item?.sha256) && expectedOutputs.get(item.file) === item.sha256,
+      "固定宿主构建的入包产物缺失、重复或摘要不一致");
+    expectedOutputs.delete(item.file);
+  }
+  return reference.sha256;
+}
+
+function verifyPreparedRental(files, expectedContextSha256, { requireFixedBuild = false } = {}) {
   const contextBytes = files.get(CONTEXT_FILE);
   requireEvidence(Buffer.isBuffer(contextBytes), "缺少正式 prepared 宿主收据，旧组合须先核定原库桥接");
   requireEvidence(isSha256(expectedContextSha256) && sha256(contextBytes) === expectedContextSha256, "宿主收据与已核摘要不一致");
@@ -281,7 +346,16 @@ function verifyPreparedRental(files, expectedContextSha256) {
   const identity = { format: "rental-release-identity-1", platform, rental,
     selection: { host: source.host, profile: source.profile, coreIds: source.coreIds, ai: source.ai, mcp: source.mcp },
     npmLocks, deploymentLockSha256, contextSha256: expectedContextSha256 };
-  return { identity, identitySha256: sha256(JSON.stringify(identity)), migrations };
+  const buildProvenanceSha256 = verifyBuildProvenance(files, context, source, identity, lock, migrations, digests, requireFixedBuild);
+  if (buildProvenanceSha256) identity.buildProvenanceSha256 = buildProvenanceSha256;
+  const result = { identity, identitySha256: sha256(JSON.stringify(identity)), migrations };
+  if (buildProvenanceSha256) verifiedCandidates.set(result, result.identitySha256);
+  return result;
+}
+
+function isVerifiedFixedBuildCandidate(candidate) {
+  const digest = verifiedCandidates.get(candidate);
+  return digest !== undefined && digest === candidate.identitySha256 && digest === sha256(JSON.stringify(candidate.identity));
 }
 
 function compareEntries(previous, candidate) {
@@ -329,4 +403,4 @@ function verifyMcpSql(files) {
 }
 
 module.exports = { isFullCommit, isSha256, CONTEXT_FILE, MCP_MANIFEST, MCP_SQL, isPackagePath, sha256,
-  verifyPreparedRental, comparePreparedRental, verifyMcpSql, compareEntries };
+  verifyPreparedRental, isVerifiedFixedBuildCandidate, comparePreparedRental, verifyMcpSql, compareEntries };
