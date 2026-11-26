@@ -1,5 +1,5 @@
 'use strict';
-/** 从固定 Git 树读取发行验证源码，tar 只在内存解析，避免并行作者改动混入本次产物。
+/** 从固定 Git 对象读取验证源码，批读只驻内存，避免并行作者改动混入本次产物。
  * 归档保持 Git 原字节，不采用本机检出换行；不读取私有 docs 或接受链接、包外路径。 */
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
@@ -20,40 +20,42 @@ function readBuildSnapshot(commit, directory = root, paths = selections, targetR
   if (!paths.length || paths.some(file => file !== '.' && (file.startsWith('/') || /[\\:]/u.test(file)
     || file.split('/').some(part => !part || part === '.' || part === '..'))))
     throw Error('构建快照只接受仓库相对文件范围');
-  // git archive 也会应用 core.autocrlf；发行摘要与迁移必须比较原提交，不能归一已发布字节。
-  const tar = execFileSync('git', ['--no-replace-objects', '-c', 'core.autocrlf=false', 'archive', '--format=tar', commit, '--', ...paths],
-    { cwd: directory, maxBuffer: 256 * 1024 * 1024, windowsHide: true });
+  const git = (args, input) => execFileSync('git', ['--no-replace-objects', ...args],
+    { cwd: directory, input, maxBuffer: 256 * 1024 * 1024, windowsHide: true });
+  if (git(['rev-parse', '--verify', commit + '^{commit}']).toString().trim() !== commit)
+    throw Error('构建快照不是固定提交对象');
+  // 原始对象不受 autocrlf、export-ignore 或工作区属性影响；声明路径丢失不能被静默裁掉。
+  const tree = git(['--literal-pathspecs', 'ls-tree', '-r', '-z', commit, '--', ...paths]).toString('utf8');
+  const entries = tree.split('\0').filter(Boolean).map(line => {
+    const match = /^(100644|100755) blob ([a-f0-9]{40})\t(.+)$/u.exec(line);
+    if (!match) throw Error('构建源码只接受普通文件，不接受链接或子模块');
+    assertSourcePath(match[3]);
+    return { blob: match[2], file: match[3] };
+  });
+  for (const selected of paths) if (!entries.some(entry => selected === '.' || entry.file === selected || entry.file.startsWith(selected + '/')))
+    throw Error('固定源码缺少声明路径：' + selected);
+  const objects = git(['cat-file', '--batch'], entries.map(entry => entry.blob).join('\n') + '\n');
   const files = new Map();
-  let extra = {};
-  const field = (header, at, length) => header.subarray(at, at + length).toString('utf8').replace(/\0.*$/su, '');
-  for (let offset = 0; offset + 512 <= tar.length;) {
-    const header = tar.subarray(offset, offset + 512); offset += 512;
-    if (header.every(byte => byte === 0)) break;
-    const size = parseInt(field(header, 124, 12).trim() || '0', 8), type = field(header, 156, 1);
-    if (!Number.isSafeInteger(size) || size < 0 || offset + size > tar.length) throw Error('Git 归档长度无效');
-    const bytes = tar.subarray(offset, offset + size); offset += Math.ceil(size / 512) * 512;
-    if (type === 'g') continue;
-    if (type === 'x') {
-      extra = {};
-      for (let cursor = 0; cursor < bytes.length;) {
-        const space = bytes.indexOf(32, cursor), length = Number(bytes.subarray(cursor, space).toString());
-        if (space < cursor || !Number.isSafeInteger(length) || length <= 0 || cursor + length > bytes.length)
-          throw Error('Git PAX 头无效');
-        const entry = bytes.subarray(space + 1, cursor + length - 1).toString('utf8'), split = entry.indexOf('=');
-        extra[entry.slice(0, split)] = entry.slice(split + 1); cursor += length;
-      }
-      continue;
-    }
-    if (type === '5') { extra = {}; continue; }
-    if (type !== '0' && type !== '') throw Error('发行源码归档包含链接或未知条目');
-    const prefix = field(header, 345, 155);
-    const name = extra.path || (prefix ? prefix + '/' : '') + field(header, 0, 100); extra = {};
-    if (name.startsWith('/') || /[\\:]/u.test(name) || name.split('/').some(part => !part || part === '.' || part === '..')
-      || /^(?:docs|output)\//u.test(name)
-      || /(?:^|\/)(?:node_modules|\.git|\.env(?:\..*)?)(?:\/|$)/u.test(name)) throw Error('Git 快照文件路径不受支持：' + name);
-    files.set(slash(path.join(targetRoot, name)), Buffer.from(bytes));
+  let offset = 0;
+  for (const entry of entries) {
+    const end = objects.indexOf(10, offset);
+    const header = end < 0 ? null : /^([a-f0-9]{40}) blob (\d+)$/u.exec(objects.toString('ascii', offset, end));
+    const length = header && Number(header[2]), start = end + 1;
+    if (!header || header[1] !== entry.blob || !Number.isSafeInteger(length) || start + length >= objects.length || objects[start + length] !== 10)
+      throw Error('Git 源码对象不完整或身份不一致');
+    files.set(slash(path.join(targetRoot, entry.file)), Buffer.from(objects.subarray(start, start + length)));
+    offset = start + length + 1;
   }
+  if (offset !== objects.length) throw Error('Git 源码含未声明对象');
   return snapshotFromFiles(commit, files, targetRoot);
+}
+
+function assertSourcePath(name) {
+  if (typeof name !== 'string' || name.startsWith('/') || /[\\:\x00-\x1f]/u.test(name)
+    || /^(?:docs|output)(?:\/|$)/iu.test(name)
+    || name.split('/').some(part => !part || part === '.' || part === '..'
+      || /^(?:output|node_modules|\.git|\.env(?:\..*)?)$/iu.test(part)))
+    throw Error('Git 快照文件路径不受支持：' + name);
 }
 
 /** 固定来源组合后重建目录视图；调用方须先核定每份源码的 Git 身份。 */
@@ -70,4 +72,4 @@ function snapshotFromFiles(commit, files, targetRoot = root) {
   const entries = directory => directories.get(slash(directory));
   return { commit, files, directories, entries };
 }
-module.exports = { readBuildSnapshot, snapshotFromFiles };
+module.exports = { readBuildSnapshot, snapshotFromFiles, assertSourcePath, selections };

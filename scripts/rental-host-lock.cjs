@@ -5,6 +5,26 @@ const { posix } = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
 const dependencyFields = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies', 'peerDependenciesMeta'];
 
+/** 两份固定源码锁只合并相同或不冲突的条目，不选择较新版本或重新解析范围。 */
+function mergeSourceLocks(platform, independent) {
+  if (platform?.lockfileVersion !== 3 || !platform.packages?.['']) throw Error('底座源码须提供npm v3锁');
+  if (!independent) return platform;
+  if (independent.lockfileVersion !== 3 || !independent.packages?.['']) throw Error('独立源码须提供npm v3锁');
+  const packages = { ...platform.packages };
+  const identity = entry => {
+    const result = { ...entry };
+    for (const field of ['dev', 'optional', 'devOptional', 'peer']) delete result[field];
+    return result;
+  };
+  for (const [file, entry] of Object.entries(independent.packages)) {
+    if (!file) continue;
+    if (packages[file] && !isDeepStrictEqual(identity(packages[file]), identity(entry)))
+      throw Error('双仓依赖锁冲突，须显式更新固定锁：' + file);
+    packages[file] = entry;
+  }
+  return { ...platform, packages };
+}
+
 function lockedDependency(lock, owner, name) {
   if (!/^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+$/iu.test(name)) throw Error('依赖名称无效：' + name);
   let directory = owner;
@@ -91,7 +111,8 @@ function projectHostLock(lock, workspaces, aiMode, runtimePeers = [], host = 're
 }
 
 /** 源码开发组合复用同一依赖闭包算法；root 明确列出所选工作区及构建工具。 */
-function projectWorkspaceLock(lock, workspaces, root) {
+function projectWorkspaceLock(lock, workspaces, root, options = {}) {
+  if (lock?.lockfileVersion !== 3 || !lock.packages?.['']) throw Error('源码投影要求npm v3锁');
   const entries = { '': root }, reach = new Map(), queue = [['', false, false]];
   // Track production/development and required/optional independently. Old flags
   // describe the entire monorepo; retaining them can silently omit runtime code.
@@ -120,6 +141,15 @@ function projectWorkspaceLock(lock, workspaces, root) {
       if (!target) {
         if (isOptional) continue;
         throw Error('原锁缺少依赖：' + file + ' -> ' + name);
+      }
+      if (options.verifySpecifications && (file === '' || workspaces.has(file))) {
+        const declared = dependencies[name], locked = lock.packages[target];
+        const version = locked?.link ? workspaces.get(locked.resolved)?.version : locked?.version;
+        const old = lock.packages[file];
+        const sameSpecification = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']
+          .some(field => old?.[field]?.[name] === declared);
+        if (declared !== version && !sameSpecification)
+          throw Error('源码依赖声明没有对应固定锁依据：' + file + ' -> ' + name);
       }
       const isDev = Object.hasOwn(development, name) && !Object.hasOwn(entry.dependencies || {}, name)
         && !Object.hasOwn(entry.optionalDependencies || {}, name);
@@ -151,4 +181,4 @@ function projectWorkspaceLock(lock, workspaces, root) {
   return { root, lock: projected };
 }
 
-module.exports = { selectWorkspaces, projectHostLock, projectWorkspaceLock, lockedDependency, hostDirectory };
+module.exports = { selectWorkspaces, projectHostLock, projectWorkspaceLock, mergeSourceLocks, lockedDependency, hostDirectory };

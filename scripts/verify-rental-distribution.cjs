@@ -19,7 +19,7 @@ const { execFileSync } = require('node:child_process');
 const { createBuild, verifyContracts } = require('./check-rental-package-build.cjs');
 const { createMemoryBuild } = require('./rental-build-memory.cjs');
 const { readBuildSnapshot } = require('./rental-build-snapshot.cjs');
-const { readIndependentRentalSource, composeRentalBuildSnapshot } = require('./prepare-rental-workspace.cjs');
+const { readIndependentRentalSource, readRentalBuildSupport, composeRentalBuildSnapshot } = require('./prepare-rental-workspace.cjs');
 const root = path.resolve(__dirname, '..');
 const slash = file => path.resolve(file).split(path.sep).join('/');
 const rentalSourceDirectory = 'packages/rental-core';
@@ -40,26 +40,33 @@ function sourceRepository(directory = root, explicitRepository) {
   return url.href.replace(/\.git\/?$/u, '').replace(/\/$/u, '');
 }
 
-function fixedPortableSource(snapshot, options, documentationSource) {
+function fixedPortableSource(options, documentationSource, buildDirectory) {
   const directory = path.resolve(options.get('--core-repo'));
   if (slash(git(directory, ['rev-parse', '--show-toplevel']).toString('utf8').trim()) !== slash(directory))
     throw Error('公开 Core 来源须指定独立 Git 仓库根目录');
-  const repository = sourceRepository(directory);
+  const rental = readIndependentRentalSource(directory, options.get('--core-commit'), { mode: 'release' });
+  const repository = rental.source.repository;
   if (!/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(repository)
     || repository.toLowerCase() === documentationSource.repository.toLowerCase())
     throw Error('公开 Core 来源须为独立的 GitHub 仓库');
   const commit = options.get('--core-commit');
-  const rental = readIndependentRentalSource(directory, commit);
   const version = rental.metadata.version, tag = rental.tag;
   // Core 独立标签是业务源码的权威来源；固定底座只提供合同和构建支持。
   // 两者组合后重新编译，而不是强制业务改动先回写底座仓库。
-  const combined = composeRentalBuildSnapshot(snapshot, rental);
+  const legacySupport = rental.layoutKind === 'legacy-root';
+  if (!legacySupport && !rental.layout.paths.some(entry => entry.target === 'apps/rental-api' && entry.roles.includes('host')))
+    throw Error('正式发行缺少独立 Rental API 宿主源码；不能使用底座旧业务副本');
+  const snapshot = legacySupport ? readBuildSnapshot(documentationSource.commit, buildDirectory)
+    : readRentalBuildSupport(documentationSource.commit, buildDirectory);
+  const combined = composeRentalBuildSnapshot(snapshot, rental, { legacySupport });
   const output = path.resolve(options.get('--out'));
   const relative = path.relative(root, output).split(path.sep);
   if (path.basename(output) !== `rental-${version}.tgz` || relative[0]?.toLowerCase() === 'docs')
     throw Error('公开 Core 输出须为私有资料目录之外的新 rental-<版本>.tgz 文件');
   if (fs.existsSync(output)) throw Error('目标归档已存在，不覆盖用户产物');
-  return { source: { repository, commit }, tag, output, documentationSource, snapshot: combined };
+  return { source: { repository, commit }, tag, output, documentationSource, snapshot: combined,
+    layout: rental.layoutKind, checkoutRepository: rental.checkoutRepository,
+    packageRoot: rental.layout.paths.find(entry => entry.target === 'packages/rental-core').source };
 }
 
 function selectedPrisma(build) {
@@ -343,11 +350,10 @@ async function main(args) {
   const deps = options.get('--deps') ?? path.join(root, 'node_modules');
   const commit = options.get('--commit') ?? git(root, ['rev-parse', 'HEAD']).toString('ascii').trim();
   const buildDirectory = options.get('--build-repo') ? path.resolve(options.get('--build-repo')) : root;
-  const snapshot = readBuildSnapshot(commit, buildDirectory);
   const buildSource = { repository: sourceRepository(buildDirectory, options.get('--source-repository')), commit };
   const portable = options.has('--portable')
-    ? fixedPortableSource(snapshot, options, buildSource) : undefined;
-  const build = createBuild(deps, { snapshot: portable?.snapshot ?? snapshot });
+    ? fixedPortableSource(options, buildSource, buildDirectory) : undefined;
+  const build = createBuild(deps, { snapshot: portable?.snapshot ?? readBuildSnapshot(commit, buildDirectory) });
   verifyContracts(build);
   verifyServer(build);
   if (portable) {
@@ -371,7 +377,9 @@ async function main(args) {
     writeArchive(portable.output, packed.bytes);
     console.log(JSON.stringify({ status: 'packaged', mode: 'portable', output: portable.output,
       source: portable.source, tag: portable.tag, documentationSource: portable.documentationSource,
-      platformSource: portable.platformSource, files: packed.fileCount, bytes: packed.bytes.length,
+      platformSource: portable.platformSource, layout: portable.layout, packageRoot: portable.packageRoot,
+      checkoutRepository: portable.checkoutRepository, profile: 'core-package', ai: false, mcp: false,
+      files: packed.fileCount, bytes: packed.bytes.length,
       sha256: packed.sha256, install: 'prepared', deployment: 'pending' }));
     return;
   }

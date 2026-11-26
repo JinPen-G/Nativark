@@ -8,6 +8,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const { createRequire } = require('node:module');
+const { createHash } = require('node:crypto');
 const { selectedCompilerOptions } = require('./build-selected-prisma.cjs');
 const root = path.resolve(__dirname, '..');
 const slash = file => path.resolve(file).split(path.sep).join('/');
@@ -22,8 +23,20 @@ function createBuild(dependencyDirectory, settings = {}) {
   let generatedDirectories = new Set();
   const workspaceRoot = slash(root);
   const snapshot = settings.snapshot ?? (settings.commit && require('./rental-build-snapshot.cjs').readBuildSnapshot(settings.commit));
+  if (snapshot?.sources) {
+    for (const source of [snapshot.sources.platform, snapshot.sources.rental])
+      if (!/^[a-f0-9]{40}$/u.test(source?.commit)) throw Error('组合构建必须固定双完整提交');
+    if (snapshot.origins?.size !== snapshot.files.size) throw Error('组合源码文件表与来源记录不一致');
+    for (const [file, bytes] of snapshot.files) {
+      const origin = snapshot.origins?.get(file);
+      if (!origin || ![snapshot.sources.platform.commit, snapshot.sources.rental.commit].includes(origin.commit)
+        || origin.sha256 !== createHash('sha256').update(bytes).digest('hex'))
+        throw Error('组合源码来源或字节已变化：' + file);
+    }
+  }
   const lockFile = workspaceRoot + '/package-lock.json';
-  const lock = JSON.parse(snapshot ? snapshot.files.get(lockFile)?.toString('utf8') : ts.sys.readFile(lockFile));
+  const lock = require('./rental-host-lock.cjs').mergeSourceLocks(
+    JSON.parse(snapshot ? snapshot.files.get(lockFile)?.toString('utf8') : ts.sys.readFile(lockFile)), snapshot?.dependencyLock);
   const dependencyPackages = new Map(), dependencyDirectories = new Set([deps]);
   for (const [name, metadata] of Object.entries(lock.packages || {})) {
     if (!name.startsWith('node_modules/') || metadata.link || !metadata.version) continue;
@@ -332,11 +345,25 @@ function verifyContracts(build) {
 
 function main(args) {
   let deps = path.join(root, 'node_modules');
+  const options = {};
   for (let index = 0; index < args.length; index++) {
     if (args[index] === '--deps' && args[index + 1]) deps = args[++index];
+    else if (['--commit', '--build-repo', '--core-repo', '--core-commit', '--source-mode'].includes(args[index]) && args[index + 1]) {
+      const key = args[index];
+      if (options[key]) throw Error('重复构建选项：' + key);
+      options[key] = args[++index];
+    }
     else if (args[index] !== '--contracts-only') throw Error('未知构建核验选项：' + args[index]);
   }
-  const build = createBuild(deps);
+  let snapshot;
+  if (Object.keys(options).length) {
+    if (!options['--commit'] || !options['--core-repo'] || !options['--core-commit'])
+      throw Error('双仓构建须提供两个完整SHA和独立源码目录');
+    const api = require('./prepare-rental-workspace.cjs');
+    snapshot = api.composeRentalBuildSnapshot(api.readRentalBuildSupport(options['--commit'], options['--build-repo'] ?? root),
+      api.readIndependentRentalSource(options['--core-repo'], options['--core-commit'], { mode: options['--source-mode'] ?? 'development' }));
+  }
+  const build = createBuild(deps, { snapshot });
   verifyContracts(build);
   console.log(JSON.stringify({ status: 'passed', mode: 'contracts', typescript: build.ts.version,
     stages: build.stages.length, emittedFiles: build.outputs.size, diskOutputs: 0 }));

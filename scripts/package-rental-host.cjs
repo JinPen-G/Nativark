@@ -29,7 +29,7 @@ function parseArguments(args) {
   const values = {};
   for (let index = 0; index < args.length; index += 2) {
     const option = args[index], value = args[index + 1];
-    if (!['--ai', '--host', '--deployment', '--platform-package', '--rental-package', '--tickets-package', '--ai-data-package', '--client', '--platform-client', '--output', '--deps', '--mcp-entry'].includes(option)
+    if (!['--ai', '--host', '--deployment', '--platform-package', '--rental-package', '--tickets-package', '--ai-data-package', '--client', '--platform-client', '--output', '--deps', '--mcp-entry', '--source-provenance'].includes(option)
       || Object.hasOwn(values, option) || !value || value.startsWith('--')) throw Error('未知、重复或缺值的打包选项：' + option);
     values[option] = value;
   }
@@ -44,13 +44,13 @@ function parseArguments(args) {
   for (const key of ['--deployment', '--platform-package', '--rental-package', '--client', '--platform-client', '--output'])
     if (!values[key] || !path.isAbsolute(values[key])) throw Error(key + ' 须为显式绝对路径');
   if ((values['--ai'] === 'enabled') !== Boolean(values['--ai-data-package'])) throw Error('只有 AI enabled 必须提供 --ai-data-package');
-  for (const key of ['--ai-data-package', '--tickets-package', '--deps']) if (values[key] && !path.isAbsolute(values[key])) throw Error(key + ' 须为绝对路径');
+  for (const key of ['--ai-data-package', '--tickets-package', '--deps', '--source-provenance']) if (values[key] && !path.isAbsolute(values[key])) throw Error(key + ' 须为绝对路径');
   if (!values['--output'].endsWith('.tgz')) throw Error('--output 须为尚不存在的 .tgz 文件');
   if (!values['--platform-package'].endsWith('.tgz')) throw Error('--platform-package 须为锁定的完整底座源码 .tgz');
   return { aiMode: values['--ai'], host, ...(values['--mcp-entry'] ? { mcpEntry: values['--mcp-entry'] } : {}),
     ticketsPackage: values['--tickets-package'], deployment: values['--deployment'], rentalPackage: values['--rental-package'],
     platformPackage: values['--platform-package'],
-    aiDataPackage: values['--ai-data-package'], client: values['--client'], platformClient: values['--platform-client'],
+    aiDataPackage: values['--ai-data-package'], sourceProvenance: values['--source-provenance'], client: values['--client'], platformClient: values['--platform-client'],
     output: values['--output'], deps: values['--deps'] || path.join(root, 'node_modules') };
 }
 
@@ -94,6 +94,7 @@ function publicApi() {
   return {
     ...require('@rental-os/core-contracts'),
     ...require('@rental-os/core-contracts/archive'),
+    ...require('@rental-os/core-contracts/deployment'),
     ...require('@rental-os/core-contracts/package'),
     ...require('@rental-os/core-contracts/platform-data-package'),
     ...require('@rental-os/core-contracts/platform-source'),
@@ -361,6 +362,55 @@ function runtimePackageReadme(source, file, files, aiMode, platformFiles, platfo
       [...missing].map(target => '- `' + target.replace(/`/gu, '\\`') + '`').join('\n') + '\n' : '');
 }
 
+/** 消费已用正式组合器逐字节核过的材料，复用其数据库迁移名称与次序。 */
+function describeRentalDeployment(api, lock, deploymentFiles, platform) {
+  const describe = file => {
+    const bytes = deploymentFiles.get(file);
+    if (!bytes) throw Error('部署记录缺少实际材料：' + file);
+    return { path: file, bytes: bytes.byteLength, sha256: hash(bytes) };
+  };
+  const byDirectory = new Map();
+  const add = (owner, source, assetSha256, migration, directory) => {
+    const file = describe(`migrations/${directory}/migration.sql`);
+    if (byDirectory.has(directory) || file.sha256 !== migration.sha256)
+      throw Error('部署迁移归属或原 SQL 不一致：' + directory);
+    byDirectory.set(directory, { owner, source, assetSha256, id: migration.id,
+      originalPath: migration.file, originalDirectory: path.posix.dirname(migration.file),
+      directory, ledger: { table: '_prisma_migrations', migrationName: directory, checksum: file.sha256 }, file });
+  };
+  lock.platform.data.migrations.forEach((migration, index) =>
+    add('platform', lock.platform.source, lock.platform.sha256, migration, platform.migrationNames[index]));
+  for (const { manifest, sha256 } of lock.cores) for (const migration of manifest.data.migrations)
+    add(manifest.id, manifest.source, sha256, migration, api.corePrismaMigrationName(manifest.id, migration.id));
+  for (const capability of lock.dataCapabilities ?? []) for (const migration of capability.data.migrations)
+    add(capability.id, capability.source, capability.sha256, migration,
+      api.platformCapabilityPrismaMigrationName(capability.id, migration.id));
+  const migrations = [...byDirectory.keys()].sort().map((directory, order) => ({ order, ...byDirectory.get(directory) }));
+  return { format: 'rental-host-deployment-provenance-1', state: 'prepared', deployment: 'pending',
+    lock: describe('core.deployment.lock.json'), schema: describe('schema.prisma'),
+    migrationLock: describe('migrations/migration_lock.toml'),
+    data: { platform: lock.platform, cores: lock.cores, capabilities: lock.dataCapabilities ?? [] },
+    migrations, files: [...deploymentFiles.keys()].sort().map(describe) };
+}
+
+/** 双仓运行归档须和已准备的版本、选择及 npm 源锁投影在同一次组合中。 */
+function requireHostSourceProvenance(bytes, npmLock, lock, host, aiMode, mcpEntry) {
+  const source = JSON.parse(Buffer.from(bytes).toString('utf8'));
+  const rental = lock.cores.find(pin => pin.manifest.id === 'rental')?.manifest;
+  if (source.format !== 'nativark-core-development-source-2' || source.mode !== 'release'
+    || source.host !== host || !['host', 'full'].includes(source.profile)
+    || source.ai !== (aiMode === 'enabled') || source.mcp !== Boolean(mcpEntry)
+    || !rental || !isDeepStrictEqual(source.core?.source, rental.source)
+    || source.core.version !== rental.version || source.core.tag !== 'v' + rental.version
+    || !isDeepStrictEqual(source.platform?.source, lock.platform.source)
+    || source.platform.version !== lock.platform.versions.platform
+    || source.npmLocks?.projected?.sha256 !== hash(npmLock))
+    throw Error('双仓发行源码、宿主选择或原 npm 投影锁与准备材料不一致');
+  // 当前正式准备器只交付 AI 数据能力，MCP 所用五份 SQL 尚无同锁的数据贡献。
+  if (mcpEntry) throw Error('正式双仓 MCP 发行缺少已锁定的 MCP 数据贡献和原账适配');
+  return source;
+}
+
 function createRentalHostContext(input) {
   const api = publicApi(), { aiMode, sourceFiles, platformFiles, rentalFiles, ticketsFiles, aiFiles, deploymentFiles, ts, selections } = input;
   const host = input.host ?? 'rental', directory = rentalHostDirectory(host), multi = host === 'example-multi-core';
@@ -377,6 +427,9 @@ function createRentalHostContext(input) {
     || (lock.dataCapabilities?.length || 0) !== (aiMode === 'enabled' ? 1 : 0)
     || aiMode === 'enabled' && lock.dataCapabilities[0].id !== 'ai-native'
     || (aiMode === 'enabled') !== Boolean(aiFiles)) throw Error('部署锁、固定包与显式 AI 选择不一致');
+  const sourceProvenanceFile = 'development.workspace.json';
+  const sourceProvenanceBytes = sourceFiles.get(sourceProvenanceFile);
+  if (sourceProvenanceBytes) requireHostSourceProvenance(sourceProvenanceBytes, sourceFiles.get('package-lock.json'), lock, host, aiMode, mcpEntry);
   const publicSchema = text(sourceFiles, 'apps/platform-api/prisma/schema.prisma');
   if (publicSchema !== text(platformFiles, 'apps/platform-api/prisma/schema.prisma'))
     throw Error('实际公共 schema 与固定底座源码不同');
@@ -442,6 +495,8 @@ function createRentalHostContext(input) {
       files.set(directory + '/package.json', json(runtimeOnlyMetadata(workspaces.get(directory))));
   }
   for (const [file, bytes] of deploymentFiles) files.set('apps/rental-api/prisma-deployment/' + file, bytes);
+  files.set('rental-host.deployment-provenance.json', json(describeRentalDeployment(api, lock, deploymentFiles, platform)));
+  if (sourceProvenanceBytes) files.set(sourceProvenanceFile, sourceProvenanceBytes);
   files.set('LICENSE', Buffer.from(text(sourceFiles, 'LICENSE')));
   const entry = mcpEntry ?? directory + (aiMode === 'enabled' ? '/dist-ai/ai-main.js' : '/dist/main.js');
   if (mcpEntry) requireMcpStartup(files, entry, ts);
@@ -477,7 +532,9 @@ function createRentalHostContext(input) {
       platformFiles, lock.platform.source, api.pinCoreDocumentationLinks)));
   }
   const receipt = { format: 'rental-host-context-1', host, aiMode, imageBuild: 'not-run', deployment: 'pending',
-    ...(mcpEntry ? { mcpEntry } : {}),
+    mcpMode: mcpEntry ? 'enabled' : 'disabled', ...(mcpEntry ? { mcpEntry } : {}),
+    deploymentProvenance: 'rental-host.deployment-provenance.json',
+    ...(sourceProvenanceBytes ? { sourceProvenance: { file: sourceProvenanceFile, sha256: hash(sourceProvenanceBytes) } } : {}),
     target: 'linux-bookworm', prismaVersion: '5.22.0', entry, clients,
     deploymentLockSha256: hash(deploymentFiles.get('core.deployment.lock.json')), coreSha256: rentalPin.sha256,
     ...(multi ? { additionalCorePackages: [{ id: ticketsPin.manifest.id, sha256: ticketsPin.sha256 }] } : {}),
@@ -491,6 +548,8 @@ function createRentalHostContext(input) {
 function collectInputs(options) {
   const api = publicApi(), sourceFiles = new Map([['package-lock.json', readOrdinary(path.join(root, 'package-lock.json'))],
     ['LICENSE', readOrdinary(path.join(root, 'LICENSE'))]]);
+  const sourceProvenance = options.sourceProvenance ?? path.join(root, 'development.workspace.json');
+  if (options.sourceProvenance || fs.existsSync(sourceProvenance)) sourceFiles.set('development.workspace.json', readOrdinary(sourceProvenance));
   const deploymentFiles = readTree(options.deployment, file => file === 'schema.prisma' || file === 'core.deployment.lock.json'
     || file === 'migrations/migration_lock.toml' || /^migrations\/[^/]+\/migration\.sql$/u.test(file));
   const lock = api.CoreDeploymentLockSchema.parse(JSON.parse(text(deploymentFiles, 'core.deployment.lock.json')));
@@ -573,6 +632,9 @@ function main(args) {
   const result = createRentalHostContext(collectInputs(options)); writeArchive(options.output, result.bytes);
   return { status: 'packaged', aiMode: options.aiMode, ...(result.receipt.mcpEntry ? { mcpEntry: result.receipt.mcpEntry } : {}),
     output: options.output, sha256: result.sha256,
+    deploymentProvenance: { file: result.receipt.deploymentProvenance,
+      sha256: hash(result.files.get(result.receipt.deploymentProvenance)) },
+    ...(result.receipt.sourceProvenance ? { sourceProvenance: result.receipt.sourceProvenance } : {}),
     files: result.files.size, bytes: result.bytes.length, imageBuild: 'not-run', deployment: 'pending' };
 }
 if (require.main === module) {
@@ -580,4 +642,4 @@ if (require.main === module) {
   catch (error) { process.stderr.write((error instanceof Error ? error.message : '独立宿主打包失败') + '\n'); process.exitCode = 1; }
 }
 module.exports = { parseArguments, createRentalHostContext, collectInputs, checkRuntimeClosure,
-  readOrdinary, readTree, createRuntimeVerifier, writeArchive, main };
+  readOrdinary, readTree, createRuntimeVerifier, describeRentalDeployment, requireHostSourceProvenance, writeArchive, main };
