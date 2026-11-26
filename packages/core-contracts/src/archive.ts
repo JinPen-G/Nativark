@@ -64,6 +64,19 @@ export function createCoreArchive(files: ReadonlyMap<string, Uint8Array>): { byt
   return { bytes, sha256: digest(bytes) };
 }
 
+/** 已展开的固定包按原 USTAR 重制。旧 Windows/Linux 只允许 gzip OS 字节不同，仍匹配原锁的完整 SHA-256。 */
+export function matchesInstalledCoreArchive(files: ReadonlyMap<string, Uint8Array>, expectedSha256: string): boolean {
+  CoreArtifactHashSchema.parse(expectedSha256);
+  const { bytes, sha256 } = createCoreArchive(files);
+  if (sha256 === expectedSha256) return true;
+  const level9Header = [0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 2];
+  const windowsOs = 10, linuxOs = 3, osOffset = level9Header.length;
+  const os = bytes[osOffset];
+  if ((os !== linuxOs && os !== windowsOs) || bytes.length < 18 || !level9Header.every((value, index) => bytes[index] === value)) return false;
+  return createHash("sha256").update(bytes.subarray(0, osOffset)).update(Buffer.from([os === linuxOs ? windowsOs : linuxOs]))
+    .update(bytes.subarray(osOffset + 1)).digest("hex") === expectedSha256;
+}
+
 export function readCoreArchive(bytes: Uint8Array, expectedSha256: string): CoreArchive {
   CoreArtifactHashSchema.parse(expectedSha256);
   if (bytes.length > CORE_ARCHIVE_LIMITS.totalBytes) throw new Error("压缩包超过大小上限");

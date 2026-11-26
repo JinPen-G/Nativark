@@ -11,7 +11,7 @@ import {
   type CoreDeploymentLock, type CoreHttpContribution, type CoreManifest,
   type CoreOpenApiContribution, type CoreServerContribution
 } from "@rental-os/core-contracts";
-import { CORE_ARCHIVE_LIMITS, createCoreArchive } from "@rental-os/core-contracts/archive";
+import { CORE_ARCHIVE_LIMITS, matchesInstalledCoreArchive } from "@rental-os/core-contracts/archive";
 import { corePrismaMigrationName } from "@rental-os/core-contracts/deployment";
 import { requireCorePackagePin } from "@rental-os/core-contracts/install";
 import { readCorePackageFiles } from "@rental-os/core-contracts/package";
@@ -171,7 +171,7 @@ export function prepareRentalAdditionalCores<Binding = unknown>(
       throw new Error("额外 Core entry 或完整清单与固定发行不一致");
     // 第二次读取所消费的 JSON/迁移时仍核整包摘要，避免首查后换字节混用两份发行。
     const files = readCorePackageFiles(actual.root, CORE_ARCHIVE_LIMITS.fileBytes, CORE_ARCHIVE_LIMITS.totalBytes);
-    if (createCoreArchive(files).sha256 !== pin.sha256) throw new Error("额外 Core 固定包在准备期间发生变化");
+    if (!matchesInstalledCoreArchive(files, pin.sha256)) throw new Error("额外 Core 固定包在准备期间发生变化");
     const manifest = freeze(actual.manifest);
     requireServerExport(files, manifest);
     if (!setup.dataPlan || !isDeepStrictEqual(setup.dataPlan.data, manifest.data)

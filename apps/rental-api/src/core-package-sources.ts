@@ -8,7 +8,7 @@ import {
   CORE_CONTRACT_VERSION, CoreDeploymentLockSchema, coreDeploymentHostVersions,
   type CoreDataObservation, type CoreDeploymentLock, type CoreManifest, type CorePlatformDataCapabilityRelease
 } from "@rental-os/core-contracts";
-import { CORE_ARCHIVE_LIMITS, createCoreArchive, readCoreArchive } from "@rental-os/core-contracts/archive";
+import { CORE_ARCHIVE_LIMITS, matchesInstalledCoreArchive, readCoreArchive } from "@rental-os/core-contracts/archive";
 import { readCorePackageFiles } from "@rental-os/core-contracts/package";
 import { readPlatformDataCapabilityPackage } from "@rental-os/core-contracts/platform-data-package";
 import {
@@ -109,7 +109,7 @@ export function createRentalCorePackageSources(input: RentalCorePackageSourcesIn
       const current = rentalPackage();
       requireRentalRoot(current);
       rentalFiles = readCorePackageFiles(current.root, CORE_ARCHIVE_LIMITS.fileBytes, CORE_ARCHIVE_LIMITS.totalBytes);
-      if (createCoreArchive(rentalFiles).sha256 !== pin.sha256)
+      if (!matchesInstalledCoreArchive(rentalFiles, pin.sha256))
         throw new Error("Rental 包材料在读取期间已变化");
     }
     const coreFiles = new Map([[pin.manifest.id, rentalFiles]]);
@@ -117,7 +117,7 @@ export function createRentalCorePackageSources(input: RentalCorePackageSourcesIn
       const expected = extraPins.find(pin => pin.manifest.id === current.manifest.id)!;
       requireCorePackagePin(current.root, expected, coreDeploymentHostVersions(lock));
       const files = readCorePackageFiles(current.root, CORE_ARCHIVE_LIMITS.fileBytes, CORE_ARCHIVE_LIMITS.totalBytes);
-      if (createCoreArchive(files).sha256 !== expected.sha256) throw new Error("额外 Core 包材料在读取期间已变化");
+      if (!matchesInstalledCoreArchive(files, expected.sha256)) throw new Error("额外 Core 包材料在读取期间已变化");
       coreFiles.set(expected.manifest.id, files);
     }
 

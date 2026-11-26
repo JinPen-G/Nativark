@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import { closeSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, renameSync, rmdirSync, unlinkSync, writeFileSync, type Stats } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep, toNamespacedPath } from "node:path";
-import { CORE_ARCHIVE_LIMITS, createCoreArchive, readCoreArchive } from "./archive";
+import { CORE_ARCHIVE_LIMITS, createCoreArchive, matchesInstalledCoreArchive, readCoreArchive } from "./archive";
 import type { CoreHostVersions } from "./compatibility";
 import type { CoreManifest } from "./manifest";
 import { CorePackagePinSchema, type CoreDeploymentLock } from "./update";
@@ -53,24 +53,29 @@ function readOrdinaryFile(file: string, maxBytes: number): Buffer {
   } finally { closeSync(descriptor); }
 }
 
-/** 返回完整标准包字节；旧路径例外仅由实际宿主传入，省略时仍强制 Core 命名空间。 */
-export function packCoreDirectory(directory: string, host?: CoreHostVersions, legacyApiRoutes: readonly string[] = []) {
-  ordinaryDirectory(directory);
+function readCheckedCoreDirectory(directory: string, host: CoreHostVersions | undefined, legacyApiRoutes: readonly string[]) {
   const files = readCorePackageFiles(directory, CORE_ARCHIVE_LIMITS.fileBytes, CORE_ARCHIVE_LIMITS.totalBytes);
   const inspected = inspectCorePackageFiles(files, host, legacyApiRoutes);
   if (!inspected.ok) throw new Error(inspected.issues.map(issue => `${issue.file}:${issue.field ?? ""} [${issue.code}] ${issue.message}`).join("\n"));
-  return { ...createCoreArchive(files), manifest: inspected.manifest! };
+  return { files, manifest: inspected.manifest! };
+}
+
+/** 返回完整标准包字节；旧路径例外仅由实际宿主传入，省略时仍强制 Core 命名空间。 */
+export function packCoreDirectory(directory: string, host?: CoreHostVersions, legacyApiRoutes: readonly string[] = []) {
+  ordinaryDirectory(directory);
+  const { files, manifest } = readCheckedCoreDirectory(directory, host, legacyApiRoutes);
+  return { ...createCoreArchive(files), manifest };
 }
 
 /** 宿主在构建/运行前核定实际已安装标准包，不接受仅有同版本声明的不同字节。 */
 export function requireCorePackagePin(directory: string, input: CoreDeploymentLock["cores"][number], host: CoreHostVersions,
   legacyApiRoutes: readonly string[] = []) {
   const pin = CorePackagePinSchema.parse(input), root = ordinaryDirectory(directory);
-  const packed = packCoreDirectory(root, host, legacyApiRoutes), manifest = packed.manifest;
+  const { files, manifest } = readCheckedCoreDirectory(root, host, legacyApiRoutes);
   if (manifest.id !== pin.manifest.id || manifest.version !== pin.manifest.version
     || manifest.source.repository !== pin.manifest.source.repository || manifest.source.commit !== pin.manifest.source.commit)
     throw new Error("实际Core包的标识、版本或来源与部署锁不一致");
-  if (packed.sha256 !== pin.sha256) throw new Error("实际Core包字节与锁定摘要不一致，先重新核对待部署组合");
+  if (!matchesInstalledCoreArchive(files, pin.sha256)) throw new Error("实际Core包字节与锁定摘要不一致，先重新核对待部署组合");
   return { root, manifest };
 }
 
