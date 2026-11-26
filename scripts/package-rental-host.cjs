@@ -124,10 +124,10 @@ function requireMcpEntry(entry, host) {
 }
 
 /** 只接受源入口真正调用原bootstrap；单独导出函数不会在Node启动时执行。 */
-function requireMcpStartup(files, entry, ts) {
+function requireMcpStartup(files, entry, ts, fresh = false) {
   const tree = ts.createSourceFile(entry, text(files, entry), ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
   const names = new Set(), spaces = new Set();
-  const bootstraps = new Set(['bootstrapRentalAiMcp', 'bootstrapRentalOriginalAiMcp']);
+  const bootstraps = new Set(fresh ? ['bootstrapFreshRentalMcp'] : ['bootstrapRentalAiMcp', 'bootstrapRentalOriginalAiMcp']);
   const isBootstrap = value => value === '@rental-os/rental-api/mcp-bootstrap' || /^\.\/mcp-bootstrap(?:\.js)?$/u.test(value);
   for (const statement of tree.statements) {
     if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier) && isBootstrap(statement.moduleSpecifier.text)) {
@@ -183,8 +183,9 @@ function workspaceExport(metadata, specifier, mode = 'require') {
   return target.replace(/^\.\//u, '');
 }
 
-/** MCP镜像只执行AI服务包；去掉类型条件后才省略声明，避免留下悬空正式出口。
- * 固定Core/AI数据包与公共六包仍完整保留，归档资源上限不扩大。 */
+/** A runtime image does not compile clients against the AI server SDK. Strip
+ * declaration-only conditions from its runtime manifest with those declarations.
+ * Keep the fixed Core/data packages and public platform build byte-for-byte. */
 function runtimeOnlyMetadata(metadata) {
   const result = { ...metadata };
   delete result.types; delete result.typings; delete result.typesVersions;
@@ -271,7 +272,7 @@ function checkRuntimeClosure(files, workspaces, lock, entry, ts, options = {}) {
   return { files: seen.size, resolutions, clients: [...clients].sort(), runtimePeers: [...runtimePeers.values()] };
 }
 
-function dockerfile(mode, entry, freshAi = false) {
+function dockerfile(mode, entry, freshAi = false, freshMcp = false) {
   return `# 从本打包上下文构建；不复制作者 node_modules、Windows 引擎或环境文件。\n` +
     `FROM node:${targetNodeVersion}-bookworm-slim AS base\n` +
     `RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates openssl && rm -rf /var/lib/apt/lists/*\n` +
@@ -281,6 +282,7 @@ function dockerfile(mode, entry, freshAi = false) {
     `    DATABASE_URL=mysql://offline:offline@127.0.0.1:1/rental_os_offline node node_modules/prisma/build/index.js generate --schema apps/rental-api/prisma-deployment/schema.prisma\n` +
     `FROM base AS runtime\nENV NODE_ENV=production RENTAL_AI_MODE=${mode} RENTAL_DEPLOYMENT_LOCK=/app/apps/rental-api/prisma-deployment/core.deployment.lock.json\n` +
     (freshAi ? `ENV RENTAL_PUBLIC_AI_DATA_PACKAGE_DIR=/app/public-ai-data\n` : '') +
+    (freshMcp ? `ENV RENTAL_MCP_DATA_PACKAGE_DIR=/app/packages/mcp-server\n` : '') +
     `COPY . .\nRUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund\n` +
     `COPY --from=clients /app/apps/platform-api/generated/client ./apps/platform-api/generated/client\n` +
     `COPY --from=clients /app/apps/rental-api/generated/client ./apps/rental-api/generated/client\n` +
@@ -423,8 +425,9 @@ function requireSourceProvenance(bytes, npmLock, lock, host, aiMode, mcpEntry, m
     || source.platform.version !== lock.platform.versions.platform
     || source.npmLocks?.projected?.sha256 !== hash(npmLock))
     throw Error('双仓发行源码、宿主选择或原 npm 投影锁与准备材料不一致');
-  // 当前正式准备器只交付 AI 数据能力，MCP 所用五份 SQL 尚无同锁的数据贡献。
-  if (mcpEntry) throw Error('正式双仓 MCP 发行缺少已锁定的 MCP 数据贡献和原账适配');
+  // V2 MCP has a fresh development path only. It cannot enter the release updater.
+  if (mcpEntry && (mode !== 'development' || !freshAi || !lock.dataCapabilities?.some(item => item.id === 'mcp')))
+    throw Error('当前双仓 MCP 仅接受具备锁定原账的新装开发组合');
   return source;
 }
 
@@ -527,8 +530,33 @@ function publicizeFreshAiDeclarations(build) {
   }
 }
 
+/** Read metadata from the actual ESM emit; the data verifier itself is the only
+ * MCP module evaluated at packaging time. The distributed bytes stay ESM. */
+function prepareFreshMcpData(build, workspace, absolute) {
+  const directory = 'packages/mcp-server';
+  const manifest = JSON.parse(text(workspace.files, directory + '/package.json'));
+  const originals = new Map(['package.json', 'README.md', 'LICENSE', ...manifest.files.filter(file => file !== 'dist')]
+    .map(file => [file, workspace.files.get(directory + '/' + file) ?? (file === 'LICENSE' ? workspace.files.get('LICENSE') : undefined)]));
+  for (const [file, content] of build.outputs) if (file.startsWith(absolute(directory + '/dist') + '/'))
+    originals.set(file.slice(absolute(directory).length + 1), Buffer.from(content));
+  const output = build.exported('@rental-os/mcp-server/data-capability', true);
+  const module = { exports: {} };
+  const read = name => {
+    if (name === 'node:crypto' || name === 'node:util') return require(name);
+    if (['@rental-os/core-contracts', '@rental-os/core-contracts/archive', '@rental-os/core-contracts/platform-data-package'].includes(name))
+      return build.load(build.exported(name, true));
+    throw Error('MCP 数据材料不应加载运行模块：' + name);
+  };
+  const verified = build.ts.transpileModule(build.outputs.get(output), { compilerOptions: { target: build.ts.ScriptTarget.ES2022,
+    module: build.ts.ModuleKind.CommonJS } }).outputText;
+  require('node:vm').compileFunction(verified, ['require', 'module', 'exports'], { filename: output })(read, module, module.exports);
+  const release = module.exports.createMcpDataRelease({ files: originals, source: workspace.platform.source });
+  module.exports.readMcpDataPackage(originals, release);
+  return { files: originals, release };
+}
+
 function createRentalHostContext(input) {
-  const { aiMode, sourceFiles, platformFiles, rentalFiles, ticketsFiles, aiFiles, deploymentFiles, ts, selections, freshAi } = input;
+  const { aiMode, sourceFiles, platformFiles, rentalFiles, ticketsFiles, aiFiles, mcpFiles, deploymentFiles, ts, selections, freshAi } = input;
   const sourceProvenanceBytes = sourceFiles.get(sourceProvenanceFile);
   const fixed = (sourceFiles.has(sourceProvenanceFile) || trustedBuilds.has(sourceFiles)) && requireFixedRuntime(sourceFiles, sourceProvenanceBytes);
   const development = fixed?.mode === 'development';
@@ -540,8 +568,10 @@ function createRentalHostContext(input) {
   const host = input.host ?? 'rental', directory = rentalHostDirectory(host), multi = host === 'example-multi-core';
   if (!['enabled', 'disabled'].includes(aiMode)) throw Error('须明确选择宿主 AI 模式');
   const mcpEntry = input.mcpEntry === undefined ? undefined : requireMcpEntry(input.mcpEntry, host);
+  const freshMcp = Boolean(freshAi && mcpEntry);
   if (mcpEntry && aiMode !== 'enabled') throw Error('MCP入口须选择同一AI数据与Runtime');
-  if (freshAi && (!fixed || !development || host !== 'rental' || aiMode !== 'enabled' || mcpEntry || !aiFiles))
+  if (freshAi && (!fixed || !development || host !== 'rental' || aiMode !== 'enabled' || !aiFiles)
+    || freshMcp !== Boolean(mcpFiles))
     throw Error('v2 只接受同次固定双仓编译的单 Rental 新装开发组合');
   const lockValue = JSON.parse(text(deploymentFiles, 'core.deployment.lock.json'));
   const phased = freshAi ? api.CorePhasedMigrationLockSchema.parse(lockValue) : undefined;
@@ -550,12 +580,14 @@ function createRentalHostContext(input) {
     throw Error(`Rental 宿主锁须与实际合同和目标 Node ${targetNodeVersion} 一致`);
   const rentalPin = lock.cores.find(pin => pin.manifest.id === 'rental');
   const ticketsPin = lock.cores.find(pin => pin.manifest.id === 'example-tickets');
+  const aiRelease = lock.dataCapabilities?.find(item => item.id === 'ai-native');
+  const mcpRelease = lock.dataCapabilities?.find(item => item.id === 'mcp');
   if (!rentalPin || lock.cores.length !== (multi ? 2 : 1) || multi !== Boolean(ticketsFiles)
     || multi && !ticketsPin
-    || (lock.dataCapabilities?.length || 0) !== (aiMode === 'enabled' ? 1 : 0)
-    || aiMode === 'enabled' && lock.dataCapabilities[0].id !== 'ai-native'
+    || (lock.dataCapabilities?.length || 0) !== (aiMode === 'enabled' ? freshMcp ? 2 : 1 : 0)
+    || (aiMode === 'enabled') !== Boolean(aiRelease) || freshMcp !== Boolean(mcpRelease)
     || (aiMode === 'enabled') !== Boolean(aiFiles)) throw Error('部署锁、固定包与显式 AI 选择不一致');
-  if (development && (host !== 'rental' || !freshAi && aiMode !== 'disabled' || mcpEntry))
+  if (development && (host !== 'rental' || !freshAi && aiMode !== 'disabled' || mcpEntry && !freshMcp))
     throw Error('开发运行包只支持单 Rental 普通或明确的新装 AI 宿主');
   if (sourceProvenanceBytes) requireSourceProvenance(sourceProvenanceBytes, sourceFiles.get('package-lock.json'), lock, host, aiMode, mcpEntry,
     development ? 'development' : 'release', Boolean(phased));
@@ -568,8 +600,9 @@ function createRentalHostContext(input) {
       sql: sourceFiles.get('apps/platform-api/' + platform.data.migrations[index].file) })),
     ...(multi ? { additionalCores: [{ pin: ticketsPin, files: ticketsFiles }] } : {}) };
   const expected = phased ? fixed.createFreshDeployment({ ...baseInput,
-    publicAi: { release: lock.dataCapabilities[0], files: aiFiles }, extension: freshAi })
-    : api.createRentalDeploymentFiles({ ...baseInput, ...(aiFiles ? { ai: { release: lock.dataCapabilities[0], files: aiFiles } } : {}) });
+    publicAi: { release: aiRelease, files: aiFiles }, extension: freshAi,
+    ...(freshMcp ? { mcp: { release: mcpRelease, files: mcpFiles } } : {}) })
+    : api.createRentalDeploymentFiles({ ...baseInput, ...(aiFiles ? { ai: { release: aiRelease, files: aiFiles } } : {}) });
   if (!isDeepStrictEqual(expected.lock, phased ?? lock) || expected.files.size !== deploymentFiles.size)
     throw Error('部署材料与原准备结果不一致');
   for (const [file, bytes] of expected.files) if (!deploymentFiles.has(file) || !Buffer.from(bytes).equals(deploymentFiles.get(file)))
@@ -597,20 +630,23 @@ function createRentalHostContext(input) {
     throw Error('宿主与固定底座的原依赖锁不一致：' + file);
   const fixedPackages = new Map([['packages/rental-core', rentalFiles],
     ...(ticketsFiles ? [['packages/example-tickets-core', ticketsFiles]] : []),
+    ...(mcpFiles ? [['packages/mcp-server', mcpFiles]] : []),
     ...(aiFiles && !phased ? [['packages/ai-native-data', aiFiles]] : [])]);
   const workspaces = selectWorkspaces(originalLock, directory => JSON.parse(text(
     fixedPackages.get(directory) ?? (publicDirectories.includes(directory) ? platformFiles : sourceFiles),
     fixedPackages.has(directory) ? 'package.json' : directory + '/package.json')), aiMode, host, { mcp: Boolean(mcpEntry) });
   for (const directory of fixedPackages.keys()) if (!workspaces.has(directory))
     throw Error('固定 Core 包不在实际宿主依赖闭包：' + directory);
+  const aiServerRuntimeOnly = Boolean(phased || mcpEntry);
   const files = new Map();
   for (const [directory] of workspaces) {
     const fixed = fixedPackages.get(directory);
     if (fixed) for (const [file, bytes] of fixed) files.set(directory + '/' + file, bytes);
     else for (const [file, bytes] of sourceFiles) if (file.startsWith(directory + '/')) {
       const relative = file.slice(directory.length + 1);
-      if (relative.startsWith('dist-mcp/') && !mcpEntry) continue;
-      if (mcpEntry && directory === 'packages/ai-native-server' && relative.endsWith('.d.ts')) continue;
+      if ((relative.startsWith('dist-mcp/') && !mcpEntry)
+        || (freshMcp && directory === 'apps/rental-api' && relative.startsWith('dist-ai/'))) continue;
+      if (aiServerRuntimeOnly && directory === 'packages/ai-native-server' && relative.endsWith('.d.ts')) continue;
       if (['apps/rental-api', 'apps/example-multi-core-api'].includes(directory)
         && aiMode === 'disabled' && relative.startsWith('dist-ai/')) continue;
       if (['package.json', 'README.md', 'LICENSE'].includes(relative) || /^dist(?:-[a-z0-9-]+)?\/.*\.(?:js|cjs|json|d\.ts)$/u.test(relative)
@@ -622,9 +658,10 @@ function createRentalHostContext(input) {
     if (publicDirectories.includes(directory) && files.has(directory + '/README.md'))
       files.set(directory + '/README.md', Buffer.from(text(platformFiles, directory + '/README.md')));
     if (!files.has(directory + '/LICENSE')) files.set(directory + '/LICENSE', Buffer.from(text(sourceFiles, 'LICENSE')));
-    if (mcpEntry && directory === 'packages/ai-native-server')
+    if (aiServerRuntimeOnly && directory === 'packages/ai-native-server')
       files.set(directory + '/package.json', json(runtimeOnlyMetadata(workspaces.get(directory))));
   }
+  const runtimePackageFiles = files.size;
   for (const [file, bytes] of deploymentFiles) files.set('apps/rental-api/prisma-deployment/' + file, bytes);
   if (phased) {
     for (const [file, bytes] of freshAi.files) {
@@ -639,17 +676,19 @@ function createRentalHostContext(input) {
   let buildProvenance;
   if (fixed) {
     const bytes = json({ ...fixed.evidence, files: fixed.evidence.files.filter(({ file }) => files.has(file)
-      && ![...fixedPackages.keys()].some(directory => file.startsWith(directory + '/'))) });
+      && ![...fixedPackages.keys()].some(directory => file.startsWith(directory + '/')
+        && (!freshMcp || directory !== 'packages/mcp-server'))) });
     files.set(hostBuildFile, bytes);
     buildProvenance = { file: hostBuildFile, sha256: hash(bytes) };
   }
   files.set('LICENSE', Buffer.from(text(sourceFiles, 'LICENSE')));
   const entry = mcpEntry ?? directory + (phased ? '/dist-ai/ai-fresh-main.js' : aiMode === 'enabled' ? '/dist-ai/ai-main.js' : '/dist/main.js');
-  if (mcpEntry) requireMcpStartup(files, entry, ts);
+  if (mcpEntry) requireMcpStartup(files, entry, ts, freshMcp);
   const runtime = checkRuntimeClosure(files, workspaces, originalLock, entry, ts, { moduleImports: Boolean(mcpEntry) });
   if (phased) {
-    const initialization = checkRuntimeClosure(files, workspaces, originalLock, directory + '/dist-ai/ai-fresh-initialize.js', ts);
-    runtime.initialization = { entry: directory + '/dist-ai/ai-fresh-initialize.js', files: initialization.files };
+    const initializationEntry = directory + (freshMcp ? '/dist-mcp/mcp-fresh-initialize.js' : '/dist-ai/ai-fresh-initialize.js');
+    const initialization = checkRuntimeClosure(files, workspaces, originalLock, initializationEntry, ts, { moduleImports: freshMcp });
+    runtime.initialization = { entry: initializationEntry, files: initialization.files };
     runtime.resolutions = [...runtime.resolutions, ...initialization.resolutions];
     runtime.runtimePeers = [...new Map([...runtime.runtimePeers, ...initialization.runtimePeers]
       .map(peer => [peer.owner + ':' + peer.name, peer])).values()];
@@ -673,7 +712,7 @@ function createRentalHostContext(input) {
   requireMatchingPublicRuntime(sourceFiles, platformFiles, platformBuild);
   for (const [file, bytes] of platformBuild.generated) files.set(file, bytes);
   files.set('package.json', json(projected.root)); files.set('package-lock.json', json(projected.lock));
-  files.set('Dockerfile', Buffer.from(dockerfile(aiMode, entry, Boolean(phased))));
+  files.set('Dockerfile', Buffer.from(dockerfile(aiMode, entry, Boolean(phased), freshMcp)));
   files.set('.dockerignore', Buffer.from('**/node_modules\n**/generated\n**/.git\n**/.env\n**/.env.*\ndocs\noutput\n'));
   files.set('verify-runtime.cjs', Buffer.from(createRuntimeVerifier('rental-host.context.json', Boolean(mcpEntry))));
   files.set('README.md', Buffer.from('# 独立 Rental 宿主镜像上下文\n\n' +
@@ -682,13 +721,16 @@ function createRentalHostContext(input) {
       '部署方配置专用 MySQL 的 `DATABASE_URL` 和 `AUTH_TOKEN_SECRET`，以 `apps/rental-api/prisma-deployment/schema.prisma` 执行 Prisma 5.22 迁移；' +
       '设置初始口令后执行 `node apps/platform-api/dist/initialize.js`。' +
       `设置 \`RENTAL_AI_MODE=${aiMode}\` 和指向随包 \`apps/rental-api/prisma-deployment/core.deployment.lock.json\` 的绝对 \`RENTAL_DEPLOYMENT_LOCK\`，` +
-      (phased ? '设置指向随包 `public-ai-data` 的绝对 `RENTAL_PUBLIC_AI_DATA_PACKAGE_DIR`，执行 `node apps/rental-api/dist-ai/ai-fresh-initialize.js` 登记内置品类。' : '') +
+      (phased ? '设置指向随包 `public-ai-data` 的绝对 `RENTAL_PUBLIC_AI_DATA_PACKAGE_DIR`。' +
+        (freshMcp ? '设置指向同一安装中 `packages/mcp-server` 的绝对 `RENTAL_MCP_DATA_PACKAGE_DIR`。' : '') +
+        `执行 \`node ${runtime.initialization.entry}\` 登记内置品类。` : '') +
       `运行 \`node ${entry}\`。` +
       '登录后依次登记部署准入、授权测试租户、分配成员和绑定 Core。\n\n' : '') +
     '本目录消费固定 Rental 包、所选 AI 数据包及原 prepared 锁/迁移。rental-host.context.json 记录实际字节摘要；不将作者工作区或包版本名当作已部署来源。\n\n' +
     '在目标 Linux 平台执行 `docker build --target runtime -t rental-host .`。构建按原 npm 锁安装依赖，并在镜像内用 Prisma 5.22.0 分别生成公共和所选宿主 Client；不会复制 Windows 引擎或默认 Client。外部镜像、apt/npm/引擎下载与实际构建须在部署环境核验。\n\n' +
     `镜像启动入口固定为 ${entry}，AI=${aiMode}。运行前由部署负责人配置 DATABASE_URL、AUTH_TOKEN_SECRET 及必要的原集成配置，沿原迁移账/物理观察办理数据库准备。候选材料位于 apps/rental-api/prisma-deployment；不得用它替代迁移收据。\n\n` +
-    (mcpEntry ? 'MCP由该第一方源码入口显式调用bootstrapRentalAiMcp或bootstrapRentalOriginalAiMcp；原Auth/Core/Native、AS就绪、工具发布及字段释放须由真实owner供给。缺依赖拒绝启动或读取，包不自动制造批准。Node预检按实际import条件解析ESM，不执行目标模块。\n\n' : '') +
+    (freshMcp ? '此入口在专用空库核 23 条原迁移和实际结构后启动 Rental/AI，未提供首方授权来源时不挂 MCP HTTP。业务接入由第一方代码显式调用 `bootstrapFreshRentalMcp(sources)`，复用原 Auth/Core/Native；AS、当前发布、字段和计量均须原权威。\n\n'
+      : mcpEntry ? 'MCP由该第一方源码入口显式调用bootstrapRentalAiMcp或bootstrapRentalOriginalAiMcp；原Auth/Core/Native、AS就绪、工具发布及字段释放须由真实owner供给。缺依赖拒绝启动或读取，包不自动制造批准。Node预检按实际import条件解析ESM，不执行目标模块。\n\n' : '') +
     '版本与候选材料读取另须配置 CORE_PACKAGE_STORAGE_ROOT 为受管绝对目录，在其 archives/index.json 登记同一固定底座完整源码 .tgz 及发行资料；CORE_PLATFORM_PACKAGE_REFERENCE 选取其中与当前启动锁 platform 完全一致的引用。缺配置或原材料保持不可用，已有归档或发行不匹配时拒绝读取。[宿主配置](apps/rental-api/README.md)\n\n' +
     '兼容程序恢复须使用上次已验证的完整运行包及原锁，同时保留并选取该锁对应的完整底座归档和原登记，先核当前数据与原迁移链仍符合该锁。索引成功读取后固定于本进程，变更登记或配置选择须重新启动装配后采用；实际归档每次读取仍核原路径和字节。运行包和原锁不代替数据兼容、当前授权与原操作收据的实际验证。\n\n' +
     '打包和镜像预检均不启动应用、连接数据库、执行迁移或供应商动作。当前 imageBuild=not-run、deployment=pending；真实安装、镜像、数据库及业务验收分别办理。\n'));
@@ -700,22 +742,28 @@ function createRentalHostContext(input) {
   const receipt = { format: 'rental-host-context-1', host, aiMode, imageBuild: 'not-run', deployment: 'pending',
     ...(development ? { sourceMode: 'development', releaseApproved: false, serverUpdateEligible: false } : {}),
     ...(phased ? { installation: 'fresh-ai', ledgerVersion: 2 } : {}),
-    mcpMode: mcpEntry ? 'enabled' : 'disabled', ...(mcpEntry ? { mcpEntry } : {}),
+    mcpMode: freshMcp ? 'data-only' : mcpEntry ? 'enabled' : 'disabled', ...(mcpEntry ? { mcpEntry } : {}),
     deploymentProvenance: 'rental-host.deployment-provenance.json',
     ...(sourceProvenanceBytes ? { sourceProvenance: { file: sourceProvenanceFile, sha256: hash(sourceProvenanceBytes) } } : {}),
     ...(buildProvenance ? { buildProvenance } : {}),
     target: 'linux-bookworm', prismaVersion: '5.22.0', entry, clients,
     deploymentLockSha256: hash(deploymentFiles.get('core.deployment.lock.json')), coreSha256: rentalPin.sha256,
     ...(multi ? { additionalCorePackages: [{ id: ticketsPin.manifest.id, sha256: ticketsPin.sha256 }] } : {}),
-    ...(aiFiles ? { aiDataSha256: lock.dataCapabilities[0].sha256 } : {}),
+    ...(aiFiles ? { aiDataSha256: aiRelease.sha256 } : {}),
+    ...(mcpFiles ? { mcpDataSha256: mcpRelease.sha256, mcpDataDirectory: 'packages/mcp-server' } : {}),
+    ...(phased ? { omittedAiServerDeclarations: fixed.evidence.files.filter(({ file }) =>
+      file.startsWith('packages/ai-native-server/') && file.endsWith('.d.ts')).length } : {}),
     originalNpmLockSha256: hash(sourceFiles.get('package-lock.json')), platformBuild: platformBuild.evidence, runtime,
     files: [...files].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([file, bytes]) => ({ file, sha256: hash(bytes) })) };
   files.set('rental-host.context.json', json(receipt));
+  if (files.size > api.CORE_ARCHIVE_LIMITS.files)
+    throw Error(`Rental 宿主归档 ${files.size} 文件超过上限 ${api.CORE_ARCHIVE_LIMITS.files}（工作区运行文件 ${runtimePackageFiles}）`);
   return { files, receipt, ...api.createCoreArchive(files) };
 }
 
 /** Build an untagged development candidate without relaxing the release CLI. */
-async function prepareRentalDevelopmentHost({ repo, repository, commit, coreRepo, coreCommit, deps, freshAi = false }) {
+async function prepareRentalDevelopmentHost({ repo, repository, commit, coreRepo, coreCommit, deps, freshAi = false, mcp = false }) {
+  if (mcp && !freshAi) throw Error('新装 MCP 必须显式选择 --fresh-ai');
   const { compileFixedPlatformContracts, createRentalDevelopmentWorkspace } = require('./prepare-rental-workspace.cjs');
   const { createBuild, verifyContracts } = require('./check-rental-package-build.cjs');
   const { snapshotFromFiles } = require('./rental-build-snapshot.cjs');
@@ -724,8 +772,9 @@ async function prepareRentalDevelopmentHost({ repo, repository, commit, coreRepo
   const contracts = compileFixedPlatformContracts(repo, commit, deps, true);
   const loadContract = name => contracts.load(contracts.exported('@rental-os/core-contracts' + name, true));
   const platformApi = { ...loadContract(''), ...loadContract('/platform-source'), ...loadContract('/archive') };
-  const workspace = await createRentalDevelopmentWorkspace({ repo, repository, commit, coreRepo, coreCommit,
-    mode: 'development', profile: 'host', ...(freshAi ? { ai: true, freshAi: true } : {}) }, platformApi);
+  const options = { repo, repository, commit, coreRepo, coreCommit, mode: 'development', profile: 'host',
+    ...(freshAi ? { ai: true, freshAi: true, mcp } : {}) };
+  const workspace = await createRentalDevelopmentWorkspace(options, platformApi);
   const sourceBytes = workspace.files.get(sourceProvenanceFile);
   const absolute = file => path.resolve(root, file).split(path.sep).join('/');
   const build = createBuild(deps, { snapshot: snapshotFromFiles(commit,
@@ -735,7 +784,7 @@ async function prepareRentalDevelopmentHost({ repo, repository, commit, coreRepo
   verifyContracts(build);
   if (freshAi) build.compile('packages/core-contracts/tsconfig.json');
   const schemas = freshAi ? selectedPrisma(build) : verifyServer(build);
-  let publicAi, extension;
+  let publicAi, extension, mcpData;
   if (freshAi) {
     for (const name of ['platform-server', 'core-host', 'platform-core-host', 'ai-native-data']) build.compile(`packages/${name}/tsconfig.json`);
     const load = name => build.load(build.exported(`@rental-os/${name}`, true));
@@ -762,7 +811,8 @@ async function prepareRentalDevelopmentHost({ repo, repository, commit, coreRepo
     schemas.schema = adapter.composeRentalPublicAiPrismaSchema(schemas.publicSchema, data.createPublicAiDataContribution(publicAi.files),
       text(workspace.files, 'packages/rental-core/prisma/schema.prisma'), adapter.readRentalAiDataExtension(extension.files));
     generatePrismaDeclarations(build, [['rental', schemas.schema]]);
-    for (const directory of ['packages/rental-core','packages/ai-native-server','apps/rental-api','apps/rental-admin'])
+    for (const directory of ['packages/rental-core','packages/ai-native-server','apps/rental-api','apps/rental-admin',
+      ...(mcp ? ['packages/rental-mcp-host'] : [])])
       build.selectedClients.set(absolute(directory), { client: absolute('apps/rental-api/generated/client/index.d.ts'), mode: 'rental-ai' });
     build.compile('packages/rental-core/tsconfig.json');
     build.compile('packages/ai-native-server/tsconfig.json');
@@ -772,6 +822,12 @@ async function prepareRentalDevelopmentHost({ repo, repository, commit, coreRepo
   if (freshAi) {
     build.compile('apps/rental-api/tsconfig.ai.json');
     build.compile('apps/rental-admin/tsconfig.json');
+  }
+  if (mcp) {
+    build.compileMcp();
+    mcpData = prepareFreshMcpData(build, workspace, absolute);
+    build.compile('packages/rental-mcp-host/tsconfig.json');
+    build.compile('apps/rental-api/tsconfig.mcp.json');
   }
   verifyNative(build);
   const memory = createMemoryBuild(build);
@@ -790,7 +846,7 @@ async function prepareRentalDevelopmentHost({ repo, repository, commit, coreRepo
     publicSchema: schemas.publicSchema, publicMigrations: platform.migrationNames.map((name, index) => ({ name,
       sql: workspace.platform.files.get('apps/platform-api/' + platform.data.migrations[index].file) })) };
   const createFreshDeployment = freshAi && memory.load(absolute('apps/rental-api/dist-ai/ai-fresh-deployment.js')).createFreshRentalAiDeployment;
-  const deployment = createFreshDeployment ? createFreshDeployment({ ...deploymentInput, publicAi, extension })
+  const deployment = createFreshDeployment ? createFreshDeployment({ ...deploymentInput, publicAi, extension, mcp: mcpData })
     : memory.load(absolute('apps/rental-api/dist/prepare-deployment.js')).createRentalDeploymentFiles(deploymentInput);
   if (!Buffer.from(deployment.files.get('schema.prisma')).equals(Buffer.from(schemas.schema)))
     throw Error('实际部署 schema 和所选编译 Client 的 schema 不一致');
@@ -808,7 +864,8 @@ async function prepareRentalDevelopmentHost({ repo, repository, commit, coreRepo
   if (freshAi) trustedBuilds.get(compiled.sourceFiles).createFreshDeployment = createFreshDeployment;
   return createRentalHostContext({ ...compiled, aiMode: freshAi ? 'enabled' : 'disabled', platformFiles: workspace.platform.files,
     rentalFiles, deploymentFiles: deployment.files, dependencyDirectory: deps,
-    ...(freshAi ? { freshAi: extension, aiFiles: publicAi.files } : {}) });
+    ...(freshAi ? { freshAi: extension, aiFiles: publicAi.files } : {}),
+    ...(mcpData ? { mcpEntry: 'apps/rental-api/dist-mcp/mcp-fresh-main.js', mcpFiles: mcpData.files } : {}) });
 }
 
 function collectInputs(options) {
@@ -952,6 +1009,7 @@ async function packageDevelopment(args) {
   const options = {}, names = { '--repo': 'repo', '--repository': 'repository', '--commit': 'commit',
     '--core-repo': 'coreRepo', '--core-commit': 'coreCommit', '--deps': 'deps', '--output': 'output' };
   if (args[0] === '--fresh-ai') { options.freshAi = true; args = args.slice(1); }
+  if (args[0] === '--mcp') { options.mcp = true; args = args.slice(1); }
   for (let index = 0; index < args.length; index += 2) {
     const flag = args[index], name = names[flag], value = args[index + 1];
     if (!Object.hasOwn(names, flag) || !value || value.startsWith('--') || Object.hasOwn(options, name))

@@ -28,11 +28,13 @@ const supportScripts = [
   'scripts/prepare-selected-prisma-schema.cjs', 'scripts/miniprogram-shared-types.cjs',
   'scripts/miniprogram-ai-runtime.cjs', 'scripts/rental-client-vite.ts',
   'scripts/check-rental-package-build.cjs', 'scripts/rental-build-memory.cjs',
-  'scripts/rental-build-snapshot.cjs', 'scripts/verify-rental-distribution.cjs',
+  'scripts/rental-build-snapshot.cjs', 'scripts/rental-host-lock.cjs', 'scripts/verify-rental-distribution.cjs',
   'scripts/prepare-rental-workspace.cjs',
 ];
 
 const freshAiHostExport = name => ['ai-app-module', 'ai-data-extension'].includes(name.replace(/^\.\//u, ''));
+const freshMcpHostFiles = ['src/mcp-bootstrap.ts', 'src/mcp-composition.ts', 'src/mcp-fresh-initialize.ts',
+  'src/mcp-fresh-main.ts', 'src/mcp-host.ts', 'tsconfig.mcp.json'];
 
 function git(directory, args) {
   return execFileSync('git', ['--no-replace-objects', ...args],
@@ -84,6 +86,17 @@ function mapRentalSource(raw, layout, source) {
       if (raw.has(prefix + 'prisma/ai-extension/.gitattributes') && !files.includes('prisma/ai-extension/.gitattributes'))
         throw Error('新装 AI 扩展须随原始字节属性选装');
     }
+    if (entry.target === 'apps/rental-api' && entry.mcpFiles !== undefined) {
+      const files = entry.mcpFiles;
+      if (!entry.roles.includes('host') || !entry.aiFiles || !Array.isArray(files) || files.length !== freshMcpHostFiles.length
+        || !freshMcpHostFiles.every(file => files.includes(file) && raw.has(prefix + file)
+          && !entry.required.includes(file) && !entry.aiFiles.includes(file)))
+        throw Error('新装 MCP 须逐文件声明固定的独立宿主入口');
+    } else if (entry.mcpFiles !== undefined) throw Error('只有新装 Rental API 可声明 MCP 宿主叶');
+    if (entry.target === 'apps/rental-api' && [...raw.keys()].some(name => name.startsWith(prefix)
+      && /^(?:src\/mcp-[a-z.-]+\.ts|tsconfig\.mcp\.json)$/u.test(name.slice(prefix.length))
+      && !entry.mcpFiles?.includes(name.slice(prefix.length))))
+      throw Error('独立宿主含未声明的 MCP 文件');
     const metadata = JSON.parse(raw.get(prefix + 'package.json').toString('utf8'));
     const expectedName = entry.target === coreDirectory ? '@rental-os/rental-core'
       : '@rental-os/' + entry.target.split('/')[1];
@@ -198,12 +211,15 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
   const required = profile === 'domain' ? [coreDirectory] : ['apps/rental-api', 'apps/rental-admin',
     ...(profile === 'full' ? ['apps/tenant-website', 'apps/enterprise-portal', 'apps/miniprogram', 'apps/staff-miniprogram'] : [])];
   if (options.mcp && !options.ai) throw Error('MCP 开发组合须同时选用 AI');
-  if (options.freshAi && (!options.ai || options.mcp || profile === 'domain'))
-    throw Error('新装 AI 只接受带宿主、不含 MCP 的显式组合');
+  if (options.freshAi && (!options.ai || profile === 'domain'))
+    throw Error('新装 AI 只接受带宿主的显式组合');
   const freshHost = rental.layout.paths.find(entry => entry.target === 'apps/rental-api' && entry.aiFiles);
   if (options.freshAi && (!['src/ai-fresh-main.ts', 'src/ai-fresh-deployment.ts', 'tsconfig.ai.json']
     .every(file => freshHost?.aiFiles.includes(file)) || !freshHost.aiFiles.some(file => /^prisma\/ai-extension\/\d{14}-initial\.sql$/u.test(file))))
     throw Error('固定独立仓缺少新装 AI 宿主或原扩展 SQL，不能从底座补齐');
+  const freshMcp = Boolean(options.freshAi && options.mcp);
+  if (freshMcp && (!freshHost?.mcpFiles || rental.mode !== 'development'))
+    throw Error('新装 MCP 只接受实际提供选装宿主叶的固定双仓开发组合');
   const selectedRoles = ['domain', ...(profile === 'domain' ? [] : ['host']), ...(profile === 'full' ? ['client'] : []),
     ...(options.ai ? ['ai'] : []), ...(options.mcp ? ['mcp'] : [])];
   const selected = rental.layout.paths.filter(entry => entry.roles.some(role => selectedRoles.includes(role))
@@ -233,6 +249,7 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
   for (const [absolute, bytes] of rental.snapshot.files) {
     const relative = path.relative(root, absolute).split(path.sep).join('/');
     if (!options.freshAi && freshHost?.aiFiles.some(file => freshHost.target + '/' + file === relative)) continue;
+    if (!freshMcp && freshHost?.mcpFiles?.some(file => freshHost.target + '/' + file === relative)) continue;
     if (isSource(relative) && selected.some(entry => relative.startsWith(entry.target + '/'))) files.set(relative, bytes);
   }
   const workspaces = new Map();
@@ -251,6 +268,25 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
       for (const name of Object.keys(metadata.typesVersions?.['*'] ?? {})) if (freshAiHostExport(name)) delete metadata.typesVersions['*'][name];
       delete metadata.peerDependencies?.['@rental-os/ai-native-server'];
       delete metadata.peerDependenciesMeta?.['@rental-os/ai-native-server'];
+    }
+    if (freshHost?.target === directory && !freshMcp) {
+      for (const name of Object.keys(metadata.scripts ?? {})) if (/:mcp(?::|$)/u.test(name)) delete metadata.scripts[name];
+      delete metadata.exports?.['./mcp-bootstrap'];
+      delete metadata.typesVersions?.['*']?.['mcp-bootstrap'];
+      for (const name of ['@rental-os/mcp-server', '@rental-os/rental-mcp-host']) {
+        delete metadata.peerDependencies?.[name];
+        delete metadata.peerDependenciesMeta?.[name];
+      }
+    }
+    if (freshMcp && directory === 'apps/rental-api') {
+      // AI declarations and MCP ingress share the selected runtime assembly.
+      for (const name of Object.keys(metadata.exports ?? {})) if (freshAiHostExport(name)) {
+        for (const key of Object.keys(metadata.exports[name]))
+          metadata.exports[name][key] = metadata.exports[name][key].replace('./dist-ai/', './dist-mcp/');
+      }
+      for (const name of Object.keys(metadata.typesVersions?.['*'] ?? {})) if (freshAiHostExport(name))
+        metadata.typesVersions['*'][name] = metadata.typesVersions['*'][name].map(file => file.replace('dist-ai/', 'dist-mcp/'));
+      for (const name of Object.keys(metadata.scripts ?? {})) if (/:ai:fresh$/u.test(name)) delete metadata.scripts[name];
     }
     files.set(packageFile, json(metadata));
     workspaces.set(directory, metadata);
@@ -284,6 +320,8 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
         'check:ai': 'node scripts/check-selected-prisma-types.cjs --mode rental-ai --config apps/rental-api/tsconfig.ai.json',
       } : {}),
       ...(options.freshAi ? { 'build:admin:fresh': 'npm run build:fresh -w @rental-os/rental-admin' } : {}),
+      ...(freshMcp ? { 'build:mcp': 'npm run build:mcp -w @rental-os/rental-api',
+        'check:mcp': 'node scripts/check-selected-prisma-types.cjs --mode rental-ai --config apps/rental-api/tsconfig.mcp.json' } : {}),
     } };
   const originalLockBytes = readBuildSnapshot(options.commit, options.repo, ['package-lock.json'])
     .files.get(slash(path.join(root, 'package-lock.json')));

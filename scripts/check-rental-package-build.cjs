@@ -17,7 +17,8 @@ const inside = (directory, file) => file === directory || file.startsWith(direct
 function createBuild(dependencyDirectory, settings = {}) {
   const deps = slash(dependencyDirectory);
   const requireDeps = createRequire(deps + '/typescript/package.json');
-  const ts = requireDeps('typescript');
+  const compilerPath = settings.compilerPath ?? requireDeps.resolve('typescript');
+  const ts = requireDeps(compilerPath);
   const outputs = new Map(), virtual = new Map(), packages = new Map(), stages = [], runtimeAliases = new Map();
   const selectedClients = new Map();
   let generatedDirectories = new Set();
@@ -53,9 +54,11 @@ function createBuild(dependencyDirectory, settings = {}) {
     try { return samePath(slash(fs.realpathSync(file)), file); } catch { return false; }
   };
   const checkedDependencies = new Map();
+  const compilerRoot = settings.compilerPath && slash(path.dirname(path.dirname(compilerPath)));
   // Only installed, lock-declared third-party packages may bypass the Git
   // snapshot. Workspace links, generated Clients and links to other trees may not.
   const dependencyPath = file => {
+    if (compilerRoot && inside(compilerRoot, file)) return physicalPath(file);
     if (!inside(deps, file) || /(?:^|\/)\.prisma(?:\/|$)/u.test(file) || !physicalPath(file)) return false;
     if (dependencyDirectories.has(file)) return true;
     const relative = 'node_modules/' + file.slice(deps.length + 1);
@@ -77,6 +80,7 @@ function createBuild(dependencyDirectory, settings = {}) {
   const fromSnapshot = file => snapshot && inside(workspaceRoot, file) && !inside(deps, file);
   const sourceRead = file => {
     file = slash(file);
+    if (compilerRoot && inside(compilerRoot, file)) return dependencyFile(file) ? ts.sys.readFile(file) : undefined;
     if (inside(deps, file)) return dependencyFile(file) ? ts.sys.readFile(file) : undefined;
     return fromSnapshot(file) ? snapshot.files.get(file)?.toString('utf8')
       : inside(workspaceRoot, file) ? ts.sys.readFile(file) : undefined;
@@ -109,7 +113,7 @@ function createBuild(dependencyDirectory, settings = {}) {
   const fileExists = file => {
     file = mapped(file);
     if (/(?:^|\/)\.prisma\/client(?:\/|$)/u.test(file)) return false;
-    return outputs.has(file) || virtual.has(file) || (!generated(file)
+    return outputs.has(file) || virtual.has(file) || (compilerRoot && inside(compilerRoot, file) ? dependencyFile(file) : !generated(file)
       && (inside(deps, file) ? dependencyFile(file) : fromSnapshot(file)
         ? snapshot.files.has(file) : inside(workspaceRoot, file) && ts.sys.fileExists(file)));
   };
@@ -121,6 +125,7 @@ function createBuild(dependencyDirectory, settings = {}) {
   const directoryExists = file => {
     file = mapped(file);
     if (file.endsWith('/node_modules/@rental-os')) return true;
+    if (compilerRoot && inside(compilerRoot, file)) return dependencyPath(file) && ts.sys.directoryExists(file);
     return generatedDirectories.has(file)
       || (inside(deps, file) ? dependencyPath(file) && ts.sys.directoryExists(file)
         : !generated(file + '/_') && (fromSnapshot(file)
@@ -256,7 +261,9 @@ function createBuild(dependencyDirectory, settings = {}) {
     for (const [file, text] of emitted) outputs.set(file, text);
     const stage = { config: configName, roots: parsed.fileNames.length,
       sourceFiles: program.getSourceFiles().filter(file => !file.isDeclarationFile).length,
-      outputs: emitted.size, diagnostics: 0 };
+      outputs: emitted.size, diagnostics: 0,
+      ...(settings.compilerPath ? { compiler: { version: ts.version,
+        sha256: createHash('sha256').update(fs.readFileSync(compilerPath)).digest('hex') } } : {}) };
     stages.push(stage);
     if (!settings.quiet) console.log(JSON.stringify(stage));
     return { program, emitted };
@@ -290,7 +297,21 @@ function createBuild(dependencyDirectory, settings = {}) {
       .runInThisContext()(requireBuilt, module, module.exports, path.dirname(file), file);
     return module.exports;
   }
-  return { ts, outputs, virtual, packages, stages, runtimeAliases, selectedClients, compile, exported, load, requireDeps, deps,
+  function compileMcp() {
+    const directory = slash(path.join(path.dirname(deps), 'packages/mcp-server/node_modules/typescript'));
+    const version = lock.packages['packages/mcp-server/node_modules/typescript']?.version;
+    const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8'));
+    const compiler = path.join(directory, 'lib/typescript.js');
+    if (!physicalPath(directory) || !physicalPath(slash(compiler)) || pkg.name !== 'typescript' || pkg.version !== version)
+      throw Error('MCP 编译器与固定工作区锁不一致');
+    const selected = createBuild(deps, { ...settings, compilerPath: compiler });
+    if (selected.ts.version !== version) throw Error('MCP 实际编译器版本与锁不一致');
+    for (const [file, content] of outputs) selected.outputs.set(file, content);
+    const result = selected.compile('packages/mcp-server/tsconfig.json');
+    for (const [file, content] of result.emitted) outputs.set(file, content);
+    stages.push(selected.stages.at(-1));
+  }
+  return { ts, outputs, virtual, packages, stages, runtimeAliases, selectedClients, compile, compileMcp, exported, load, requireDeps, deps,
     snapshot, sourceRead, readDirectory, quiet: settings.quiet };
 }
 
