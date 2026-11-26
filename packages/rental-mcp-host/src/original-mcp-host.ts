@@ -90,10 +90,10 @@ export function createOriginalMcpHost(
   const catalogGoal = config.catalogGoal === undefined ? undefined : (() => {
     if (typeof mcp.createMcpCatalogGoalControlPlane !== 'function') throw new Error('Original MCP host goal unavailable');
     if (original.catalogGoal === undefined) return mcp.createMcpCatalogGoalControlPlane(config.catalogGoal);
-    if (typeof mcp.captureMcpReadInput !== 'function' || typeof mcp.createPrismaMcpCatalogGoals !== 'function' || mcp.ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION !== 'catalog-admission-1'
+    if (typeof mcp.captureMcpReadInput !== 'function' || typeof mcp.createPrismaMcpCatalogGoals !== 'function'
       || typeof logs.recordOriginalMcpReadGoalAudit !== 'function' || typeof logs.recordOriginalMcpCatalogGoalIntentAudit !== 'function') throw new Error('Original MCP host goal unavailable');
     const pkg: OriginalMcpCatalogGoalPackageExports = { captureMcpReadInput:mcp.captureMcpReadInput,createPrismaMcpCatalogGoals:mcp.createPrismaMcpCatalogGoals,
-      ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION:mcp.ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION,createMcpCatalogGoalControlPlane:mcp.createMcpCatalogGoalControlPlane,
+      createMcpCatalogGoalControlPlane:mcp.createMcpCatalogGoalControlPlane,
       ...(mcp.createPrismaMcpCatalogGoalAdoptions === undefined ? {} : { createPrismaMcpCatalogGoalAdoptions:mcp.createPrismaMcpCatalogGoalAdoptions }) };
     const originalLogs = { recordOriginalMcpReadGoalAudit:logs.recordOriginalMcpReadGoalAudit.bind(logs),recordOriginalMcpCatalogGoalIntentAudit:logs.recordOriginalMcpCatalogGoalIntentAudit.bind(logs),
       ...(logs.recordOriginalMcpCatalogGoalAdoptionAudit === undefined ? {} : { recordOriginalMcpCatalogGoalAdoptionAudit:logs.recordOriginalMcpCatalogGoalAdoptionAudit.bind(logs) }) };

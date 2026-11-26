@@ -1394,7 +1394,8 @@ test("selected MCP Core fences new work and preserves exact Native request recov
     target: { goalId: '11111111-1111-1111-1111-111111111111', goalRevision: 1, grantId: 'grant-a',
       subject: authorization.subject, clientId: authorization.clientId, resource: authorization.resource, scopes: authorization.scopes,
       purpose: 'rental.catalog.search', originalInputHash: capture({ limit: 2 }).inputHash, policyVersion: 'catalog-admission-1' } };
-  const goal = goals.captureOriginalMcpCatalogGoal({ ...goalBody, recordHash: capture(goalBody).inputHash });
+  const goal = goals.captureOriginalMcpCatalogGoal({ ...goalBody, recordHash: capture(goalBody).inputHash },
+    source('packages/rental-mcp-host/src/catalog-goal-policy.ts').RENTAL_MCP_CATALOG_GOAL_POLICY);
   const intentCurrent = { principal: { ...intentOwner, audience: 'operator', sessionId: 'original-web-session', expiresAt },
     goal, policyHash: 'd'.repeat(64), expiresAt };
   const intentRows = new Map(), query = f.tx.$queryRaw; let intentWrites = 0, adoptionCalls = 0, adopted;

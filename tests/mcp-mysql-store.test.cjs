@@ -122,13 +122,13 @@ async function compiled() {
   };
   // Compile the OAuth/read-budget persistence adapters and actual dependency
   // closure, not unrelated business readers or shared; never overwrite common dist.
-  check(ts.createProgram([path.join(source, "src/original-traffic-meter.ts"), path.join(source, "src/prisma-oauth-store.ts"), path.join(source, "src/prisma-mcp-read-budget.ts"), path.join(source, "src/prisma-mcp-read-accounting.ts"), path.join(source, "src/prisma-mcp-read-bindings.ts"), path.join(source, "src/prisma-mcp-catalog-goals.ts"), path.join(source, "src/prisma-mcp-read-goal-settlement.ts"), path.join(source, "src/index.ts")], options));
+  check(ts.createProgram([path.join(source, "src/original-traffic-meter.ts"), path.join(source, "src/prisma-oauth-store.ts"), path.join(source, "src/prisma-mcp-read-budget.ts"), path.join(source, "src/prisma-mcp-read-accounting.ts"), path.join(source, "src/prisma-mcp-read-bindings.ts"), path.join(source, "src/prisma-mcp-catalog-goals.ts"), path.join(source, "src/prisma-mcp-catalog-goal-adoptions.ts"), path.join(source, "src/prisma-mcp-read-goal-settlement.ts"), path.join(source, "src/index.ts")], options));
   // Rental owns the mapping artifact; use the public MCP declarations across
   // package roots instead of compiling Rental sources into the framework.
   const rentalRoot = path.join(root, "packages/rental-mcp-host"), stagedRental = path.join(output, "node_modules/@rental-os/rental-mcp-host");
   fs.mkdirSync(stagedRental, { recursive: true });
   fs.copyFileSync(path.join(rentalRoot, "package.json"), path.join(stagedRental, "package.json"));
-  check(ts.createProgram([path.join(rentalRoot, "src/capability-mapping.ts")], {
+  check(ts.createProgram([path.join(rentalRoot, "src/capability-mapping.ts"), path.join(rentalRoot, "src/catalog-goal-policy.ts")], {
     ...options, rootDir: path.join(rentalRoot, "src"), outDir: path.join(stagedRental, "dist"),
     paths: { ...options.paths, "@rental-os/mcp-server": [path.join(staged, "dist/index.d.ts")] },
   }));
@@ -141,9 +141,12 @@ async function compiled() {
     'export { createPrismaMcpReadAccounting } from "@rental-os/mcp-server/prisma-mcp-read-accounting";',
     'import { createPrismaMcpReadAccounting } from "@rental-os/mcp-server/prisma-mcp-read-accounting";',
     'export { createPrismaMcpReadBindings } from "@rental-os/mcp-server/prisma-mcp-read-bindings";',
-    'export { createPrismaMcpCatalogGoals, captureOriginalMcpCatalogGoal, ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION } from "@rental-os/mcp-server/prisma-mcp-catalog-goals";',
+    'export { createPrismaMcpCatalogGoals, captureOriginalMcpCatalogGoal } from "@rental-os/mcp-server/prisma-mcp-catalog-goals";',
+    'export { createPrismaMcpCatalogGoalIntents, originalCatalogGoalIntentId } from "@rental-os/mcp-server/prisma-mcp-catalog-goal-intents";',
+    'export { createPrismaMcpCatalogGoalAdoptions, captureOriginalCatalogGoalAdoption } from "@rental-os/mcp-server/prisma-mcp-catalog-goal-adoptions";',
     'export { createPrismaMcpReadGoalSettlement } from "@rental-os/mcp-server/prisma-mcp-read-goal-settlement";',
     'export { MCP_BUSINESS_CAPABILITIES } from "@rental-os/rental-mcp-host/capability-mapping";',
+    'export { RENTAL_MCP_CATALOG_GOAL_POLICY, ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION } from "@rental-os/rental-mcp-host/catalog-goal-policy";',
     'import { createPrismaMcpReadBindings } from "@rental-os/mcp-server/prisma-mcp-read-bindings";',
     'import type { OriginalMcpReadBindingAuthority, OriginalMcpReadGoalOwner } from "@rental-os/mcp-server/prisma-mcp-read-bindings";',
     'interface ScopedOwner extends OriginalMcpReadGoalOwner { dataScope: "organization"; }',
@@ -323,6 +326,79 @@ function sqlFixture() {
   } };
   return fixture;
 }
+test('fixed goal policy ports preserve original hashes and reject cross-purpose history without new frontiers', async () => {
+  const api = await compiled(), f = sqlFixture(), audit = { admitted: async () => {}, published: async () => {} };
+  const policy = { purpose: 'synthetic.catalog.read', initialPolicyVersion: 'synthetic-admission-1' };
+  const originalPolicy = { ...policy }, owner = { userId: 'user-a', tenantId: 'tenant-a', workspaceId: 'workspace-a', grantId: 'grant-a', grantRevision: 1 };
+  const draft = { owner, authorityHash: 'a'.repeat(64), target: { grantId: owner.grantId, subject: 'subject-a', clientId: 'client-a',
+    resource: 'https://mcp.example.invalid/mcp', scopes: ['catalog:read'], purpose: policy.purpose,
+    originalInputHash: api.captureMcpReadInput({ limit: 2 }).inputHash, policyVersion: policy.initialPolicyVersion } };
+  f.state.ownerGrants[owner.grantId] = { id: owner.grantId, ...owner };
+  const store = api.createPrismaMcpCatalogGoals(audit, policy), tx = work => f.database.$transaction(work,
+    { isolationLevel: 'Serializable', maxWait: 2500, timeout: 5000 });
+  policy.purpose = 'mutated'; policy.initialPolicyVersion = 'mutated';
+  assert.throws(() => api.createPrismaMcpCatalogGoals(audit));
+  assert.throws(() => api.createPrismaMcpCatalogGoals(audit, { ...originalPolicy, callerGoalId: 'forged' }));
+  await assert.rejects(tx(native => store.prepareIn({ ...draft, target: { ...draft.target, purpose: 'other' } }, native, signal())));
+  await assert.rejects(tx(native => store.prepareIn({ ...draft, target: { ...draft.target, policyVersion: 'other' } }, native, signal())));
+  assert.equal(f.calls.length, 0, 'wrong purpose/policy fails before original SQL');
+  const goal = await tx(native => store.prepareIn(draft, native, signal()));
+  assert.equal(goal.ownerKey, api.captureMcpReadInput({ kind: 'original_catalog_goal', userId: owner.userId, tenantId: owner.tenantId, workspaceId: owner.workspaceId }).inputHash);
+  const { recordHash, ...body } = goal; assert.equal(recordHash, api.captureMcpReadInput(body).inputHash);
+  assert.deepEqual(api.captureOriginalMcpCatalogGoal(goal, originalPolicy), goal);
+  const observer = api.createPrismaMcpReadGoalSettlement(store, originalPolicy);
+  assert.equal((await tx(native => observer.readIn(goal, native, signal()))).state, 'not_observed');
+  const before = structuredClone(f.state);
+  const changed = api.createPrismaMcpCatalogGoals(audit, { ...originalPolicy, initialPolicyVersion: 'synthetic-admission-2' });
+  await assert.rejects(tx(native => changed.prepareIn({ ...draft, target: { ...draft.target, policyVersion: 'synthetic-admission-2' } }, native, signal())));
+  assert.deepEqual(await tx(native => changed.readIn(goal.target.goalId, native, signal())), goal, 'new admission version does not hide original history');
+  const foreign = api.createPrismaMcpCatalogGoals(audit, api.RENTAL_MCP_CATALOG_GOAL_POLICY);
+  await assert.rejects(tx(native => foreign.readOwnerIn(owner, native, signal())));
+  await assert.rejects(tx(native => foreign.prepareIn({ ...draft, target: { ...draft.target, purpose: api.RENTAL_MCP_CATALOG_GOAL_POLICY.purpose,
+    policyVersion: api.RENTAL_MCP_CATALOG_GOAL_POLICY.initialPolicyVersion } }, native, signal())));
+  assert.throws(() => api.captureOriginalMcpCatalogGoal(goal, api.RENTAL_MCP_CATALOG_GOAL_POLICY));
+  const foreignObserver = api.createPrismaMcpReadGoalSettlement(store, api.RENTAL_MCP_CATALOG_GOAL_POLICY);
+  await assert.rejects(tx(native => foreignObserver.readIn(goal, native, signal())));
+  assert.deepEqual(f.state, before, 'policy changes cannot replace an owner frontier or mutate its ledgers');
+  const nextBody = { ...body, target: { ...goal.target, goalId: '22222222-2222-2222-2222-222222222222', originalInputHash: 'b'.repeat(64) } };
+  const nextGoal = { ...nextBody, recordHash: api.captureMcpReadInput(nextBody).inputHash };
+  const operationKey = 'original-adoption', adoptionBody = { version: 'catalog-goal-adoption-1',
+    id: api.originalCatalogGoalIntentId(operationKey, owner), operationKey, intentRecordHash: 'c'.repeat(64), oldGoal: goal, newGoal: nextGoal,
+    settlement: { state: 'settled', goalId: goal.target.goalId, goalRecordHash: goal.recordHash, budgetRevision: 1, consumedCalls: 1,
+      consumedActiveMs: 1, reservedActiveMs: 0, concurrentReads: 0, ledgerHash: 'd'.repeat(64), observation: 'native_call_rows_not_commit_or_goal_completion_evidence', retryable: false }, adoptedAt: 1 };
+  const adoption = { ...adoptionBody, recordHash: api.captureMcpReadInput(adoptionBody).inputHash };
+  assert.deepEqual(api.captureOriginalCatalogGoalAdoption(adoption, originalPolicy), adoption);
+  assert.throws(() => api.captureOriginalCatalogGoalAdoption(adoption, api.RENTAL_MCP_CATALOG_GOAL_POLICY));
+  const { userId, tenantId, workspaceId } = owner, adoptionAudit = { admitted: async () => {}, adopted: async () => {} };
+  const adoptionSql = { async $queryRaw(parts) {
+    if (parts[0].includes('FROM mcp_catalog_goal_history')) return [{ goalId: goal.target.goalId, ownerKey: goal.ownerKey,
+      recordHash, adoptionId: adoption.id, adoptionHash: adoption.recordHash, recordJson: JSON.stringify(goal) }];
+    assert.match(parts[0], /FROM mcp_catalog_goal_adoptions/);
+    return [{ userId, tenantId, workspaceId, id: adoption.id, ownerKey: goal.ownerKey, operationKey,
+      oldGoalId: goal.target.goalId, newGoalId: nextGoal.target.goalId, intentRecordHash: adoption.intentRecordHash,
+      recordHash: adoption.recordHash, recordJson: JSON.stringify(adoption) }];
+  } };
+  const originalHistory = api.createPrismaMcpCatalogGoalAdoptions(adoptionAudit, originalPolicy);
+  const wrongHistory = api.createPrismaMcpCatalogGoalAdoptions(adoptionAudit, api.RENTAL_MCP_CATALOG_GOAL_POLICY);
+  assert.deepEqual(await originalHistory.readIn(adoption.id, adoptionSql, signal()), adoption);
+  await assert.rejects(wrongHistory.readIn(adoption.id, adoptionSql, signal()));
+  const base = 'https://as.example.invalid/policy', config = { prepareEndpoint: base + '/prepare', decideEndpoint: base + '/decide', receiptEndpoint: base + '/receipt' };
+  const expiresAt = Math.floor(Date.now() / 1000) + 60;
+  let intentReads = 0;
+  const authority = { goalPolicy: { ...originalPolicy }, acceptsNextInput: () => true, withOwner: async () => {}, audit: async () => {},
+    withCurrent: async (_request, _input, stop, consume) => consume({ principal: { userId, tenantId, workspaceId, audience: 'operator', sessionId: 'session-a', expiresAt },
+      goal, policyHash: 'e'.repeat(64), expiresAt }, { async $queryRaw() { intentReads++; return []; }, async $executeRaw() { return 0; } }, stop) };
+  const prepare = () => new Request(config.prepareEndpoint, { method: 'POST', headers: { origin: 'https://as.example.invalid', 'content-type': 'application/json' },
+    body: JSON.stringify({ operationKey: 'foreign-intent', nextInput: { limit: 2 } }) });
+  const originalIntents = api.createPrismaMcpCatalogGoalIntents(config, authority);
+  await assert.rejects(originalIntents.prepare(prepare(), signal()), { kind: 'conflict' });
+  assert.equal(intentReads, 1, 'same purpose reaches the original intent lookup');
+  const intents = api.createPrismaMcpCatalogGoalIntents(config, { ...authority, goalPolicy: api.RENTAL_MCP_CATALOG_GOAL_POLICY });
+  await assert.rejects(intents.prepare(prepare(), signal()), { kind: 'unknown' });
+  assert.equal(intentReads, 1, 'foreign purpose is rejected before the intent lookup');
+  assert.deepEqual(f.state, before);
+});
+
 test('original goal settlement evidence validates every original call and never closes resets or repairs',async()=>{
   const api=await compiled(),{ fixture:originalFixture,source }=require('./fixtures/mcp/original-identity.cjs');
   const make=()=>{

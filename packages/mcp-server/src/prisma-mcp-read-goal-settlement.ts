@@ -6,8 +6,8 @@
 import { isDeepStrictEqual } from 'node:util';
 import { snapshotJson, snapshotJsonFields } from './json-snapshot.js';
 import { captureMcpReadInput } from './persistent-read-accounting.js';
-import { captureOriginalMcpCatalogGoal } from './prisma-mcp-catalog-goals.js';
-import type { OriginalCatalogGoal } from './prisma-mcp-catalog-goals.js';
+import { captureOriginalMcpCatalogGoal, captureOriginalMcpCatalogGoalPolicy } from './prisma-mcp-catalog-goals.js';
+import type { OriginalCatalogGoal, OriginalCatalogGoalPolicy } from './prisma-mcp-catalog-goals.js';
 import { captureOriginalMcpReadBudgetSnapshot, captureOriginalMcpReadCallSnapshot } from './prisma-mcp-read-budget.js';
 import type { OAuthSqlTransaction } from './prisma-oauth-store.js';
 export interface OriginalMcpReadGoalSettlement {
@@ -25,11 +25,12 @@ const limits = { stringCharacters: 32768, arrayItems: 32 };
  * The goal is selected by that original owner, never by a model parameter. */
 export function createPrismaMcpReadGoalSettlement<Native extends OAuthSqlTransaction>(original: {
   readIn(goalId: string, native: Native, signal: AbortSignal): Promise<OriginalCatalogGoal | undefined>;
-}): { readIn(goal: OriginalCatalogGoal, native: Native, signal: AbortSignal): Promise<OriginalMcpReadGoalSettlement> } {
+}, binding: OriginalCatalogGoalPolicy): { readIn(goal: OriginalCatalogGoal, native: Native, signal: AbortSignal): Promise<OriginalMcpReadGoalSettlement> } {
+  const policy = captureOriginalMcpCatalogGoalPolicy(binding);
   if (typeof original?.readIn !== 'function') throw fail();
   const readGoal = original.readIn.bind(original);
   return Object.freeze({ async readIn(raw: OriginalCatalogGoal, native: Native, signal: AbortSignal): Promise<OriginalMcpReadGoalSettlement> {
-    const goal = captureOriginalMcpCatalogGoal(raw);
+    const goal = captureOriginalMcpCatalogGoal(raw, policy);
     const live = () => { if (!native || '$transaction' in native || signal.aborted) throw fail(); };
     live();
     if (!isDeepStrictEqual(goal, await readGoal(goal.target.goalId, native, signal))) throw fail(); live();

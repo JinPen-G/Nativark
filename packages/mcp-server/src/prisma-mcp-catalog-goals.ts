@@ -11,7 +11,13 @@ import type { OriginalMcpReadTarget } from './prisma-mcp-read-budget.js';
 import type { OriginalMcpReadGoalOwner } from './prisma-mcp-read-bindings.js';
 import type { OAuthSqlTransaction } from './prisma-oauth-store.js';
 
-export const ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION = 'catalog-admission-1';
+/** Fixed host-owned admission binding, never request/model configuration.
+ * Stored goals retain their original policyVersion; this version only admits
+ * an initial frontier. Changing either field cannot reset an existing owner. */
+export interface OriginalCatalogGoalPolicy {
+  readonly purpose: string;
+  readonly initialPolicyVersion: string;
+}
 export interface OriginalCatalogGoal {
   ownerKey: string; target: OriginalMcpReadTarget; owner: Required<OriginalMcpReadGoalOwner>;
   authorityHash: string; recordHash: string;
@@ -43,6 +49,13 @@ function object(raw: unknown, keys: readonly string[]) {
   if (!copy || typeof copy !== 'object' || Array.isArray(copy) || Object.keys(copy).length !== keys.length) throw fail();
   return snapshotJsonFields(copy, keys, limits);
 }
+/** Capture the explicit business binding without adding it to historical keys. */
+export function captureOriginalMcpCatalogGoalPolicy(raw: OriginalCatalogGoalPolicy): OriginalCatalogGoalPolicy {
+  const value = object(raw, ['purpose', 'initialPolicyVersion']);
+  const id = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(v);
+  if (!id(value.purpose) || !id(value.initialPolicyVersion)) throw fail();
+  return Object.freeze({ purpose: value.purpose, initialPolicyVersion: value.initialPolicyVersion });
+}
 function scope(raw: unknown) {
   const r = snapshotJsonFields(raw, ['userId', 'tenantId', 'workspaceId'], limits);
   const id = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/.test(v);
@@ -58,12 +71,12 @@ function owner(raw: unknown): Required<OriginalMcpReadGoalOwner> {
 // NOT token/client/query/resource-derived. A different grant or endpoint cannot
 // produce a new frontier for the same original catalog owner/workspace.
 const keyFor = (raw: unknown) => captureMcpReadInput({ kind: 'original_catalog_goal', ...scope(raw) }).inputHash;
-function stored(raw: unknown): OriginalCatalogGoal {
+function stored(raw: unknown, policy: OriginalCatalogGoalPolicy): OriginalCatalogGoal {
   const r = object(raw, ['ownerKey', 'goalId', 'grantId', 'grantRevision', 'userId', 'tenantId', 'workspaceId', 'authorityHash', 'recordHash', 'recordJson']);
   const body = object(typeof r.recordJson === 'string' ? JSON.parse(r.recordJson) : r.recordJson, ['ownerKey', 'target', 'owner', 'authorityHash']);
   const target = captureOriginalMcpReadTarget(body.target), who = owner(body.owner);
   const expected = captureMcpReadInput({ ownerKey: keyFor(who), target, owner: who, authorityHash: body.authorityHash });
-  if (!uuid(target.goalId) || target.goalRevision !== 1 || target.purpose !== 'rental.catalog.search' || !digest(body.authorityHash)
+  if (!uuid(target.goalId) || target.goalRevision !== 1 || target.purpose !== policy.purpose || !digest(body.authorityHash)
     || body.ownerKey !== keyFor(who) || r.ownerKey !== body.ownerKey || r.goalId !== target.goalId || r.grantId !== target.grantId
     || who.grantId !== target.grantId || r.grantRevision !== who.grantRevision || r.userId !== who.userId || r.tenantId !== who.tenantId
     || r.workspaceId !== who.workspaceId || r.authorityHash !== body.authorityHash || r.recordHash !== expected.inputHash) throw fail();
@@ -72,25 +85,27 @@ function stored(raw: unknown): OriginalCatalogGoal {
 
 /** Detached ORIGINAL metadata validation, not a caller goal/owner authority.
  * Reuses the exact row/hash contract so consumers cannot invent a lookalike DTO. */
-export function captureOriginalMcpCatalogGoal(raw: unknown): OriginalCatalogGoal {
+export function captureOriginalMcpCatalogGoal(raw: unknown, binding: OriginalCatalogGoalPolicy): OriginalCatalogGoal {
+  const policy = captureOriginalMcpCatalogGoalPolicy(binding);
   const value = object(raw, ['ownerKey', 'target', 'owner', 'authorityHash', 'recordHash']);
   const who = owner(value.owner), target = captureOriginalMcpReadTarget(value.target);
   return stored({ ownerKey: value.ownerKey, goalId: target.goalId, grantId: target.grantId, grantRevision: who.grantRevision,
     userId: who.userId, tenantId: who.tenantId, workspaceId: who.workspaceId, authorityHash: value.authorityHash,
-    recordHash: value.recordHash, recordJson: { ownerKey: value.ownerKey, target, owner: who, authorityHash: value.authorityHash } });
+    recordHash: value.recordHash, recordJson: { ownerKey: value.ownerKey, target, owner: who, authorityHash: value.authorityHash } }, policy);
 }
 
 /** Requires mysql-catalog-goal-schema.sql and actual original same-Native audit.
  * Does not open transactions or install tables. Initial admission only: a new
  * legitimate goal/changed policy requires separately implemented trusted adoption;
  * never manufacture it from another call/credential when this frontier is spent. */
-export function createPrismaMcpCatalogGoals<Native extends OAuthSqlTransaction>(audit: OriginalCatalogGoalAudit<Native>): OriginalCatalogGoalStore<Native> {
+export function createPrismaMcpCatalogGoals<Native extends OAuthSqlTransaction>(audit: OriginalCatalogGoalAudit<Native>, binding: OriginalCatalogGoalPolicy): OriginalCatalogGoalStore<Native> {
+  const policy = captureOriginalMcpCatalogGoalPolicy(binding);
   if (typeof audit?.admitted !== 'function' || typeof audit.published !== 'function') throw fail();
   const admitted = audit.admitted.bind(audit), published = audit.published.bind(audit);
   const live = (native: Native, signal: AbortSignal) => { if (!native || '$transaction' in native || signal.aborted) throw fail(); };
   const row = (raw: unknown) => {
     const rows = snapshotJson(raw, limits); if (!Array.isArray(rows) || rows.length > 1) throw fail();
-    return rows.length ? stored(rows[0]) : undefined;
+    return rows.length ? stored(rows[0], policy) : undefined;
   };
   const readOwner = async (key: string, native: Native, s: AbortSignal) => {
     live(native, s);
@@ -110,8 +125,8 @@ export function createPrismaMcpCatalogGoals<Native extends OAuthSqlTransaction>(
       // Validate without adopting any caller goal ID. UUID is created only after
       // proving a genuinely empty original-owner frontier below.
       const template = captureOriginalMcpReadTarget({ ...fields, goalId: 'template', goalRevision: 1 });
-      if (template.grantId !== who.grantId || template.purpose !== 'rental.catalog.search'
-        || template.policyVersion !== ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION || !digest(d.authorityHash)) throw fail();
+      if (template.grantId !== who.grantId || template.purpose !== policy.purpose
+        || template.policyVersion !== policy.initialPolicyVersion || !digest(d.authorityHash)) throw fail();
       const key = keyFor(who), existing = await readOwner(key, native, s);
       if (existing) {
         const { originalInputHash: _first, ...prior } = existing.target;

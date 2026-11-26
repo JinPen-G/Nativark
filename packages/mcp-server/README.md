@@ -148,6 +148,8 @@ public-client 登记 / 审查由原当前 SaaS 管理身份办理。通知与准
 
 采用在同一原事务保存原键收据、旧目标 history，CAS 更新 frontier，并写 admitted / adopted 日志。旧预算、calls、bindings 和审计完整保留，新 goal 首次读仍须准备原输入关联后进独立预算。settled / adopted 均只描述原计量或 frontier 证据，业务完成与执行批准另沿原链核定。[采用参加者](src/prisma-mcp-catalog-goal-adoptions.ts) · [意图 SQL](mysql-catalog-goal-intent-schema.sql) · [采用 SQL](mysql-catalog-goal-adoption-schema.sql)
 
+宿主为目录目标存储、意图权威、采用及结算提供同一份固定 `OriginalCatalogGoalPolicy`。首次准入核对 `purpose` 和 `initialPolicyVersion`，历史目标与收据核对 `purpose` 并保留原记录的 `policyVersion`。不同用途或新准入版本无法为同一所有者替换原目标。原键、记录 hash、审计与账本沿原契约。[政策端口](src/prisma-mcp-catalog-goals.ts) · [Rental 生产者](../rental-mcp-host/src/catalog-goal-policy.ts)
+
 目标意图权威必须提供同步 `acceptsNextInput(input)`。通用存储先捕获不可变原输入并计算原 hash，仅接受严格 `true`；它不转换业务输入或代替当前授权。Rental 的原权威使用同源目录 schema 和 50 条上限，并在原 Guard 事务内再次校验。缺校验器、异步返回或拒绝均不可进入原事务。[意图存储](src/prisma-mcp-catalog-goal-intents.ts) · [Rental 校验生产者](../rental-mcp-host/src/original-mcp-catalog-goal-intent-authority.ts)
 
 五份 SQL 是原结构材料，尚未注册为完整的公共数据能力发行。新空库的依赖顺序为 OAuth → read-budget → catalog-goal → catalog-goal-intent → catalog-goal-adoption；目标结构中的 ALTER 依赖前两份，采用结构依赖意图表，不能按文件名字典序安装。已有库须先观察原表、索引、外键和迁移账，保留原迁移身份及凭据/目标/调用记录，再核定增量和发布锁；不能重复执行初始化 DDL 或凭源码 hash 宣称物理结构已就绪。正式能力包还需按 [数据发行合同](../core-contracts/src/data-capability.ts)补齐 schema 文件、源提交、归档摘要、迁移清单与宿主观察接线；本包构造器不执行迁移。

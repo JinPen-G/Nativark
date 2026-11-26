@@ -33,7 +33,7 @@ async function compiled() {
   // Keep the Rental mapping in its own package and consume emitted MCP types.
   const rentalRoot = path.join(root, 'packages/rental-mcp-host'), stagedRental = path.join(output, 'node_modules/@rental-os/rental-mcp-host');
   fs.mkdirSync(stagedRental, { recursive: true }); fs.copyFileSync(path.join(rentalRoot, 'package.json'), path.join(stagedRental, 'package.json'));
-  check(ts.createProgram([path.join(rentalRoot, 'src/capability-mapping.ts')], {
+  check(ts.createProgram([path.join(rentalRoot, 'src/capability-mapping.ts'), path.join(rentalRoot, 'src/catalog-goal-policy.ts')], {
     ...options, rootDir: path.join(rentalRoot, 'src'), outDir: path.join(stagedRental, 'dist'),
     paths: { ...options.paths, '@rental-os/mcp-server': [path.join(staged, 'dist/index.d.ts')] },
   }));
@@ -54,6 +54,7 @@ async function compiled() {
     'export { createOriginalMcpTrafficMeter, originalMcpTrafficClass } from "@rental-os/mcp-server/original-traffic-meter";',
     'export { createPrismaMcpProtocolTraffic, originalMcpProtocolOperations } from "@rental-os/mcp-server/protocol-traffic";',
     'export { MCP_BUSINESS_CAPABILITIES } from "@rental-os/rental-mcp-host/capability-mapping";',
+    'export { RENTAL_MCP_CATALOG_GOAL_POLICY, ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION } from "@rental-os/rental-mcp-host/catalog-goal-policy";',
     'export { createPrismaOAuthWebConsent } from "@rental-os/mcp-server/prisma-oauth-web-consent";',
     'export { createPrismaOAuthConsentReview } from "@rental-os/mcp-server/prisma-oauth-consent-review";',
     'export { createPrismaOAuthConsentAuthority } from "@rental-os/mcp-server/prisma-oauth-consent-authority";',
@@ -80,7 +81,7 @@ async function compiled() {
     'export { createPrismaOAuthGrantAdmissionSource } from "@rental-os/mcp-server/prisma-oauth-grant-admission";',
     'export { createPersistentMcpReadAccounting, OriginalMcpReadBudgetError, captureMcpReadInput } from "@rental-os/mcp-server/persistent-read-accounting";',
     'export { createPrismaMcpReadAccounting } from "@rental-os/mcp-server/prisma-mcp-read-accounting";',
-    'export { createPrismaMcpCatalogGoals, ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION } from "@rental-os/mcp-server/prisma-mcp-catalog-goals";',
+    'export { createPrismaMcpCatalogGoals } from "@rental-os/mcp-server/prisma-mcp-catalog-goals";',
     'export { createPrismaMcpCatalogGoalIntents, originalCatalogGoalIntentId } from "@rental-os/mcp-server/prisma-mcp-catalog-goal-intents";',
     'export { createPrismaMcpCatalogGoalAdoptions, captureOriginalCatalogGoalAdoption } from "@rental-os/mcp-server/prisma-mcp-catalog-goal-adoptions";',
     'export { createMcpCatalogGoalControlPlane } from "@rental-os/mcp-server/catalog-goal-control-plane";',
@@ -379,7 +380,7 @@ test('original catalog goal adoption closes once under trusted Web nonce preserv
   const originalUnknown=structuredClone(unknown.f.state),unknownReceipt=await unknown.intents.receipt(unknownIntent.operationKey,unknown.browser(),signal());assert.equal(unknownReceipt.adoption.state,'observed');assert.deepEqual(unknown.f.state,originalUnknown);assert.deepEqual(await unknown.adopt(unknownIntent),unknownReceipt.adoption);assert.deepEqual(unknown.f.state,originalUnknown,'lost answer never adopts another UUID');
   const beforeBad=unknown.f.transactions;await assert.rejects(unknown.intents.adopt(unknown.post(unknown.config.adoptEndpoint,{ operationKey:unknownIntent.operationKey,nextInput:unknownIntent.nextInput,expectedRevision:2,nonce:unknownIntent.nonce,actor:'self' }),signal()));
   await assert.rejects(unknown.intents.adopt(unknown.post(unknown.config.adoptEndpoint,{ operationKey:unknownIntent.operationKey,nextInput:unknownIntent.nextInput,expectedRevision:2,nonce:unknownIntent.nonce },{ origin:'https://evil.example.invalid' }),signal()));assert.equal(unknown.f.transactions,beforeBad);
-  assert.throws(()=>api.createPrismaMcpCatalogGoalIntents(unknown.config,{ acceptsNextInput:unknown.authority.acceptsNextInput,withCurrent:unknown.authority.withCurrent,withOwner:unknown.authority.withOwner,audit:unknown.authority.audit }),'missing original transition path never falls back to intent authority');
+  assert.throws(()=>api.createPrismaMcpCatalogGoalIntents(unknown.config,{ goalPolicy:unknown.authority.goalPolicy,acceptsNextInput:unknown.authority.acceptsNextInput,withCurrent:unknown.authority.withCurrent,withOwner:unknown.authority.withOwner,audit:unknown.authority.audit }),'missing original transition path never falls back to intent authority');
   // HTTP goal control uses the ACTUAL original host/Core. Identity/goal setup
   // above and SQL/MFA remain fixtures; no listener or real external HTTP runs.
   const web=await make();await web.read();const OriginalPlatform=source('apps/api/src/modules/platform/platform.service.ts').PlatformService;

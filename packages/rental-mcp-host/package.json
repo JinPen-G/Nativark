@@ -159,6 +159,10 @@
     "./capability-mapping": {
       "types": "./dist/capability-mapping.d.ts",
       "default": "./dist/capability-mapping.js"
+    },
+    "./catalog-goal-policy": {
+      "types": "./dist/catalog-goal-policy.d.ts",
+      "default": "./dist/catalog-goal-policy.js"
     }
   },
   "typesVersions": {
@@ -270,6 +274,9 @@
       ],
       "capability-mapping": [
         "dist/capability-mapping.d.ts"
+      ],
+      "catalog-goal-policy": [
+        "dist/catalog-goal-policy.d.ts"
       ]
     }
   },

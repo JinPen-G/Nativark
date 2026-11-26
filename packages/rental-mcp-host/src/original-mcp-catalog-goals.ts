@@ -6,9 +6,10 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { Prisma } from '@prisma/client';
+import { RENTAL_MCP_CATALOG_GOAL_POLICY, ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION } from './catalog-goal-policy';
 import { AI_CONTRACT_DRAFT_VERSION, aiCatalogReadInputSchema } from '@rental-os/shared';
 import type { captureMcpReadInput, OriginalMcpReadCallRef } from '@rental-os/mcp-server/persistent-read-accounting' with { 'resolution-mode': 'import' };
-import type { createPrismaMcpCatalogGoals, OriginalCatalogGoal, ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION } from '@rental-os/mcp-server/prisma-mcp-catalog-goals' with { 'resolution-mode': 'import' };
+import type { createPrismaMcpCatalogGoals, OriginalCatalogGoal } from '@rental-os/mcp-server/prisma-mcp-catalog-goals' with { 'resolution-mode': 'import' };
 import type { createPrismaMcpReadBindings, OriginalMcpReadGoalOwner } from '@rental-os/mcp-server/prisma-mcp-read-bindings' with { 'resolution-mode': 'import' };
 import type { OriginalMcpReadInputTargetSource } from '@rental-os/mcp-server/prisma-mcp-read-accounting' with { 'resolution-mode': 'import' };
 import type { createPrismaMcpReadGoalSettlement, OriginalMcpReadGoalSettlement } from '@rental-os/mcp-server/prisma-mcp-read-goal-settlement' with { 'resolution-mode': 'import' };
@@ -26,7 +27,6 @@ export interface OriginalMcpCatalogGoalsExports {
   captureMcpReadInput: typeof captureMcpReadInput;
   createPrismaMcpCatalogGoals: typeof createPrismaMcpCatalogGoals;
   createPrismaMcpReadBindings: typeof createPrismaMcpReadBindings;
-  ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION: typeof ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION;
   MCP_BUSINESS_CAPABILITIES: typeof MCP_BUSINESS_CAPABILITIES;
   /** Optional original read-only observation; absence is never settled evidence. */
   createPrismaMcpReadGoalSettlement?: typeof createPrismaMcpReadGoalSettlement;
@@ -49,11 +49,10 @@ export function createOriginalMcpCatalogGoals(mcp: OriginalMcpCatalogGoalsExport
   const mapping = mcp?.MCP_BUSINESS_CAPABILITIES?.find(v => v.code === 'rental.catalog.search');
   if (!mapping || mapping.operation !== 'read' || typeof config?.enabled !== 'boolean' || typeof context?.current !== 'function' || typeof context.withReadNative !== 'function'
     || typeof logs?.recordOriginalMcpReadGoalAudit !== 'function' || typeof mcp.captureMcpReadInput !== 'function'
-    || typeof mcp.createPrismaMcpCatalogGoals !== 'function' || typeof mcp.createPrismaMcpReadBindings !== 'function'
-    || mcp.ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION !== 'catalog-admission-1') throw fail();
+    || typeof mcp.createPrismaMcpCatalogGoals !== 'function' || typeof mcp.createPrismaMcpReadBindings !== 'function') throw fail();
   const enabled = config.enabled, capture = mcp.captureMcpReadInput.bind(mcp), subjectFor = context.current.bind(context);
   const record = logs.recordOriginalMcpReadGoalAudit.bind(logs), bind = mcp.createPrismaMcpReadBindings;
-  const policyVersion = mcp.ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION, name = mapping.name;
+  const policyVersion = ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION, name = mapping.name;
   const createGoals = mcp.createPrismaMcpCatalogGoals, ownerRead = context.withReadNative.bind(context);
   if (mcp.createPrismaMcpReadGoalSettlement !== undefined && typeof mcp.createPrismaMcpReadGoalSettlement !== 'function') throw fail();
   const createSettlement = mcp.createPrismaMcpReadGoalSettlement;
@@ -77,7 +76,7 @@ export function createOriginalMcpCatalogGoals(mcp: OriginalMcpCatalogGoalsExport
   const goalsFor = (call: OriginalMcpReadCallRef, s: ReturnType<typeof who>) => createGoals<Prisma.TransactionClient>({
     async admitted(g, tx, stop) { check(call, s, stop); await audit('admitted', g, tx, [], stop); check(call, s, stop); },
     async published(g, keys, tx, stop) { check(call, s, stop); await audit('bindings_published', g, tx, keys, stop); check(call, s, stop); },
-  });
+  }, RENTAL_MCP_CATALOG_GOAL_POLICY);
   const observe = async (call: OriginalMcpReadCallRef, s: ReturnType<typeof who>, native: Prisma.TransactionClient, signal: AbortSignal) => {
     check(call, s, signal);
     const g = await goalsFor(call, s).readOwnerIn(owner(s), native, signal); check(call, s, signal);
@@ -138,7 +137,7 @@ export function createOriginalMcpCatalogGoals(mcp: OriginalMcpCatalogGoalsExport
         const observer = createSettlement<Prisma.TransactionClient>({ async readIn(id, tx, currentSignal) {
           check(call, s, currentSignal); if (tx !== native || id !== goal.target.goalId) throw fail();
           const found = await goalsFor(call, s).readIn(id, tx, currentSignal); check(call, s, currentSignal); return found;
-        } });
+        } }, RENTAL_MCP_CATALOG_GOAL_POLICY);
         const result = await observer.readIn(goal, native, stop); check(call, s, stop);
         // Resource rows do not close a business goal or attest the enclosing Auth
         // commit. Trusted completion/adoption must consume fresh original evidence.

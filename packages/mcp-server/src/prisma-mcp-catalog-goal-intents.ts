@@ -7,8 +7,8 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { captureMcpReadInput } from './persistent-read-accounting.js';
 import { snapshotJson, snapshotJsonFields } from './json-snapshot.js';
-import { captureOriginalMcpCatalogGoal } from './prisma-mcp-catalog-goals.js';
-import type { OriginalCatalogGoal } from './prisma-mcp-catalog-goals.js';
+import { captureOriginalMcpCatalogGoal, captureOriginalMcpCatalogGoalPolicy } from './prisma-mcp-catalog-goals.js';
+import type { OriginalCatalogGoal, OriginalCatalogGoalPolicy } from './prisma-mcp-catalog-goals.js';
 import type { OAuthConsentBrowserPrincipal } from './prisma-oauth-web-consent.js';
 import type { OAuthSqlTransaction } from './prisma-oauth-store.js';
 import type { PrismaMcpCatalogGoalAdoptions, OriginalCatalogGoalAdoption } from './prisma-mcp-catalog-goal-adoptions.js';
@@ -22,6 +22,7 @@ export interface OriginalCatalogGoalIntentAudit {
   goalId: string; recordHash: string; revision: 1 | 2; state: 'pending' | 'accepted' | 'denied';
 }
 export interface OriginalCatalogGoalIntentAuthority<Native extends OAuthSqlTransaction> {
+  readonly goalPolicy: OriginalCatalogGoalPolicy;
   /** Fixed business owner's synchronous validator over the captured immutable
    * input. Exact true is required; this validates shape, never current authority. */
   acceptsNextInput(input: unknown): boolean;
@@ -97,6 +98,7 @@ const receipt = (r?: Row): CatalogGoalIntentReceipt => r ? { state: 'observed', 
 export function createPrismaMcpCatalogGoalIntents<Native extends OAuthSqlTransaction>(
   config: { prepareEndpoint: string; decideEndpoint: string; receiptEndpoint: string; adoptEndpoint?: string }, authority: OriginalCatalogGoalIntentAuthority<Native>
 ) {
+  const goalPolicy = captureOriginalMcpCatalogGoalPolicy(authority?.goalPolicy);
   const urls = [config.prepareEndpoint,config.decideEndpoint,config.receiptEndpoint];
   if (config.adoptEndpoint !== undefined) urls.push(config.adoptEndpoint);
   const routes = urls.map(raw => { const u = new URL(raw);
@@ -140,7 +142,7 @@ export function createPrismaMcpCatalogGoalIntents<Native extends OAuthSqlTransac
     const rows = snapshotJson(await sql.$queryRaw<unknown[]>`SELECT id, operationKey, ownerKey, userId, tenantId, workspaceId, sessionId, goalId, goalRecordHash, nextInputHash, recordHash, nonceHash, revision, state, CAST(decidedAt AS DOUBLE) AS decidedAt, recordJson FROM mcp_catalog_goal_intents WHERE id = ${expected} FOR UPDATE NOWAIT`, limits);
     live(sql, signal); if (!Array.isArray(rows) || rows.length > 1) throw fail('unavailable'); if (!rows.length) return undefined;
     const r = object(rows[0], ['id','operationKey','ownerKey','userId','tenantId','workspaceId','sessionId','goalId','goalRecordHash','nextInputHash','recordHash','nonceHash','revision','state','decidedAt','recordJson']);
-    const d = object(r.recordJson, ['operationKey','owner','goal','nextInputHash','policyHash','expiresAt']), g = captureOriginalMcpCatalogGoal(d.goal);
+    const d = object(r.recordJson, ['operationKey','owner','goal','nextInputHash','policyHash','expiresAt']), g = captureOriginalMcpCatalogGoal(d.goal, goalPolicy);
     const o = object(d.owner, ['userId','tenantId','workspaceId','audience','sessionId']);
     if (r.id !== expected || r.operationKey !== operationKey || d.operationKey !== operationKey || r.userId !== p.userId || r.tenantId !== p.tenantId || r.workspaceId !== p.workspaceId
       || o.userId !== r.userId || o.tenantId !== r.tenantId || o.workspaceId !== r.workspaceId || o.sessionId !== r.sessionId || o.audience !== 'operator' || !id(o.sessionId)
@@ -150,7 +152,7 @@ export function createPrismaMcpCatalogGoalIntents<Native extends OAuthSqlTransac
     return { ...r, draft: { ...d, goal: g, owner: o } } as unknown as Row;
   };
   const checked = (raw: OriginalCatalogGoalIntentCurrent): OriginalCatalogGoalIntentCurrent => {
-    const v = object(raw, ['principal','goal','policyHash','expiresAt']), p = principal(v.principal), g = captureOriginalMcpCatalogGoal(v.goal);
+    const v = object(raw, ['principal','goal','policyHash','expiresAt']), p = principal(v.principal), g = captureOriginalMcpCatalogGoal(v.goal, goalPolicy);
     if (!digest(v.policyHash) || !positive(v.expiresAt) || v.expiresAt > p.expiresAt || v.expiresAt <= Date.now() / 1000 || p.userId !== g.owner.userId || p.tenantId !== g.owner.tenantId || p.workspaceId !== g.owner.workspaceId) throw fail('denied');
     return Object.freeze({ principal: p, goal: g, policyHash: v.policyHash, expiresAt: v.expiresAt });
   };

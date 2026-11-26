@@ -5,8 +5,9 @@
  * No synthetic resource token, manager fallback, second role/MFA/approval system. */
 import { isDeepStrictEqual } from 'node:util';
 import type { Prisma } from '@prisma/client';
+import { RENTAL_MCP_CATALOG_GOAL_POLICY, ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION } from './catalog-goal-policy';
 import type { captureMcpReadInput } from '@rental-os/mcp-server/persistent-read-accounting' with { 'resolution-mode': 'import' };
-import type { createPrismaMcpCatalogGoals, OriginalCatalogGoal, ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION } from '@rental-os/mcp-server/prisma-mcp-catalog-goals' with { 'resolution-mode': 'import' };
+import type { createPrismaMcpCatalogGoals, OriginalCatalogGoal } from '@rental-os/mcp-server/prisma-mcp-catalog-goals' with { 'resolution-mode': 'import' };
 import type { OriginalCatalogGoalIntentAuthority, OriginalCatalogGoalIntentCurrent, OriginalCatalogGoalIntentAudit } from '@rental-os/mcp-server/prisma-mcp-catalog-goal-intents' with { 'resolution-mode': 'import' };
 import type { createPrismaMcpCatalogGoalAdoptions } from '@rental-os/mcp-server/prisma-mcp-catalog-goal-adoptions' with { 'resolution-mode': 'import' };
 import { aiCatalogReadInputSchema } from '@rental-os/shared';
@@ -38,7 +39,6 @@ const acceptsNextInput = (input: unknown): boolean => {
 };
 export function createOriginalMcpCatalogGoalIntentAuthority(mcp: {
   captureMcpReadInput: typeof captureMcpReadInput; createPrismaMcpCatalogGoals: typeof createPrismaMcpCatalogGoals;
-  ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION: typeof ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION;
   /** Optional original SQL adoption producer. Missing never becomes a rollover. */
   createPrismaMcpCatalogGoalAdoptions?: typeof createPrismaMcpCatalogGoalAdoptions;
 }, config: { requiredToolScopes: readonly string[]; allowedScopes: readonly string[] },
@@ -48,7 +48,7 @@ export function createOriginalMcpCatalogGoalIntentAuthority(mcp: {
   logs: Pick<OperationLogService,'recordOriginalMcpReadGoalAudit'|'recordOriginalMcpCatalogGoalIntentAudit'> & Partial<Pick<OperationLogService,'recordOriginalMcpCatalogGoalAdoptionAudit'>>,
   verification: OriginalCatalogGoalIntentVerificationSource
 ): OriginalCatalogGoalIntentAuthority<Prisma.TransactionClient> {
-  if (typeof mcp?.captureMcpReadInput !== 'function' || typeof mcp.createPrismaMcpCatalogGoals !== 'function' || mcp.ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION !== 'catalog-admission-1'
+  if (typeof mcp?.captureMcpReadInput !== 'function' || typeof mcp.createPrismaMcpCatalogGoals !== 'function'
     || typeof original?.store?.transaction !== 'function' || typeof original.store.native !== 'function' || typeof original.grantAuthority?.access?.current !== 'function' || typeof original.grantAuthority.principal !== 'function'
     || typeof auth?.withTrustedWorkspacePrincipal !== 'function' || typeof guard?.withTrustedCatalogRead !== 'function' || typeof logs?.recordOriginalMcpReadGoalAudit !== 'function'
     || typeof logs.recordOriginalMcpCatalogGoalIntentAudit !== 'function' || typeof verification?.current !== 'function') throw fail();
@@ -59,8 +59,8 @@ export function createOriginalMcpCatalogGoalIntentAuthority(mcp: {
   const withPrincipal = auth.withTrustedWorkspacePrincipal.bind(auth), withCatalog = guard.withTrustedCatalogRead.bind(guard), verify = verification.current.bind(verification);
   if (original.coreAccess !== undefined && typeof original.coreAccess?.withCurrent !== 'function') throw fail();
   const withCore = original.coreAccess?.withCurrent.bind(original.coreAccess), coreLeases = new WeakMap<Prisma.TransactionClient, OriginalMcpCoreLease>();
-  const record = logs.recordOriginalMcpReadGoalAudit.bind(logs), intentAudit = logs.recordOriginalMcpCatalogGoalIntentAudit.bind(logs), policyVersion = mcp.ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION;
-  const goals = mcp.createPrismaMcpCatalogGoals<Prisma.TransactionClient>({ admitted: async () => { throw fail(); }, published: async () => { throw fail(); } });
+  const record = logs.recordOriginalMcpReadGoalAudit.bind(logs), intentAudit = logs.recordOriginalMcpCatalogGoalIntentAudit.bind(logs), policyVersion = ORIGINAL_MCP_CATALOG_GOAL_POLICY_VERSION;
+  const goals = mcp.createPrismaMcpCatalogGoals<Prisma.TransactionClient>({ admitted: async () => { throw fail(); }, published: async () => { throw fail(); } }, RENTAL_MCP_CATALOG_GOAL_POLICY);
   const own = (p: TrustedBrowserPrincipal, g: OriginalCatalogGoal) => p.audience === 'operator' && p.userId === g.owner.userId && p.tenantId === g.owner.tenantId && p.workspaceId === g.owner.workspaceId;
   const admitted = (g: OriginalCatalogGoal, sql: Prisma.TransactionClient, stop: AbortSignal, requireExisting = true) => record(sql, { kind: 'admitted', goalId: g.target.goalId, ownerKey: g.ownerKey,
     userId: g.owner.userId, tenantId: g.owner.tenantId, workspaceId: g.owner.workspaceId, grantId: g.owner.grantId, grantRevision: g.owner.grantRevision,
@@ -74,7 +74,7 @@ export function createOriginalMcpCatalogGoalIntentAuthority(mcp: {
       return adoptionAudit(sql,{ id:a.id,ownerKey:a.oldGoal.ownerKey,userId:a.oldGoal.owner.userId,tenantId:a.oldGoal.owner.tenantId,workspaceId:a.oldGoal.owner.workspaceId,
         oldGoalId:a.oldGoal.target.goalId,newGoalId:a.newGoal.target.goalId,recordHash:a.recordHash },stop,requireExisting);
     },
-  });
+  }, RENTAL_MCP_CATALOG_GOAL_POLICY);
   const withGoal = async <T>(browser: Request, input: { operationKey: string; nextInput: unknown }, signal: AbortSignal,
     consume: (current: OriginalCatalogGoalIntentCurrent, native: Prisma.TransactionClient, signal: AbortSignal) => Promise<T>, transition: boolean): Promise<T> => {
     const stop = AbortSignal.any([signal, browser.signal]); if (stop.aborted || typeof consume !== 'function' || transition && !adoption) throw fail();
@@ -131,6 +131,7 @@ export function createOriginalMcpCatalogGoalIntentAuthority(mcp: {
     if (stop.aborted || finalExpiresAt === undefined || finalExpiresAt <= Date.now()/1000) throw fail(); return result;
   };
   return Object.freeze({
+    goalPolicy: RENTAL_MCP_CATALOG_GOAL_POLICY,
     acceptsNextInput,
     ...(withCore ? { requireNewWorkIn(sql: Prisma.TransactionClient, stop: AbortSignal) {
       const lease = coreLeases.get(sql);
