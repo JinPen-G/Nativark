@@ -1,7 +1,7 @@
 'use strict';
 /** 启用 Rental AI 的实际 composition DI 与原请求/知识文件权限回归。只替换持久化与外部运输，
  * 使用真实 Auth → Guard → selected access → 原知识政策/文件 ACL。
- * Prisma 5.22 官方 247/40 模型运行时仅在内存生成及构造，不连接数据库或启动应用。
+ * Prisma 5.22 官方 248/41 模型运行时仅在内存生成及构造，不连接数据库或启动应用。
  * node apps/rental-api/test/ai-composition.test.cjs --deps <只读 node_modules>
  * 临时目录只由本入口创建，拒绝复用已有目录，成功、失败和退出均清理。
  */
@@ -162,7 +162,7 @@ const contribution = data.createAiNativeDataContribution(files),
   prepared = prepare.createAiNativeDataPreparation({ baseSchema: base, contribution });
 const dmmf = JSON.parse(wasm.get_dmmf(JSON.stringify({ prismaSchema: prepared.schema, noColor: true })));
 const generator = rd('@prisma/client/generator-build/index.js');
-assert.equal(dmmf.datamodel.models.length, 247);
+assert.equal(dmmf.datamodel.models.length, 248);
 assert.equal(dmmf.datamodel.enums.length, 35);
 
 const generatorPath = deps + '/@prisma/client/generator-build/index.js';
@@ -251,13 +251,16 @@ const { createRentalApplication } = require('@rental-os/rental-core/application'
 const { createRentalCustomerManagementApplication } = require('@rental-os/rental-core/customer-management');
 const { createRentalAuthorization } = require('@rental-os/rental-core/http-auth');
 const { createRentalManifest } = require('@rental-os/rental-core/manifest');
+const { AI_NATIVE_DATA_PACKAGE_VERSION, aiNativeDataPrerequisites } =
+  require('@rental-os/ai-native-data/data-package');
+const { createPublicPlatformDataPlan } = require('@rental-os/platform-api/data-plan');
 
 const source = { repository: 'https://example.com/offline/rental', commit: 'a'.repeat(40) };
 const manifest = createRentalManifest({ source, assets: ['dist/http-openapi.js'],
   contributions: { openapi: 'dist/http-openapi.js' } });
 const aiRelease = {
   id: 'ai-native',
-  version: '0.1.0',
+  version: AI_NATIVE_DATA_PACKAGE_VERSION,
   source,
   sha256: 'b'.repeat(64),
   compatibility: manifest.compatibility,
@@ -265,36 +268,23 @@ const aiRelease = {
   schema: data.AI_NATIVE_PRISMA_SCHEMA,
   files: [...files].map(([file, bytes]) => ({ file, sha256: hash(bytes) })),
   data: contribution.data,
-  prerequisites: {
-    platform: { minInclusive: '0.1.8', maxExclusive: '0.1.9' },
-    cores: [
-      {
-        coreId: 'rental',
-        version: { minInclusive: '0.1.0', maxExclusive: '0.1.1' },
-        migrations: [
-          {
-            id: prepare.AI_NATIVE_DATA_PREREQUISITES.rental.migrationId,
-            sha256: prepare.AI_NATIVE_DATA_PREREQUISITES.rental.migrationSha256,
-          },
-        ],
-      },
-    ],
-  },
+  prerequisites: aiNativeDataPrerequisites(),
 };
 const lock = {
   lockVersion: 1,
   platform: {
-    versions: { platform: '0.1.0', contract: '0.1.1', node: '22.16.0', capabilities: {} },
+    versions: { platform: JSON.parse(fs.readFileSync(root + '/package.json', 'utf8')).version,
+      contract: '0.1.1', node: '22.16.0', capabilities: {} },
     source,
     sha256: 'c'.repeat(64),
-    data: { version: '0.1.8', readable: { minInclusive: '0.1.0', maxExclusive: '0.2.0' }, migrations: [] },
+    data: createPublicPlatformDataPlan().data,
   },
   cores: [{ manifest, sha256: 'd'.repeat(64) }],
   dataCapabilities: [aiRelease],
 };
 function compositionFixture(selectedLock = lock) {
   const trace = { db: [], life: 0 },
-    // The fixture owns the exact official 247-model graph; no default Client is loaded.
+    // The fixture owns the exact official 248-model graph; no default Client is loaded.
     db = { _runtimeDataModel: { models: Object.fromEntries(
       dmmf.datamodel.models.map(({ name, ...model }) => [name, model]),
     ) } };
@@ -875,7 +865,27 @@ test('启用宿主的实际 DI、知识权限与原结果边界', async (t) => {
         // not an installed archive/root-host test; no package loader or admission is replaced.
         const f = compositionFixture();
         assert.deepEqual(requireRentalAiSelection(f.binding.lock), lock);
-        assert.equal(Object.keys(f.db._runtimeDataModel.models).length, 247);
+        assert.equal(lock.platform.data.version, '0.1.9');
+        assert.equal(lock.cores[0].manifest.data.version, '0.1.1');
+        assert.deepEqual(aiRelease.prerequisites.platform, { minInclusive: '0.1.8', maxExclusive: '0.1.10' });
+        assert.deepEqual(aiRelease.prerequisites.cores[0].version, { minInclusive: '0.1.0', maxExclusive: '0.1.2' });
+        // Old data remains a legal selection; this does not claim its physical schema is current.
+        const legacyLock = structuredClone(lock);
+        legacyLock.platform.data.version = '0.1.8';
+        legacyLock.platform.data.migrations = legacyLock.platform.data.migrations.filter(row => row.id !== 'platform.rate-limit');
+        legacyLock.cores[0].manifest.data.version = '0.1.0';
+        legacyLock.cores[0].manifest.data.migrations = legacyLock.cores[0].manifest.data.migrations.filter(row =>
+          row.id === prepare.AI_NATIVE_DATA_PREREQUISITES.rental.migrationId);
+        assert.deepEqual(requireRentalAiSelection(legacyLock), legacyLock);
+        for (const change of [
+          value => { value.platform.data.version = '0.1.10'; },
+          value => { value.cores[0].manifest.data.version = '0.1.2'; },
+          value => { value.dataCapabilities[0].prerequisites.platform.maxExclusive = '0.2.0'; },
+        ]) {
+          const unsupported = structuredClone(lock); change(unsupported);
+          assert.throws(() => requireRentalAiSelection(unsupported));
+        }
+        assert.equal(Object.keys(f.db._runtimeDataModel.models).length, 248);
         for (const name of ['$transaction', '$connect', '$disconnect', '$queryRaw'])
           replace(f.db, name, forbid(name));
         const adapter = (file, name) => require('@rental-os/ai-native-server/runtime/rental-adapters/' + file)[name];
@@ -991,8 +1001,8 @@ test('启用宿主的实际 DI、知识权限与原结果边界', async (t) => {
             error => error.code === 'AI_RESOURCE_UNAVAILABLE');
         }
         assert.deepEqual(get(AI_STAFF_INSPECTION_OPERATIONS), [
-          'history-read', 'receipt-host-read', 'draft-operation', 'submission-preparation',
-          'submission-read', 'fulfillment-receipt-read',
+          'history-read', 'receipt-host-read', 'result-save-receipt', 'draft-operation',
+          'input-receipt', 'submission-preparation', 'submission-read', 'result-read', 'fulfillment-receipt-read',
         ], 'default publication exposes original receipts only; host allowlist does not enable new work');
         const http = modules.find(module => module.metatype === HttpComposition);
         for (const controller of RENTAL_AI_CONTROLLERS) {
@@ -1035,7 +1045,7 @@ test('启用宿主的实际 DI、知识权限与原结果边界', async (t) => {
 
       const publicSchema = fs.readFileSync(root + '/apps/platform-api/prisma/schema.prisma', 'utf8');
       const publicDmmf = JSON.parse(wasm.get_dmmf(JSON.stringify({ prismaSchema: publicSchema, noColor: true })));
-      assert.equal(publicDmmf.datamodel.models.length, 40);
+      assert.equal(publicDmmf.datamodel.models.length, 41);
       const publicClientFile = root + '/apps/platform-api/generated/client/index.js';
       const publicModule = new Module(publicClientFile);
       publicModule.filename = publicClientFile;
@@ -1046,8 +1056,8 @@ test('启用宿主的实际 DI、知识权限与原结果边界', async (t) => {
       // Constructors only: neither Client connects, queries, generates files or runs lifecycle hooks.
       const selectedClient = new generatedModule.exports.PrismaClient();
       const publicClient = new publicModule.exports.PrismaClient();
-      assert.equal(Object.keys(selectedClient._runtimeDataModel.models).length, 247);
-      assert.equal(Object.keys(publicClient._runtimeDataModel.models).length, 40);
+      assert.equal(Object.keys(selectedClient._runtimeDataModel.models).length, 248);
+      assert.equal(Object.keys(publicClient._runtimeDataModel.models).length, 41);
       const { createAiBodyStorageDatabase, bindAiBodyStorageTransaction } =
         require('@rental-os/ai-native-server/runtime/privacy/prisma-ai-body-storage');
       const { AiBodyStorageCodec, AI_BODY_TITLE_PLACEHOLDER } =
@@ -1121,7 +1131,7 @@ test('启用宿主的实际 DI、知识权限与原结果边界', async (t) => {
       native.unlistedModel = { create() { throw Error('unlisted delegate must not be called'); } };
       assert.throws(() => view.unlistedModel, bodyUnavailable);
       assert.equal(forbiddenDefaultLoads, 0, 'no default generated Client was loaded');
-      console.log('PASS official SQL/null/Decimal identities, 247+40 graph isolation, nested encryption and fail closed metadata');
+      console.log('PASS official SQL/null/Decimal identities, 248+41 graph isolation, nested encryption and fail closed metadata');
     });
   } finally {
     modelTransport.createNativeModelEgressTransport = originalTransport;
