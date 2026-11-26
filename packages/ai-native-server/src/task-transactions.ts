@@ -7,7 +7,7 @@ import { AiTaskRepositoryError } from './task-errors';
 export type AiTaskTransactionReference =
   | { kind: 'creation'; inputRef: string; sceneCode: string }
   | { kind: 'task'; taskId: string }
-  | { kind: 'task_control'; taskId: string }
+  | { kind: 'task_control'; taskId: string; operation?: 'claim_recovery_run' | 'release_run' }
   | { kind: 'step'; stepId: string }
   | { kind: 'invocation'; callId: string };
 export interface AiTaskTransactionAuthority<Transaction extends object> {
@@ -15,6 +15,7 @@ export interface AiTaskTransactionAuthority<Transaction extends object> {
   begin(transaction: Transaction, reference: AiTaskTransactionReference): Promise<{
     verifyReference(reference: AiTaskTransactionReference): Promise<void>;
     revalidate(): Promise<void>;
+    close?(): void;
   }>;
 }
 export type AiTaskTransactionBoundary<Transaction extends object> = ReturnType<typeof createAiTaskTransactionBoundary<Transaction>>;
@@ -68,16 +69,19 @@ export function createAiTaskTransactionBoundary<Transaction extends object>(
       return consume();
     }
     const lease = await scope.authority.begin(transaction, structuredClone(reference));
-    if (!scope.active || scopes.getStore() !== scope || !lease
-      || typeof lease.verifyReference !== 'function' || typeof lease.revalidate !== 'function') throw denied();
-    held.set(transaction, { scope, lease });
     try {
+      if (!scope.active || scopes.getStore() !== scope || !lease
+        || typeof lease.verifyReference !== 'function' || typeof lease.revalidate !== 'function') throw denied();
+      held.set(transaction, { scope, lease });
       const result = await consume();
       if (!scope.active || scopes.getStore() !== scope) throw denied();
       await lease.revalidate();
       if (!scope.active || scopes.getStore() !== scope) throw denied();
       return result;
-    } finally { held.delete(transaction); }
+    } finally {
+      if (held.get(transaction)?.lease === lease) held.delete(transaction);
+      lease?.close?.();
+    }
   }
 
   async function withHeldAiTaskTransaction<T>(transaction: Transaction, reference: AiTaskTransactionReference,

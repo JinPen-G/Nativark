@@ -10,7 +10,7 @@ import { taskExecutionPhaseStore } from './task-execution-phase.store';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskExecutionBudgetError, type AiTaskExecutionEvidenceSource, type AiTaskExecutionSettlementRequest } from '../task-execution-budget.ports';
 import type { AiTaskExecutionScopeSource } from './prisma-task-execution-budget.repository';
-import type { AiTaskRunnerLease, AiTaskRunnerPlan, AiTaskRunnerTaskMetadata, AiTaskRunnerEffectResult, AiTaskRunnerConfirmationContinuation } from '@rental-os/platform-server/ai-runtime';
+import type { AiTaskRunnerLease, AiTaskRunnerEffectResult, AiTaskRunnerConfirmationContinuation } from '@rental-os/platform-server/ai-runtime';
 import type { AiTaskRunnerObservedResult } from './ai-task-runner.ports';
 import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
 import { isGatewayConfig } from '../gateway-contract-validation';
@@ -18,7 +18,8 @@ import { readModelNonDispatchEvidence } from '../model-input/prisma-model-nondis
 import { isTaskModelCountCharge, taskStepChargesValid } from './task-model-count-charge';
 import { PrismaCountTokensReceipts, countTokensOperationId, countTokensCallId, countTokensSceneCode } from '../input-counting/input-count-tokens.receipt';
 import type { composeControlledApprovedOrder } from '../approval-execution/controlled-approved-order.composition';
-import type { AiTaskControlResourceOrigin } from './task-run-preparation.ports';
+import { TaskRunPlanRepository, aiTaskRunPlanSchema as planSchema, type TaskRunPlanAuthority,
+  type AiTaskControlResourceOrigin } from './task-run-plan.repository';
 type OrderBusiness = ReturnType<typeof composeControlledApprovedOrder>['waiting'];
 export type AiTaskOrderPhaseBusinessEvidence = {
   readWaiting(input: Parameters<OrderBusiness['readWaiting']>[0], tx?: Prisma.TransactionClient): ReturnType<OrderBusiness['readWaiting']>;
@@ -50,28 +51,12 @@ const orderPhasePayloadSchema = z.object({ version: z.enum(['approved-order-wait
   effectState: z.enum(['awaiting_decision', 'rejected', 'preparation_unknown', 'unresolved', 'committed']),
   proposalId: id.max(36).optional(), decisionRef: id.max(36).optional(), decision: z.enum(['approved', 'rejected']).optional(),
   businessResultRef: id.optional(), replayed: z.boolean().optional() }).strict();
-export const aiTaskRunnerLimitsSchema = z.object({ maxSteps: z.number().int().min(1).max(1000), maxCalls: z.number().int().min(1).max(1000), maxConcurrent: z.literal(1),
-  maxTotalMs: z.number().int().min(1).max(86400000), maxStepMs: z.number().int().min(1).max(86400000), maxOutputBytes: z.number().int().min(1).max(16777216) }).strict();
-export function isAiTaskRunPlanBounded(plan: Pick<AiTaskRunnerPlan, 'steps' | 'limits'>) {
-  return plan.steps.length <= plan.limits.maxSteps && plan.limits.maxStepMs <= plan.limits.maxTotalMs
-    && new Set(plan.steps.map(step => step.registrationRef)).size === plan.steps.length;
-}
-const planSchema = z.object({ taskId: id.max(36), runId: id.max(36), taskRevision: z.number().int().min(1).max(4294967294),
-  steps: z.array(z.object({ registrationRef: id, operation: z.enum(['readonly', 'idempotent', 'external_unknown']), toolCode: id, toolVersion: id }).strict()).max(1000),
-  limits: aiTaskRunnerLimitsSchema
-}).strict().refine(isAiTaskRunPlanBounded);
-export { planSchema as aiTaskRunPlanSchema };
+export { aiTaskRunnerLimitsSchema, isAiTaskRunPlanBounded, aiTaskRunPlanSchema } from './task-run-plan.repository';
 // Read-only original receipt consumers share the persisted validators, not
 // the live execution/lease authorization performed by this repository.
 export { orderPhasePayloadSchema as aiTaskConfirmationPhasePayloadSchema,
   resumedConfirmationSchema as aiTaskResumedConfirmationSchema };
-const proofSchema = z.object({ authorityHash: z.string().regex(/^[a-f0-9]{64}$/u), policyVersion: id.max(64), expiresAt: z.string().datetime({ offset: true }) }).strict();
-export interface AiTaskPlanEvidenceAuthority {
-  /** Server-owned action/limits/configuration policy. A model cannot attest its own plan. */
-  authorize(plan: Readonly<AiTaskRunnerPlan>, lease: Readonly<AiTaskRunnerLease>): Promise<z.infer<typeof proofSchema>>;
-  /** Resource-definition admission before input publication, NOT plan authorization. */
-  authorizePreparation?: (definition: import('@rental-os/platform-server/ai-runtime').AiTaskPreparationDefinition,
-    lease: AiTaskRunnerLease, db?: Prisma.TransactionClient) => Promise<z.infer<typeof proofSchema>>;
+export interface AiTaskPlanEvidenceAuthority extends TaskRunPlanAuthority {
   /** Current-authorized binding of an existing step, never a start grant. */
   resolveOriginal?: (command: import('../ai-step-registration.repository').AiStepRegistrationCommand,
     tx?: Prisma.TransactionClient) => Promise<import('../ai-step-registration.repository').AiStepOriginalRegistrationGrant>;
@@ -86,7 +71,7 @@ const conflict = () => new AiTaskExecutionBudgetError('AI_REVISION_CONFLICT');
  * call, approval, dispatch or financial ledger. Missing policy remains unavailable.
  * Activity means the measured uninterrupted tool interval, not paused wall time.
  */
-export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceSource {
+export class PrismaTaskRunEvidenceRepository extends TaskRunPlanRepository<Db> implements AiTaskExecutionEvidenceSource {
   private toolActivityObserver?: (lease: AiTaskRunnerLease, chargeId: string, started: number, ended: number) => void;
 
   /** Composition-only timing handoff. Neither callback data nor a client field
@@ -97,15 +82,15 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     this.toolActivityObserver = observer;
   }
 
-  constructor(private readonly db: Db, private readonly scopes: AiTaskExecutionScopeSource,
-    private readonly planAuthority: AiTaskPlanEvidenceAuthority, private readonly wall: () => Date = () => new Date(),
+  constructor(db: Db, scopes: AiTaskExecutionScopeSource,
+    planAuthority: AiTaskPlanEvidenceAuthority, wall: () => Date = () => new Date(),
     private readonly monotonic: () => number = () => performance.now(),
     private readonly financialEvidence?: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>,
     private readonly orderEvidence?: AiTaskOrderPhaseBusinessEvidence,
     private readonly confirmationTool: AiConfirmationTool = 'rental.order.commit',
-    private readonly controlResourceOrigin?: AiTaskControlResourceOrigin) {
-    if (typeof db?.$transaction !== 'function' || typeof db?.aiTaskRunPlan?.findUnique !== 'function'
-      || typeof db?.aiTaskResultArtifact?.create !== 'function' || typeof scopes?.resolve !== 'function' || typeof planAuthority?.authorize !== 'function'
+    controlResourceOrigin?: AiTaskControlResourceOrigin) {
+    super(db, scopes, planAuthority, wall, controlResourceOrigin, { withAiTaskTransaction });
+    if (typeof db?.aiTaskResultArtifact?.create !== 'function'
       || !['rental.order.commit', 'tenant.notifications.commit', 'membership.profile.commit'].includes(confirmationTool)
       || (orderEvidence && (typeof orderEvidence.readWaiting !== 'function' || typeof orderEvidence.reconcile !== 'function'))) throw unavailable();
   }
@@ -114,226 +99,6 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     const parsed = orderPhasePayloadSchema.parse(value);
     if (parsed.version !== aiTaskConfirmationPhaseVersion(this.confirmationTool)) throw denied();
     return parsed;
-  }
-
-  private async access(lease: AiTaskRunnerLease, accountingOnly = false) {
-    lease = structuredClone(lease);
-    if (!lease || !id.max(36).safeParse(lease.taskId).success || !id.max(36).safeParse(lease.runId).success || !id.safeParse(lease.holderId).success
-      || !/^[1-9][0-9]{0,19}$/u.test(lease.fencingToken) || !Number.isSafeInteger(lease.revision) || lease.revision < 1) throw denied();
-    const operation = accountingOnly && lease.expiresAt === '' ? 'settle_released_run' : 'write';
-    const access = structuredClone(await this.scopes.resolve(lease.taskId, lease, operation));
-    if (!access?.scopeId || access.taskWhere?.id !== lease.taskId || !access.bindingKey) throw denied();
-    return access;
-  }
-
-  private async held(db: Pick<PrismaClient, 'aiTask' | 'aiRun'>, lease: AiTaskRunnerLease, before: Awaited<ReturnType<PrismaTaskRunEvidenceRepository['access']>>, locked = false, accountingOnly = false) {
-    const statuses: import('@prisma/client').AiTaskStatus[] = accountingOnly
-      ? ['QUEUED', 'RUNNING', 'SUCCEEDED', 'PARTIALLY_SUCCEEDED', 'FAILED', 'CANCELLED'] : ['QUEUED', 'RUNNING'];
-    const current = await this.access(lease, accountingOnly);
-    if (current.bindingKey !== before.bindingKey || current.scopeId !== before.scopeId) throw denied();
-    const task = await db.aiTask.findFirst({ where: { AND: [current.taskWhere, { scopeId: current.scopeId }] }, select: { id: true, scopeId: true } });
-    const receiptOnly = accountingOnly && lease.expiresAt === '';
-    const run = await db.aiRun.findFirst({ where: { scopeId: current.scopeId, taskId: lease.taskId, id: lease.runId,
-      fencingToken: new prismaRuntime.Decimal(lease.fencingToken), revision: lease.revision, status: { in: statuses },
-      ...(receiptOnly ? { OR: [{ status: { in: ['SUCCEEDED', 'PARTIALLY_SUCCEEDED', 'FAILED', 'CANCELLED'] } },
-        { leaseOwnerId: lease.holderId, leaseExpiresAt: { gt: this.wall() } },
-        { leaseOwnerId: null, leaseExpiresAt: null }] }
-        : { leaseOwnerId: lease.holderId, leaseExpiresAt: { gt: this.wall() } }) },
-      select: { id: true, scopeId: true, taskId: true, leaseOwnerId: true, fencingToken: true, revision: true, status: true, leaseExpiresAt: true } });
-    // A released or terminal receipt is not a held execution lease. It can
-    // verify original measured time, never reserve or enter ordinary marker writes.
-    const terminalReceipt = receiptOnly && run && (!['QUEUED', 'RUNNING'].includes(run.status)
-      || run.leaseOwnerId === null && run.leaseExpiresAt === null);
-    if (!task || task.id !== lease.taskId || task.scopeId !== current.scopeId || !run || run.id !== lease.runId
-      || run.scopeId !== current.scopeId || run.taskId !== lease.taskId
-      || run.fencingToken.toFixed(0) !== lease.fencingToken || run.revision !== lease.revision || !statuses.includes(run.status)
-      || terminalReceipt && locked
-      || !terminalReceipt && (run.leaseOwnerId !== lease.holderId || !run.leaseExpiresAt || run.leaseExpiresAt <= this.wall()
-        || lease.expiresAt && Date.parse(lease.expiresAt) !== run.leaseExpiresAt.getTime())) throw denied();
-    if (locked && (await db.aiRun.updateMany({ where: { scopeId: current.scopeId, taskId: lease.taskId, id: lease.runId,
-      leaseOwnerId: lease.holderId, fencingToken: new prismaRuntime.Decimal(lease.fencingToken), revision: lease.revision,
-      status: { in: statuses }, leaseExpiresAt: { gt: this.wall() } }, data: { revision: lease.revision } })).count !== 1) throw denied();
-  }
-
-  private async locked<T>(lease: AiTaskRunnerLease, consume: (tx: Tx, access: Awaited<ReturnType<PrismaTaskRunEvidenceRepository['access']>>) => Promise<T>, accountingOnly = false, newWork = !accountingOnly) {
-    lease = structuredClone(lease); const access = await this.access(lease);
-    try {
-      return await this.db.$transaction(async tx => {
-const originalWork = async () => {
-        await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_tasks WHERE scopeId = ${access.scopeId} AND id = ${lease.taskId} FOR UPDATE`);
-        await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_runs WHERE scopeId = ${access.scopeId} AND taskId = ${lease.taskId} AND id = ${lease.runId} FOR UPDATE`);
-        await this.held(tx, lease, access, true, accountingOnly);
-        const result = await consume(tx, access);
-        await this.held(tx, lease, access, true, accountingOnly);
-        return result;
-
-};
-return newWork ? withAiTaskTransaction(tx, { kind: 'task', taskId: lease.taskId }, originalWork) : originalWork();
-}, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
-    } catch (error) {
-      if (error instanceof AiTaskExecutionBudgetError) throw error;
-      throw new AiTaskExecutionBudgetError('AI_STORAGE_UNAVAILABLE');
-    }
-  }
-
-  /** Internal resource participant: execute no business/model callback in this transaction. */
-  withHeldRun<T>(lease: AiTaskRunnerLease, participant: (tx: Prisma.TransactionClient, scopeId: string) => Promise<T>) {
-    return this.locked(lease, (tx, access) => participant(tx, access.scopeId));
-  }
-
-  async assertHeldRun(lease: AiTaskRunnerLease) {
-    const access = await this.access(lease);
-    await this.held(this.db, lease, access);
-    return access.scopeId;
-  }
-
-  /** Original time receipts only. A nonempty deadline still needs the exact
-   * live holder; empty released/terminal observation can read saved measurements
-   * after release/expiry, never capture, prepare, dispatch or write a new marker. */
-  async assertAccountingRun(lease: AiTaskRunnerLease) {
-    const access = await this.access(lease, true);
-    await this.held(this.db, lease, access, false, true);
-    return access.scopeId;
-  }
-
-  async withAccountingRun<T>(lease: AiTaskRunnerLease, participant: (tx: Prisma.TransactionClient, scopeId: string) => Promise<T>) {
-    if (!lease.expiresAt) throw denied();
-    return this.locked(lease, (tx, access) => participant(tx, access.scopeId), true);
-  }
-
-  /** Infrastructure-only final time participant. A terminal/absent holder alone
-   * is insufficient: lock the exact released CAS+1 tuple, recheck current receipt
-   * authority, and leave owner/deadline/fence untouched. The caller must also own
-   * the original same-process measurement; no tool/model callback belongs here. */
-  async withReleasedAccountingRun<T>(before: AiTaskRunnerLease, receipt: { released: true; revision: number },
-    participant: (tx: Prisma.TransactionClient, scopeId: string) => Promise<T>) {
-    before = structuredClone(before); receipt = structuredClone(receipt);
-    if (!before.expiresAt || !Number.isFinite(Date.parse(before.expiresAt)) || receipt?.released !== true
-      || !Number.isSafeInteger(receipt.revision) || receipt.revision !== before.revision + 1
-      || receipt.revision > 0xffffffff) throw denied();
-    const lease = { ...before, revision: receipt.revision, expiresAt: '' }, access = await this.access(lease, true);
-    const key = { scopeId: access.scopeId, taskId: lease.taskId, id: lease.runId, revision: lease.revision,
-      fencingToken: new prismaRuntime.Decimal(lease.fencingToken), leaseOwnerId: null, leaseExpiresAt: null };
-    try {
-      return await this.db.$transaction(async tx => {
-        await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_tasks WHERE scopeId = ${access.scopeId} AND id = ${lease.taskId} FOR UPDATE`);
-        await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_runs WHERE scopeId = ${access.scopeId} AND taskId = ${lease.taskId} AND id = ${lease.runId} FOR UPDATE`);
-        await this.held(tx, lease, access, false, true);
-        // The FOR UPDATE lock already fences this observation. A no-op Prisma
-        // update would still change AiRun.updatedAt during original-time closure.
-        if (!await tx.aiRun.findFirst({ where: key })) throw denied();
-        const result = await participant(tx, access.scopeId);
-        await this.held(tx, lease, access, false, true);
-        if (!await tx.aiRun.findFirst({ where: key })) throw denied();
-        return result;
-      }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
-    } catch (error) {
-      if (error instanceof AiTaskExecutionBudgetError) throw error;
-      throw new AiTaskExecutionBudgetError('AI_STORAGE_UNAVAILABLE');
-    }
-  }
-
-  async assertExecutable(lease: AiTaskRunnerLease) {
-    lease = structuredClone(lease);
-    const access = await this.access(lease);
-    const task = await this.db.aiTask.findFirst({ where: { AND: [access.taskWhere, { scopeId: access.scopeId, status: 'RUNNING', cancelRequestedAt: null }] },
-      select: { id: true, scopeId: true, status: true, cancelRequestedAt: true } });
-    if (!task || task.id !== lease.taskId || task.scopeId !== access.scopeId || task.status !== 'RUNNING' || task.cancelRequestedAt !== null) throw denied();
-    await this.held(this.db, lease, access);
-  }
-
-  async savePlan(value: AiTaskRunnerPlan, lease: AiTaskRunnerLease) {
-    const plan = planSchema.parse(structuredClone(value)); lease = structuredClone(lease);
-    if (plan.taskId !== lease.taskId || plan.runId !== lease.runId) throw denied();
-    const proof = proofSchema.parse(structuredClone(await this.planAuthority.authorize(structuredClone(plan), structuredClone(lease))));
-    if (Date.parse(proof.expiresAt) <= this.wall().getTime()) throw denied();
-    return this.locked(lease, async (tx, access) => {
-      const key = { scopeId: access.scopeId, taskId: lease.taskId, runId: lease.runId };
-      const hash = requestFingerprint(plan);
-      const prior = await tx.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
-      if (prior && (prior.planHash !== hash || prior.authorityHash !== proof.authorityHash || prior.policyVersion !== proof.policyVersion)) throw conflict();
-      const current = proofSchema.parse(await this.planAuthority.authorize(structuredClone(plan), structuredClone(lease)));
-      if (current.authorityHash !== proof.authorityHash || current.policyVersion !== proof.policyVersion || Date.parse(current.expiresAt) <= this.wall().getTime()) throw denied();
-      if (!prior) {
-        const task = await tx.aiTask.updateMany({ where: { AND: [access.taskWhere, { revision: plan.taskRevision, cancelRequestedAt: null }] }, data: { revision: plan.taskRevision } });
-        if (task.count !== 1) throw conflict();
-        await tx.aiTaskRunPlan.create({ data: { ...key, planHash: hash, authorityHash: proof.authorityHash, policyVersion: proof.policyVersion, payload: plan } });
-      }
-      return { planHash: hash, replayed: prior !== null };
-    });
-  }
-
-  async resolve(task: AiTaskRunnerTaskMetadata, lease: AiTaskRunnerLease, recovery: boolean, accountingOnly = false): Promise<AiTaskRunnerPlan> {
-    task = structuredClone(task); lease = structuredClone(lease);
-    if (accountingOnly && !recovery) throw denied();
-    const access = await this.access(lease, accountingOnly); await this.held(this.db, lease, access, false, accountingOnly);
-    const plan = await this.currentPlan(this.db, lease, access.scopeId, recovery);
-    if (plan.taskId !== task.taskId) throw denied();
-    await this.held(this.db, lease, access, false, accountingOnly);
-    return { ...plan, taskRevision: task.revision };
-  }
-
-  async resourceOrigin(plan: AiTaskRunnerPlan, lease: AiTaskRunnerLease, accountingOnly = false): Promise<AiTaskRunnerPlan> {
-    plan = planSchema.parse(structuredClone(plan)); lease = structuredClone(lease);
-    const access = await this.access(lease, accountingOnly); await this.held(this.db, lease, access, false, accountingOnly);
-    const key = { scopeId: access.scopeId, taskId: lease.taskId };
-    const run = await this.db.aiRun.findFirst({ where: { ...key, id: lease.runId } });
-    if (!run || run.id !== lease.runId || run.scopeId !== key.scopeId || run.taskId !== key.taskId
-      || plan.runId !== run.id || plan.taskId !== key.taskId) throw denied();
-    if (run.inputReceiptId == null && run.resourceOriginRunId == null) return plan;
-    if (run.inputReceiptId == null && run.resourceOriginRunId && run.sequence > 1 && this.controlResourceOrigin) {
-      if (run.actorKind !== 'USER') throw denied();
-      const original = planSchema.parse(await this.controlResourceOrigin({ ...key, runId: run.id,
-        resourceOriginRunId: run.resourceOriginRunId }));
-      const stored = await this.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: {
-        ...key, runId: run.resourceOriginRunId } } });
-      if (!stored || stored.scopeId !== key.scopeId || stored.taskId !== key.taskId || stored.runId !== run.resourceOriginRunId
-        || original.taskId !== key.taskId || original.runId !== run.resourceOriginRunId
-        || stored.planHash !== requestFingerprint(stored.payload) || stored.planHash !== requestFingerprint(original)
-        || Object.entries(original.limits).some(([name, ceiling]) => plan.limits[name as keyof typeof plan.limits] > ceiling)) throw denied();
-      await this.held(this.db, lease, access, false, accountingOnly);
-      return original;
-    }
-    if (!run.inputReceiptId || !run.resourceOriginRunId || run.sequence < 2) throw denied();
-    const receipt = await this.db.aiTaskInputReceipt.findUnique({ where: { scopeId_taskId_id: { ...key, id: run.inputReceiptId } } });
-    const request = receipt && await this.db.aiTaskInputRequest.findUnique({ where: { scopeId_taskId_id: { ...key, id: receipt.requestId } } });
-    if (!receipt || receipt.id !== run.inputReceiptId || receipt.scopeId !== key.scopeId || receipt.taskId !== key.taskId
-      || receipt.actorKind !== run.actorKind || receipt.actorId !== run.actorId || !receipt.consumedAt || !receipt.consumedTaskRevision
-      || !request || request.id !== receipt.requestId || request.scopeId !== key.scopeId || request.taskId !== key.taskId
-      || request.status !== 'CONSUMED' || request.planHash !== receipt.planHash || request.waitingTaskRevision + 1 !== receipt.consumedTaskRevision) throw denied();
-    const parent = await this.db.aiRun.findFirst({ where: { ...key, id: request.runId } });
-    const origin = await this.db.aiRun.findFirst({ where: { ...key, id: run.resourceOriginRunId } });
-    if (!parent || parent.id !== request.runId || parent.scopeId !== key.scopeId || parent.taskId !== key.taskId
-      || parent.sequence + 1 !== run.sequence || parent.status !== 'SUCCEEDED'
-      || (parent.resourceOriginRunId ?? parent.id) !== run.resourceOriginRunId
-      || !origin || origin.id !== run.resourceOriginRunId || origin.scopeId !== key.scopeId || origin.taskId !== key.taskId
-      || origin.sequence !== 1 || origin.inputReceiptId != null || origin.resourceOriginRunId != null || origin.status !== 'SUCCEEDED') throw denied();
-    const stored = await this.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: { ...key, runId: origin.id } } });
-    if (!stored || stored.scopeId !== key.scopeId || stored.taskId !== key.taskId || stored.runId !== origin.id
-      || requestFingerprint(stored.payload) !== stored.planHash) throw denied();
-    const original = planSchema.parse(stored.payload);
-    if (original.taskId !== key.taskId || original.runId !== origin.id
-      || Object.entries(original.limits).some(([name, ceiling]) => plan.limits[name as keyof typeof plan.limits] > ceiling)) throw denied();
-    await this.held(this.db, lease, access, false, accountingOnly);
-    return original;
-  }
-
-  private async currentPlan(db: Pick<PrismaClient, 'aiTaskRunPlan'>, lease: AiTaskRunnerLease, scopeId: string, originalOnly = false) {
-    const row = await db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: { scopeId, taskId: lease.taskId, runId: lease.runId } } });
-    if (!row) throw unavailable();
-    if (row.scopeId !== scopeId || row.taskId !== lease.taskId || row.runId !== lease.runId
-      || !/^[a-f0-9]{64}$/u.test(row.authorityHash) || !id.max(64).safeParse(row.policyVersion).success) throw denied();
-    const plan = planSchema.parse(structuredClone(row.payload));
-    if (plan.taskId !== lease.taskId || plan.runId !== lease.runId || requestFingerprint(plan) !== row.planHash) throw denied();
-    // The saved plan was authorized before publication. Reconciliation reads
-    // that immutable provenance under current owner/action/lease checks; a
-    // closed or replaced *new execution* policy must not erase old debt.
-    // Only normal execution/capture reauthorizes a fresh plan here.
-    if (!originalOnly) {
-      const proof = proofSchema.parse(structuredClone(await this.planAuthority.authorize(structuredClone(plan), structuredClone(lease))));
-      if (proof.authorityHash !== row.authorityHash || proof.policyVersion !== row.policyVersion || Date.parse(proof.expiresAt) <= this.wall().getTime()) throw denied();
-    }
-    return plan;
   }
 
   private async continuationBasis(tx: Tx, scopeId: string, lease: AiTaskRunnerLease, step: AiStep, continuation: AiTaskRunnerConfirmationContinuation) {
@@ -522,7 +287,7 @@ return newWork ? withAiTaskTransaction(tx, { kind: 'task', taskId: lease.taskId 
           proposalId: payload.proposal?.proposalId ?? null, proposalRevision: payload.proposal?.proposalRevision ?? null,
           reviewedPayloadHash: payload.proposal?.reviewedPayloadHash ?? null, decisionRef: payload.decisionRef ?? null,
           businessResultRef: payload.businessResultRef ?? null, createdAt: this.wall() });
-      }, false, false);
+      }, 'settle');
       return result.kind === 'paused' ? { kind: 'paused', pause: 'confirmation', resultRef: receiptId, outputBytes }
         : result.kind === 'failed' ? { kind: 'failed', errorCode: result.errorCode === 'AI_APPROVAL_REJECTED' ? 'AI_BUSINESS_REJECTED' : result.errorCode!, resultRef: receiptId, outputBytes }
           : { kind: result.kind, resultRef: receiptId, outputBytes };
@@ -539,7 +304,7 @@ return newWork ? withAiTaskTransaction(tx, { kind: 'task', taskId: lease.taskId 
         outcome: result.kind.toUpperCase() as AiStepStatus, errorCode: result.kind === 'failed' ? result.errorCode : null, payload: result.payload, contentHash: requestFingerprint(result.payload),
         outputBytes: BigInt(outputBytes), activeMs, completeMeasurement: result.kind !== 'unknown' } });
       if (saved.count !== 1) throw conflict();
-    }, false, false);
+    }, 'settle');
     return result.kind === 'failed' ? { kind: 'failed', errorCode: result.errorCode!, resultRef: ref, outputBytes }
       : { kind: result.kind, resultRef: ref, outputBytes };
   }

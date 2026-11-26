@@ -1,8 +1,8 @@
-import type { AiTaskRepository } from '../ai-task.repository';
+import type { TaskPersistenceRepository } from '../task-persistence.repository';
 import type { AiTaskExecutionLease, AiTaskExecutionPolicySource } from '../task-execution-budget.ports';
 import { AiTaskExecutionBudgetError } from '../task-execution-budget.ports';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
-import type { PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';
+import type { TaskRunPlanRepository } from './task-run-plan.repository';
 import type { AiTaskRunnerTaskMetadata } from '@rental-os/platform-server/ai-runtime';
 
 /** New reservations require today's execution policy. Original accounting
@@ -10,8 +10,8 @@ import type { AiTaskRunnerTaskMetadata } from '@rental-os/platform-server/ai-run
  * Neither mode grants permission; recovery cannot mint a fresh allowance.
  */
 export class PersistedPlanResourcePolicySource implements AiTaskExecutionPolicySource {
-  constructor(private readonly tasks: Pick<AiTaskRepository, 'readMetadata'>,
-    private readonly plans: Pick<PrismaTaskRunEvidenceRepository, 'resolve'> & Partial<Pick<PrismaTaskRunEvidenceRepository, 'resourceOrigin'>>,
+  constructor(private readonly tasks: Pick<TaskPersistenceRepository, 'readMetadata'>,
+    private readonly plans: Pick<TaskRunPlanRepository, 'resolve'> & Partial<Pick<TaskRunPlanRepository, 'resourceOrigin'>>,
     private readonly preparation?: import('./task-run-preparation.ports').AiTaskPreparationPolicySource) {
     if (typeof tasks?.readMetadata !== 'function' || typeof plans?.resolve !== 'function') {
       throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');

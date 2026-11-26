@@ -1,5 +1,6 @@
-import type { AiTaskTransactionBoundary } from '../task-transactions';
+import { isStrictAiTaskTransactionBoundary, type AiTaskTransactionBoundary } from '../task-transactions';
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
+import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { AI_TASK_DRAFT_VERSION } from "@rental-os/platform-contracts/ai-task";
@@ -33,6 +34,42 @@ export interface AiTaskRepositoryAuthority {
   resolve(taskId: string, operation: AiTaskRepositoryOperation): Promise<AiExecutionContext>;
 }
 
+function recoveryTrace(taskId: string, runId: string): Prisma.AiRunWhereInput {
+  return { id: runId, executionPlan: { is: { taskId, runId } }, OR: [
+    { steps: { some: { status: { in: ['RUNNING', 'UNKNOWN', 'SUCCEEDED', 'FAILED'] } } } },
+    // A lost base-admission reply can leave the original Step PENDING.
+    // An existing charge permits observation only, never start or cleanup.
+    { steps: { some: { status: 'PENDING', effect: 'NONE' } },
+      executionCharges: { some: { taskId, runId, stepId: { not: null }, resource: 'STEPS', amount: 1n,
+        status: { in: ['RESERVED', 'UNKNOWN'] } } } },
+    // A lost pre-step reply can leave pure Run-time debt and no Step.
+    { executionCharges: { some: { resource: 'ACTIVE_MS', stepId: null, actionId: null,
+      stepFingerprint: null, gatewayInvocationId: null, amount: { gt: 0n },
+      status: { in: ['RESERVED', 'UNKNOWN'] } } } }
+  ] };
+}
+
+/** The caller must already hold current `claim_recovery_run` access. This is
+ * the single persisted generation check for both root and Native readers. */
+export async function assertOriginalTaskRecoveryLease(db: Pick<Prisma.TransactionClient, 'aiRun'>,
+  value: unknown, access: ReturnType<typeof aiTaskAccessFromContext>) {
+  const parsed = recoveryLeaseInput.safeParse(value);
+  if (!parsed.success || access.where.id !== parsed.data.taskId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+  const lease = parsed.data;
+  const row = await db.aiRun.findFirst({ where: {
+    id: lease.runId, taskId: lease.taskId, revision: lease.revision, fencingToken: new prismaRuntime.Decimal(lease.fencingToken),
+    leaseOwnerId: lease.holderId, leaseExpiresAt: { gt: access.now }, actorKind: access.actorKind, actorId: access.actorId,
+    status: { in: [...runnable] }, task: { is: { ...access.where, contractVersion: AI_TASK_DRAFT_VERSION,
+      runs: { some: recoveryTrace(lease.taskId, lease.runId) },
+      OR: [{ status: { in: ['RUNNING', 'WAITING_INPUT', 'WAITING_CONFIRMATION', 'WAITING_EXTERNAL'] }, cancelRequestedAt: null },
+        { status: 'CANCEL_REQUESTED', cancelRequestedAt: { not: null } }] } }
+  }, select: { id: true, taskId: true, revision: true, fencingToken: true, leaseOwnerId: true, leaseExpiresAt: true, actorId: true } })
+    .catch(() => { throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE'); });
+  if (!row || row.id !== lease.runId || row.taskId !== lease.taskId || row.revision !== lease.revision
+    || row.fencingToken.toFixed(0) !== lease.fencingToken || row.leaseOwnerId !== lease.holderId || row.actorId !== access.actorId
+    || !row.leaseExpiresAt || row.leaseExpiresAt.getTime() !== Date.parse(lease.expiresAt)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+}
+
 /**
  * Not registered in Nest or a worker. The required authority re-resolves each call;
  * owner-only access is deliberate until a separately authorized task-sharing path exists.
@@ -57,9 +94,12 @@ export class TaskPersistenceRepository {
     return aiTaskAccessFromContext(context, taskId, this.clock());
   }
 
-  private async stored<T>(operation: () => Promise<T>): Promise<T> {
+  private async stored<T>(operation: () => Promise<T>, preserveRunUnknown = false): Promise<T> {
     try { return await operation(); }
-    catch { throw new AiTaskRepositoryError("AI_STORAGE_UNAVAILABLE"); }
+    catch (error) {
+      if (preserveRunUnknown && error instanceof AiTaskRunnerError && error.code === 'AI_RESULT_UNKNOWN') throw error;
+      throw new AiTaskRepositoryError("AI_STORAGE_UNAVAILABLE");
+    }
   }
 
   async readMetadata(taskId: string) {
@@ -95,41 +135,13 @@ export class TaskPersistenceRepository {
     return { ...lease, purpose: "recovery_only" as const };
   }
 
-  private recoveryTrace(taskId: string, runId: string): Prisma.AiRunWhereInput {
-    return { id: runId, executionPlan: { is: { taskId, runId } }, OR: [
-      { steps: { some: { status: { in: ['RUNNING', 'UNKNOWN', 'SUCCEEDED', 'FAILED'] } } } },
-      // A base-admission COMMIT can outlive its reply while the original Step
-      // stays PENDING. Admit only observation of this occupied planned Run;
-      // neither a partial group nor an existing charge grants start/cleanup.
-      { steps: { some: { status: 'PENDING', effect: 'NONE' } },
-        executionCharges: { some: { taskId, runId, stepId: { not: null }, resource: 'STEPS', amount: 1n,
-          status: { in: ['RESERVED', 'UNKNOWN'] } } } },
-      // A lost pre-step acknowledgement may leave only original Run time debt.
-      // Its pure ACTIVE_MS occupancy admits observation of that same planned
-      // Run, not a Step start, a synthesized result, a refund or a new action.
-      { executionCharges: { some: { resource: 'ACTIVE_MS', stepId: null, actionId: null,
-        stepFingerprint: null, gatewayInvocationId: null, amount: { gt: 0n },
-        status: { in: ['RESERVED', 'UNKNOWN'] } } } }
-    ] };
-  }
-
   async assertRecoveryRun(value: unknown) {
     const parsed = recoveryLeaseInput.safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const lease = parsed.data, access = await this.resolveAccess(lease.taskId, 'claim_recovery_run');
-    const row = await this.stored(() => this.db.aiRun.findFirst({ where: {
-      id: lease.runId, taskId: lease.taskId, revision: lease.revision, fencingToken: new prismaRuntime.Decimal(lease.fencingToken),
-      leaseOwnerId: lease.holderId, leaseExpiresAt: { gt: access.now }, actorKind: access.actorKind, actorId: access.actorId,
-      status: { in: [...runnable] }, task: { is: { ...access.where, contractVersion: AI_TASK_DRAFT_VERSION,
-        runs: { some: this.recoveryTrace(lease.taskId, lease.runId) },
-        OR: [{ status: { in: ['RUNNING', 'WAITING_INPUT', 'WAITING_CONFIRMATION', 'WAITING_EXTERNAL'] }, cancelRequestedAt: null },
-          { status: 'CANCEL_REQUESTED', cancelRequestedAt: { not: null } }] } }
-    }, select: { id: true, taskId: true, revision: true, fencingToken: true, leaseOwnerId: true, leaseExpiresAt: true, actorId: true } }));
-    if (!row || row.id !== lease.runId || row.taskId !== lease.taskId || row.revision !== lease.revision
-      || row.fencingToken.toFixed(0) !== lease.fencingToken || row.leaseOwnerId !== lease.holderId || row.actorId !== access.actorId
-      || !row.leaseExpiresAt || row.leaseExpiresAt.getTime() !== Date.parse(lease.expiresAt)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+    await assertOriginalTaskRecoveryLease(this.db, lease, access);
     const current = await this.resolveAccess(lease.taskId, 'claim_recovery_run');
-    if (current.bindingKey !== access.bindingKey || row.leaseExpiresAt <= current.now) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    if (current.bindingKey !== access.bindingKey || Date.parse(lease.expiresAt) <= current.now.getTime()) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
   }
 
   private async claimLease(value: unknown, operation: "claim_run" | "claim_recovery_run") {
@@ -146,7 +158,7 @@ export class TaskPersistenceRepository {
         // original pure Run time occupancy. Fence that original planned Run
         // for current observation; do not resume/mutate the task or dispatch.
         { status: 'RUNNING', cancelRequestedAt: null,
-          runs: { some: this.recoveryTrace(input.taskId, input.runId) } },
+          runs: { some: recoveryTrace(input.taskId, input.runId) } },
         { status: { in: ["WAITING_INPUT", "WAITING_CONFIRMATION", "WAITING_EXTERNAL"] }, cancelRequestedAt: null },
         { status: "CANCEL_REQUESTED", cancelRequestedAt: { not: null } }
       ] };
@@ -166,13 +178,24 @@ export class TaskPersistenceRepository {
         actorKind: access.actorKind, actorId: access.actorId, authorizedAt: access.authorizedAt
       }
     });
+    const control = operation === 'claim_recovery_run';
+    const strict = isStrictAiTaskTransactionBoundary(this.transactions);
     const result = await this.stored(async () => {
-      if (operation !== "claim_run" || !this.transactions.hasAiTaskTransactionAuthority()) return claim(this.db);
+      if (control ? !strict : !this.transactions.hasAiTaskTransactionAuthority()) return claim(this.db);
       if (!this.db.$transaction) throw new AiTaskRepositoryError("AI_STORAGE_UNAVAILABLE");
-      return this.db.$transaction(tx => this.transactions.withAiTaskTransaction(tx, { kind: "task", taskId: input.taskId }, () => claim(tx)),
+      const reference = control ? { kind: 'task_control', taskId: input.taskId, operation: 'claim_recovery_run' } as const
+        : { kind: 'task', taskId: input.taskId } as const;
+      const write = async (tx: Prisma.TransactionClient) => {
+        const result = await claim(tx);
+        if (strict && expiresAt <= this.clock()) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return result;
+      };
+      if (strict) return this.strictRunWrite(reference, write);
+      return this.db.$transaction(tx => this.transactions.withAiTaskTransaction(tx, reference, () => write(tx)),
         { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
-    });
+    }, strict);
     if (result.count !== 1) throw new AiTaskRepositoryError("AI_REVISION_CONFLICT");
+    if (strict) await this.verifyControlDelivery(input.taskId, operation, access.bindingKey);
     // Derived only from matched CAS values: no second read can accidentally return another holder's lease.
     return { taskId: input.taskId, runId: input.runId, holderId: input.holderId, revision: input.expectedRunRevision + 1, fencingToken: (fence + 1n).toString(), expiresAt: expiresAt.toISOString() };
   }
@@ -182,16 +205,47 @@ export class TaskPersistenceRepository {
     if (!parsed.success) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
     const input = parsed.data;
     const access = await this.resolveAccess(input.taskId, "release_run");
-    const result = await this.stored(() => this.db.aiRun.updateMany({
+    const strict = isStrictAiTaskTransactionBoundary(this.transactions);
+    const release = (db: Pick<Prisma.TransactionClient, 'aiRun'>) => db.aiRun.updateMany({
       where: {
         id: input.runId, taskId: input.taskId, revision: input.expectedRunRevision,
         fencingToken: new prismaRuntime.Decimal(input.expectedFencingToken), leaseOwnerId: input.holderId,
-        leaseExpiresAt: { gt: access.now },
+        leaseExpiresAt: { gt: strict ? this.clock() : access.now },
         task: { is: { ...access.where, revision: input.expectedTaskRevision } }
       },
       data: { revision: { increment: 1 }, leaseOwnerId: null, leaseExpiresAt: null }
-    }));
+    });
+    const result = await this.stored(() => {
+      if (!strict) return release(this.db);
+      if (!this.db.$transaction) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+      return this.strictRunWrite({ kind: 'task_control', taskId: input.taskId, operation: 'release_run' }, release);
+    }, strict);
     if (result.count !== 1) throw new AiTaskRepositoryError("AI_REVISION_CONFLICT");
+    if (strict) await this.verifyControlDelivery(input.taskId, 'release_run', access.bindingKey);
     return { released: true as const, revision: input.expectedRunRevision + 1 };
+  }
+
+  private async verifyControlDelivery(taskId: string, operation: AiTaskRepositoryOperation, bindingKey: string) {
+    // A durable CAS can survive a lost permission or connection here. Denial
+    // prevents delivery and cannot be treated as proof that the CAS rolled back.
+    try {
+      if ((await this.resolveAccess(taskId, operation)).bindingKey !== bindingKey) throw new Error();
+    } catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'original Run control acknowledgement requires current authority'); }
+  }
+
+  private async strictRunWrite(reference: import('../task-transactions').AiTaskTransactionReference,
+    write: (database: Prisma.TransactionClient) => Promise<{ count: number }>) {
+    if (!this.db.$transaction) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+    let mayHaveCommitted = false;
+    try {
+      return await this.db.$transaction(async tx => {
+        const result = await this.transactions.withAiTaskTransaction(tx, reference, () => write(tx));
+        mayHaveCommitted = result.count === 1;
+        return result;
+      }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+    } catch (error) {
+      if (mayHaveCommitted) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'original Run control commit acknowledgement is uncertain');
+      throw error;
+    }
   }
 }

@@ -10,7 +10,7 @@ import { z } from 'zod';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskExecutionBudgetError, type AiTaskExecutionBudgetPort, type AiTaskExecutionLease,
   type AiTaskExecutionPolicy, type AiTaskExecutionSettlementRequest } from '../task-execution-budget.ports';
-import { aiTaskRunPlanSchema, type AiTaskPlanEvidenceAuthority, type PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';
+import { aiTaskRunPlanSchema, type TaskRunPlanAuthority, type TaskRunPlanRepository } from './task-run-plan.repository';
 import { type AiTaskPreparationDefinition, type AiTaskPreparationTicket } from '@rental-os/platform-server/ai-runtime';
 import { taskPreparationDefinitionSchema, type AiTaskControlResourceOrigin } from './task-run-preparation.ports';
 import type { AiTaskRunnerLease } from '@rental-os/platform-server/ai-runtime';
@@ -66,11 +66,11 @@ export async function taskPreparationNonEffectChargeIds(db: Partial<Pick<PrismaC
 export class PrismaTaskRunPreparation {
   private readonly starts = new Map<string, { at: number; lease: string }>();
   constructor(private readonly db: Db,
-    private readonly evidence: Pick<PrismaTaskRunEvidenceRepository, 'assertHeldRun' | 'assertExecutable' | 'withHeldRun' | 'withAccountingRun' | 'resolve' | 'resourceOrigin'>
-      & Partial<Pick<PrismaTaskRunEvidenceRepository, 'assertAccountingRun'>>,
-    private readonly authority: AiTaskPlanEvidenceAuthority, private readonly wall: () => Date = () => new Date(),
+    private readonly evidence: Pick<TaskRunPlanRepository, 'assertHeldRun' | 'assertExecutable' | 'withHeldRun' | 'withAccountingRun' | 'resolve' | 'resourceOrigin'>
+      & Partial<Pick<TaskRunPlanRepository, 'assertAccountingRun'>>,
+    private readonly authority: TaskRunPlanAuthority, private readonly wall: () => Date = () => new Date(),
     private readonly monotonic: () => number = () => performance.now(),
-    private readonly controlResourceOrigin?: AiTaskControlResourceOrigin) {}
+    private readonly controlResourceOrigin?: AiTaskControlResourceOrigin, private readonly nativeScope = false) {}
 
   private store(db: Partial<Pick<PrismaClient, 'aiTaskRunPreparation'>> = this.db) {
     const value = db.aiTaskRunPreparation;
@@ -176,7 +176,7 @@ export class PrismaTaskRunPreparation {
     const task = await this.db.aiTask.findFirst({ where: { scopeId, id: lease.taskId } });
     if (!task) throw denied();
     const plan = await this.evidence.resolve({ taskId: task.id, revision: task.revision,
-      status: task.status.toLowerCase() as import('@rental-os/shared').AiTaskStatusDraft,
+      status: task.status.toLowerCase() as import('@rental-os/platform-contracts/ai-task').AiTaskStatusDraft,
       cancelRequestedAt: task.cancelRequestedAt?.toISOString() ?? null }, lease, false);
     const origin = await this.evidence.resourceOrigin(plan, lease);
     if (origin.runId !== definition.runId || requestFingerprint(origin.steps) !== requestFingerprint(definition.steps)
@@ -199,7 +199,7 @@ export class PrismaTaskRunPreparation {
     }
     const stable = { version: 'saved-plan-resource-1', taskId, runId: resourceOrigin.runId,
       steps: resourceOrigin.steps, limits: resourceOrigin.limits };
-    await this.scope(lease);
+    await this.scope(lease, this.nativeScope && originalOnly);
     return { version: stable.version, fingerprint: requestFingerprint(stable), limits: {
       steps: BigInt(resourceOrigin.limits.maxSteps), calls: BigInt(resourceOrigin.limits.maxCalls),
       active_ms: BigInt(resourceOrigin.limits.maxTotalMs), output_bytes: BigInt(resourceOrigin.limits.maxOutputBytes) } };
@@ -216,7 +216,7 @@ export class PrismaTaskRunPreparation {
       const task = await this.db.aiTask.findFirst({ where: { scopeId, id: lease.taskId } });
       if (!task) throw denied();
       const current = await this.evidence.resolve({ taskId: task.id, revision: task.revision,
-        status: task.status.toLowerCase() as import('@rental-os/shared').AiTaskStatusDraft,
+        status: task.status.toLowerCase() as import('@rental-os/platform-contracts/ai-task').AiTaskStatusDraft,
         cancelRequestedAt: task.cancelRequestedAt?.toISOString() ?? null }, lease, false);
       const origin = await this.evidence.resourceOrigin(current, lease);
       definition = { taskId: origin.taskId, runId: origin.runId, steps: structuredClone(origin.steps), limits: structuredClone(origin.limits),
@@ -311,13 +311,14 @@ export class PrismaTaskRunPreparation {
     if (saved && (!published || saved.scopeId !== scopeId || saved.taskId !== lease.taskId || saved.runId !== lease.runId
       || published.taskId !== lease.taskId || published.runId !== lease.runId
       || requestFingerprint(published) !== saved.planHash)) throw denied();
+    const accountingOnly = this.nativeScope && !requirePrepared;
     const plan = saved ? await this.evidence.resolve({ taskId: task.id, revision: task.revision,
-      status: task.status.toLowerCase() as import('@rental-os/shared').AiTaskStatusDraft,
-      cancelRequestedAt: task.cancelRequestedAt?.toISOString() ?? null }, lease, true) : null;
+      status: task.status.toLowerCase() as import('@rental-os/platform-contracts/ai-task').AiTaskStatusDraft,
+      cancelRequestedAt: task.cancelRequestedAt?.toISOString() ?? null }, lease, true, accountingOnly, tx) : null;
     // resolve substitutes the current CAS revision for execution. The original
     // time receipt must bind the immutable published plan, not that projection.
     if (plan && saved && published && requestFingerprint({ ...plan, taskRevision: published.taskRevision }) !== saved.planHash) throw denied();
-    const origin = plan ? await this.evidence.resourceOrigin(plan, lease) : null;
+    const origin = plan ? await this.evidence.resourceOrigin(plan, lease, accountingOnly, tx) : null;
     if (requirePrepared && !plan) throw unknown();
     const row = await this.store(tx).findUnique({ where: { scopeId_taskId_id: { scopeId, taskId: lease.taskId, id: ticket.key } } });
     if (!row) throw unknown();
@@ -363,7 +364,8 @@ export class PrismaTaskRunPreparation {
   }
 
   async complete(ticket: AiTaskPreparationTicket, leaseValue: AiTaskRunnerLease, budget: AiTaskExecutionBudgetPort) {
-    const lease = structuredClone(leaseValue), scopeId = await this.scope(lease), key = { scopeId, taskId: lease.taskId, runId: lease.runId };
+    const lease = structuredClone(leaseValue), scopeId = await this.scope(lease, this.nativeScope);
+    const key = { scopeId, taskId: lease.taskId, runId: lease.runId };
     try {
       // Measure only this original held reservation. A late Core withdrawal
       // must not turn already-consumed preparation time into a fresh admission.

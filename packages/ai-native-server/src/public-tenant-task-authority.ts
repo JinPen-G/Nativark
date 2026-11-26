@@ -12,12 +12,14 @@ import { captureAiRequestBinding } from './request-binding';
 import { isAiStepExecutionContext } from './execution-context-validation';
 import { AiTaskRepositoryError } from './task-errors';
 import type { AiTaskTransactionAuthority, AiTaskTransactionReference } from './task-transactions';
-import type { AiTaskRepositoryOperation } from './runtime/task-persistence.repository';
+import { aiTaskAccessFromContext, assertOriginalTaskRecoveryLease, type AiTaskRepositoryOperation } from './runtime/task-persistence.repository';
+import type { AiTaskExecutionScopeSource } from './task-resource-ledger';
+import { isRecoveryTimeLease } from './runtime/runner/task-execution-budget.repository';
 import { createPublicTaskActionAuthority, type PublicTenantTaskContext as TenantContext } from './task-policy-authorization';
 
 type Tx = Prisma.TransactionClient;
 type Action = AiTaskRepositoryOperation;
-type TenantIdentity = Pick<Tx, 'aiScope' | 'aiTask' | 'aiTaskActionPolicy' | '$queryRaw'>;
+type TenantIdentity = Pick<Tx, 'aiScope' | 'aiTask' | 'aiRun' | 'aiTaskActionPolicy' | '$queryRaw'>;
 type Permission = (operation: Action) => string | undefined;
 const bearer = z.string().max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -93,6 +95,27 @@ export function createPublicTenantTaskAuthority(input: {
         assertTaskAction: (context, taskId, operation) => input.assertTaskAction(reader, context, taskId, operation)
       });
       const actions = actionsFor(db, identities);
+      const grants = new WeakMap<Tx, ReturnType<typeof actionsFor>>();
+      const resourceScopes: AiTaskExecutionScopeSource = { async resolve(taskId, lease, purpose, tx) {
+        active();
+        if (!lease || lease.taskId !== taskId || !['write', 'read', 'settle', 'settle_released_run', 'recovery_time'].includes(purpose)) throw denied();
+        const authority = tx ? grants.get(tx) : actions;
+        const reader = tx ?? db;
+        if (!authority) throw denied();
+        const operation = purpose === 'write' ? 'transition_task' : purpose === 'read' ? 'read_metadata'
+          : purpose === 'recovery_time' ? 'claim_recovery_run' : 'read_step_terminal';
+        const access = aiTaskAccessFromContext(await authority.resolve(taskId, operation), taskId, clock());
+        const row = await reader.aiTask.findFirst({ where: access.where, select: { scopeId: true } });
+        if (!row) throw denied();
+        if (purpose === 'recovery_time') {
+          if (!isRecoveryTimeLease(lease)) throw denied();
+          await assertOriginalTaskRecoveryLease(reader, lease, access);
+          if (Date.parse(lease.expiresAt) <= clock().getTime()) throw denied();
+        }
+        const verified = aiTaskAccessFromContext(await authority.resolve(taskId, operation), taskId, clock());
+        if (verified.bindingKey !== access.bindingKey || tx && grants.get(tx) !== authority) throw denied();
+        return { scopeId: row.scopeId, bindingKey: verified.bindingKey, taskWhere: verified.where };
+      } };
       const transaction: AiTaskTransactionAuthority<Tx> = Object.freeze({ binding: requestFingerprint([requestId, currentKey, accessSession]),
         async begin(tx: Tx, reference: AiTaskTransactionReference) {
           active();
@@ -106,15 +129,17 @@ export function createPublicTenantTaskAuthority(input: {
             const principal = await nativeIdentity.resolve();
             if (next.kind === 'creation' && !hasEffectivePermission(principal.access.permissions, creationPermission)) throw denied();
             if (next.kind === 'task') await nativeActions.resolve(next.taskId, 'claim_run');
+            if (next.kind === 'task_control' && next.operation) await nativeActions.resolve(next.taskId, next.operation);
             // The host owns the exact control purpose, object and immutable
             // source. A generic 'task_control' ref does not choose a verb.
             await input.assertReference(tx, principal, structuredClone(next));
             await nativeIdentity.resolve();
           };
           await verify(reference);
-          return { verifyReference: verify, revalidate: () => verify(reference) };
+          grants.set(tx, nativeActions);
+          return { verifyReference: verify, revalidate: () => verify(reference), close: () => { grants.delete(tx); } };
         } });
-      return Object.freeze({ identities, actions, transaction, close: binding.close });
+      return Object.freeze({ identities, actions, transaction, resourceScopes: Object.freeze(resourceScopes), close: binding.close });
     } catch (error) { binding.close(); throw error; }
   } });
 }

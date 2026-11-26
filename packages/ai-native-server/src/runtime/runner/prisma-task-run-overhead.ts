@@ -8,7 +8,8 @@ import { performance } from 'node:perf_hooks';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskExecutionBudgetError, type AiTaskExecutionBudgetPort, type AiTaskExecutionSettlementRequest } from '../task-execution-budget.ports';
 import type { AiTaskRunnerLease, AiTaskRunnerOverheadTicket } from '@rental-os/platform-server/ai-runtime';
-import type { PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';
+import type { TaskRunPlanRepository } from './task-run-plan.repository';
+import { isRecoveryTimeLease, type TaskExecutionBudgetRepository } from './task-execution-budget.repository';
 
 type Row = AiTaskRunOverhead;
 type Store = {
@@ -18,7 +19,7 @@ type Store = {
   updateMany(input: { where: object; data: object }): Promise<{ count: number }>;
 };
 type Db = Pick<PrismaClient, 'aiTask' | 'aiTaskExecutionCharge' | 'aiTaskExecutionBudget'>;
-type Evidence = Pick<PrismaTaskRunEvidenceRepository, 'assertHeldRun' | 'withHeldRun' | 'assertAccountingRun' | 'withAccountingRun' | 'withReleasedAccountingRun' | 'resolve' | 'resourceOrigin'>;
+type Evidence = Pick<TaskRunPlanRepository, 'assertHeldRun' | 'withHeldRun' | 'assertAccountingRun' | 'withAccountingRun' | 'resolve' | 'resourceOrigin'>;
 const unavailable = () => new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
 const unknown = () => new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
 const denied = () => new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
@@ -97,15 +98,17 @@ export class PrismaTaskRunOverhead {
   private readonly starts = new Map<string, { at: number; taskId: string; runId: string; holder: string; fence: string;
     expiresAt: string; allowance: number; excludedMs: number; lastToolEnd: number; toolCharges: Set<string>;
     recovery: boolean; originalTimeDebt: boolean }>();
-  private ledger?: Pick<import('./prisma-task-execution-budget.repository').PrismaTaskExecutionBudgetRepository,
-    'rotateRunTime' | 'finalizeReleasedRunTime'>;
+  private ledger?: Pick<TaskExecutionBudgetRepository,
+    'rotateRunTime' | 'finalizeReleasedRunTime'> & Partial<Pick<TaskExecutionBudgetRepository, 'reserveRecoveryTime'>>;
   private readonly pendingContinuations = new Map<string, { expiresAt: number; debts: Map<string, string> }>();
   constructor(private readonly db: Db, private readonly evidence: Evidence,
-    private readonly wall: () => Date = () => new Date(), private readonly monotonic: () => number = () => performance.now()) {}
+    private readonly wall: () => Date = () => new Date(), private readonly monotonic: () => number = () => performance.now(),
+    private readonly nativeScope = false) {}
 
   bindLedger(ledger: NonNullable<PrismaTaskRunOverhead['ledger']>) {
     if (this.ledger || typeof ledger?.rotateRunTime !== 'function'
-      || typeof ledger?.finalizeReleasedRunTime !== 'function') throw unavailable();
+      || typeof ledger?.finalizeReleasedRunTime !== 'function'
+      || this.nativeScope && typeof ledger.reserveRecoveryTime !== 'function') throw unavailable();
     this.ledger = ledger;
   }
 
@@ -197,13 +200,16 @@ export class PrismaTaskRunOverhead {
     const at = this.monotonic(), lease = structuredClone(leaseValue);
     if (!Number.isFinite(at) || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(segment)
       || maximumMs !== undefined && (!Number.isSafeInteger(maximumMs) || maximumMs < 1)) throw unavailable();
-    const scopeId = await this.evidence.assertHeldRun(lease), key = { scopeId, taskId: lease.taskId, runId: lease.runId };
+    const recoveryTime = this.nativeScope && recovery;
+    if (recoveryTime && (!isRecoveryTimeLease(lease) || retainStepAllowance || pendingStart)) throw denied();
+    const scopeId = await (recoveryTime ? this.evidence.assertAccountingRun(lease, undefined, 'recovery_time') : this.evidence.assertHeldRun(lease));
+    const key = { scopeId, taskId: lease.taskId, runId: lease.runId };
     const task = await this.db.aiTask.findFirst({ where: { scopeId, id: lease.taskId } });
     if (!task) throw denied();
     const plan = await this.evidence.resolve({ taskId: task.id, revision: task.revision,
-      status: task.status.toLowerCase() as import('@rental-os/shared').AiTaskStatusDraft,
-      cancelRequestedAt: task.cancelRequestedAt?.toISOString() ?? null }, lease, recovery);
-    const origin = await this.evidence.resourceOrigin(plan, lease);
+      status: task.status.toLowerCase() as import('@rental-os/platform-contracts/ai-task').AiTaskStatusDraft,
+      cancelRequestedAt: task.cancelRequestedAt?.toISOString() ?? null }, lease, recovery, recoveryTime);
+    const origin = await this.evidence.resourceOrigin(plan, lease, recoveryTime);
     const originHash = requestFingerprint({ taskId: origin.taskId, runId: origin.runId, steps: origin.steps, limits: origin.limits });
     let snapshot = recovery ? await budget.load(lease.taskId, lease) : await budget.initialize(lease.taskId, lease);
     if (snapshot.scopeId !== scopeId || snapshot.taskId !== lease.taskId) throw denied();
@@ -281,9 +287,11 @@ export class PrismaTaskRunOverhead {
     // revision to meter its observation; repeated/ambiguous observation cannot
     // reopen the same interval, refund old debt or dispatch another effect.
     if (existing) throw unknown();
+    const hold = (participant: (tx: Prisma.TransactionClient, scopeId: string) => Promise<void>) => recoveryTime
+      ? this.evidence.withAccountingRun(lease, participant, 'recovery_time') : this.evidence.withHeldRun(lease, participant);
     let attempted = false;
     try {
-      await this.evidence.withHeldRun(lease, async (tx, currentScope) => {
+      await hold(async (tx, currentScope) => {
         if (currentScope !== scopeId) throw denied();
         if (pendingAdmission) await this.admitPending(tx, scopeId, lease, plan, intervals, retained!, originHash, snapshot.policy.fingerprint);
         attempted = true;
@@ -291,9 +299,11 @@ export class PrismaTaskRunOverhead {
           leaseOwnerId: lease.holderId, fencingToken: new prismaRuntime.Decimal(lease.fencingToken), runRevision: lease.revision,
           expiresAt: new Date(lease.expiresAt), startedAt: this.wall() } });
       });
-      const reserved = await budget.reserve({ taskId: lease.taskId, lease, chargeId: id, resource: 'active_ms', amount: BigInt(allowance), target: { kind: 'run' } });
+      const request = { taskId: lease.taskId, lease, chargeId: id, resource: 'active_ms' as const,
+        amount: BigInt(allowance), target: { kind: 'run' as const } };
+      const reserved = await (recoveryTime ? this.ledger!.reserveRecoveryTime!(request) : budget.reserve(request));
       if (reserved.replayed) throw unknown();
-      await this.evidence.withHeldRun(lease, async (tx, currentScope) => {
+      await hold(async (tx, currentScope) => {
         if (currentScope !== scopeId) throw denied();
         if ((await store(tx).updateMany({ where: { ...key, id, chargeId: null, completedAt: null,
           leaseOwnerId: lease.holderId, fencingToken: new prismaRuntime.Decimal(lease.fencingToken), runRevision: lease.revision },
@@ -327,13 +337,16 @@ export class PrismaTaskRunOverhead {
       || frame.holder !== lease.holderId || frame.fence !== lease.fencingToken || frame.expiresAt !== lease.expiresAt) throw unknown();
     if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(segment)
       || maximumMs !== undefined && (!Number.isSafeInteger(maximumMs) || maximumMs < 1)) throw unavailable();
-    const scopeId = await this.evidence.assertHeldRun(lease), key = { scopeId, taskId: lease.taskId, runId: lease.runId };
+    const recoveryTime = this.nativeScope && frame.recovery;
+    if (recoveryTime && (!isRecoveryTimeLease(lease) || retainStepAllowance)) throw denied();
+    const assertRun = () => recoveryTime ? this.evidence.assertAccountingRun(lease, undefined, 'recovery_time') : this.evidence.assertHeldRun(lease);
+    const scopeId = await assertRun(), key = { scopeId, taskId: lease.taskId, runId: lease.runId };
     const task = await this.db.aiTask.findFirst({ where: { scopeId, id: lease.taskId } });
     if (!task) throw denied();
     const plan = await this.evidence.resolve({ taskId: task.id, revision: task.revision,
-      status: task.status.toLowerCase() as import('@rental-os/shared').AiTaskStatusDraft,
-      cancelRequestedAt: task.cancelRequestedAt?.toISOString() ?? null }, lease, frame.recovery);
-    const origin = await this.evidence.resourceOrigin(plan, lease);
+      status: task.status.toLowerCase() as import('@rental-os/platform-contracts/ai-task').AiTaskStatusDraft,
+      cancelRequestedAt: task.cancelRequestedAt?.toISOString() ?? null }, lease, frame.recovery, recoveryTime);
+    const origin = await this.evidence.resourceOrigin(plan, lease, recoveryTime);
     const originHash = requestFingerprint({ taskId: origin.taskId, runId: origin.runId, steps: origin.steps, limits: origin.limits });
     const nextId = uuid(requestFingerprint({ version: 'run-overhead-charge-1', ...key, holder: lease.holderId, fence: lease.fencingToken, segment,
       ...(frame.recovery ? { recoveryRevision: lease.revision } : {}) }));
@@ -382,8 +395,8 @@ export class PrismaTaskRunOverhead {
             leaseOwnerId: lease.holderId, fencingToken: new prismaRuntime.Decimal(lease.fencingToken), runRevision: lease.revision,
             expiresAt: new Date(lease.expiresAt), startedAt: nextWall, chargeId: nextId, requestFingerprint: charge.requestFingerprint } });
         }
-      });
-      await this.evidence.assertHeldRun(lease);
+      }, recoveryTime);
+      await assertRun();
       const elapsed = this.monotonic() - nextAt, remainingMs = Number(rotated.amount) - Math.ceil(elapsed);
       if (!Number.isFinite(elapsed) || elapsed < 0 || remainingMs < 1) throw unknown();
       this.starts.delete(ticket.key);
@@ -413,7 +426,7 @@ export class PrismaTaskRunOverhead {
     const task = await this.db.aiTask.findFirst({ where: { scopeId, id: lease.taskId } });
     if (!task) throw denied();
     const plan = await this.evidence.resolve({ taskId: task.id, revision: task.revision,
-      status: task.status.toLowerCase() as import('@rental-os/shared').AiTaskStatusDraft,
+      status: task.status.toLowerCase() as import('@rental-os/platform-contracts/ai-task').AiTaskStatusDraft,
       cancelRequestedAt: task.cancelRequestedAt?.toISOString() ?? null }, lease, recovery);
     const origin = await this.evidence.resourceOrigin(plan, lease);
     const originHash = requestFingerprint({ taskId: origin.taskId, runId: origin.runId, steps: origin.steps, limits: origin.limits });
@@ -510,9 +523,9 @@ export class PrismaTaskRunOverhead {
         // After this sample only the original receipt/ledger settlement remains;
         // it neither reopens active execution nor creates another timing charge.
         await this.ledger.finalizeReleasedRunTime({ taskId: lease.taskId, lease, expiresAt: lease.expiresAt,
-          chargeId: ticket.key, release }, { measure: write, verify: async (_tx, currentScope) => {
+          chargeId: ticket.key, release }, { measure: write, verify: async (tx, currentScope) => {
             if (currentScope !== scopeId) throw denied();
-            await this.evidence.assertAccountingRun(accountingLease);
+            await this.evidence.assertAccountingRun(accountingLease, tx);
           } });
       } else {
         await this.evidence.withAccountingRun(lease, write);
@@ -542,7 +555,7 @@ export class PrismaTaskRunOverhead {
     // Read immutable provenance under current receipt authority, not a fresh
     // execution policy. A closed policy cannot erase the original measurement.
     const plan = await this.evidence.resolve({ taskId: task.id, revision: task.revision,
-      status: task.status.toLowerCase() as import('@rental-os/shared').AiTaskStatusDraft,
+      status: task.status.toLowerCase() as import('@rental-os/platform-contracts/ai-task').AiTaskStatusDraft,
       cancelRequestedAt: task.cancelRequestedAt?.toISOString() ?? null }, lease, true, true);
     const origin = await this.evidence.resourceOrigin(plan, lease, true);
     if (row.originHash !== requestFingerprint({ taskId: origin.taskId, runId: origin.runId, steps: origin.steps, limits: origin.limits })) throw denied();

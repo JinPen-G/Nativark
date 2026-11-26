@@ -43,9 +43,9 @@ export function createPublicAiTaskPersistence(input: {
     readCreation: receipts.readCreation,
     readMetadata: (taskId: string) => tasks.readMetadata(taskId),
     claimRun: (authority: Authority, command: unknown) => once(authority, () => tasks.claimRun(command)),
-    claimRecoveryRun: (command: unknown) => tasks.claimRecoveryRun(command),
+    claimRecoveryRun: (authority: Authority, command: unknown) => once(authority, () => tasks.claimRecoveryRun(command)),
     assertRecoveryRun: (lease: unknown) => tasks.assertRecoveryRun(lease),
-    releaseRun: (command: unknown) => tasks.releaseRun(command),
+    releaseRun: (authority: Authority, command: unknown) => once(authority, () => tasks.releaseRun(command)),
     readResult: (command: unknown) => results.read(command),
     readRunResults: (command: unknown) => results.readRunResults(command)
   });

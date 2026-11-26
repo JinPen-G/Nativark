@@ -1,12 +1,12 @@
 import type { PrismaClient } from '@prisma/client';
-import type { AiTaskStatusDraft } from '@rental-os/shared';
+import type { AiTaskStatusDraft } from '@rental-os/platform-contracts/ai-task';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskExecutionBudgetError, type AiTaskExecutionResource, type AiTaskExecutionBudgetPort, type AiTaskExecutionChargeRequest } from '../task-execution-budget.ports';
 import { taskStepChargesValid, isTaskModelCountCharge, reconcileTaskModelCountCharge } from './task-model-count-charge';
-import type { AiTaskExecutionScopeSource } from './prisma-task-execution-budget.repository';
+import type { AiTaskExecutionScopeSource } from './task-execution-budget.repository';
 import type { AiTaskRunnerLease, AiTaskRunnerStepRef, AiTaskRunnerResourceTicket } from '@rental-os/platform-server/ai-runtime';
 import type { AiTaskRunnerResourceEvidenceSource } from './persistent-task-runner-resource-gate';
-import type { PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';
+import type { TaskRunPlanRepository } from './task-run-plan.repository';
 import { PrismaTaskResourceRecoverySource } from './prisma-task-resource-recovery.source';
 
 export interface AiTaskToolResourceCatalog {
@@ -29,16 +29,18 @@ const uuid = (hash: string) => `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash
 export class PrismaTaskRunnerResourceSource implements AiTaskRunnerResourceEvidenceSource {
   private readonly recovery: PrismaTaskResourceRecoverySource;
   constructor(private readonly db: Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskExecutionCharge' | 'aiTaskExecutionBudget' | 'aiGatewayInvocation'>,
-    private readonly scopes: AiTaskExecutionScopeSource, private readonly plans: Pick<PrismaTaskRunEvidenceRepository, 'resolve'>,
+    private readonly scopes: AiTaskExecutionScopeSource, private readonly plans: Pick<TaskRunPlanRepository, 'resolve'>,
     private readonly catalog: AiTaskToolResourceCatalog, private readonly clock: () => Date = () => new Date(),
-    private readonly invocations?: AiTaskModelInvocationPreparation) {
+    private readonly invocations?: AiTaskModelInvocationPreparation, originalSettlement = false) {
     if (typeof plans?.resolve !== 'function' || typeof catalog?.resolve !== 'function') throw fail();
-    this.recovery = new PrismaTaskResourceRecoverySource(db, scopes, clock);
+    this.originalAccess = originalSettlement ? 'settle' : 'write';
+    this.recovery = new PrismaTaskResourceRecoverySource(db, scopes, clock, this.originalAccess);
   }
+  private readonly originalAccess: 'settle' | 'write';
   async recoverTicket(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease, budget?: AiTaskExecutionBudgetPort) {
     const ticket = await this.recovery.recoverTicket(step, lease);
     if (budget) {
-      const access = await this.scopes.resolve(lease.taskId, lease, 'write');
+      const access = await this.scopes.resolve(lease.taskId, lease, this.originalAccess);
       const stored = await this.db.aiStep.findFirst({ where: { scopeId: access.scopeId, taskId: lease.taskId,
         runId: lease.runId, id: step.registered.stepId }, select: { id: true, actionId: true, requestFingerprint: true } });
       const rows = await this.db.aiTaskExecutionCharge.findMany({ where: { scopeId: access.scopeId, taskId: lease.taskId,
@@ -135,7 +137,7 @@ export class PrismaTaskRunnerResourceSource implements AiTaskRunnerResourceEvide
 
   async settlements(ticket: AiTaskRunnerResourceTicket, step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease) {
     ticket = structuredClone(ticket); step = structuredClone(step); lease = structuredClone(lease);
-    const access = await this.scopes.resolve(lease.taskId, lease, 'write');
+    const access = await this.scopes.resolve(lease.taskId, lease, this.originalAccess);
     const stored = await this.db.aiStep.findFirst({ where: { scopeId: access.scopeId, taskId: lease.taskId, runId: lease.runId, id: step.registered.stepId,
       toolCode: step.plan.toolCode, toolVersion: step.plan.toolVersion, status: { in: ['SUCCEEDED', 'FAILED'] } } });
     if (!stored?.resultRef) throw fail();
@@ -143,7 +145,7 @@ export class PrismaTaskRunnerResourceSource implements AiTaskRunnerResourceEvide
       stepId: stored.id, actionId: stored.actionId, stepFingerprint: stored.requestFingerprint }, take: 6 });
     if (rows.length !== ticket.chargeIds.length || !taskStepChargesValid(rows)
       || rows.some(row => !ticket.chargeIds.includes(row.chargeId))) throw fail();
-    const current = await this.scopes.resolve(lease.taskId, lease, 'write');
+    const current = await this.scopes.resolve(lease.taskId, lease, this.originalAccess);
     if (current.bindingKey !== access.bindingKey || current.scopeId !== access.scopeId) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
     return rows.map(row => ({ taskId: lease.taskId, lease: structuredClone(lease), chargeId: row.chargeId, evidenceRef: isTaskModelCountCharge(row) ? `count:${row.gatewayInvocationId}` : `${stored.resultRef}:${row.resource.toLowerCase()}` }));
   }

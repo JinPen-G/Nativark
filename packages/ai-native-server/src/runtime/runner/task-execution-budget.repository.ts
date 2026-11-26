@@ -2,6 +2,7 @@ import type { AiTaskTransactionBoundary } from '../../task-transactions';
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
+import type { AiTaskRunnerRecoveryLease } from '@rental-os/platform-server/ai-runtime';
 import {
   AiTaskExecutionBudgetError, AiTaskExecutionPreReservationLimitError, type AiTaskExecutionBudgetPort, type AiTaskExecutionBudgetSnapshot,
   type AiTaskExecutionChargeEvidence, type AiTaskExecutionChargeReceipt, type AiTaskExecutionChargeRequest,
@@ -13,8 +14,9 @@ type Db = PrismaClient;
 type Tx = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
 
 export interface AiTaskExecutionScopeSource {
-  /** `settle` observes an existing charge, independently of new-work policy. */
-  resolve(taskId: string, lease: AiTaskExecutionLease, operation: 'read' | 'write' | 'settle' | 'settle_released_run', transaction?: Tx): Promise<{ scopeId: string; bindingKey: string; taskWhere: Prisma.AiTaskWhereInput }>;
+  /** `settle` observes an existing charge. `recovery_time` requires a current
+   * original recovery grant for the supplied generation, even with work stopped. */
+  resolve(taskId: string, lease: AiTaskExecutionLease, operation: 'read' | 'write' | 'settle' | 'settle_released_run' | 'recovery_time', transaction?: Tx): Promise<{ scopeId: string; bindingKey: string; taskWhere: Prisma.AiTaskWhereInput }>;
 }
 
 const resources: Record<AiTaskExecutionResource, { max: string; reserved: string; consumed: string; enum: import('@prisma/client').AiTaskExecutionResource }> = {
@@ -43,6 +45,11 @@ function validateResource(resource: AiTaskExecutionResource, amount: bigint) {
   if (!resources[resource] || !positive(amount) || !counter(amount)) throw new AiTaskExecutionBudgetError('AI_INVALID_INPUT');
 }
 
+export function isRecoveryTimeLease(lease: AiTaskExecutionLease): lease is AiTaskRunnerRecoveryLease {
+  const receipt = lease as Partial<AiTaskRunnerRecoveryLease>;
+  return receipt.purpose === 'recovery_only' && typeof receipt.expiresAt === 'string' && Number.isFinite(Date.parse(receipt.expiresAt));
+}
+
 /**
  * Durable task-resource accounting. This is intentionally a repository/port
  * adapter and is not registered by AppModule. A caller must provide an
@@ -63,6 +70,8 @@ export class TaskExecutionBudgetRepository implements AiTaskExecutionBudgetPort 
   private async access(taskId: string, lease: AiTaskExecutionLease,
     operation: Parameters<AiTaskExecutionScopeSource['resolve']>[2] = 'write', transaction?: Tx) {
     validateLease(taskId, lease);
+    if (this.nativeScope && operation === 'write' && 'purpose' in lease && lease.purpose === 'recovery_only')
+      throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
     const resolved = structuredClone(await this.scopes.resolve(taskId, structuredClone(lease), operation, transaction));
     if (!resolved || !id(resolved.scopeId, 36) || typeof resolved.bindingKey !== 'string' || !resolved.bindingKey || !resolved.taskWhere
       || resolved.taskWhere.id !== taskId) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
@@ -198,18 +207,29 @@ return this.transactions.withAiTaskTransaction(tx, { kind: 'task', taskId }, asy
 
   private fingerprint(input: AiTaskExecutionChargeRequest) { return requestFingerprint({ taskId: input.taskId, lease: input.lease, chargeId: input.chargeId, resource: input.resource, amount: input.amount.toString(), target: input.target }); }
 
-  private async mutate(input: AiTaskExecutionChargeRequest, action: 'reserve' | 'record' | 'reconcile' | 'unknown', evidence?: AiTaskExecutionChargeEvidence, expectedFingerprint = this.fingerprint(input)) {
+  private async mutate(input: AiTaskExecutionChargeRequest, action: 'reserve' | 'record' | 'reconcile' | 'unknown',
+    evidence?: AiTaskExecutionChargeEvidence, expectedFingerprint = this.fingerprint(input), recoveryTime = false) {
     validateLease(input.taskId, input.lease); validateResource(input.resource, input.amount);
     if (!id(input.chargeId, 36) || !input.target || !['run', 'step'].includes(input.target.kind)) throw new AiTaskExecutionBudgetError('AI_INVALID_INPUT');
-    const operation = action === 'reserve' ? 'write' : this.settlementAccess;
+    const operation = recoveryTime ? 'recovery_time' : action === 'reserve' ? 'write' : this.settlementAccess;
     const access = await this.access(input.taskId, input.lease, operation), scopeId = access.scopeId,
-      policy = await this.policy(input.taskId, input.lease, action !== 'reserve'), expected = expectedFingerprint;
+      policy = await this.policy(input.taskId, input.lease, action !== 'reserve' || recoveryTime), expected = expectedFingerprint;
     if (evidence && (evidence.scopeId !== scopeId || evidence.taskId !== input.taskId || evidence.runId !== input.lease.runId || evidence.chargeId !== input.chargeId
       || evidence.requestFingerprint !== expected || evidence.resource !== input.resource || !counter(evidence.actualAmount) || !id(evidence.evidenceRef) || !/^[a-f0-9]{64}$/u.test(evidence.evidenceHash))) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
     const result = await this.db.$transaction(async tx => {
 const originalWork = async () => {
       await this.currentTask(tx, input.taskId, input.lease, access, operation);
-      await this.activeLease(tx, scopeId, input.lease, action !== 'reserve' && input.target.kind === 'run' && input.resource === 'active_ms');
+      const held = await this.activeLease(tx, scopeId, input.lease, action !== 'reserve' && input.target.kind === 'run' && input.resource === 'active_ms');
+      if (recoveryTime) {
+        const marker = await tx.aiTaskRunOverhead.findUnique({ where: { scopeId_taskId_id: { scopeId, taskId: input.taskId, id: input.chargeId } } });
+        if (!isRecoveryTimeLease(input.lease) || held.leaseExpiresAt?.getTime() !== Date.parse(input.lease.expiresAt)
+          || !marker || marker.scopeId !== scopeId || marker.taskId !== input.taskId || marker.runId !== input.lease.runId
+          || marker.id !== input.chargeId || marker.leaseOwnerId !== input.lease.holderId
+          || marker.fencingToken.toFixed(0) !== input.lease.fencingToken || marker.runRevision !== input.lease.revision
+          || marker.expiresAt.getTime() !== held.leaseExpiresAt.getTime() || marker.policyHash !== policy.fingerprint
+          || marker.completedAt !== null || marker.chargeId !== null || marker.requestFingerprint !== null)
+          throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
+      }
       const budget = await this.lockBudget(tx, scopeId, input.taskId);
       this.snapshot(budget as unknown as Record<string, unknown>, policy);
       await this.target(tx, input, scopeId);
@@ -266,10 +286,14 @@ const originalWork = async () => {
       if (changed.count !== 1) throw new AiTaskExecutionBudgetError('AI_REVISION_CONFLICT');
       const next = await tx.aiTaskExecutionCharge.findUnique({ where: { scopeId_taskId_chargeId: { scopeId, taskId: input.taskId, chargeId: input.chargeId } } });
       if (!next) throw new AiTaskExecutionBudgetError('AI_STORAGE_UNAVAILABLE');
+      if (recoveryTime) {
+        await this.verifyCurrentAccess(tx, input.taskId, input.lease, access, operation);
+        await this.activeLease(tx, scopeId, input.lease);
+      }
       return { replayed: false, budget, charge: next };
 
 };
-      if (action === 'reserve') return this.transactions.withAiTaskTransaction(tx, { kind: 'task', taskId: input.taskId }, originalWork);
+      if (action === 'reserve' && !recoveryTime) return this.transactions.withAiTaskTransaction(tx, { kind: 'task', taskId: input.taskId }, originalWork);
       // Settling old usage cannot require new-work admission. Public hosts
       // still hold a control-only principal/source lease through COMMIT.
       return this.nativeScope
@@ -291,16 +315,19 @@ const originalWork = async () => {
     close(tx: Prisma.TransactionClient, scopeId: string, charge: import('@prisma/client').AiTaskExecutionCharge,
       policyFingerprint: string): Promise<AiTaskExecutionChargeEvidence>;
     open(tx: Prisma.TransactionClient, scopeId: string, charge: { amount: bigint; requestFingerprint: string }): Promise<T>;
-  }) {
+  }, recoveryTime = false) {
     input = structuredClone(input); validateLease(input.taskId, input.lease);
     if (!id(input.previousChargeId, 36) || !id(input.nextChargeId, 36) || input.previousChargeId === input.nextChargeId
       || !Number.isSafeInteger(input.maximumMs) || input.maximumMs < 1 || !counter(input.retainMs)
       || !Number.isFinite(Date.parse(input.expiresAt)) || typeof participant?.close !== 'function'
       || typeof participant?.open !== 'function') throw new AiTaskExecutionBudgetError('AI_INVALID_INPUT');
-    const access = await this.access(input.taskId, input.lease), policy = await this.policy(input.taskId, input.lease);
+    if (recoveryTime && (!this.nativeScope || !isRecoveryTimeLease(input.lease) || input.retainMs !== 0n))
+      throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
+    const operation = recoveryTime ? 'recovery_time' : 'write';
+    const access = await this.access(input.taskId, input.lease, operation), policy = await this.policy(input.taskId, input.lease, recoveryTime);
     return this.db.$transaction(async tx => {
-return this.transactions.withAiTaskTransaction(tx, { kind: 'task', taskId: input.taskId }, async () => {
-      await this.currentTask(tx, input.taskId, input.lease, access);
+return this.transactions.withAiTaskTransaction(tx, { kind: recoveryTime ? 'task_control' : 'task', taskId: input.taskId }, async () => {
+      await this.currentTask(tx, input.taskId, input.lease, access, operation);
       const held = await this.activeLease(tx, access.scopeId, input.lease);
       if (held.leaseExpiresAt?.getTime() !== Date.parse(input.expiresAt)) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
       const budget = await this.lockBudget(tx, access.scopeId, input.taskId);
@@ -313,6 +340,15 @@ return this.transactions.withAiTaskTransaction(tx, { kind: 'task', taskId: input
         || original.leaseOwnerId !== input.lease.holderId || original.fencingToken.toFixed(0) !== input.lease.fencingToken
         || original.actualAmount !== null || original.outcomeFingerprint !== null || original.evidenceRef !== null)
         throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
+      if (recoveryTime) {
+        const marker = await tx.aiTaskRunOverhead.findUnique({ where: { scopeId_taskId_id: { ...key, id: original.chargeId } } });
+        if (!marker || marker.scopeId !== key.scopeId || marker.taskId !== key.taskId || marker.runId !== input.lease.runId
+          || marker.id !== original.chargeId || marker.chargeId !== original.chargeId || marker.completedAt !== null
+          || marker.requestFingerprint !== original.requestFingerprint || marker.leaseOwnerId !== input.lease.holderId
+          || marker.fencingToken.toFixed(0) !== input.lease.fencingToken || marker.runRevision > input.lease.revision
+          || marker.expiresAt.getTime() !== held.leaseExpiresAt?.getTime() || marker.policyHash !== policy.fingerprint)
+          throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
+      }
       if (await tx.aiTaskExecutionCharge.findUnique({ where: { scopeId_taskId_chargeId: { ...key, chargeId: input.nextChargeId } } }))
         throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
       const evidence = await participant.close(tx, access.scopeId, original, policy.fingerprint);
@@ -344,7 +380,7 @@ return this.transactions.withAiTaskTransaction(tx, { kind: 'task', taskId: input
         consumedActiveMs: { increment: evidence.actualAmount }, revision: { increment: 1 } } })).count !== 1)
         throw new AiTaskExecutionBudgetError('AI_REVISION_CONFLICT');
       const value = await participant.open(tx, access.scopeId, { amount, requestFingerprint: fingerprint });
-      await this.verifyCurrentAccess(tx, input.taskId, input.lease, access);
+      await this.verifyCurrentAccess(tx, input.taskId, input.lease, access, operation);
       const current = await this.activeLease(tx, access.scopeId, input.lease);
       if (current.leaseExpiresAt?.getTime() !== Date.parse(input.expiresAt)) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
       return { value, amount, stepAllowanceUnavailable };
@@ -412,6 +448,15 @@ return this.transactions.withAiTaskTransaction(tx, { kind: 'task', taskId: input
   }
 
   async reserve(input: AiTaskExecutionChargeRequest) { return this.mutate(structuredClone(input), 'reserve'); }
+
+  /** Only the original recovery meter may reserve its bounded local observation.
+   * No Step, invocation, new policy or new resource ceiling can use this path. */
+  async reserveRecoveryTime(input: AiTaskExecutionChargeRequest) {
+    input = structuredClone(input);
+    if (!this.nativeScope || !input?.lease || !isRecoveryTimeLease(input.lease) || input.resource !== 'active_ms' || input.target?.kind !== 'run')
+      throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
+    return this.mutate(input, 'reserve', undefined, this.fingerprint(input), true);
+  }
 
   /** One original step's base resources share admission, not a new allowance.
    * Keep Task -> Run -> budget lock order and recheck authority/lease before
