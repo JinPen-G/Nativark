@@ -152,7 +152,23 @@ public-client 登记 / 审查由原当前 SaaS 管理身份办理。通知与准
 
 目标意图权威必须提供同步 `acceptsNextInput(input)`。通用存储先捕获不可变原输入并计算原 hash，仅接受严格 `true`；它不转换业务输入或代替当前授权。Rental 的原权威使用同源目录 schema 和 50 条上限，并在原 Guard 事务内再次校验。缺校验器、异步返回或拒绝均不可进入原事务。[意图存储](src/prisma-mcp-catalog-goal-intents.ts) · [Rental 校验生产者](../rental-mcp-host/src/original-mcp-catalog-goal-intent-authority.ts)
 
-五份 SQL 是原结构材料，尚未注册为完整的公共数据能力发行。新空库的依赖顺序为 OAuth → read-budget → catalog-goal → catalog-goal-intent → catalog-goal-adoption；目标结构中的 ALTER 依赖前两份，采用结构依赖意图表，不能按文件名字典序安装。已有库须先观察原表、索引、外键和迁移账，保留原迁移身份及凭据/目标/调用记录，再核定增量和发布锁；不能重复执行初始化 DDL 或凭源码 hash 宣称物理结构已就绪。正式能力包还需按 [数据发行合同](../core-contracts/src/data-capability.ts)补齐 schema 文件、源提交、归档摘要、迁移清单与宿主观察接线；本包构造器不执行迁移。
+### 公共 MCP 数据贡献
+
+`@rental-os/mcp-server/data-contribution.json` 是供组合与发布工具读取的静态出口。已解析包可用 `require.resolve` 定位文件。固定 Git 快照从同一框架提交读取 `packages/mcp-server/data-contribution.json` 及其所列 SQL。`formatVersion: 1` 表示清单格式，`capabilityId: "mcp"` 与 `owner: "platform-capability:mcp"` 标识公共 MCP 的五份结构材料。`sql` 数组给出数据差异比较及新空库准备顺序，`requires` 列出跨文件 DDL 的直接前置。[材料清单](data-contribution.json)
+
+| 顺序 | 材料 | 实际结构与前置 |
+| --- | --- | --- |
+| 1 | [OAuth](mysql-oauth-schema.sql) | 23 张表，覆盖原客户端、同意、准入、凭据族、grant、审查与收据。包括 `mcp_oauth_grant_self_list` |
+| 2 | [只读预算](mysql-read-budget-schema.sql) | 预算、调用与绑定 3 张表。调用通过 `(goalId, grantId)` 关联原预算 |
+| 3 | [目录目标](mysql-catalog-goal-schema.sql) | 1 张当前目标表。在前两份的 grant、预算和绑定表追加 `mcp_catalog_goal_grant_owner`、`mcp_catalog_goal_budget_grant`、`mcp_catalog_goal_binding_owner` |
+| 4 | [目录意图](mysql-catalog-goal-intent-schema.sql) | 1 张意图表。意图与原目标的业务关联由原事务核对 |
+| 5 | [目录采用](mysql-catalog-goal-adoption-schema.sql) | 2 张表，采用依赖原意图，历史依赖原采用收据 |
+
+选用 MCP 时，发布工具应将归属、固定源提交、清单和五份原字节一起纳入比较。按数组顺序逐份比较文件及 SHA-256。新增、缺失、改名、重排、字节漂移和能力选择变化均进入数据变更核定。以固定 Git 对象或与其逐字一致的发行文件为准。Windows 检出若转换了换行，应回到固定 Git 字节取材。五份 SQL 的 DDL 依赖均在上表内。运行时原 Auth、审计、Core/AI 读取和宿主提供的持久率桶另有各自前置。原分类器使用 `client_api_rate_buckets`，该表及公共 API 的率桶均由原所属数据链核定。[原分类器](src/original-traffic-meter.ts)
+
+已有库须同时取得物理结构和原账证据。物理观察按五份 SQL 核对 30 张表的列、类型、空值、字符集/排序规则、主键、唯一键、检查约束、索引列序和外键目标及删除/更新规则。单独核对目录目标的三条跨表索引和 OAuth 自助查询索引。记录同一数据库的观察时间和结构指纹，只需读取元数据。原账观察按实际账名、原 checksum、先后顺序以及完成、失败和回滚状态核对。若宿主使用 Prisma，由现有观察器读取 `_prisma_migrations`。原来由人工部署的材料需要可核实的原执行记录和经核定的映射。表齐但缺账、部分应用、checksum 漂移或执行状态不明，都应阻止自动标记就绪、自动重跑初始化或补写成功收据。已有凭据族、grant、预算、调用、绑定、意图和历史收据沿原键保留。旧库差异需交原数据所有者核定前进和恢复方案。[原账观察器](../core-host/src/mysql-deployment.ts)
+
+这个出口可用于纳入数据差异比较。写入 `CoreDeploymentLock.dataCapabilities` 仍需按正式合同固定完整能力包与归档摘要、schema 文件、发行兼容版本和数据版本、正式迁移身份及数据前置。宿主还须提供对应的原迁移名和物理观察，再由 `requireDataCapabilityAvailable("mcp")` 判定就绪。[数据发行合同](../core-contracts/src/data-capability.ts) · [部署组合器](../core-contracts/src/deployment.ts)
 
 ### 原调用键只读核对
 

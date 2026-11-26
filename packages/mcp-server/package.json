@@ -8,6 +8,7 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./data-contribution.json": "./data-contribution.json",
     "./host-router": {
       "types": "./dist/host-router.d.ts",
       "import": "./dist/host-router.js"
@@ -207,6 +208,7 @@
   },
   "files": [
     "dist",
+    "data-contribution.json",
     "mysql-oauth-schema.sql",
     "mysql-read-budget-schema.sql",
     "mysql-catalog-goal-schema.sql",

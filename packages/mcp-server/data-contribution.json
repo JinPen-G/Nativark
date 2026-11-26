@@ -1,0 +1,33 @@
+{
+  "formatVersion": 1,
+  "capabilityId": "mcp",
+  "owner": "platform-capability:mcp",
+  "provider": "mysql",
+  "sql": [
+    {
+      "file": "mysql-oauth-schema.sql",
+      "sha256": "aa8f6004c1be402bd6adeda56bba9275d820cfdea43d52483429e684b5ddded4",
+      "requires": []
+    },
+    {
+      "file": "mysql-read-budget-schema.sql",
+      "sha256": "c54ba21bd473f90c3be26761a60421af3fb2f6fc4f56f4edc9f2ab7bc73ef802",
+      "requires": []
+    },
+    {
+      "file": "mysql-catalog-goal-schema.sql",
+      "sha256": "f2069c89c85257af8077df64335623d30f97516f131fe58a6089b18832045082",
+      "requires": ["mysql-oauth-schema.sql", "mysql-read-budget-schema.sql"]
+    },
+    {
+      "file": "mysql-catalog-goal-intent-schema.sql",
+      "sha256": "db0011329f63a56f0fe199687925323a283b5de211065a60f1f1b0c06db49b57",
+      "requires": []
+    },
+    {
+      "file": "mysql-catalog-goal-adoption-schema.sql",
+      "sha256": "1b3e6d471224bf49c77da04d6970829634979cc340786907f1348e2ec098e929",
+      "requires": ["mysql-catalog-goal-intent-schema.sql"]
+    }
+  ]
+}
