@@ -1,19 +1,35 @@
 "use strict";
 /**
  * 生成小程序的品牌与 Tab 图标资源（纯 Node，不依赖图像库）：
- *   - src/assets/logo.png        品牌横版 Logo（来自根目录 assets，裁边后缩放到 480px 宽）
+ *   - src/assets/logo.png        品牌横版 Logo（来自维护者提供的原稿，裁边后缩放到 480px 宽）
  *   - src/assets/logo-mark.png   品牌圆环符号 128px（头像占位、空态）
  *   - src/assets/tab/*.png       4 个 Tab × 2 态，81×81，线性图标由 SDF 光栅化生成
  *
- * 用法：node scripts/generate-assets.cjs
- * 产物已入库；只有品牌资源或图标形状变化时才需要重新运行。
+ * 用法：node scripts/generate-assets.cjs <本地品牌原稿目录> <本地启动页素材目录>
+ * 产物已入库，常规构建直接使用产物，不需要设计原稿。
  */
 const fs = require("node:fs");
 const path = require("node:path");
 const zlib = require("node:zlib");
 
 const root = path.resolve(__dirname, "..");
-const repo = path.resolve(root, "..", "..");
+if (process.argv.length !== 4) {
+  throw new Error("用法：node scripts/generate-assets.cjs <本地品牌原稿目录> <本地启动页素材目录>");
+}
+const [brand, splashSrc] = process.argv.slice(2).map(directory => path.resolve(directory));
+const logoSource = path.join(brand, "02_logo-horizontal_后台与官网页头.png");
+const markSource = path.join(brand, "04_logo-mark-gradient_折叠菜单与品牌符号.png");
+const splashSources = {
+  background: path.join(splashSrc, "03_Background", "01_splash-background.png"),
+  wave: path.join(splashSrc, "03_Background", "02_wave-decoration-transparent.png"),
+  logo: path.join(splashSrc, "02_Logo", "01_logo-with-tagline.png"),
+  ring: path.join(splashSrc, "04_Loading", "01_loading-ring.png"),
+};
+for (const file of [logoSource, markSource, ...Object.values(splashSources)]) {
+  if (!fs.statSync(file, { throwIfNoEntry: false })?.isFile()) {
+    throw new Error(`缺少本地设计原稿：${file}`);
+  }
+}
 const assets = path.join(root, "src", "assets");
 fs.mkdirSync(path.join(assets, "tab"), { recursive: true });
 
@@ -249,30 +265,28 @@ function rasterIcon(name, color, size = 81, stroke = 1.7) {
 }
 
 /* ---------------- 生成 ---------------- */
-const brand = path.join(repo, "assets", "01_Logo");
-const logo = cropAndScale(decodePng(path.join(brand, "02_logo-horizontal_后台与官网页头.png")), 480, 0);
+const logo = cropAndScale(decodePng(logoSource), 480, 0);
 fs.writeFileSync(path.join(assets, "logo.png"), encodePng(logo.width, logo.height, logo.data));
-const mark = cropAndScale(decodePng(path.join(brand, "04_logo-mark-gradient_折叠菜单与品牌符号.png")), 128, 6);
+const mark = cropAndScale(decodePng(markSource), 128, 6);
 fs.writeFileSync(path.join(assets, "logo-mark.png"), encodePng(mark.width, mark.height, mark.data));
 // 启动页竖版品牌锁定图：官方渐变圆环（04）在上，官方“Rental OS + Build a Rental World.”字标（从主标识图切出）在下。
 // 字标像素全部取自官方文件（不自行打字），只按设计稿改为竖排；圆环本身的环/点比例不改动。
 // 启动页：直接使用负责人放入「设计图/启动页素材」的官方图层，分层缩放后由 splash 页按设计稿合成
 // （背景 + 底部波浪 + 居中 Logo 锁定图 + 可旋转加载环），不自行拼字标。
-const splashSrc = path.join(root, "设计图", "启动页素材");
 const splashDir = path.join(assets, "splash");
 fs.mkdirSync(splashDir, { recursive: true });
 // 全部用官方成品图，整幅等比缩放（scaleImage，仅为压体积），不裁边、不改构图，保留设计师留白与比例。
 // 背景：941×1672 竖版白/浅蓝底（手机屏比例），整幅缩到 828px 宽。
-const splashBg = scaleImage(decodePng(path.join(splashSrc, "03_Background", "01_splash-background.png")), 828);
+const splashBg = scaleImage(decodePng(splashSources.background), 828);
 fs.writeFileSync(path.join(splashDir, "background.png"), encodePng(splashBg.width, splashBg.height, splashBg.data));
 // 底部波浪装饰（透明底），整幅缩到 828px 宽，与背景同宽铺满底部。
-const splashWave = scaleImage(decodePng(path.join(splashSrc, "03_Background", "02_wave-decoration-transparent.png")), 828);
+const splashWave = scaleImage(decodePng(splashSources.wave), 828);
 fs.writeFileSync(path.join(splashDir, "wave.png"), encodePng(splashWave.width, splashWave.height, splashWave.data));
 // 居中 Logo 锁定图（含标语），整幅缩到 640px 宽——保留成品的内部留白，不裁边。
-const splashLogo = scaleImage(decodePng(path.join(splashSrc, "02_Logo", "01_logo-with-tagline.png")), 640);
+const splashLogo = scaleImage(decodePng(splashSources.logo), 640);
 fs.writeFileSync(path.join(splashDir, "logo.png"), encodePng(splashLogo.width, splashLogo.height, splashLogo.data));
 // 加载环，整幅缩到 96px 宽，供 splash 页旋转。
-const splashRing = scaleImage(decodePng(path.join(splashSrc, "04_Loading", "01_loading-ring.png")), 96);
+const splashRing = scaleImage(decodePng(splashSources.ring), 96);
 fs.writeFileSync(path.join(splashDir, "ring.png"), encodePng(splashRing.width, splashRing.height, splashRing.data));
 const INACTIVE = "#8A94A6", ACTIVE = "#1677FF";
 for (const name of Object.keys(ICONS)) {

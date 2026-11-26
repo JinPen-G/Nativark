@@ -3,6 +3,7 @@ docs/历史归档/整理前快照-20261016/** -text
 docs/企业客户后台/历史归档/** -text whitespace=cr-at-eol
 # Source archives must not include private development or captured UI references.
 /docs export-ignore
+/assets export-ignore
 /.impeccable export-ignore
 /apps/deepseek-harness-clone export-ignore
 /apps/deepseek-harness-original export-ignore

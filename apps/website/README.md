@@ -2,9 +2,9 @@
 
 这是重新编写的 HTML / CSS / JavaScript 首页，不是把下载站的编译 bundle 再包一层，也不是恢复作者原始 Framer 工程。
 
-首页、中英文说明、导航与元数据使用 Zelo 正式品牌。品牌 SVG 逐字节取自仓库的[黑白定稿](../../assets/01_Logo/zelo-logo-bw/README.md)。页头与页脚使用完整横标，画布为 704×236，页底使用 444×220 字标。页头在深色首屏显示白色，滚动后和手机浅色菜单显示黑色。首屏轮播使用白色图形标，浏览器图标由定稿 favicon 根据系统深浅色自动选择。
+首页、中英文说明、导航与元数据使用 Zelo 正式品牌。页头与页脚使用 704×236 的[完整横标](assets/icons/rentalos-logo.svg)，页底使用 444×220 字标。页头在深色首屏显示白色，滚动后和手机浅色菜单显示黑色。首屏轮播使用白色图形标，浏览器图标由定稿 favicon 根据系统深浅色自动选择。
 
-应用内沿用 `assets/icons/rentalos-logo.svg`、`assets/images/rentalos-wordmark.svg` 和 `assets/images/rentalos-icon-color.svg` 的兼容路径，favicon 位于 `assets/icons/zelo-favicon.svg`。标志按原比例显示，素材原稿由仓库资产目录维护。
+应用内沿用 `assets/icons/rentalos-logo.svg`、`assets/images/rentalos-wordmark.svg` 和 `assets/images/rentalos-icon-color.svg` 的兼容路径，favicon 位于 `assets/icons/zelo-favicon.svg`。运行使用这些定稿文件，无须另取设计原稿。
 
 故事区提供明确标注的租赁业务场景示例，数字区展示平台能力文案。第三方图片、动画及相关许可沿现有来源维护。
 

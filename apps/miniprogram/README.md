@@ -53,6 +53,8 @@ apps/miniprogram
 
 页面共 22 个（`src/app.json`）。底部 4 个 Tab 为首页 `home`、分类 `catalog`、订单 `orders`、我的 `me`，其余为 splash、item、checkout、pay、order、extend、exchange、login、register、closure、profile、qualifications、benefits、favorites、coupons、locations、addresses、legal。
 
+常规构建使用已提交的 `src/assets/` 运行图片，不读取设计原稿。维护者需要重新生成时，从小程序目录运行 `node scripts/generate-assets.cjs <本地品牌原稿目录> <本地启动页素材目录>`。
+
 ## 本地开发与预览
 
 1. 起后端并灌入演示数据（仓库根目录）：

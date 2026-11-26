@@ -63,13 +63,8 @@ temp/
 /.worktree/
 /worktree/
 
-# Local design originals and references; retain the default mark imported by admin.
-/assets/*
-!/assets/01_Logo/
-/assets/01_Logo/*
-!/assets/01_Logo/rentalOS-icon.svg
-# Approved Zelo vector originals; the source ZIP and other local design drafts stay excluded.
-!/assets/01_Logo/zelo-logo-bw/
+# Local design originals. Runtime assets belong to the modules that use them.
+/assets/
 /参考资料/
 /apps/设计图/
 /apps/*设计图.png

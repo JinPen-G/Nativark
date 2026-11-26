@@ -2,7 +2,7 @@
 
 平台官网采用 Next.js App Router、React、next-intl、Framer Motion 和 WebGL / Three.js 动效。页面、中英文文案与元数据使用 Zelo 正式品牌，现有布局、业务演示、预约入口及社交链接由对应组件维护。
 
-完整横标与图形标逐字节取自[Zelo 黑白定稿](../../assets/01_Logo/zelo-logo-bw/README.md)。横标画布为 704×236，导航和内部演示按原比例显示白色版本。favicon 使用 512×512 黑白图形标，按系统深浅色选择。应用内沿用 `public/harness/icons/rentalos-logo.svg` 与 `rentalos-icon-black.svg`、`rentalos-icon-white.svg` 的兼容路径。
+应用直接使用 704×236 的 [Zelo 横标](public/harness/icons/rentalos-logo.svg)，导航和内部演示按原比例显示白色版本。favicon 使用 512×512 黑白图形标，按系统深浅色选择。图形标沿用 `public/harness/icons/rentalos-icon-black.svg` 和 `rentalos-icon-white.svg` 的兼容路径，运行无须另取设计原稿。
 
 ## 启动和构建
 

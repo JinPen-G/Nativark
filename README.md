@@ -1,10 +1,5 @@
 # Zelo
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/01_Logo/zelo-logo-bw/zelo-logo-white.svg">
-  <img src="assets/01_Logo/zelo-logo-bw/zelo-logo-black.svg" alt="Zelo" width="240">
-</picture>
-
 **面向 AI Native 应用的开源多租户 SaaS 底座。**
 
 *An open-source, multi-tenant SaaS foundation built for AI-native business applications.*
