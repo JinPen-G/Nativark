@@ -7,6 +7,7 @@ import { PrismaSubscriptionBudgetReader } from '../budget/prisma-subscription-bu
 import { AutomationError, PrismaAutomationAuthority } from './prisma-automation.authority';
 import { AutomationFailureTaskService } from './automation-failure-task.service';
 import type { BusinessFailureReadAuthority } from '../business-events/business-failure-read.authority';
+import type { HumanAutomationTransactionParticipant } from './human-automation-transactions';
 
 export type AutomationDependencies = {
   db: PrismaClient;
@@ -15,6 +16,8 @@ export type AutomationDependencies = {
   clock?: () => Date;
   /** Trusted selection recheck inside the original event/preparation transaction. */
   assertPreparationPolicy?: (tx: Prisma.TransactionClient) => Promise<void>;
+  assertCurrentConfiguration?: () => void;
+  transactions?: HumanAutomationTransactionParticipant;
 };
 
 export function composeAutomationFailureTasks(input: AutomationDependencies, humanReads?: BusinessFailureReadAuthority) {
@@ -26,7 +29,7 @@ export function composeAutomationFailureTasks(input: AutomationDependencies, hum
   const entitlements = new SubscriptionBudgetEntitlementAdapter(new PrismaSubscriptionBudgetReader(input.db, input.subscriptions, clock));
   const authority = new PrismaAutomationAuthority(input.db, input.policyId, entitlements, clock, humanReads);
   return new AutomationFailureTaskService(input.db, authority, new AiTaskCreationRepository(input.db, authority, clock), clock,
-    input.assertPreparationPolicy);
+    input.assertPreparationPolicy, input.transactions, input.assertCurrentConfiguration);
 }
 
 @Module({})

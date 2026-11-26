@@ -9,7 +9,7 @@ import { PrismaAdmissionRepository } from './invocation-admission.repository';
 import { InvocationAdmissionService } from './invocation-admission.service';
 import { InvocationDispatchService } from './invocation-dispatch.service';
 import { PrismaProviderProfileRepository } from './provider-profile.repository';
-import { PrismaProviderCapabilityEvidenceRepository } from './provider-capability.repository';
+import { type ProviderCapabilityEvidenceTransactions, PrismaProviderCapabilityEvidenceRepository } from './provider-capability.repository';
 import { ProviderCapabilityService, type CapabilityPreflight } from './provider-capability.service';
 import { createPersistedGatewayBudget } from './budget/gateway-budget.composition';
 import type { RegisterGatewayInvocation } from './budget/prisma-gateway-invocation-bindings';
@@ -52,6 +52,8 @@ export type TextCapabilityProbeDependencies = Omit<Parameters<typeof createPersi
    * authority, never the Gateway, ledger, receipts or task engine. */
   identity?: TextCapabilityProbeIdentityPort;
   transactionParticipant?: TenantModelConfigurationTransactionParticipant;
+  /** Server-owned platform evidence participant; no tenant fallback. */
+  evidenceTransactions?: ProviderCapabilityEvidenceTransactions;
 };
 
 /** Structural authority contract shared by the workspace and platform hosts. */
@@ -95,7 +97,7 @@ export class TextCapabilityProbeApplication {
     }
     this.profiles = new PrismaProviderProfileRepository(input.db);
     this.receipts = new PrismaTextCapabilityReceiptRepository(input.db, input.clock);
-    this.capabilities = createPersistedTextCapabilityEvidence(input.db, input.clock, input.transactionParticipant ? {
+    this.capabilities = createPersistedTextCapabilityEvidence(input.db, input.clock, input.evidenceTransactions ?? (input.transactionParticipant ? {
       begin: async tx => {
         const current = await this.currentRequest();
         if (isPlatformProbeContext(current.context)) throw new ModelGatewayError('FORBIDDEN');
@@ -103,7 +105,7 @@ export class TextCapabilityProbeApplication {
         if (!participant) throw new ModelGatewayError('FORBIDDEN');
         return participant;
       }
-    } : undefined);
+    } : undefined));
     this.accounting = createPersistedGatewayBudget(input);
     this.financialRecovery = this.accounting.recovery;
     this.financialEvidence = Object.freeze({ readDispatch: (reservationId: string) =>

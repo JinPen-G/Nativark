@@ -4,11 +4,15 @@ import { logInterruptedRetention } from './retention-page-observation';
 import { AI_PLATFORM_RETENTION_HTTP } from '@rental-os/shared';
 import type { AiRetentionService } from './retention.service';
 import { AiTaskRepositoryError } from '../ai-task.repository';
+import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
 import { withRequestAbort, type AiRequestAbortSource } from '../scenes/request-abort';
 import { callAiTaskRunnerDependency } from '@rental-os/platform-server/ai-runtime';
 import { retentionHttpRequest, retentionHttpResponse, platformRetentionHttpRequest, platformRetentionHttpResponse } from './retention-http.contract';
 import type { AiPlatformRetentionService } from './platform-retention.service';
+
+const inRetentionRequest = <T>(work: () => Promise<T>) => hasRentalBusinessTenantFence()
+  ? work() : runWithRequestIdentity({}, work);
 
 export const AI_RETENTION_REQUESTS = Symbol('AI_RETENTION_REQUESTS');
 export const AI_PLATFORM_RETENTION_REQUESTS = Symbol('AI_PLATFORM_RETENTION_REQUESTS');
@@ -27,7 +31,7 @@ export class AiRetentionController {
     const writing = operation === 'cleanup';
     try {
       const command = retentionHttpRequest(operation, request.body ?? body);
-      return await withRequestAbort(request, signal => runWithRequestIdentity({}, async () => {
+      return await withRequestAbort(request, signal => inRetentionRequest(async () => {
         const scoped = this.create(request), close = () => scoped.close();
         signal.addEventListener('abort', close, { once: true });
         if (signal.aborted) close();
@@ -69,7 +73,7 @@ export class AiPlatformRetentionController {
     const writing = operation === 'cleanup';
     try {
       const command = platformRetentionHttpRequest(operation, request.body ?? body);
-      return await withRequestAbort(request, signal => runWithRequestIdentity({}, async () => {
+      return await withRequestAbort(request, signal => inRetentionRequest(async () => {
         const scoped = this.create(request), close = () => scoped.close();
         signal.addEventListener('abort', close, { once: true }); if (signal.aborted) close();
         try {

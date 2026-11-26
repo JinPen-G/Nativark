@@ -26,6 +26,8 @@ import { eraseExpiredNotificationDraftBodies, eraseNotificationDraftSnapshotCopi
 import { PrismaClientBookingRepository, type ClientBookingOperation } from '../scenes/prisma-client-booking.repository';
 import { PrismaClientSceneMaterialRepository } from '../scenes/prisma-client-scene-material.repository';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
+import { beginTenantModelConfigurationTransaction, createTenantModelConfigurationTransactions,
+  type TenantModelConfigurationTransactionParticipant, type TenantModelConfigurationTransactions } from '../tenant-model-config-transactions';
 import { clientMaterialSnapshotHash } from '../scenes/client-entry-action';
 
 export const aiRetentionCleanupSchema = z.object({ kind: z.enum(retentionKinds),
@@ -51,11 +53,27 @@ export class AiRetentionUnknown extends Error {
  */
 export class AiRetentionService {
   private readonly identities: AiTaskCurrentIdentityAuthority;
+  private readonly transactionParticipant: TenantModelConfigurationTransactionParticipant;
   constructor(readonly db: PrismaClient, auth: Pick<AuthService, 'resolveAccessContext'>,
     credentials: AiTaskCredentialSource, private readonly files?: Pick<FileStorageRuntimeService, 'eraseAiRetentionObject'>,
     private readonly clock: () => Date = () => new Date(), private readonly restoreKeyHash?: string,
-    private readonly notificationDraftCipher?: NotificationDraftRetentionCipher) {
+    private readonly notificationDraftCipher?: NotificationDraftRetentionCipher, transactions?: TenantModelConfigurationTransactions) {
     this.identities = new AiTaskCurrentIdentityAuthority(auth, credentials, clock);
+    this.transactionParticipant = createTenantModelConfigurationTransactions({ transactions, credentials });
+  }
+  /** Auth/Tenant/Core before the original scope and content locks. Every return,
+   * including a held or replayed receipt, crosses the same final revalidation. */
+  private async inTransaction<T>(tx: Prisma.TransactionClient, before: Session, work: () => Promise<T>): Promise<T> {
+    if (before.context.actor.kind !== 'user') throw refused();
+    const participant = await beginTenantModelConfigurationTransaction(tx, { actorId: before.context.actor.userId,
+      tenantId: before.tenantId, workspaceId: before.workspaceId }, this.transactionParticipant).catch(() => { throw refused(); });
+    try {
+      await this.check(before);
+      const result = await work();
+      await this.check(before);
+      await participant?.revalidate().catch(() => { throw refused(); });
+      return result;
+    } finally { participant?.close(); }
   }
   async current(): Promise<Session> {
     const context = await this.identities.resolve();
@@ -328,12 +346,21 @@ export class AiRetentionService {
     for (const { id: resourceId } of candidates) {
       try { results.push(await this.erase(command.kind, resourceId)); }
       catch (error) {
-        if (error instanceof AiTaskRepositoryError && error.code === 'AI_ACCESS_DENIED') throw error;
+        if (error instanceof AiTaskRepositoryError && error.code === 'AI_ACCESS_DENIED') {
+          if (results.some(row => ['erased', 'withdrawn', 'prepared', 'unknown'].includes(row.state))) throw new AiRetentionUnknown();
+          throw error;
+        }
         results.push({ state: error instanceof AiRetentionUnknown ? 'unknown' : 'unavailable', retryable: false,
           nextAction: 'list_retention_receipts' });
       }
     }
-    await this.check(current);
+    try { await this.check(current); }
+    catch (error) {
+      // Earlier items may already have committed; loss of authority cannot
+      // turn their outcome into a confirmed no-write result.
+      if (results.some(row => ['erased', 'withdrawn', 'prepared', 'unknown'].includes(row.state))) throw new AiRetentionUnknown();
+      throw error;
+    }
     const nextAfter = candidates.length === command.limit ? candidates[candidates.length - 1].id : null;
     logRetentionPage({ scopeKind: 'workspace', scopeId: scope.id, kind: command.kind, after: command.after }, this.now(), candidates, results, nextAfter);
     return { policyVersion: AI_RETENTION_POLICY.version, scanned: candidates.length, limit: command.limit, results,
@@ -351,10 +378,10 @@ export class AiRetentionService {
     if (restore && !expectedHash) throw refused();
     const key = fingerprint([AI_RETENTION_POLICY.version, current.tenantId, current.workspaceId, kind, resourceId]);
     const owner = { tenantId: current.tenantId, workspaceId: current.workspaceId };
-    let attempted = false;
+    let attempted = false, committed = false;
     let result;
     try {
-      result = await this.db.$transaction(async tx => {
+      result = await this.db.$transaction(tx => this.inTransaction(tx, current, async () => {
         const scope = await tx.aiScope.findFirst({ where: aiPersistenceScopeColumns(current.context.scope) });
         if (!scope || scope.kind !== 'WORKSPACE' || scope.tenantId !== owner.tenantId || scope.workspaceId !== owner.workspaceId) throw refused();
         const locked = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`SELECT id FROM ai_scopes
@@ -521,9 +548,11 @@ export class AiRetentionService {
           if (changed.count !== 1) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
         }
         return { id: key, state, replayed: Boolean(receipt) };
-      }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      }), { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      committed = true;
       await this.check(current);
     } catch (error) {
+      if (committed && attempted) throw new AiRetentionUnknown();
       if (error instanceof AiTaskRepositoryError) throw error;
       if (attempted) throw new AiRetentionUnknown();
       throw unavailable();

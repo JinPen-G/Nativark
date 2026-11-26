@@ -171,10 +171,10 @@ export const AI_NATIVE_AUTOMATION_EXPLANATION_CONFIGURATION = Symbol('AI_NATIVE_
 export const AI_NATIVE_AUTOMATION_EXPLANATION_PROVIDER: FactoryProvider = {
   provide: AutomationExplanationApplication,
   inject: [AI_NATIVE_BODY_DATABASE, AuthService, ApiAuthGuard, RentalCoreService, SubscriptionService, SecretBox,
-    AI_NATIVE_BUSINESS_FAILURE_RESOURCES, ConfigService, AI_NATIVE_GATEWAY_CAPACITY],
+    AI_NATIVE_BUSINESS_FAILURE_RESOURCES, ConfigService, AI_NATIVE_GATEWAY_CAPACITY, RentalCoreFactRepository],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, core: RentalCoreService,
-    subscriptions: SubscriptionService, secrets: SecretBox, resources: BusinessFailureResourcePorts, configuration: ConfigService, capacity: GatewayCapacityPort) =>
-    new AutomationExplanationApplication({ db, auth, guard, core, subscriptions, secrets, resources, capacity,
+    subscriptions: SubscriptionService, secrets: SecretBox, resources: BusinessFailureResourcePorts, configuration: ConfigService, capacity: GatewayCapacityPort, orders: RentalCoreFactRepository) =>
+    new AutomationExplanationApplication({ db, auth, guard, core, subscriptions, secrets, resources, capacity, transactions: { auth, orders },
       currentConfiguration: () => readRuntimePublication(configuration).configurations.automationExplanation }),
 };
 export const AI_NATIVE_BUSINESS_FAILURE_PROVIDERS: FactoryProvider[] = [{
@@ -232,12 +232,12 @@ export const AI_NATIVE_BUSINESS_FAILURE_PROVIDERS: FactoryProvider[] = [{
   }
 }, {
   provide: HumanAutomationRequestFactory, inject: [AI_NATIVE_BODY_DATABASE, AuthService, ApiAuthGuard, RentalCoreService, SubscriptionService, ConfigService,
-    AI_NATIVE_BUSINESS_FAILURE_RESOURCES,
+    AI_NATIVE_BUSINESS_FAILURE_RESOURCES, RentalCoreFactRepository,
     { token: AI_NATIVE_BUSINESS_FAILURE_CONFIGURATION, optional: true }],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, core: RentalCoreService, subscriptions: SubscriptionService,
-    configurationSource: ConfigService, resources: BusinessFailureResourcePorts, value?: unknown) => {
+    configurationSource: ConfigService, resources: BusinessFailureResourcePorts, orders: RentalCoreFactRepository, value?: unknown) => {
     const configuration = readFailureConfiguration(value);
-    return new HumanAutomationRequestFactory({ db, auth, guard, core, resources, reviewGrantPolicy: new RuntimeAutomationReviewGrantPolicySource(configurationSource),
+    return new HumanAutomationRequestFactory({ db, auth, guard, core, resources, transactions: { auth, orders }, reviewGrantPolicy: new RuntimeAutomationReviewGrantPolicySource(configurationSource),
       outboxObservationPolicy: new RuntimeTaskFaultAlertPolicySource(configurationSource),
       ...(configuration.enabled && configuration.automation ? { automation: { ...configuration.automation, subscriptions,
         assertCurrent: () => {
@@ -513,7 +513,7 @@ export const AI_NATIVE_RETENTION_PROVIDER: FactoryProvider = {
         await current();
         return result;
       } };
-      const service = new AiRetentionService(db, requestAuth, { current }, files, undefined, restoreKeyHash, secrets);
+      const service = new AiRetentionService(db, requestAuth, { current }, files, undefined, restoreKeyHash, secrets, { auth });
       return { cleanup: value => service.cleanup(value), receipt: value => service.receipt(value),
         receipts: value => service.receipts(value), protectStoredBodies: value => service.protectStoredBodies(value),
         exportRestoreManifest: service.exportRestoreManifest.bind(service), reapplyRestore: service.reapplyRestore.bind(service),

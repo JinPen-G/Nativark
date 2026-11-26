@@ -1,4 +1,4 @@
-import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
 import type { ServerResponse } from 'node:http';
 import { withRequestAbort, type AiRequestAbortSource, AiRequestWaitError } from '../scenes/request-abort';
 import { AI_PLATFORM_CAPABILITY_HTTP_DRAFT as routes } from '@rental-os/shared';
@@ -89,7 +89,7 @@ export class PlatformCapabilityProbeController {
   @Post(routes.readTask) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readTask(@Req() request: Request, @Body() body: unknown) { return this.call('readCreation', request, body); }
   @Post(routes.start) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  start(@Req() request: Request, @Body() body: unknown, @Res({ passthrough: true }) response?: Response) {
+  start(@Req() request: Request, @Body() body: unknown, response?: Response) {
     return this.call('start', request, body, response);
   }
   @Post(routes.inspect) @HttpCode(200) @Header('Cache-Control', 'no-store')
@@ -97,7 +97,7 @@ export class PlatformCapabilityProbeController {
   @Post(routes.cancel) @HttpCode(200) @Header('Cache-Control', 'no-store')
   cancel(@Req() request: Request, @Body() body: unknown) { return this.call('requestCancellation', request, body); }
   @Post(routes.reconcile) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  reconcile(@Req() request: Request, @Body() body: unknown, @Res({ passthrough: true }) response?: Response) {
+  reconcile(@Req() request: Request, @Body() body: unknown, response?: Response) {
     return this.call('reconcile', request, body, response);
   }
   @Post(routes.readCapabilityReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')

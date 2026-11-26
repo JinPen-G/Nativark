@@ -11,6 +11,8 @@ import { requestFingerprint as fingerprint } from '@rental-os/platform-contracts
 import { HumanAutomationReviewError, type HumanAutomationOriginalGrantTarget,
   type HumanAutomationReviewGrantTarget, type HumanAutomationReviewGrantReadTarget,
   type HumanAutomationReviewService } from './human-automation-review.service';
+import { withHumanAutomationTransaction, type HumanAutomationTransactionParticipant } from './human-automation-transactions';
+import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const uuid = z.string().uuid(), hash = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -34,6 +36,8 @@ type EnabledPolicy = Extract<HumanAutomationReviewGrantPolicy, { enabled: true }
 export interface HumanAutomationReviewGrantPolicySource {
   /** Trusted runtime publication only. Missing/disabled is unavailable for writes. */
   read(target: HumanAutomationReviewGrantTarget): Promise<unknown>;
+  /** Selected hosts recheck the publication synchronously after the last lease wait. */
+  readCurrent?(target: HumanAutomationReviewGrantTarget): unknown;
 }
 
 const querySchema = z.object({ inputRef: uuid, action: z.enum(['close', 'feedback']) }).strict();
@@ -106,7 +110,8 @@ function grantSnapshot(row: StoredGrant, key: Key) {
 
 export class HumanAutomationReviewGrantService {
   constructor(private readonly db: Db, private readonly reviews: Pick<HumanAutomationReviewService, 'withGrantTarget' | 'withOriginalGrantTarget'>,
-    private readonly policySource: HumanAutomationReviewGrantPolicySource, private readonly clock: () => Date = () => new Date()) {
+    private readonly policySource: HumanAutomationReviewGrantPolicySource, private readonly clock: () => Date = () => new Date(),
+    private readonly transactions?: HumanAutomationTransactionParticipant) {
     if (typeof db?.$transaction !== 'function' || typeof db.$queryRaw !== 'function'
       || typeof db.aiAutomationReviewGrant?.findFirst !== 'function' || typeof db.aiAutomationReviewGrant.create !== 'function'
       || typeof db.aiAutomationReviewGrant.updateMany !== 'function' || typeof db.operationLog?.findFirst !== 'function'
@@ -125,7 +130,15 @@ export class HumanAutomationReviewGrantService {
     if (policy.scope.tenantId !== target.tenantId || policy.scope.workspaceId !== target.workspaceId
       || Date.parse(policy.validFrom) > now.getTime() || Date.parse(policy.expiresAt) <= now.getTime()
       || policy.actions[target.action].requiredPermissions.some(code => !hasEffectivePermission(heldPermissions, code))) throw unavailable();
-    return { value: policy, reference: { policyId: policy.policyId, revision: policy.revision, fingerprint: fingerprint(policy) } };
+    const reference = { policyId: policy.policyId, revision: policy.revision, fingerprint: fingerprint(policy) };
+    const assertCurrent = () => {
+      if (Date.parse(policy.validFrom) > this.clock().getTime() || Date.parse(policy.expiresAt) <= this.clock().getTime()) throw unavailable();
+      if (!hasRentalBusinessTenantFence()) return;
+      const current = humanAutomationReviewGrantPolicySchema.safeParse(this.policySource.readCurrent?.(structuredClone(target)));
+      if (!current.success || fingerprint(current.data) !== reference.fingerprint) throw unavailable();
+    };
+    assertCurrent();
+    return { value: policy, reference, assertCurrent };
   }
 
   private async grant(db: HumanAutomationReviewGrantDb, key: Key) {
@@ -232,7 +245,7 @@ export class HumanAutomationReviewGrantService {
         const policy = await this.policy(before); this.verifyPreparation(prepared, before, policy.value);
         const existing = await this.originalReceipt(this.db, prepared.key, prepared.preparedRef);
         if (existing) return { state: 'observed' as const, receipt: existing, replayed: true, ...semantics };
-        const receipt = await this.db.$transaction(async tx => {
+        const receipt = await this.db.$transaction(async tx => withHumanAutomationTransaction(tx, this.transactions, [before.eventId], async () => {
           const event = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`SELECT id FROM ai_business_failure_outbox WHERE id = ${before.eventId} AND tenantId = ${before.tenantId} AND workspaceId = ${before.workspaceId} FOR UPDATE`);
           const input = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`SELECT id FROM ai_automation_inputs WHERE id = ${before.inputId} AND tenantId = ${before.tenantId} AND workspaceId = ${before.workspaceId} FOR UPDATE`);
           if (event.length !== 1 || event[0].id !== before.eventId || input.length !== 1 || input[0].id !== before.inputId) throw unavailable();
@@ -273,7 +286,10 @@ export class HumanAutomationReviewGrantService {
               || !same((await this.policy(target)).reference, currentPolicy.reference)) throw unavailable();
             return detail;
           }, tx);
-        }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+        }, () => {
+          policy.assertCurrent();
+          if (Date.parse(prepared.expiresAt) <= this.clock().getTime()) throw unavailable();
+        }), { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
         acknowledged = true;
         if (!same((await this.policy(before)).reference, policy.reference)) throw unavailable();
         return { state: 'observed' as const, receipt, replayed: false, ...semantics };
@@ -318,7 +334,8 @@ export class HumanAutomationReviewGrantService {
         || receipt.principalFingerprint !== target.principalFingerprint || receipt.sourceFingerprint !== target.sourceFingerprint
         || !this.receiptPolicyMatches(receipt, policy.value) || !same(receipt.requiredPermissions, policy.value.actions[kind].requiredPermissions)
         || !same((await this.policy(target)).reference, policy.reference)) throw unavailable();
-      return { id: row.id, revision: row.revision, policyFingerprint: policy.reference.fingerprint, preparedRef: receipt.preparedRef };
+      return { id: row.id, revision: row.revision, policyFingerprint: policy.reference.fingerprint,
+        preparedRef: receipt.preparedRef, assertCurrent: policy.assertCurrent };
     }, db);
   }
 

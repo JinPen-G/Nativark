@@ -64,9 +64,19 @@ AI 选装宿主通过 [原收据选择器](src/ai-http-policy.ts) 从实际处�
 
 原请求发布、Task/动作策略、能力证据及显式账务恢复复用当前 Auth/Tenant/Core 和原事务，提交前复验身份、原引用与期限。模型启动保留唯一 Gateway、原预算预占和累计用量，丢失提交应答只核原操作。部署停新保留十二项原读取/控制，Core 停用保留其中八项原读取，精确集合见[处理器政策](src/ai-http-policy.ts)。前端十九个操作沿相同公共合同，九项写入关闭认证刷新后的自动重发，当前会话变化会撤回迟到结果。
 
+SaaS 平台能力检测通过[原平台 Controller](../../packages/ai-native-server/src/runtime/platform-capability-probe/platform-capability-probe.controller.ts)提供十四个操作，六项读取与八项写入分别登记；能力回执核对可能保存证据，仍属于写入。请求与原 Task、调用、财务恢复均沿当前 SaaS 查看／管理授权，不借经营空间身份。停新时仅保留十项原读取／控制／财务核对，不允许发布、创建、启动或写入能力证据。
+
+[隐私维护 Controller](../../packages/ai-native-server/src/runtime/privacy/retention.controller.ts)分别提供工作空间与平台的 cleanup、receipt、receipts 六个操作。清理按原事务复核当前管理员或独立 SaaS 权限，保留未决效果、资金占用及对象 ACL。批次中已有提交后再失权保持结果未知，按原删除收据核对；正文保护和恢复清单导出／重放只由宿主内部调用，不作为 HTTP 入口。
+
 经营政策页通过[原八方法客户端](../../packages/rental-core/admin/task-center/api/aiAutomationPolicies.ts)消费发现、预览、明确准备、明确提交及原收据。[政策 Controller](../../packages/ai-native-server/src/runtime/automation/human-automation-policy-request.controller.ts)另保留两个要求原管理授权的兼容方法，十条路由共用宿主 OpenAPI 和精确读写声明。请求工厂的类令牌与实际挂载集合绑定，目录仅发布已挂载工厂。
 
 政策的确认授权、准备、版本变更及操作收据沿同一原事务提交，先核当前 Auth/Tenant/Core，最后一次授权等待后再核有效期。政策保存只改变管理配置，模型和业务动作仍走各自正式入口。部署停新或 Core 停用后保留 preparation、review、operation 三项原读取，仍核当前会话、成员权限及原操作归属。
+
+经营待办通过[原十六方法客户端](../../packages/rental-core/admin/task-center/api/aiAutomationReviews.ts)读取事件与队列、准备候选和 Task、办理人工反馈与关闭，并核对原操作。营运和员工的[同源 Controller](../../packages/ai-native-server/src/runtime/automation/human-automation-request.controller.ts)各挂载二十个操作，每端十项读取、十项写入。`readCandidate` 可能使过期事件失效，按写入处理。宿主沿同一请求的 Auth/Guard/ALS 核定渠道、空间、地点和资源范围，再进入原 Core 读取。
+
+[经营事务参加者](../../packages/ai-native-server/src/runtime/automation/human-automation-transactions.ts)在候选、批次、输入、Task、人工授权和反馈的各个原提交点先核 Auth/Tenant/Core、部署准入与原订单，再取得相关元数据锁。提交前复核当前授权，并在最后一次等待后核期限和运行政策。各阶段保留自己的原键和收据，Task 创建应答不明时继续核对同一 Task/Run。反馈或关闭待办的收据与业务异常是否解决分别显示。
+
+部署停新或 Core 停用后，每端仅保留 `readPendingBatch/readCreation/readQueue/read/forEvent/operation/readGrant` 七项原读取。原请求与收据仍需当前身份、成员权限和对象授权。解释的读取、准备与明确启动由独立[解释 Controller](../../packages/ai-native-server/src/runtime/automation/automation-explanation.controller.ts)承接，停用后仅保留其 `read`。原经营元数据操作及前端传输的离线验证复用[原事务夹具](../../packages/ai-native-server/test/original-scene-transactions.test.cjs)，真实数据库、浏览器和员工宿主另行验收。
 
 SaaS 平台模型设置复用[原五操作 Controller](../../packages/ai-native-server/src/runtime/platform-model-settings.application.ts)，包括目录、配置、保存、原操作收据及能力证据观察。[平台管理选择器](src/ai-http-policy.ts)从实际挂载处理器生成方法和路径闭集，经原 SaaS 会话权威及所选数据可用性核验，支持没有经营空间的当前平台管理员。[原事务参加者](../../packages/ai-native-server/src/runtime/platform-management-transaction.ts)在 Scope 初始化和 Vault/Profile/CAS 保存的各自事务内复核同一请求身份及权限；失应答按原操作键核对。能力观察返回已有证据，配置白名单和保存成功均不证明供应商能力已通过。宿主 OpenAPI 统一原合同与 Nest 的参数模板后，只发布实际挂载的方法。
 

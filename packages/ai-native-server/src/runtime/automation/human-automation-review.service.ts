@@ -12,6 +12,8 @@ import { hasEffectivePermission } from '@rental-os/platform-server/permission-ma
 import { BusinessFailureReadAuthority, type FailureSource } from '../business-events/business-failure-read.authority';
 import { BusinessFailureError } from '../business-events/prisma-business-failure-outbox';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
+import { withHumanAutomationTransaction, type HumanAutomationTransactionParticipant } from './human-automation-transactions';
+import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
 
 const uuid = z.string().uuid(), revision = z.number().int().min(1).max(4294967293);
 const fence = z.number().int().min(0).max(4294967293);
@@ -73,13 +75,15 @@ export type HumanAutomationOriginalGrantTarget = Pick<HumanAutomationReviewGrant
  * anomaly fingerprint or action authority is manufactured for old receipts. */
 export type HumanAutomationReviewGrantReadTarget = Omit<HumanAutomationReviewGrantTarget, 'sourceFingerprint' | 'targetFingerprint'>;
 export type HumanAutomationCurrentGrantPort = (inputRef: string, action: 'close' | 'feedback', db: ReadDb,
-  original: HumanAutomationOriginalGrantTarget) => Promise<{ id: string; revision: number; policyFingerprint: string; preparedRef: string }>;
+  original: HumanAutomationOriginalGrantTarget) => Promise<{ id: string; revision: number; policyFingerprint: string;
+    preparedRef: string; assertCurrent?(): void }>;
 
 export class HumanAutomationReviewService {
   constructor(private readonly db: ReadDb & Pick<PrismaClient, '$transaction'>,
     private readonly reads: BusinessFailureReadAuthority, private readonly clock: () => Date = () => new Date(),
     /** Required only for new metadata writes. Historical reads use original access. */
-    private readonly currentGrant?: HumanAutomationCurrentGrantPort) {}
+    private readonly currentGrant?: HumanAutomationCurrentGrantPort,
+    private readonly transactions?: HumanAutomationTransactionParticipant) {}
 
   private async load(inputRef: string, db: ReadDb) {
     const { context, scope } = await this.reads.current();
@@ -319,12 +323,13 @@ export class HumanAutomationReviewService {
       || row.requiredPermissions.some(permission => typeof permission !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9:._-]{0,190}$/u.test(permission)
         || !hasEffectivePermission(currentPermissions, permission))) throw unavailable();
     if (!published || published.id !== row.id || published.revision !== row.revision
-      || !/^[a-f0-9]{64}$/u.test(published.policyFingerprint) || !/^[a-f0-9]{64}$/u.test(published.preparedRef)) throw unavailable();
+      || !/^[a-f0-9]{64}$/u.test(published.policyFingerprint) || !/^[a-f0-9]{64}$/u.test(published.preparedRef)
+      || hasRentalBusinessTenantFence() && typeof published.assertCurrent !== 'function') throw unavailable();
     const authorizationHash = requestFingerprint({ principal: target.principal, key: where, id: row.id, revision: row.revision,
       resourceHash: row.resourceHash, permissions: row.requiredPermissions, expiresAt: row.expiresAt.toISOString(),
       publication: published.policyFingerprint, preparedRef: published.preparedRef });
     if (principal((await this.reads.current()).context) !== target.principal) throw unavailable();
-    return { id: row.id, revision: row.revision, authorizationHash };
+    return { id: row.id, revision: row.revision, authorizationHash, expiresAt: row.expiresAt, assertCurrent: published.assertCurrent };
   }
 
   private receipt(target: Target, row: AiAutomationReviewOperation, command?: Command) {
@@ -478,7 +483,9 @@ export class HumanAutomationReviewService {
         const key = this.operationKey(before, command.operationKey);
         const existing = await this.db.aiAutomationReviewOperation.findFirst({ where: key });
         if (existing) return this.originalOperation(command.inputRef, command.operationKey, command);
-        const result = await this.db.$transaction(async tx => {
+        let grantDeadline: Date | undefined;
+        let assertPublication: (() => void) | undefined;
+        const result = await this.db.$transaction(async tx => withHumanAutomationTransaction(tx, this.transactions, [before.event.id], async () => {
           await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_business_failure_outbox WHERE id = ${before.event.id} FOR UPDATE`);
           await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_automation_inputs WHERE id = ${before.row.id} FOR UPDATE`);
           return this.withTarget(command.inputRef, async target => {
@@ -489,6 +496,8 @@ export class HumanAutomationReviewService {
             if (target.row.reviewRevision !== command.expectedRevision || target.event.fence !== command.expectedEventFence
               || (target.task?.id ?? null) !== command.expectedTaskId || command.action === 'close' && target.row.reviewStatus === 'closed') throw conflict();
             const grant = await this.grant(target, command.action, tx);
+            grantDeadline = grant.expiresAt;
+            assertPublication = grant.assertCurrent;
             await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_automation_review_grants WHERE id = ${grant.id} FOR UPDATE`);
             if ((await this.grant(target, command.action, tx)).authorizationHash !== grant.authorizationHash) throw unavailable();
             attempted = true;
@@ -518,7 +527,10 @@ export class HumanAutomationReviewService {
             if (requestFingerprint(after.task) !== requestFingerprint(target.task)) throw conflict();
             return this.receipt(after, receipt, command);
           }, tx);
-        }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+        }, () => {
+          assertPublication?.();
+          if (grantDeadline && grantDeadline <= this.clock()) throw unavailable();
+        }), { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
         acknowledged = true;
         return result;
       });

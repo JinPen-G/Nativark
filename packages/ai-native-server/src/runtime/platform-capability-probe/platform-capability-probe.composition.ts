@@ -26,6 +26,8 @@ import type { AiTaskRunnerClock } from '@rental-os/platform-server/ai-runtime';
 import { PlatformTaskIdentityAuthority, composePlatformTaskAuthorization, PlatformTaskPlanPolicyReader } from './platform-probe.authorization';
 import { PlatformBudgetAuthorizationSource, PlatformPolicyEntitlementSource, PlatformGatewayCallPricing } from './platform-budget.authorization';
 import { PlatformCapabilityProbeAuthority } from './platform-probe.authority';
+import { createPersistedGatewayBudget } from '../budget/gateway-budget.composition';
+import { beginPlatformAiManagementTransaction } from '../platform-management-transaction';
 import type { GatewayCapacityPort } from '../gateway-capacity.ports';
 
 export interface AuthorizedPlatformCapabilityProbeDependencies {
@@ -93,18 +95,23 @@ export function composeAuthorizedPlatformCapabilityProbe(input: AuthorizedPlatfo
     },
   };
 
+  const accounting = { db: input.db, scopes, subscriptions: sentinels.subscriptions, clock,
+    authorization: new PlatformBudgetAuthorizationSource({ db: input.db, scopes, clock }, bindings),
+    entitlements: new PlatformPolicyEntitlementSource(input.db, TEXT_PROBE_SCENE, clock),
+    entitlementFeatureCode: 'ai.native.platform.probe',
+    pricing: new PlatformGatewayCallPricing(input.db, scopes, input.priceVersion, clock),
+  };
+  // Explicit original-key financial recovery adds the Task transaction fence.
+  // Automatic Gateway settlement retains its own persisted-dispatch authority.
+  const recovery = createPersistedGatewayBudget({ ...accounting, recoveryTransactions: 'original_task' }).recovery;
   const application = new TextCapabilityProbeApplication({
-    db: input.db, scopes, subscriptions: sentinels.subscriptions,
+    ...accounting,
     management: { authorize: async () => { throw new ModelGatewayError('FORBIDDEN'); } },
     configuration: {
       selectionForInvocation: async () => { throw new ModelGatewayError('FORBIDDEN'); },
       profile: async () => { throw new ModelGatewayError('FORBIDDEN'); },
       credential: async () => { throw new ModelGatewayError('FORBIDDEN'); },
     },
-    authorization: new PlatformBudgetAuthorizationSource({ db: input.db, scopes, clock }, bindings),
-    entitlements: new PlatformPolicyEntitlementSource(input.db, TEXT_PROBE_SCENE, clock),
-    entitlementFeatureCode: 'ai.native.platform.probe',
-    pricing: new PlatformGatewayCallPricing(input.db, scopes, input.priceVersion, clock),
     ...(input.audit !== undefined ? { audit: input.audit } : {
       auditForTask: (taskId, facts) => new PrismaPlatformGatewayAudit(input.db, scopes, facts, taskId, clock),
     }),
@@ -114,6 +121,23 @@ export function composeAuthorizedPlatformCapabilityProbe(input: AuthorizedPlatfo
       credentials: input.credentials, invocation: platformIdentity, profileId: input.platformProfileId,
       secrets: input.secrets }).invocation,
     identity: identityPort,
+    evidenceTransactions: { async begin(tx, profile) {
+      const before = await scopes.resolveCurrent();
+      if (before.context.actor.kind !== 'saas_admin' || before.scope.kind !== 'PLATFORM'
+        || profile.scopeKind !== 'PLATFORM' || profile.scopeId !== before.scope.id
+        || profile.id !== input.platformProfileId) throw denied();
+      const participant = await beginPlatformAiManagementTransaction(tx, before.context.actor.userId);
+      if (!participant) throw denied();
+      try {
+        await platformAuthority.manage(input.platformProfileId);
+        return { async revalidate() {
+          await platformAuthority.manage(input.platformProfileId);
+          const after = await scopes.resolveCurrent();
+          if (after.scope.id !== before.scope.id || stableIdentity(after.context) !== stableIdentity(before.context)) throw denied();
+          await participant.revalidate();
+        }, close: () => participant.close() };
+      } catch (error) { participant.close(); throw error; }
+    } },
   });
 
   const accessPort: TextProbeOriginalAccessPort = {
@@ -203,7 +227,7 @@ export function composeAuthorizedPlatformCapabilityProbe(input: AuthorizedPlatfo
     clock, ...(input.monotonic !== undefined ? { monotonic: input.monotonic } : {}),
     ...(input.runnerClock !== undefined ? { runnerClock: input.runnerClock } : {}),
     authorization: taskAuthorization, taskScopeKind: 'PLATFORM' as const,
-    producer, taskPolicies, accountingRecovery: application.financialRecovery,
+    producer, taskPolicies, accountingRecovery: recovery,
   });
   return Object.freeze({ application, workflow, authorization: taskAuthorization, scopes, identity: platformIdentity });
 }

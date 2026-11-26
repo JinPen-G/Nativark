@@ -5,6 +5,8 @@ import { z } from 'zod';
 import { AiTaskCreationRepository } from '../ai-task-creation.repository';
 import { AutomationError, PrismaAutomationAuthority } from './prisma-automation.authority';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
+import { mutateHumanAutomation, withHumanAutomationTransaction, withHumanAutomationTaskCreation,
+  type HumanAutomationTransactionParticipant } from './human-automation-transactions';
 
 const eventCommand = z.object({ eventId: z.string().uuid() }).strict();
 const inputCommand = z.object({ inputRef: z.string().uuid() }).strict();
@@ -26,14 +28,21 @@ export class AutomationFailureTaskService {
   constructor(private readonly db: Pick<PrismaClient, '$transaction' | 'aiAutomationInput'>,
     private readonly authority: PrismaAutomationAuthority, private readonly tasks: AiTaskCreationRepository,
     private readonly clock: () => Date = () => new Date(),
-    private readonly assertPreparationPolicy?: (tx: Prisma.TransactionClient) => Promise<void>) {}
+    private readonly assertPreparationPolicy?: (tx: Prisma.TransactionClient) => Promise<void>,
+    private readonly transactions?: HumanAutomationTransactionParticipant,
+    private readonly assertCurrentConfiguration?: () => void) {}
+
+  private assertCurrent(expiresAt: Date) {
+    this.assertCurrentConfiguration?.();
+    if (expiresAt <= this.clock()) throw new AutomationError('unavailable');
+  }
 
   async prepare(value: unknown) {
     const { eventId } = parse(eventCommand, value);
     const before = await this.authority.snapshot(eventId), inputRef = randomUUID();
     let storedId: string, attemptedRef: string = inputRef;
     try {
-      storedId = await this.db.$transaction(async tx => {
+      storedId = await this.db.$transaction(async tx => withHumanAutomationTransaction(tx, this.transactions, [eventId], async () => {
         await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_automation_policies WHERE id = ${before.policy.id} FOR UPDATE`);
         await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_automation_subjects WHERE id = ${before.subject.id} FOR UPDATE`);
         if (before.event.inspectionId) await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM rental_inspection_records WHERE id = ${before.event.inspectionId} AND tenantId = ${before.key.tenantId} AND workspaceId = ${before.key.workspaceId} FOR UPDATE`);
@@ -80,7 +89,8 @@ export class AutomationFailureTaskService {
         if ((await this.authority.inspect(eventId, tx)).materialHash !== before.materialHash) throw new AutomationError('unavailable');
         await this.assertPreparationPolicy?.(tx);
         return inputRef;
-      }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      }, () => this.assertCurrent(before.expiresAt)),
+      { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (error) {
       if (error instanceof AutomationError) throw error;
       return { state: 'unknown' as const, inputRef: attemptedRef, creationKey: before.creationKey, retryable: false as const,
@@ -103,17 +113,36 @@ export class AutomationFailureTaskService {
     const { row } = await this.authority.input(inputRef);
     if (row.status !== 'prepared') return this.reconcile({ inputRef });
     try {
-      const claim = await this.db.aiAutomationInput.updateMany({ where: { id: row.id, tenantId: row.tenantId, workspaceId: row.workspaceId,
-        policyId: row.policyId, policyRevision: row.policyRevision, authorityHash: row.authorityHash, inputHash: row.inputHash,
-        status: 'prepared', reviewStatus: 'open', expiresAt: { gt: this.clock() }, taskId: null, runId: null }, data: { status: 'creation_unknown' } });
+      const claim = await mutateHumanAutomation(this.db, this.transactions, [row.eventId], async db => {
+        await this.authority.input(inputRef);
+        return db.aiAutomationInput.updateMany({ where: { id: row.id, tenantId: row.tenantId, workspaceId: row.workspaceId,
+          policyId: row.policyId, policyRevision: row.policyRevision, authorityHash: row.authorityHash, inputHash: row.inputHash,
+          status: 'prepared', reviewStatus: 'open', expiresAt: { gt: this.clock() }, taskId: null, runId: null }, data: { status: 'creation_unknown' } });
+      }, () => this.assertCurrent(row.expiresAt));
       if (claim.count !== 1) return this.reconcile({ inputRef });
     } catch { return this.reconcile({ inputRef }); }
     try {
-      const task = await this.tasks.create(command(row));
+      const task = await withHumanAutomationTaskCreation(this.transactions,
+        { eventId: row.eventId, inputRef, sceneCode: row.sceneCode, binding: originalInput(row) }, async (tx, lock) => {
+          // Auth/Core/Order are already held. Keep the original policy and event
+          // before the creation repository acquires its Scope/Task locks.
+          if (lock) {
+            await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_automation_policies WHERE id = ${row.policyId} FOR UPDATE`);
+            await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_automation_subjects WHERE id = ${row.subjectId} FOR UPDATE`);
+            await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_business_failure_outbox WHERE id = ${row.eventId} FOR UPDATE`);
+            await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_automation_inputs WHERE id = ${inputRef} FOR UPDATE`);
+          }
+          const stored = await tx.aiAutomationInput.findFirst({ where: { id: inputRef } });
+          if (!stored || originalInput(stored) !== originalInput(row) || stored.status !== 'creation_unknown'
+            || stored.reviewStatus !== 'open' || stored.expiresAt <= this.clock()) throw new AutomationError('unavailable');
+          const fresh = await this.authority.snapshot(row.eventId, tx);
+          this.authority.verifyInput(stored, fresh);
+        }, () => this.tasks.create(command(row)), () => this.assertCurrent(row.expiresAt));
       await this.authority.input(inputRef);
-      const linked = await this.db.aiAutomationInput.updateMany({ where: { id: row.id, tenantId: row.tenantId, workspaceId: row.workspaceId,
+      const linked = await mutateHumanAutomation(this.db, this.transactions, [row.eventId], db => db.aiAutomationInput.updateMany({ where: { id: row.id, tenantId: row.tenantId, workspaceId: row.workspaceId,
         scopeId: row.scopeId, policyId: row.policyId, policyRevision: row.policyRevision, inputHash: row.inputHash,
-        status: 'creation_unknown', taskId: null, runId: null }, data: { status: 'linked', taskId: task.taskId, runId: task.runId } });
+        status: 'creation_unknown', taskId: null, runId: null }, data: { status: 'linked', taskId: task.taskId, runId: task.runId } }),
+      () => this.assertCurrent(row.expiresAt));
       if (linked.count !== 1) return this.reconcile({ inputRef });
     } catch { return this.reconcile({ inputRef }); }
     return this.reconcile({ inputRef });

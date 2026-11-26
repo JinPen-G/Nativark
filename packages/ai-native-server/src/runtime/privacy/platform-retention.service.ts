@@ -22,6 +22,10 @@ import { retentionPublicKeyHash } from './retention-restore';
 import { platformRetentionKinds, requirePlatformRestorePermit, signPlatformRetentionManifest,
   type AiPlatformRetentionRestorePermit } from './platform-retention-restore';
 
+import { beginPlatformAiManagementTransaction } from '../platform-management-transaction';
+import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
+import { getRequestIdentity } from '@rental-os/platform-server/request-identity';
+
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
 const kindSchema = z.enum(platformRetentionKinds);
@@ -53,6 +57,12 @@ export class AiPlatformRetentionService {
       || context.audience !== 'operator' || !('permissions' in context) || !Array.isArray(context.permissions)
       || !hasEffectivePermission(context.permissions, PLATFORM_AI_PROVIDER_PERMISSIONS[writing ? 'manage' : 'view'])
       || Date.parse(context.authorizedAt) > this.now().getTime()) throw denied();
+    if (hasRentalBusinessTenantFence()) {
+      const selected = getRequestIdentity();
+      if (!selected || selected.isSaasAdmin !== true || selected.audience !== 'operator' || selected.staffApi
+        || selected.userId !== context.actor.userId
+        || fingerprint([...(selected.permissions ?? [])].sort()) !== fingerprint([...context.permissions].sort())) throw denied();
+    }
     const user = await this.db.user.findUnique({ where: { id: context.actor.userId },
       select: { id: true, tenantId: true, isActive: true, isSaasAdmin: true } });
     const scope = await this.db.aiScope.findFirst({ where: { kind: 'PLATFORM', scopeKey: 'platform', tenantId: null, workspaceId: null } });
@@ -64,6 +74,16 @@ export class AiPlatformRetentionService {
       hash: fingerprint({ stable, scopeId: scope.id, journalTenantId: user.tenantId }) };
   }
   private async check(before: Session, writing: boolean) { if ((await this.current(writing)).hash !== before.hash) throw denied(); }
+  private async inTransaction<T>(tx: Prisma.TransactionClient, before: Session, work: () => Promise<T>): Promise<T> {
+    const participant = await beginPlatformAiManagementTransaction(tx, before.actorId).catch(() => { throw denied(); });
+    try {
+      await this.check(before, true);
+      const result = await work();
+      await this.check(before, true);
+      await participant?.revalidate().catch(() => { throw denied(); });
+      return result;
+    } finally { participant?.close(); }
+  }
   private async locked(tx: Prisma.TransactionClient, before: Session) {
     const rows = await tx.$queryRaw<Array<{ id: string }>>(prismaRuntime.sql`SELECT id FROM ai_scopes
       WHERE id = ${before.scopeId} AND kind = 'platform' AND scopeKey = 'platform'
@@ -159,9 +179,9 @@ export class AiPlatformRetentionService {
     const before = await this.current(true), expected = restore && requirePlatformRestorePermit(restore, this.restoreKeyHash,
       before.scopeId, this.now()).tombstones.find(item => item.kind === kind && item.resourceId === resourceId)?.targetHash;
     if (restore && !expected) throw denied();
-    let attempted = false;
+    let attempted = false, committed = false;
     try {
-      const result = await this.db.$transaction(async tx => {
+      const result = await this.db.$transaction(tx => this.inTransaction(tx, before, async () => {
         await this.locked(tx, before);
         const exists = kind === 'task' ? await tx.aiTask.findFirst({ where: { id: resourceId, scopeId: before.scopeId } })
           : await tx.aiTaskOriginalRequest.findFirst({ where: { id: resourceId, scopeId: before.scopeId } });
@@ -182,9 +202,11 @@ export class AiPlatformRetentionService {
             taskId: resourceId, now: this.now(), check: () => this.check(before, true),
             platformReceipt: this.taskReceipt(tx, before, resourceId) }, expected || undefined);
         await this.check(before, true); return result;
-      }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      }), { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      committed = true;
       await this.check(before, true); return result;
     } catch (error) {
+      if (committed && attempted) throw new AiRetentionUnknown();
       if (error instanceof AiTaskRepositoryError) throw error;
       if (attempted) throw new AiRetentionUnknown();
       throw unavailable();
@@ -203,11 +225,20 @@ export class AiPlatformRetentionService {
     const results = [];
     for (const row of rows) {
       try { results.push(await this.erase(command.kind, row.id)); }
-      catch (error) { if (error instanceof AiTaskRepositoryError && error.code === 'AI_ACCESS_DENIED') throw error;
+      catch (error) { if (error instanceof AiTaskRepositoryError && error.code === 'AI_ACCESS_DENIED') {
+          if (results.some(row => ['erased', 'withdrawn', 'prepared', 'unknown'].includes(row.state))) throw new AiRetentionUnknown();
+          throw error;
+        }
         results.push({ state: error instanceof AiRetentionUnknown ? 'unknown' as const : 'unavailable' as const,
           retryable: false as const, nextAction: 'list_retention_receipts' as const }); }
     }
-    await this.check(before, true);
+    try { await this.check(before, true); }
+    catch (error) {
+      // Earlier items may already have committed; loss of authority cannot
+      // turn their outcome into a confirmed no-write result.
+      if (results.some(row => ['erased', 'withdrawn', 'prepared', 'unknown'].includes(row.state))) throw new AiRetentionUnknown();
+      throw error;
+    }
     const nextAfter = rows.length === command.limit ? rows[rows.length - 1].id : null;
     const candidates = rows.map(row => retentionCandidate(row.id, 'updatedAt' in row ? row.updatedAt : row.createdAt));
     logRetentionPage({ scopeKind: 'platform', scopeId: before.scopeId, kind: command.kind, after: command.after }, this.now(), candidates, results, nextAfter);

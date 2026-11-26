@@ -10,6 +10,10 @@ export class RuntimeAutomationReviewGrantPolicySource implements HumanAutomation
   constructor(private readonly configuration: Pick<ConfigService, 'get'>) {}
 
   async read(_target: HumanAutomationReviewGrantTarget): Promise<unknown> {
+    return this.readCurrent(_target);
+  }
+
+  readCurrent(_target: HumanAutomationReviewGrantTarget): unknown {
     const publication = readRuntimePublication(this.configuration);
     return publication.configurations.automationReviewGrant ?? { enabled: false };
   }

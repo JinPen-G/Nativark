@@ -12,6 +12,7 @@ import { BusinessFailureError, isResourceFailureEvent, type FailureScope } from 
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { PendingCandidateBatchRepository, type PendingCandidateBatchDb, type PendingCandidateBatchJournal,
   type PendingCandidateBatchReference, type PendingCandidateEvent } from './pending-candidate-batch.repository';
+import { mutateHumanAutomation, type HumanAutomationTransactionParticipant } from '../automation/human-automation-transactions';
 
 const batchRequest = z.object({ limit: z.number().int().min(1).max(10),
   operationKey: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u).optional() }).strict();
@@ -36,7 +37,13 @@ const parse = <T>(schema: z.ZodType<T>, value: unknown): T => {
 export class BusinessFailureCandidateService {
   constructor(private readonly db: Pick<PrismaClient, 'aiBusinessFailureOutbox'>,
     private readonly authority: BusinessFailureReadAuthority, private readonly clock: () => Date = () => new Date(),
-    private readonly batchDb?: PendingCandidateBatchDb) {}
+    private readonly batchDb?: PendingCandidateBatchDb, private readonly transactions?: HumanAutomationTransactionParticipant) {}
+
+  private mutate<T>(row: AiBusinessFailureOutbox, write: (db: Pick<PrismaClient, 'aiBusinessFailureOutbox'>) => Promise<T>,
+    finalCheck?: () => void) {
+    return mutateHumanAutomation(this.batchDb ?? this.db, this.transactions, [row.id],
+      db => this.authority.withEvent(row, () => write(db)), finalCheck);
+  }
 
   async read(value: unknown) {
     const { eventId } = parse(inputSchema, value), { scope } = await this.authority.current();
@@ -57,10 +64,12 @@ export class BusinessFailureCandidateService {
       if (row.status === 'claimed' && row.leaseUntil && row.leaseUntil > now || row.nextAttemptAt > now) return this.view(row, source);
       if (row.attempts >= 3) return this.invalidate(row, 'dead_letter');
       const leaseOwner = randomUUID();
-      const claim = await this.db.aiBusinessFailureOutbox.updateMany({ where: {
+      const claim = await this.mutate(row, db => db.aiBusinessFailureOutbox.updateMany({ where: {
         id: row.id, tenantId: row.tenantId, workspaceId: row.workspaceId, fence: row.fence, attempts: { lt: 3 }, expiresAt: { gt: now },
         OR: [{ status: { in: ['pending', 'retry_scheduled'] }, nextAttemptAt: { lte: now } }, { status: 'claimed', leaseUntil: { lte: now } }]
-      }, data: { status: 'claimed', leaseOwner, leaseUntil: new Date(now.getTime() + 10000), fence: { increment: 1 }, attempts: { increment: 1 } } });
+      }, data: { status: 'claimed', leaseOwner, leaseUntil: new Date(now.getTime() + 10000), fence: { increment: 1 }, attempts: { increment: 1 } } }), () => {
+        if (row.expiresAt <= this.clock() || now.getTime() + 10000 <= this.clock().getTime()) throw new BusinessFailureError('unavailable');
+      });
       if (claim.count !== 1) return this.view(await this.load(scope, row.id), source);
       const claimed = await this.load(scope, row.id);
       if (claimed.leaseOwner !== leaseOwner || claimed.fence !== row.fence + 1) throw new BusinessFailureError('result_unknown');
@@ -109,7 +118,7 @@ export class BusinessFailureCandidateService {
 
   private batches() {
     if (!this.batchDb) throw new BusinessFailureError('unavailable');
-    return new PendingCandidateBatchRepository(this.batchDb, this.clock);
+    return new PendingCandidateBatchRepository(this.batchDb, this.clock, this.transactions);
   }
 
   private async batchIdentity(input: z.infer<typeof batchReference>) {
@@ -300,21 +309,24 @@ export class BusinessFailureCandidateService {
 
   private async invalidate(row: AiBusinessFailureOutbox, status: 'expired' | 'dead_letter') {
     if (row.status === status || row.status === 'closed' || row.status === 'expired') return this.view(row);
-    const result = await this.db.aiBusinessFailureOutbox.updateMany({ where: {
+    const result = await this.mutate(row, db => db.aiBusinessFailureOutbox.updateMany({ where: {
       id: row.id, tenantId: row.tenantId, workspaceId: row.workspaceId, fence: row.fence, status: row.status
     }, data: { status, fence: { increment: 1 }, leaseOwner: null, leaseUntil: null,
-      lastErrorCode: status === 'expired' ? 'resource_changed_or_expired' : 'attempts_exhausted' } });
+      lastErrorCode: status === 'expired' ? 'resource_changed_or_expired' : 'attempts_exhausted' } }));
     if (result.count !== 1) throw new BusinessFailureError('conflict');
     return this.view(await this.load(row, row.id));
   }
 
   private async finish(row: AiBusinessFailureOutbox, status: 'ready' | 'expired' | 'retry_scheduled' | 'dead_letter', lastErrorCode?: string) {
     const now = this.clock();
-    const result = await this.db.aiBusinessFailureOutbox.updateMany({ where: {
+    const result = await this.mutate(row, db => db.aiBusinessFailureOutbox.updateMany({ where: {
       id: row.id, tenantId: row.tenantId, workspaceId: row.workspaceId, status: 'claimed', fence: row.fence,
       leaseOwner: row.leaseOwner, leaseUntil: { gt: now }, ...(status === 'ready' ? { expiresAt: { gt: now } } : {})
     }, data: { status, leaseOwner: null, leaseUntil: null, lastErrorCode: lastErrorCode ?? null,
-      ...(status === 'retry_scheduled' ? { nextAttemptAt: new Date(now.getTime() + row.attempts * 30000) } : {}) } });
+      ...(status === 'retry_scheduled' ? { nextAttemptAt: new Date(now.getTime() + row.attempts * 30000) } : {}) } }), () => {
+        if (!row.leaseUntil || row.leaseUntil <= this.clock() || status === 'ready' && row.expiresAt <= this.clock())
+          throw new BusinessFailureError('unavailable');
+      });
     if (result.count !== 1) throw new BusinessFailureError('result_unknown');
   }
 

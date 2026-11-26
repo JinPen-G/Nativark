@@ -236,12 +236,12 @@ export class PrismaAutomationAuthority implements AiTaskCreationAuthority {
         policy: { id: policy.id, revision: policy.revision, sceneCode: policy.sceneCode, sceneVersion: policy.sceneVersion } } };
   }
 
-  async snapshot(eventId: string) {
+  async snapshot(eventId: string, db: AutomationReadDb = this.db) {
     try {
-      const before = await this.inspect(eventId, this.db, true);
+      const before = await this.inspect(eventId, db, true);
       const entitlement = await this.entitlements.check(before.context, 'ai.native.use');
       if (!entitlement.available) throw unavailable();
-      const current = await this.inspect(eventId, this.db, true);
+      const current = await this.inspect(eventId, db, true);
       if (before.materialHash !== current.materialHash) throw unavailable();
       const authorityHash = requestFingerprint({ materialHash: current.materialHash, entitlement });
       const payload = { ...current.payload, authorityHash };

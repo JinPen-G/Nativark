@@ -2,10 +2,16 @@ import { z } from 'zod';
 import { composeAuthorizedPlatformCapabilityProbe, type AuthorizedPlatformCapabilityProbeDependencies } from './platform-capability-probe.composition';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { randomUUID } from 'node:crypto';
-import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
+import { getRequestIdentity, runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
 import { TextProbeOriginalRequestUnknownError } from '../prisma-text-probe-original-request.repository';
+
+import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
+import { hasEffectivePermission } from '@rental-os/platform-server/permission-match';
+import { PLATFORM_AI_PROVIDER_PERMISSIONS } from '../rental-adapters/platform-ai-access-policy';
+import { withPlatformProbeTaskTransactions } from './platform-probe-transactions';
+import { textProbeTaskCreationKey } from '../text-capability-probe-task.composition';
 
 const bearer = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
 export type PlatformCapabilityProbeHttpRequest = { headers: { authorization?: unknown } };
@@ -34,24 +40,33 @@ export class PlatformCapabilityProbeRequestFactory {
       return { authorization, requestId, audience: 'operator' as const };
     } };
     const composed = composeAuthorizedPlatformCapabilityProbe({ ...this.dependencies, credentials });
+    const selected = hasRentalBusinessTenantFence(), source = getRequestIdentity();
+    const sourceHash = requestFingerprint(source ?? null);
     let identity: string | undefined;
-    const current = async () => {
+    const current = async (writing = false) => {
       const context = structuredClone((await composed.scopes.resolveCurrent()).context);
-      if (authorization === undefined) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      if (authorization === undefined || context.actor.kind !== 'saas_admin' || context.scope.kind !== 'platform'
+        || context.audience !== 'operator' || !('permissions' in context)
+        || !hasEffectivePermission(context.permissions, PLATFORM_AI_PROVIDER_PERMISSIONS[writing ? 'manage' : 'view'])
+        || selected && (!source || getRequestIdentity() !== source || requestFingerprint(source) !== sourceHash
+          || source.isSaasAdmin !== true || source.staffApi || source.audience !== 'operator'
+          || source.userId !== context.actor.userId || requestFingerprint(source.permissions) !== requestFingerprint(context.permissions)))
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       const { requestId: _request, authorizedAt: _at, ...stable } = context;
       const fingerprint = requestFingerprint(stable);
       if (identity !== undefined && identity !== fingerprint) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       identity = fingerprint;
+      return context;
     };
     const guard = <T>(run: () => Promise<T>, writes = false, execution = false, signal?: AbortSignal): Promise<T> => {
       if (authorization === undefined) return Promise.reject(new AiTaskRepositoryError('AI_ACCESS_DENIED'));
       const abort = () => { authorization = undefined; };
       if (signal?.aborted) abort();
       signal?.addEventListener('abort', abort, { once: true });
-      return runWithRequestIdentity({}, async () => {
-        let entered = false;
+      const consume = async () => {
+        let entered = false, returned = false;
         try {
-          await waitForTaskApplicationDependency(current, false, signal);
+          await waitForTaskApplicationDependency(() => current(writes), false, signal);
           entered = true;
           // Preserve an original-result unknown raised by the workflow. The
           // read wait barrier may classify its OWN timeout as unavailable, but
@@ -64,13 +79,29 @@ export class PlatformCapabilityProbeRequestFactory {
             if (!outcome.ok) throw outcome.error;
             return outcome.value;
           })();
-          await waitForTaskApplicationDependency(current, writes, signal);
+          returned = true;
+          await waitForTaskApplicationDependency(() => current(writes), writes, signal);
           return structuredClone(result);
         } catch (error) {
-          if (writes && entered) throw new TextProbeOriginalRequestUnknownError();
+          // A confirmed authorization/conflict refusal is not a lost commit.
+          // Storage failures and interrupted writes keep the original unknown.
+          if (writes && entered && (returned || !(error instanceof Error) || !('code' in error)
+            || error.code === 'AI_STORAGE_UNAVAILABLE')) throw new TextProbeOriginalRequestUnknownError();
           throw error;
         } finally { signal?.removeEventListener('abort', abort); }
-      });
+      };
+      return selected ? consume() : runWithRequestIdentity({}, consume);
+    };
+    const inTask = <T>(value: unknown, purpose: 'creation' | 'execution' | 'control' | 'recovery' | 'accounting', work: () => Promise<T>) => {
+      const key = z.object({ inputRef: z.string().min(1).max(191), creationKey: z.string().min(1).max(128) })
+        .parse(value);
+      return withPlatformProbeTaskTransactions({ db: this.dependencies.db, key, purpose, clock: this.dependencies.clock,
+        current: () => current(true), readOriginal: requestKey => composed.workflow.readOriginalLocator(requestKey) }, work);
+    };
+    const accounting = async <T>(requestKey: string, work: () => Promise<T>) => {
+      const original = await composed.workflow.readOriginalLocator(requestKey);
+      if (!original) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      return inTask({ inputRef: original.inputRef, creationKey: textProbeTaskCreationKey(requestKey) }, 'accounting', work);
     };
     return Object.freeze({
       close() { authorization = undefined; },
@@ -87,13 +118,13 @@ export class PlatformCapabilityProbeRequestFactory {
         return original ? { state: 'stored' as const, inputRef: original.inputRef, inputHash: original.inputHash }
           : { state: 'not_found' as const };
       }, false, false, signal),
-      createTask: (value: unknown, signal?: AbortSignal) => { const command = structuredClone(value); return guard(() => composed.workflow.createTask(command), true, false, signal); },
+      createTask: (value: unknown, signal?: AbortSignal) => { const command = structuredClone(value); return guard(() => inTask(command, 'creation', () => composed.workflow.createTask(command)), true, false, signal); },
       readCreation: (value: unknown, signal?: AbortSignal) => guard(() => composed.workflow.readCreation(value), false, false, signal),
-      start: (value: unknown, signal?: AbortSignal) => { const command = structuredClone(value); return guard(() => composed.workflow.startOriginal(command, signal), true, true, signal); },
+      start: (value: unknown, signal?: AbortSignal) => { const command = structuredClone(value); return guard(() => inTask(command, 'execution', () => composed.workflow.startOriginal(command, signal)), true, true, signal); },
       inspect: (value: unknown, signal?: AbortSignal) => guard(() => composed.workflow.inspectOriginal(value), false, false, signal),
-      requestCancellation: (value: unknown, signal?: AbortSignal) => { const command = structuredClone(value); return guard(() => composed.workflow.requestCancellationOriginal(command), true, false, signal); },
-      reconcile: (value: unknown, signal?: AbortSignal) => { const command = structuredClone(value); return guard(() => composed.workflow.reconcileOriginal(command, signal), true, true, signal); },
-      readCapabilityReceipt: (value: unknown, signal?: AbortSignal) => guard(() => composed.workflow.readCapabilityReceipt(value), true, false, signal),
+      requestCancellation: (value: unknown, signal?: AbortSignal) => { const command = structuredClone(value); return guard(() => inTask(command, 'control', () => composed.workflow.requestCancellationOriginal(command)), true, false, signal); },
+      reconcile: (value: unknown, signal?: AbortSignal) => { const command = structuredClone(value); return guard(() => inTask(command, 'recovery', () => composed.workflow.reconcileOriginal(command, signal)), true, true, signal); },
+      readCapabilityReceipt: (value: unknown, signal?: AbortSignal) => { const command = structuredClone(value); return guard(() => composed.workflow.readCapabilityReceipt(command), true, false, signal); },
       readHistory: (value: unknown, signal?: AbortSignal) => guard(() => composed.workflow.readHistoricalOriginal(typeof value === 'string' ? value : String((value as { requestKey?: string })?.requestKey ?? '')), false, false, signal),
       readTaskPolicyMutation: (value: unknown, signal?: AbortSignal) => guard(() => composed.workflow.readTaskPolicyMutation(
         String((value as { requestKey?: string }).requestKey ?? ''),
@@ -106,8 +137,8 @@ export class PlatformCapabilityProbeRequestFactory {
         if (!command.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
         return composed.workflow.readOriginalAccountingOperation(command.data.requestKey, command.data.operation);
       }, false, false, signal),
-      releaseUnsent: (value: unknown, signal?: AbortSignal) => { const key = typeof value === 'string' ? value : String((value as { requestKey?: string })?.requestKey ?? ''); return guard(() => composed.workflow.releaseOriginalUnsent(key), true, false, signal); },
-      reconcileAccounting: (value: unknown, signal?: AbortSignal) => { const key = typeof value === 'string' ? value : String((value as { requestKey?: string })?.requestKey ?? ''); return guard(() => composed.workflow.reconcileOriginalAccounting(key), true, false, signal); },
+      releaseUnsent: (value: unknown, signal?: AbortSignal) => { const key = typeof value === 'string' ? value : String((value as { requestKey?: string })?.requestKey ?? ''); return guard(() => accounting(key, () => composed.workflow.releaseOriginalUnsent(key)), true, false, signal); },
+      reconcileAccounting: (value: unknown, signal?: AbortSignal) => { const key = typeof value === 'string' ? value : String((value as { requestKey?: string })?.requestKey ?? ''); return guard(() => accounting(key, () => composed.workflow.reconcileOriginalAccounting(key)), true, false, signal); },
     });
   }
 }

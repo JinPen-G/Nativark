@@ -13,9 +13,20 @@ export function createTaskProviderDispatchCheck(db: Partial<Pick<PrismaClient, '
     await db.$transaction(tx => withAiTaskTransaction(tx, { kind: 'invocation', callId: request.callId }, async () => {
       const invocation = await tx.aiGatewayInvocation.findFirst({ where: { callId: request.callId, taskId,
         actorId: context.actorId } });
-      if (!invocation || !('tenantId' in context && 'workspaceId' in context)) throw new ModelGatewayError('FORBIDDEN');
-      const scope = await tx.aiScope.findFirst({ where: { id: invocation.scopeId, kind: 'WORKSPACE',
-        tenantId: context.tenantId, workspaceId: context.workspaceId } });
+      if (!invocation) throw new ModelGatewayError('FORBIDDEN');
+      if (('tenantId' in context) !== ('workspaceId' in context)) throw new ModelGatewayError('FORBIDDEN');
+      const workspace = 'tenantId' in context && 'workspaceId' in context;
+      if (!workspace) {
+        // The original platform probe authority already owns this transaction.
+        // Confirm its stored SaaS task; an actor-only context cannot grant access.
+        const task = await tx.aiTask.findFirst({ where: { id: taskId, scopeId: invocation.scopeId,
+          scopeKind: 'PLATFORM', audience: 'OPERATOR', ownerKind: 'SAAS_ADMIN', ownerId: context.actorId,
+          sceneCode: 'ai.capability.text', archivedAt: null } });
+        if (!task) throw new ModelGatewayError('FORBIDDEN');
+      }
+      const scope = await tx.aiScope.findFirst({ where: workspace
+        ? { id: invocation.scopeId, kind: 'WORKSPACE', tenantId: context.tenantId, workspaceId: context.workspaceId }
+        : { id: invocation.scopeId, kind: 'PLATFORM', scopeKey: 'platform', tenantId: null, workspaceId: null } });
       if (!scope || signal.aborted) throw new ModelGatewayError('FORBIDDEN');
     }), { isolationLevel: 'ReadCommitted', maxWait: 2500, timeout: 5000 });
   };

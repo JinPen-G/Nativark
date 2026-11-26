@@ -31,10 +31,24 @@ import { AiGatewayPricingHistoryController, AI_BUDGET_MANAGEMENT, AI_GATEWAY_PRI
   from "@rental-os/ai-native-server/runtime/budget/budget-management.module";
 import { TextCapabilityProbeController, TEXT_CAPABILITY_PROBE_REQUESTS }
   from "@rental-os/ai-native-server/runtime/text-capability-probe.controller";
+import { PlatformCapabilityProbeController, PLATFORM_CAPABILITY_PROBE_REQUESTS }
+  from "@rental-os/ai-native-server/runtime/platform-capability-probe/platform-capability-probe.controller";
+
 import { HumanAutomationPolicyRequestController }
   from "@rental-os/ai-native-server/runtime/automation/human-automation-policy-request.controller";
 import { HumanAutomationPolicyRequestFactory }
   from "@rental-os/ai-native-server/runtime/automation/human-automation-policy-request.composition";
+
+import { AiRetentionController, AiPlatformRetentionController, AI_RETENTION_REQUESTS, AI_PLATFORM_RETENTION_REQUESTS }
+  from "@rental-os/ai-native-server/runtime/privacy/retention.controller";
+import { OperatorAutomationController, StaffAutomationController }
+  from "@rental-os/ai-native-server/runtime/automation/human-automation-request.controller";
+import { HumanAutomationRequestFactory }
+  from "@rental-os/ai-native-server/runtime/automation/human-automation-request.composition";
+import { AutomationExplanationController }
+  from "@rental-os/ai-native-server/runtime/automation/automation-explanation.controller";
+import { AutomationExplanationApplication }
+  from "@rental-os/ai-native-server/runtime/automation/automation-explanation.application";
 
 export const RENTAL_AI_INSPECTION_OPERATIONS = Object.freeze([
   "fulfillment-receipt-read", "history-read", "receipt-host-read", "host-read", "template-read",
@@ -42,6 +56,9 @@ export const RENTAL_AI_INSPECTION_OPERATIONS = Object.freeze([
   "draft-operation", "input-prepare", "input-receipt", "result-read", "result-save", "result-save-receipt", "submission-review", "submission-prepare", "submission-preparation", "submission-submit", "submission-read"
 ]);
 export const RENTAL_AI_CONTROLLERS = Object.freeze([
+  PlatformCapabilityProbeController, AiRetentionController, AiPlatformRetentionController,
+  AutomationExplanationController,
+  OperatorAutomationController, StaffAutomationController,
   HumanAutomationPolicyRequestController,
   TextCapabilityProbeController,
   AiPlatformModelSettingsController,
@@ -55,6 +72,9 @@ export const RENTAL_AI_CONTROLLERS = Object.freeze([
   RentalWebsiteClientEntryController, RentalWechatClientEntryController
 ]);
 export const RENTAL_AI_MOUNTED_REQUESTS: readonly (symbol | Function)[] = Object.freeze([
+  PLATFORM_CAPABILITY_PROBE_REQUESTS, AI_RETENTION_REQUESTS, AI_PLATFORM_RETENTION_REQUESTS,
+  AutomationExplanationApplication,
+  HumanAutomationRequestFactory,
   HumanAutomationPolicyRequestFactory,
   TEXT_CAPABILITY_PROBE_REQUESTS,
   AI_NATIVE_PLATFORM_MODEL_SETTINGS_REQUESTS,
@@ -76,6 +96,7 @@ const plans = AiScenePlanPolicyController.prototype, actions = AiOriginalTaskAct
 const conversations = AiConversationController.prototype;
 const capabilityProbe = TextCapabilityProbeController.prototype;
 const automationPolicy = HumanAutomationPolicyRequestController.prototype;
+const automationExplanation = AutomationExplanationController.prototype;
 const inspection = RentalStaffInspectionAssistController.prototype, recognition = InspectionRecognitionTaskController.prototype;
 const accounting = StaffInspectionAccountingController.prototype;
 const budget = RentalTenantBudgetController.prototype, pricing = AiGatewayPricingHistoryController.prototype;
@@ -83,7 +104,42 @@ const credit = RentalTenantCreditController.prototype;
 const platformSettings = AiPlatformModelSettingsController.prototype;
 const platformBudget = RentalPlatformBudgetController.prototype;
 const platformCredit = RentalPlatformCreditController.prototype;
+const platformProbe = PlatformCapabilityProbeController.prototype;
+const retention = AiRetentionController.prototype, platformRetention = AiPlatformRetentionController.prototype;
+const automationControllers = [OperatorAutomationController, StaffAutomationController] as const;
+const automationOriginalReads = (controller: typeof automationControllers[number]) => {
+  const p = controller.prototype;
+  return [p.readPendingBatch, p.readCreation, p.readQueue, p.read, p.forEvent, p.operation, p.readGrant];
+};
 const declarations: readonly RentalHttpAccessDeclaration[] = [
+  ...[AiRetentionController, AiPlatformRetentionController].flatMap(controller => [
+    ...reviewed(controller, [controller.prototype.receipt, controller.prototype.receipts], "buffered-read",
+    "current workspace manager or independent SaaS view reads bounded original erasure receipts; same selected identity and final response recheck, no body or restore access"),
+    ...reviewed(controller, [controller.prototype.cleanup], "transactional-write",
+    "bounded original cleanup transactions acquire current workspace Auth/Tenant/Core or independent SaaS principal before scope/content locks and revalidate before commit; unresolved effects, object ACL and exact erasure receipts retained; restore and body protection stay host-only")
+  ]),
+  ...reviewed(PlatformCapabilityProbeController, [platformProbe.readOriginal, platformProbe.readTask, platformProbe.inspect,
+    platformProbe.readHistory, platformProbe.readAccounting, platformProbe.readAccountingOperation], "buffered-read",
+  "current SaaS view and original platform request/Task/accounting ownership; same selected identity and final response recheck, no new work"),
+  ...reviewed(PlatformCapabilityProbeController, [platformProbe.publish, platformProbe.createTask, platformProbe.start,
+    platformProbe.cancel, platformProbe.reconcile, platformProbe.readCapabilityReceipt, platformProbe.releaseUnsent,
+    platformProbe.reconcileAccounting], "transactional-write",
+  "current SaaS manage in original publication, Task, capability evidence and explicit financial recovery transactions; final authority recheck, same original key and one Gateway ledger, no tenant grant fallback"),
+  ...reviewed(AutomationExplanationController, [automationExplanation.read, automationExplanation.prepare], "buffered-read",
+  "current human original event and Task lineage; preparation rechecks the published execution boundary and original financial evidence without dispatch"),
+  ...reviewed(AutomationExplanationController, [automationExplanation.start], "transactional-write",
+  "explicit original explanation admission and Task transactions retain the owning request, current Auth/Tenant/Core and event authority before original locks; Gateway single accounting and same-operation unknown recovery remain"),
+  ...automationControllers.flatMap(controller => {
+    const p = controller.prototype;
+    return [
+      ...reviewed(controller, [p.outboxObservation, p.readPendingBatch, p.readInput, p.readCreation,
+        p.readQueue, p.read, p.forEvent, p.operation, p.prepareGrant, p.readGrant], "buffered-read",
+      "current operator/staff Guard reads original event/input/task/review bindings with final identity and source checks; grant preparation is not approval or dispatch"),
+      ...reviewed(controller, [p.readCandidate, p.prepareCandidate, p.preparePending, p.continuePendingBatch,
+        p.prepareInput, p.createTask, p.createEventTask, p.close, p.feedback, p.enableGrant], "transactional-write",
+      "each original candidate/batch/input/task/grant/review transaction holds current Auth/Tenant/Core and original resource authority before its metadata locks; original keys and separate commit receipts preserve partial unknown without dispatch")
+    ];
+  }),
   ...reviewed(HumanAutomationPolicyRequestController, [automationPolicy.discover, automationPolicy.read,
     automationPolicy.preview, automationPolicy.preparation, automationPolicy.review, automationPolicy.operation], "buffered-read",
   "current workspace configuration manager observes bounded policy metadata or original preparation/operation receipts with final identity recheck; preview grants no publication or execution"),
@@ -277,6 +333,11 @@ export function createRentalAiHttpPolicy(authorization = createRentalAuthorizati
  * platform URL prefix. The Core layer still requires its original SaaS lease. */
 export function rentalAiPlatformManagementSelector(policy: ReturnType<typeof createRentalAiHttpPolicy>) {
   const handlers = new Map<Function, readonly Function[]>([
+    [AiPlatformRetentionController, [platformRetention.cleanup, platformRetention.receipt, platformRetention.receipts]],
+    [PlatformCapabilityProbeController, [platformProbe.publish, platformProbe.readOriginal, platformProbe.createTask,
+      platformProbe.readTask, platformProbe.start, platformProbe.inspect, platformProbe.cancel, platformProbe.reconcile,
+      platformProbe.readCapabilityReceipt, platformProbe.readHistory, platformProbe.readAccounting,
+      platformProbe.readAccountingOperation, platformProbe.releaseUnsent, platformProbe.reconcileAccounting]],
     [AiPlatformModelSettingsController, [platformSettings.list, platformSettings.read, platformSettings.operation,
       platformSettings.capabilities, platformSettings.save]],
     [RentalPlatformBudgetController, [platformBudget.platformRead, platformBudget.platformReadOperation,
@@ -295,6 +356,13 @@ export function rentalAiPlatformManagementSelector(policy: ReturnType<typeof cre
  * recover/reconcile 仍由原 lease/receipt 仓储裁定，不能据此创建或重新派发。 */
 export function rentalAiDeploymentContinuationSelector(policy: ReturnType<typeof createRentalAiHttpPolicy>) {
   const selected = new Map<Function, readonly Function[]>([
+    [AiRetentionController, [retention.cleanup, retention.receipt, retention.receipts]],
+    [AiPlatformRetentionController, [platformRetention.cleanup, platformRetention.receipt, platformRetention.receipts]],
+    [PlatformCapabilityProbeController, [platformProbe.readOriginal, platformProbe.readTask, platformProbe.inspect,
+      platformProbe.readHistory, platformProbe.readAccounting, platformProbe.readAccountingOperation,
+      platformProbe.cancel, platformProbe.reconcile, platformProbe.releaseUnsent, platformProbe.reconcileAccounting]],
+    [AutomationExplanationController, [automationExplanation.read]],
+    ...automationControllers.map(controller => [controller, automationOriginalReads(controller)] as [Function, readonly Function[]]),
     [HumanAutomationPolicyRequestController, [automationPolicy.preparation, automationPolicy.review, automationPolicy.operation]],
     [TextCapabilityProbeController, [capabilityProbe.readOriginal, capabilityProbe.readTask, capabilityProbe.inspect,
       capabilityProbe.readTaskAction, capabilityProbe.readTaskActionReceipt, capabilityProbe.readHistory,
@@ -386,6 +454,9 @@ export function rentalAiRouteSelector(policy: ReturnType<typeof createRentalAiHt
  * 从真实controller/handler闭集取路由，并要求只读审定；请求标志不能扩展此集合。 */
 export function rentalAiOriginalReceiptSelector(policy: ReturnType<typeof createRentalAiHttpPolicy>) {
   const selected = new Map<Function, readonly Function[]>([
+    [AiRetentionController, [retention.receipt, retention.receipts]],
+    [AutomationExplanationController, [automationExplanation.read]],
+    ...automationControllers.map(controller => [controller, automationOriginalReads(controller)] as [Function, readonly Function[]]),
     [HumanAutomationPolicyRequestController, [automationPolicy.preparation, automationPolicy.review, automationPolicy.operation]],
     [TextCapabilityProbeController, [capabilityProbe.readOriginal, capabilityProbe.readTask, capabilityProbe.inspect,
       capabilityProbe.readTaskAction, capabilityProbe.readTaskActionReceipt, capabilityProbe.readHistory,

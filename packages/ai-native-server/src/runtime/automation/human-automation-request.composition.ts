@@ -19,6 +19,8 @@ import { HumanAutomationReviewQueueService } from './human-automation-review-que
 import { OriginalAutomationCreationReader } from './original-automation-creation.reader';
 import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
 import type { IncomingMessage } from 'node:http';
+import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
+import { createHumanAutomationTransactions, type HumanAutomationTransactionDependencies } from './human-automation-transactions';
 
 export type HumanAutomationHttpRequest = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
 export type HumanAutomationRequestDependencies = Pick<BusinessFailureDependencies, 'db' | 'auth' | 'guard' | 'core' | 'clock' | 'resources'> & {
@@ -29,6 +31,7 @@ export type HumanAutomationRequestDependencies = Pick<BusinessFailureDependencie
   /** Separate trusted human metadata policy, never the automation subject's grant. */
   reviewGrantPolicy?: HumanAutomationReviewGrantPolicySource;
   outboxObservationPolicy?: Pick<RuntimeTaskFaultAlertPolicySource, 'readForScope' | 'readCurrentForScope'>;
+  transactions?: HumanAutomationTransactionDependencies;
 };
 export type HumanAutomationRequestAction = 'readCandidate' | 'prepareCandidate' | 'preparePending'
   | 'directoryMetadata'
@@ -54,7 +57,7 @@ const unavailable = () => new AutomationError('unavailable');
 export class HumanAutomationRequestFactory {
   private readonly dependencies: HumanAutomationRequestDependencies;
   constructor(input: HumanAutomationRequestDependencies) {
-    if (!input || Object.keys(input).some(key => !['db', 'auth', 'guard', 'core', 'clock', 'automation', 'resources', 'reviewGrantPolicy', 'outboxObservationPolicy'].includes(key))
+    if (!input || Object.keys(input).some(key => !['db', 'auth', 'guard', 'core', 'clock', 'automation', 'resources', 'reviewGrantPolicy', 'outboxObservationPolicy', 'transactions'].includes(key))
       || typeof input.db?.$transaction !== 'function' || typeof input.db.aiBusinessFailureOutbox?.findFirst !== 'function'
       || typeof input.db.aiAutomationInput?.findFirst !== 'function' || typeof input.db.aiTask?.findFirst !== 'function'
       || typeof input.auth?.resolveAccessContext !== 'function' || typeof input.guard?.canActivate !== 'function'
@@ -111,7 +114,8 @@ export class HumanAutomationRequestFactory {
     } };
     const identity = new AiTaskCurrentIdentityAuthority(auth, credentials, clock);
     const guard: Pick<ApiAuthGuard, 'canActivate'> = { canActivate: async execution => {
-      await identity.resolve();
+      await credentials.current();
+      if (!hasRentalBusinessTenantFence()) await identity.resolve();
       if (await server.guard.canActivate(execution) !== true) throw unavailable();
       const context = await identity.resolve(), stored = getRequestIdentity();
       if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace' || !('access' in context)
@@ -121,17 +125,18 @@ export class HumanAutomationRequestFactory {
       return true;
     } };
     try {
-      return await waitForTaskApplicationDependency(() => runWithRequestIdentity({}, async () => {
+      const consume = async () => {
         await identity.resolve();
         const reads = new BusinessFailureReadAuthority(server.db, auth, credentials, guard, server.core, clock, server.resources);
-        const candidates = new BusinessFailureCandidateService(server.db, reads, clock, server.db);
+        const transactions = createHumanAutomationTransactions({ db: server.db, reads, credentials, ports: server.transactions });
+        const candidates = new BusinessFailureCandidateService(server.db, reads, clock, server.db, transactions);
         let grants: HumanAutomationReviewGrantService | undefined;
         const reviews = new HumanAutomationReviewService(server.db, reads, clock,
           (inputRef, kind, tx, original) => {
             if (!grants) throw unavailable();
             return grants.assertCurrentGrant(inputRef, kind, tx, original);
-          });
-        if (server.reviewGrantPolicy) grants = new HumanAutomationReviewGrantService(server.db, reviews, server.reviewGrantPolicy, clock);
+          }, transactions);
+        if (server.reviewGrantPolicy) grants = new HumanAutomationReviewGrantService(server.db, reviews, server.reviewGrantPolicy, clock, transactions);
         const configured = () => {
           if (!server.automation) throw unavailable();
           server.automation.assertCurrent?.();
@@ -203,7 +208,8 @@ export class HumanAutomationRequestFactory {
           }
           configured();
           const originalSelection = eventSelection;
-          return composeAutomationFailureTasks({ db: server.db, clock, policyId: selectedId, subscriptions: configuration.subscriptions,
+          return composeAutomationFailureTasks({ db: server.db, clock, policyId: selectedId, subscriptions: configuration.subscriptions, transactions,
+            assertCurrentConfiguration: () => { configured(); },
             ...(origin === 'event' && 'selection' in configuration && originalSelection ? { assertPreparationPolicy: async tx => {
               const selected = await eventPolicy(originalSelection.eventId, tx);
               if (hash(selected) !== hash({ id: originalSelection.id, fingerprint: originalSelection.fingerprint })) throw unavailable();
@@ -345,7 +351,9 @@ export class HumanAutomationRequestFactory {
         await identity.resolve();
         assertOutboxPolicy?.();
         return result;
-      }), write, signal);
+      };
+      return await waitForTaskApplicationDependency(() => hasRentalBusinessTenantFence()
+        ? consume() : runWithRequestIdentity({}, consume), write, signal);
     } catch (error) {
       if (writeReturned || error instanceof Error && 'code' in error && error.code === 'AI_RESULT_UNKNOWN') throw new AutomationError('result_unknown');
       throw error;

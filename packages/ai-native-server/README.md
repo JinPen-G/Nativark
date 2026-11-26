@@ -57,9 +57,19 @@ Core 停用后的已有回答及模型结果核对，由宿主 [只读处理器�
 
 `readCapabilityReceipt` 可能保存能力证据，按写入处理。手动释放和核账仅消费原调用的未派发或用量事实，并在原账务事务中复核当前主体及任务关联；已派发调用的自动计量与结算继续由原善后路径负责。完整的停用配置保留原八项读取，原收据不授权新发布或派发。启动与恢复从原请求的服务器响应观察断连，正常 body 完成不会触发取消，返回结果仍交宿主处理。
 
+[平台能力检测](src/runtime/platform-capability-probe/platform-capability-probe-request.factory.ts)保留所选宿主最初 Guard 的 SaaS 身份，区分查看与管理权限。[平台探测事务参加者](src/runtime/platform-capability-probe/platform-probe-transactions.ts)将原 input/Task/Run/Step/调用键绑定到原事务，并在提交前复验。唯一 Gateway 财务账与 Task 累计资源保持原职责；失应答只沿原键核对。平台探测仅在首个 Run 且整 Task 无补充输入时读取空输入历史，供应商派发还要求 PLATFORM/OPERATOR/SAAS_ADMIN 和 ai.capability.text 的原关联；不完整租户上下文拒绝进入平台分支。
+
+[隐私维护](src/runtime/privacy/retention.controller.ts)在工作空间及平台各保留清理与原收据两类 HTTP 能力。原清理事务先锁当前 Auth/Tenant/Core 或独立 SaaS 主体，再锁 Scope/内容，提交前复验；终态 Task 存在未决财务或业务效果仍不清理。protectStoredBodies、exportRestoreManifest、reapplyRestore 保持宿主专用，恢复不授予重发许可。
+
 经营政策由[原请求工厂](src/runtime/automation/human-automation-policy-request.composition.ts)进入[政策管理服务](src/runtime/automation/human-automation-policy-management.service.ts)。所选宿主保留最初 Guard 的请求身份，内部配置权限核验先由原 Guard 填充自己的验证作用域，再核当前主体与范围。确认授权和政策写入共用原事务，复用 Auth/Tenant/Core 参加者、政策 CAS 和原操作键，提交前复核当前权限及所有嵌套准备的期限。
 
 发现、预览与原收据读取不签发执行权。显式准备和提交记录政策边界，重复或丢失提交应答沿原键核对；原影子/人工确认约束、过期政策停用及旧宿主兼容路径继续由原管理服务裁定。直接消费者是[经营政策客户端](../rental-core/admin/task-center/api/aiAutomationPolicies.ts)，宿主从[实际处理器](../../apps/rental-api/src/ai-http-policy.ts)发布十个操作及三项停用后原读取。
+
+经营待办的[原请求工厂](src/runtime/automation/human-automation-request.composition.ts)分别接收营运和员工二十个操作。所选宿主保留最初 Guard 的同一身份对象，内部业务 Guard 复验后经原受控桥返回该请求，供 Core 核定原资源。[候选服务](src/runtime/business-events/business-failure-candidate.service.ts)、[持久批次](src/runtime/business-events/pending-candidate-batch.repository.ts)和[Task 创建](src/runtime/automation/automation-failure-task.service.ts)继续使用原 Outbox、输入和 Task 仓储。
+
+[经营事务参加者](src/runtime/automation/human-automation-transactions.ts)分别加入各个原事务，在候选、输入或 Task 锁前核当前 Auth/Tenant/Core、部署准入和原订单。创建 Task 复用原创建仓储的事务，保留 `creation_unknown` 与原 Task/Run。人工授权和[反馈/关闭](src/runtime/automation/human-automation-review.service.ts)沿原 CAS 和操作收据提交，最后一次授权等待后同步核期限与原政策发布指纹，撤权或发布变化使当前事务回滚。
+
+直接消费者为[经营待办客户端](../rental-core/admin/task-center/api/aiAutomationReviews.ts)的十六个方法，写入应答不明沿原操作读取。每端停新/Core停用后的读取闭集是 `readPendingBatch/readCreation/readQueue/read/forEvent/operation/readGrant`，`readCandidate` 因可能更新过期标记归写入。解释由[独立解释应用](src/runtime/automation/automation-explanation.application.ts)承接原 Task 的读取、准备和明确启动，其当前事务依赖由同一 provider 注入。离线验证沿[原事务入口](test/original-scene-transactions.test.cjs)及原前端工厂，SQL运输与回滚替身的范围独立于真实 MySQL 和宿主验收。
 
 当前租户页面的额度申请、空间分配及调用记录经[租户额度 Controller](../../apps/rental-api/src/ai-credit-http.ts)进入[原额度服务](src/runtime/budget/ai-credit.service.ts)。所选宿主绑定最初 Guard 的同一 ALS 身份，申请与分配在原事务中复用[Auth/Tenant/Core 参加者](src/runtime/tenant-model-config-transactions.ts)，提交前复验权限，丢应答只核原操作收据。历史调用在有界快照中读取原 invocation、usage 和账务依据，BYOK 不生成金额，缺用量不补零，查询和游标继续核当前租户及空间范围。平台批准保留独立管理授权与原增额语义。
 

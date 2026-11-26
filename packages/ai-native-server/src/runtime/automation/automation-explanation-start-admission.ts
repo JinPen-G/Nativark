@@ -9,6 +9,9 @@ import { hasEffectivePermission } from '@rental-os/platform-server/permission-ma
 import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 import type { BusinessFailureReadAuthority } from '../business-events/business-failure-read.authority';
 import { AiScopeRepository } from '../ai-scope.repository';
+import type { HumanAutomationTransactionParticipant } from './human-automation-transactions';
+import { withAutomationExplanationTransactions } from './automation-explanation-transactions';
+import { withAiTaskTransaction } from '../task-transaction-authority';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { PrismaTaskActionPolicyRepository } from '../prisma-task-action-policy.repository';
 import { AutomationTaskModelAuthority, automationTaskModelReferenceSchema,
@@ -97,6 +100,7 @@ export async function readOriginalAutomationExplanationAdmission(d: Pick<Depende
 
 export async function admitOriginalAutomationExplanationStart(d: Dependencies & {
   reads: Pick<BusinessFailureReadAuthority, 'current'>;
+  transactions?: HumanAutomationTransactionParticipant;
   authorityFor(db: PrismaClient): AutomationTaskModelAuthority;
   assertPublication(): void;
 }, expected: Awaited<ReturnType<typeof prepareAutomationExplanationAdmission>>, signal?: AbortSignal): Promise<'recorded' | 'already_recorded'> {
@@ -114,7 +118,13 @@ export async function admitOriginalAutomationExplanationStart(d: Dependencies & 
   };
   try {
     await check(d.authority);
-    const result = await d.db.$transaction(async tx => {
+    const result = await withAutomationExplanationTransactions({ db: d.db, transactions: d.transactions, origin, clock: d.clock,
+      assertCurrent: async () => {
+        await check(d.authority);
+        const now = d.clock().getTime();
+        if (!Number.isFinite(now) || Date.parse(expected.current.plan.expiresAt) <= now
+          || expected.policies.some(policy => policy && policy.expiresAt.getTime() <= now)) throw denied();
+      } }, () => d.db.$transaction(async tx => withAiTaskTransaction(tx, { kind: 'task', taskId: origin.original.taskId }, async () => {
       // Match the original input producer's policy/subject/resource lock order.
       await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_automation_policies WHERE id = ${origin.policyId} FOR UPDATE`);
       await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_automation_subjects WHERE id = ${origin.subjectId} FOR UPDATE`);
@@ -179,7 +189,7 @@ export async function admitOriginalAutomationExplanationStart(d: Dependencies & 
         detail: JSON.parse(JSON.stringify({ payloadHash: hash(payload), payload })) as Prisma.InputJsonValue } });
       await check(authority);
       return 'recorded' as const;
-    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+    }), { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 }));
     await check(d.authority);
     return result;
   } catch (error) { if (attempted) throw unknown(); throw error; }

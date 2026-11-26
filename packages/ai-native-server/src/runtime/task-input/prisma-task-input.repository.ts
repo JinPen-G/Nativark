@@ -769,12 +769,20 @@ return withAiTaskTransaction(tx, { kind: 'task', taskId: submission.taskId }, as
   async readForStep(lease: AiTaskRunnerLease, registrationRef: string): Promise<readonly AiTaskInputContext[]> {
     lease = structuredClone(lease);
     if (!id.safeParse(registrationRef).success) throw denied();
-    const before = await this.access(lease.taskId, 'read_metadata');
+    const selected = await this.tasks.resolveAccess(lease.taskId, 'read_metadata');
+    const platformProbe = selected.actorKind === 'SAAS_ADMIN' && selected.audience === 'OPERATOR' && selected.scope.kind === 'PLATFORM';
+    const before = platformProbe ? selected : await this.access(lease.taskId, 'read_metadata', selected);
     return this.transaction(async tx => {
       const task = await this.task(tx, lease.taskId, before), run = await this.run(tx, task.id, task.scopeId, lease.runId, before);
       this.held(run, lease);
       if (task.status !== 'RUNNING' || task.cancelRequestedAt !== null) throw denied();
-      const requests = await tx.aiTaskInputRequest.findMany({ where: { scopeId: task.scopeId, taskId: task.id, runId: run.id }, take: 1001 });
+      // Platform probes have no human-input contract. Observe only an original
+      // probe with no stored questions; never authorize platform input writes.
+      if (platformProbe && (task.scopeKind !== 'PLATFORM' || task.sceneCode !== 'ai.capability.text' || run.sequence !== 1
+        || run.inputReceiptId != null || run.resourceOriginRunId != null)) throw denied();
+      const requests = await tx.aiTaskInputRequest.findMany({ where: { scopeId: task.scopeId, taskId: task.id,
+        ...(!platformProbe ? { runId: run.id } : {}) }, take: 1001 });
+      if (platformProbe && requests.length !== 0) throw denied();
       if (requests.length > 1000) throw unavailable();
       const results: AiTaskInputContext[] = [];
       for (const request of requests) {
@@ -788,7 +796,9 @@ return withAiTaskTransaction(tx, { kind: 'task', taskId: submission.taskId }, as
         await this.validateAnswers(facts.binding, contract, receipt.answers as unknown as AiTaskInputSubmissionDraft['answers']);
         results.push({ requestId: request.id, receiptId: receipt.id, answers: structuredClone(receipt.answers) as unknown as AiTaskInputSubmissionDraft['answers'] });
       }
-      await this.access(task.id, 'read_metadata', before);
+      if (platformProbe) {
+        if ((await this.tasks.resolveAccess(task.id, 'read_metadata')).bindingKey !== before.bindingKey) throw denied();
+      } else await this.access(task.id, 'read_metadata', before);
       const live = await this.run(tx, task.id, task.scopeId, run.id, before); this.held(live, lease);
       return results;
     });

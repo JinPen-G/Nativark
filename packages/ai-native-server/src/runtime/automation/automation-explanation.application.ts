@@ -13,6 +13,9 @@ import type { AiAutomationExplanationObservationDraft, AiAutomationExplanationPr
   AiAutomationExplanationReadDraft, AiAutomationExplanationStartDraft } from '@rental-os/shared';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { runWithRequestIdentity } from '@rental-os/platform-server/request-identity';
+import { hasRentalBusinessTenantFence } from '@rental-os/rental-core/mysql-business-fence';
+import { createHumanAutomationTransactions, type HumanAutomationTransactionDependencies } from './human-automation-transactions';
+import { withAutomationExplanationTransactions } from './automation-explanation-transactions';
 import { BusinessFailureReadAuthority } from '../business-events/business-failure-read.authority';
 import type { BusinessFailureResourcePorts } from '../business-events/prisma-business-failure-outbox';
 import { PrismaSubscriptionBudgetReader } from '../budget/prisma-subscription-budget-reader';
@@ -56,7 +59,7 @@ export class AutomationExplanationApplication {
     secrets: SecretBox; resources?: BusinessFailureResourcePorts; currentConfiguration(): unknown;
     adapters?: readonly ModelAdapter[]; clock?: () => Date; capacity?: GatewayCapacityPort;
     /** Trusted server timing ports; HTTP/model fields never select them. */
-    runnerClock?: AiTaskRunnerClock; monotonic?: () => number }) {}
+    runnerClock?: AiTaskRunnerClock; monotonic?: () => number; transactions?: HumanAutomationTransactionDependencies }) {}
 
   async call(request: HumanAutomationHttpRequest, action: 'read' | 'prepare' | 'start', value: unknown, signal?: AbortSignal) {
     const command = (action === 'start' ? startInput.parse(structuredClone(value)) : read.parse(structuredClone(value))) as
@@ -71,9 +74,10 @@ export class AutomationExplanationApplication {
     signal?.addEventListener('abort', close, { once: true });
     const credentials = { current: async () => { live(); return { authorization: bearer, audience: 'operator' as const, requestId }; } };
     try {
-      return await runWithRequestIdentity({}, async () => {
+      const consume = async () => {
         live();
         const reads = new BusinessFailureReadAuthority(this.d.db, this.d.auth, credentials, this.d.guard, this.d.core, clock, this.d.resources);
+        const transactions = hasRentalBusinessTenantFence() ? createHumanAutomationTransactions({ db: this.d.db, reads, credentials, ports: this.d.transactions }) : undefined;
         const receipt = await new OriginalAutomationCreationReader(this.d.db, reads, clock).readCreation(selected);
         if (receipt.state !== 'observed' || !receipt.task) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         const current = await reads.current();
@@ -149,7 +153,7 @@ export class AutomationExplanationApplication {
         if (!publication.enabled || requestFingerprint(publication) !== requestFingerprint(prepared.published)) {
           throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         }
-        const admission = await admitOriginalAutomationExplanationStart({ db: this.d.db, authority, reads, clock,
+        const admission = await admitOriginalAutomationExplanationStart({ db: this.d.db, authority, reads, clock, transactions,
           authorityFor: db => new AutomationTaskModelAuthority({ db, reads, original, clock,
             source: new PrismaAutomationAuthority(db, row.policyId,
               new SubscriptionBudgetEntitlementAdapter(new PrismaSubscriptionBudgetReader(db, this.d.subscriptions, clock)), clock, reads) }),
@@ -178,10 +182,15 @@ export class AutomationExplanationApplication {
           runtime, priceVersion: gateway.priceVersion, financialEvidence: gateway.financialEvidence, host: publication.host,
           runnerClock: this.d.runnerClock, monotonic: this.d.monotonic,
           gatewayScene: { sceneCode: publication.sceneCode, routeScene: 'chat', maxOutputTokens: publication.maxOutputTokens } });
-        const result = await host.start({ ...original, decision: 'start_original_automation_explanation' }, signal);
+        const result = await withAutomationExplanationTransactions({ db: this.d.db, transactions, origin, clock,
+          assertCurrent: async () => { live(); await authority.inspectCurrent('transition_task'); } },
+          () => host.start({ ...original, decision: 'start_original_automation_explanation' }, signal));
         live();
         return projection(result);
-      });
+      };
+      // Selected requests retain the original Guard identity; legacy callers
+      // keep their isolated scope without inventing selected-host authority.
+      return await (hasRentalBusinessTenantFence() ? consume() : runWithRequestIdentity({}, consume));
     } finally { close(); signal?.removeEventListener('abort', close); }
   }
 }

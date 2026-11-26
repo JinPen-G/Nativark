@@ -16,6 +16,7 @@ import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import { BusinessFailureError, isResourceFailureEvent, readBusinessFailureResourceBinding, readBusinessFailureResource,
   resourceFailureEvent, requireBusinessFailureResourcePorts, type BusinessFailureResourcePorts } from './prisma-business-failure-outbox';
 import { returnExceptionSource } from './return-exception-source';
+import { captureRentalInternalAuthority } from '@rental-os/rental-core/application-internal-authority';
 
 export type FailureSource = { revision: number; failed: boolean; orderId: string | null; paymentIntentId?: string;
   sourceHash?: string; capturedSourceHash?: string; resourceEvent?: AiBusinessEventDraft };
@@ -62,6 +63,7 @@ export class BusinessFailureReadAuthority {
       const credential = structuredClone(await this.credentials.current());
       if (!credential || credential.audience !== context.audience || typeof credential.authorization !== 'string')
         throw new BusinessFailureError('unavailable');
+      const internal = captureRentalInternalAuthority();
       return runWithRequestIdentity({}, async () => {
         const staff = credential.audience === 'staff', path = before.path;
         const request: { url: string; originalUrl: string; method: string; headers: object; query: object; body: object;
@@ -79,17 +81,20 @@ export class BusinessFailureReadAuthority {
             || identity.organizationId !== context.access.organizationId
             || requestFingerprint(identity.locationScope) !== requestFingerprint(context.access.locationScope))
             throw new BusinessFailureError('unavailable');
-          if (event.notificationId && !canManageWorkspaceWideNotifications(getRequestDataScope(), getRequestLocationIds())) {
-            if (!before.orderId || !canResolveNotificationOrderScope(getRequestDataScope(), getRequestLocationIds()))
-              throw new BusinessFailureError('unavailable');
-            await this.core.getOrder(event.tenantId, before.orderId);
-          } else if (before.orderId && (event.refundId || event.inspectionId || event.eventType === 'fulfillment.resource_shortage')) {
-            await this.core.getOrder(event.tenantId, before.orderId);
-          }
-          const after = await this.originalBinding(event, tx);
-          if (requestFingerprint(before) !== requestFingerprint(after)) throw new BusinessFailureError('unavailable');
-          return read(structuredClone(after.event), requestFingerprint({ actor: context.actor, audience: context.audience,
-            scope: context.scope, access: context.access, original: after }));
+          const consume = async () => {
+            if (event.notificationId && !canManageWorkspaceWideNotifications(getRequestDataScope(), getRequestLocationIds())) {
+              if (!before.orderId || !canResolveNotificationOrderScope(getRequestDataScope(), getRequestLocationIds()))
+                throw new BusinessFailureError('unavailable');
+              await this.core.getOrder(event.tenantId, before.orderId);
+            } else if (before.orderId && (event.refundId || event.inspectionId || event.eventType === 'fulfillment.resource_shortage')) {
+              await this.core.getOrder(event.tenantId, before.orderId);
+            }
+            const after = await this.originalBinding(event, tx);
+            if (requestFingerprint(before) !== requestFingerprint(after)) throw new BusinessFailureError('unavailable');
+            return read(structuredClone(after.event), requestFingerprint({ actor: context.actor, audience: context.audience,
+              scope: context.scope, access: context.access, original: after }));
+          };
+          return internal ? internal.runVerified(consume) : consume();
         } catch { throw new BusinessFailureError('unavailable'); }
       });
     };
@@ -163,6 +168,7 @@ export class BusinessFailureReadAuthority {
             : `/rental/v1/orders/${encodeURIComponent(original!.orderId!)}/payment-intents/${encodeURIComponent(original!.paymentIntentId!)}/refunds`;
       const credentials = structuredClone(await this.credentials.current());
       if (!credentials || credentials.audience !== context.audience || typeof credentials.authorization !== 'string') throw new BusinessFailureError('unavailable');
+      const internal = captureRentalInternalAuthority();
       return runWithRequestIdentity({}, async () => {
         const staff = credentials.audience === 'staff';
         const request: { url: string; originalUrl: string; method: string; headers: object; query: object; body: object; staffApiRequest: boolean; user?: { id: string; tenantId: string; isActive: boolean } } = {
@@ -174,22 +180,25 @@ export class BusinessFailureReadAuthority {
           if (!request.user?.isActive || !identity || identity.tenantId !== event.tenantId || identity.workspaceId !== event.workspaceId
             || context.actor.kind !== 'user' || identity.userId !== context.actor.userId || request.user.id !== context.actor.userId
             || identity.staffApi !== staff || identity.isSaasAdmin) throw new BusinessFailureError('unavailable');
+        } catch { throw new BusinessFailureError('unavailable'); }
+        const consume = async () => {
           if (event.notificationId && !canManageWorkspaceWideNotifications(getRequestDataScope(), getRequestLocationIds())) {
             if (!original!.orderId || !canResolveNotificationOrderScope(getRequestDataScope(), getRequestLocationIds())) throw new BusinessFailureError('unavailable');
             await this.core.getOrder(event.tenantId, original!.orderId);
           }
           if (event.refundId || event.inspectionId) await this.core.getOrder(event.tenantId, original!.orderId!);
           if (reference?.kind === 'order_assignment') await this.core.getOrder(event.tenantId, reference.id);
-        } catch { throw new BusinessFailureError('unavailable'); }
-        // Original Guard/ALS must be established before any new Core/readiness
-        // callback. The stored reference locates evidence; it grants no access.
-        const observed = reference ? await readBusinessFailureResource(current.scope, reference, this.resources!, this.clock()) : null;
-        const source: FailureSource = observed ? { revision: observed.revision, failed: observed.failed, orderId: observed.orderId,
-          sourceHash: observed.sourceHash, capturedSourceHash: observed.capturedSourceHash,
-          resourceEvent: resourceFailureEvent(event, reference!) } : original!;
-        const principal = requestFingerprint({ actor: context.actor, audience: context.audience, scope: context.scope,
-          access: 'access' in context ? context.access : null });
-        return read(source, principal);
+          // Original Guard/ALS must be established before any new Core/readiness
+          // callback. The stored reference locates evidence; it grants no access.
+          const observed = reference ? await readBusinessFailureResource(current.scope, reference, this.resources!, this.clock()) : null;
+          const source: FailureSource = observed ? { revision: observed.revision, failed: observed.failed, orderId: observed.orderId,
+            sourceHash: observed.sourceHash, capturedSourceHash: observed.capturedSourceHash,
+            resourceEvent: resourceFailureEvent(event, reference!) } : original!;
+          const principal = requestFingerprint({ actor: context.actor, audience: context.audience, scope: context.scope,
+            access: 'access' in context ? context.access : null });
+          return read(source, principal);
+        };
+        return internal ? internal.runVerified(consume) : consume();
       });
     };
     return authorize(async (source, principal) => {

@@ -18,6 +18,7 @@ import { aiTaskRunnerLimitsSchema } from './runner/prisma-task-run-evidence.repo
 import { textProbeCommandSchema, textProbeCapability, TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE } from './text-capability-probe';
 import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import { beginTenantModelConfigurationTransaction, type TenantModelConfigurationTransactionParticipant } from './tenant-model-config-transactions';
+import { beginPlatformAiManagementTransaction } from './platform-management-transaction';
 import { holdAiTaskDeploymentAdmission } from './task-transaction-authority';
 
 const version = 'text-probe-original-1';
@@ -243,7 +244,8 @@ export class PrismaTextProbeOriginalRequestRepository implements TextCapabilityP
         const participant = context.actor.kind === 'user' && context.scope.kind === 'workspace'
           ? await beginTenantModelConfigurationTransaction(tx, { actorId: context.actor.userId,
             tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId }, this.input.transactionParticipant)
-          : undefined;
+          : context.actor.kind === 'saas_admin' && context.scope.kind === 'platform'
+            ? await beginPlatformAiManagementTransaction(tx, context.actor.userId) : undefined;
         try {
           await holdAiTaskDeploymentAdmission(tx, 'new_work');
           await tx.$queryRaw(prismaRuntime.sql`SELECT id FROM ai_scopes WHERE id = ${access.owner.scopeId} FOR UPDATE`);

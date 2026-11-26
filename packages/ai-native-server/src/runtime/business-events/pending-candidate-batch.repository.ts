@@ -7,6 +7,8 @@ import type { Prisma, PrismaClient, OperationLog } from '@prisma/client';
 import { z } from 'zod';
 import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 import { BusinessFailureError } from './prisma-business-failure-outbox';
+import { mutateHumanAutomation, withHumanAutomationTransaction,
+  type HumanAutomationTransactionParticipant } from '../automation/human-automation-transactions';
 
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u);
 const key = id.max(128), uuid = z.string().uuid(), fingerprint = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -42,7 +44,8 @@ const original = (journal: Omit<PendingCandidateBatchJournal, 'bindingHash'>) =>
   key: journal.key, recordedAt: journal.recordedAt, events: journal.events });
 
 export class PendingCandidateBatchRepository {
-  constructor(private readonly db: PendingCandidateBatchDb, private readonly clock: () => Date = () => new Date()) {
+  constructor(private readonly db: PendingCandidateBatchDb, private readonly clock: () => Date = () => new Date(),
+    private readonly transactions?: HumanAutomationTransactionParticipant) {
     if (typeof db?.$transaction !== 'function' || typeof db.operationLog?.findFirst !== 'function'
       || typeof db.operationLog.create !== 'function' || typeof db.operationLog.updateMany !== 'function') throw unavailable();
   }
@@ -72,7 +75,7 @@ export class PendingCandidateBatchRepository {
     select: (tx: Prisma.TransactionClient) => Promise<PendingCandidateEvent[]>,
     revalidate: (tx: Prisma.TransactionClient, events: PendingCandidateEvent[]) => Promise<void>) {
     const input = reference.parse(value);
-    return this.db.$transaction(async tx => {
+    return this.db.$transaction(async tx => withHumanAutomationTransaction(tx, this.transactions, [], async () => {
       const existing = await this.read(input, tx);
       if (existing) return { created: false, journal: existing };
       const events = await select(tx), recordedAt = this.clock();
@@ -88,17 +91,19 @@ export class PendingCandidateBatchRepository {
       if (!same(this.receipt(row, input), journal)) throw unknown();
       await revalidate(tx, journal.events);
       return { created: true, journal };
-    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+    }), { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
   }
 
   async confirm(journal: PendingCandidateBatchJournal, eventId: string) {
     const before = journalSchema.parse(journal);
     if (before.events[before.confirmed.length]?.eventId !== eventId) throw unavailable();
     const after = journalSchema.parse({ ...before, confirmed: [...before.confirmed, eventId] });
-    const updated = await this.db.operationLog.updateMany({ where: { id: batchId(before.key), action,
-      tenantId: before.key.tenantId, workspaceId: before.key.workspaceId, userId: before.key.userId,
-      detail: { equals: before } }, data: { detail: after } });
-    if (updated.count !== 1 || !same(await this.read(before.key), after)) throw unknown();
-    return after;
+    return mutateHumanAutomation(this.db, this.transactions, before.events.map(event => event.eventId), async db => {
+      const updated = await db.operationLog.updateMany({ where: { id: batchId(before.key), action,
+        tenantId: before.key.tenantId, workspaceId: before.key.workspaceId, userId: before.key.userId,
+        detail: { equals: before } }, data: { detail: after } });
+      if (updated.count !== 1 || !same(await this.read(before.key, db), after)) throw unknown();
+      return after;
+    });
   }
 }
