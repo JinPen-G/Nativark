@@ -3,6 +3,7 @@
 module.exports = async function runCases({ t, lock }) {
   const assert = require('node:assert/strict');
   const shared = require('@rental-os/shared');
+  const { matchableRequestPath } = require('@rental-os/platform-server/request-path');
   const { HTTP_CODE_METADATA } = require('@nestjs/common/constants');
   const { createRentalAuthorization } = require('@rental-os/rental-core/http-auth');
   const { createRentalStaffPolicy } = require('@rental-os/rental-core/staff-api-policy');
@@ -37,14 +38,13 @@ module.exports = async function runCases({ t, lock }) {
       check('RentalWebsiteClientEntryController', name, true);
     for (const name of ['prepareOrderMaterial', 'createTask', 'startTaskModel', 'submitTaskInput', 'continueTaskInput'])
       check('RentalWebsiteClientEntryController', name, false);
-    const inspection = policy.routes.find(route => route.controller.name === 'StaffInspectionAssistController' && route.handlerName === 'consume');
-    assert(inspection); assert.equal(selector.isHandler(inspection.controller, inspection.handler), false);
-    for (const [operation, expected] of [['draft-read', true], ['submission-read', true], ['submission-preparation', true],
-      ['draft-create', false], ['submission-prepare', false], ['submission-submit', false], ['evidence-bind', false], ['unknown', false]]) {
-      const request = { method: inspection.method, url: '/api' + inspection.path.replace(':operation', operation) };
-      assert.equal(selector.isRoute(request), expected, operation);
-      assert.equal(selector.isHandler(inspection.controller, inspection.handler, request), expected);
-    }
+    // 员工检查已按原操作分开挂载，不能再把旧 consume 分发器当一个可恢复处理器。
+    for (const name of ['draftRead', 'submissionRead', 'submissionPreparation'])
+      check('RentalStaffInspectionAssistController', name, true);
+    for (const name of ['draftCreate', 'submissionPrepare', 'submissionSubmit', 'evidenceBind'])
+      check('RentalStaffInspectionAssistController', name, false);
+    assert(!policy.routes.some(route => route.controller.name === 'StaffInspectionAssistController'));
+    assert.equal(selector.isRoute({ method: 'POST', url: '/api/' + shared.AI_STAFF_INSPECTION_HTTP_DRAFT.basePath + '/unknown' }), false);
     assert.equal(selector.isRoute({ method: 'POST', url: '/api/rental/v1/unknown?recover=true' }), false);
   });
   await t.test('实际 AI 路由具有原权限、正确成功状态和完整文档引用', () => {
@@ -78,7 +78,11 @@ module.exports = async function runCases({ t, lock }) {
         const permissions = path.startsWith('/staff/v1/') ? staff.staffRoutePermissions(route.method, path)
           : authorization.requiredPermissions(route.method, path);
         assert(permissions && !permissions.includes(authorization.UNMATCHED_ROUTE_PERMISSION), route.controller.name + '.' + route.handlerName);
-        const documented = document.paths['/api' + path.replace(/:([\w]+)/g, '{$1}')]?.[route.method.toLowerCase()];
+        // 文档保留 closeUnstarted 等原合同拼写，路由按原 Express/Guard 语义小写比较。
+        const matching = Object.entries(document.paths).filter(([key, methods]) =>
+          matchableRequestPath(key) === path.replace(/:([\w]+)/g, '{$1}') && methods[route.method.toLowerCase()]);
+        assert.equal(matching.length, 1, '每个实际路由须有唯一同源文档：' + path);
+        const documented = matching[0][1][route.method.toLowerCase()];
         assert(documented, '缺同源文档：' + path);
         const expected = Reflect.getMetadata(HTTP_CODE_METADATA, route.handler) ?? (route.method === 'POST' ? 201 : 200);
         assert(documented.responses[expected], '成功状态须与原 Controller 一致：' + path + ' ' + expected);

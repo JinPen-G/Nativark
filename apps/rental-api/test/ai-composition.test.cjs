@@ -28,7 +28,15 @@ function cleanup() {
     process.exitCode = 1;
     console.error('离线守卫记录拒绝行为，本次验证失败');
   }
-  fs.rmSync(temporary, { recursive: true });
+  // 本入口只落审计文件。逐项核定后移除空目录，避免 Windows/Node 24 的
+  // rmSync(recursive) 在本地中文路径返回成功却仍留下空目录，也不递归处理未知成果。
+  for (const name of fs.readdirSync(temporary)) {
+    const file = path.join(temporary, name), entry = fs.lstatSync(file);
+    if (name !== 'audit.log' || !entry.isFile() || entry.isSymbolicLink())
+      throw Error('临时目录包含未登记产物，拒绝删除');
+    fs.unlinkSync(file);
+  }
+  fs.rmdirSync(temporary);
   if (fs.existsSync(temporary)) throw Error('临时目录未清理');
   ownsTemporary = false;
 }
@@ -358,7 +366,8 @@ function compositionFixture(selectedLock = lock) {
 // 原 storage delegate 与唯一 native transport 的离线替身；Auth/Guard/ACL 不替换。
 
 const { runWithRequestIdentity, getRequestIdentity } = require('@rental-os/platform-server/request-identity');
-const { createRentalApplicationAccess } = require('@rental-os/rental-core/application-access');
+const { createRentalApplicationAccess, createRentalMemberAuthority } = require('@rental-os/rental-core/application-access');
+const { RentalWorkspacePrincipalRepository } = require('@rental-os/rental-core/mysql-workspace-principal');
 const { KnowledgeError } = require(
   '@rental-os/ai-native-server/runtime/knowledge/knowledge-errors',
 );
@@ -497,6 +506,36 @@ function knowledgeFixture(selectedLock = lock) {
   f.rental.authSource.findWorkspaceScopedUser = async (id, w) =>
     state.active && id === state.user.id && w === state.workspace ? structuredClone(state.user) : undefined;
   f.rental.authSource.listUserWorkspaces = async () => [];
+  // 只替换原成员仓储的数据读取；锁定、角色投影、Auth 租约及提交前复验仍用正式实现。
+  const principals = new RentalWorkspacePrincipalRepository(f.db, {
+    findUserById: async (id, tx) => {
+      assert(tx && !('$transaction' in tx));
+      assert.equal(state.depth, 1);
+      return f.rental.authSource.findUserById(id);
+    },
+    projectWorkspace: row => row,
+    projectRoleScope: scope => scope.toLowerCase(),
+    projectDataScope: scope => scope.toLowerCase(),
+  });
+  const workspacePorts = {
+    lock: f.rental.authSource.lockWorkspaceSessionUser,
+    read: f.rental.authSource.readWorkspaceSessionUser,
+  };
+  for (const [member, workspace, original] of [
+    ['lockMemberSessionUser', 'lockWorkspaceSessionUser', workspacePorts.lock],
+    ['readMemberSessionUser', 'readWorkspaceSessionUser', workspacePorts.read],
+  ]) f.rental.authSource[member] = async (tx, expected, ...locks) => {
+    // 子夹具可替换同一持久化空间端口以观察锁等待/回滚；成员端口沿用其当前读值，
+    // 原 Auth 和 createRentalMemberAuthority 仍逐次核身份、权限及地点，不能返回恒真租约。
+    if (f.rental.authSource[workspace] !== original) {
+      assert.equal(expected.projection, 'workspace');
+      assert.equal(expected.allowInvalidWorkspace, false);
+      assert.equal(state.depth, 1);
+      const user = await f.rental.authSource[workspace](tx, expected);
+      return { user, configuredLocationScope: structuredClone(user.locationScope) };
+    }
+    return principals[member](tx, expected, ...locks);
+  };
   f.rental.integrations.integrations.runtimeConfig = async () => structuredClone(configuration);
   f.db.aiKnowledgeDocument.findFirst = async ({ where }) =>
     where.id === 'document-a' ? structuredClone(row) : null;
@@ -608,6 +647,7 @@ function knowledgeFixture(selectedLock = lock) {
   const access = createRentalApplicationAccess({
     database: f.db,
     authorization: f.authorization,
+    memberAuthority: createRentalMemberAuthority({ auth: f.rental.auth, authorization: f.authorization }),
     admissionForTransaction: require('@rental-os/core-host/mysql-deployment-admission').createMysqlCoreDeploymentAdmission,
     term: {
       requireNewBusiness: async () => {
@@ -670,6 +710,13 @@ function knowledgeFixture(selectedLock = lock) {
       businessId: 'fresh-a',
     });
   require('./knowledge-scene-cases.cjs').prepareFixture({ ...f, state });
+  const transaction = f.db.$transaction;
+  f.db.$transaction = (consume, options) => transaction(tx => {
+    // 原知识审计夹具收窄为 findFirst；补回正式 Auth 事务形状，任何账号写入仍直接失败。
+    tx.authSession.create ??= async () => { throw Error('unexpected auth session create'); };
+    tx.authSession.updateMany ??= async () => { throw Error('unexpected auth session update'); };
+    return consume(tx);
+  }, options);
   return {
     ...f,
     state,

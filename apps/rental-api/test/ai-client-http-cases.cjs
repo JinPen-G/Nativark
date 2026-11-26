@@ -1,5 +1,5 @@
 'use strict';
-/** Twelve selected methods per client channel, using real Nest metadata and the
+/** Explicitly reviewed methods per client channel, using real Nest metadata and the
  * original Controller. The application fixture only reads fixed receipts;
  * refusal audit storage is in memory. The parent owns loading/offline cleanup. */
 module.exports = async function runCases({ t }) {
@@ -19,7 +19,18 @@ module.exports = async function runCases({ t }) {
   const methods = ['prepareOrderMaterial', 'readOrderMaterialReceipt', 'createTask', 'readTaskCreation'];
   const executionMethods = ['startTaskModel', 'submitTaskInput', 'continueTaskInput', 'recoverTaskModel',
     'reconcileTaskModel', 'readTaskInput', 'readTaskInputReceipt', 'readTaskModelResult'];
-  const mountedMethods = [...methods, ...executionMethods];
+  // 固定 ffa9172a 的已发布闭集；逐名对照原 Controller/公共合同，不从待测宿主反推预期集合。
+  const mountedMethods = [...methods, ...executionMethods,
+    'prepareGoal', 'readGoalPreparation', 'readGoalCandidates', 'prepareGoalQuote', 'readGoalQuotePreparation',
+    'prepareQuoteParameters', 'readQuotePreparationOperation', 'confirmQuoteParameters', 'readPreparedQuoteOriginal',
+    'prepareOriginalQuoteBooking', 'readOriginalQuoteBookingOperation', 'issueAction', 'createBookingDraft',
+    'chooseBookingDraft', 'readBookingDraft', 'handoffBookingDraft', 'readBookingHandoff', 'readBookingOperation',
+    'readBookingAcceptance', 'issueBookingTransfer', 'readBookingTransferIssue', 'consumeBookingTransfer',
+    'readBookingTransferReceipt', 'acceptBookingSubmission', 'submitAcceptedBooking', 'readBookingSubmission',
+    'readHostCapabilities', 'readOrderTaskHostCapabilities', 'readOrderAction', 'revalidateOrderAction',
+    'readTaskSnapshot', 'readTaskEvents', 'readOrderExplanation', 'readSource', 'requestTaskCancellation',
+    'readTaskCancellationReceipt', 'readTaskCancellationSettlementReceipt', 'settleTaskUnstartedCancellation',
+    'reconcileTaskInputCancellation'];
   const channels = [
     { Controller: RentalWebsiteClientEntryController, original: WebsiteClientEntryController, token: AI_WEBSITE_ENTRY,
       prefix: shared.AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedBasePath, channel: 'web' },
@@ -76,8 +87,10 @@ module.exports = async function runCases({ t }) {
     assert.fail('expected original HTTP refusal');
   }
 
-  await t.test('客户两渠道只挂 12 个原方法，Nest 方法/路径/状态/header/参数与原定义一致', () => {
+  await t.test('客户两渠道精确挂载已核定的 51 个原方法，Nest 方法/路径/状态/header/参数与原定义一致', () => {
     const scanner = new MetadataScanner(), routes = [];
+    assert.equal(mountedMethods.length, 51);
+    assert.equal(new Set(mountedMethods).size, 51);
     for (const channel of channels) {
       const { Controller, original, prefix, token } = channel;
       assert.equal(Reflect.getMetadata(PATH_METADATA, Controller), prefix);
@@ -101,7 +114,7 @@ module.exports = async function runCases({ t }) {
       for (const name of scanner.getAllMethodNames(AiClientEntryController.prototype).filter(name => !mountedMethods.includes(name)))
         assert.equal(Controller.prototype[name], undefined, `unexpected inherited entry: ${name}`);
     }
-    assert.equal(routes.length, 24); assert.equal(new Set(routes).size, 24);
+    assert.equal(routes.length, 102); assert.equal(new Set(routes).size, 102);
   });
 
   await t.test('两渠道委托真实原 Controller，原 schema 投影及只读收据逐方法保持', async () => {
