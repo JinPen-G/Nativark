@@ -1,6 +1,6 @@
 'use strict';
-/** 独立 Rental 宿主的离线打包入口。消费已构建字节、固定完整包及原 prepared 部署材料，
- * 从锁定底座源码在内存复算公共六包，匹配后沿原上下文收据记录同源产物。
+/** 独立 Rental 宿主的离线打包入口。双仓发行从固定 Git 源码在内存重建，
+ * 旧单仓路径仍消费已编译产物并逐字节复算公共六包。两者均核对固定包及 prepared 部署材料。
  * 输出确定性 Linux Docker 上下文；镜像构建才安装原锁依赖并生成目标平台 Client。
  * 本命令不读 .env、不安装、不生成 Client、不启动进程/服务、不连接库或办理迁移。 */
 const fs = require('node:fs'), path = require('node:path');
@@ -12,6 +12,9 @@ const { compileRentalPlatformSource, requireMatchingPublicRuntime, publicDirecto
 const { selectWorkspaces, projectHostLock, lockedDependency, hostDirectory } = require('./rental-host-lock.cjs');
 const root = path.resolve(__dirname, '..');
 const targetNodeVersion = '24.13.0';
+const sourceProvenanceFile = 'development.workspace.json';
+const hostBuildFile = 'rental-host.build-provenance.json';
+const trustedBuilds = new WeakMap();
 const json = value => Buffer.from(JSON.stringify(value, null, 2) + '\n');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const text = (files, file) => {
@@ -29,7 +32,7 @@ function parseArguments(args) {
   const values = {};
   for (let index = 0; index < args.length; index += 2) {
     const option = args[index], value = args[index + 1];
-    if (!['--ai', '--host', '--deployment', '--platform-package', '--rental-package', '--tickets-package', '--ai-data-package', '--client', '--platform-client', '--output', '--deps', '--mcp-entry', '--source-provenance'].includes(option)
+    if (!['--ai', '--host', '--deployment', '--platform-package', '--rental-package', '--tickets-package', '--ai-data-package', '--client', '--platform-client', '--output', '--deps', '--mcp-entry', '--source-provenance', '--platform-repo', '--core-repo'].includes(option)
       || Object.hasOwn(values, option) || !value || value.startsWith('--')) throw Error('未知、重复或缺值的打包选项：' + option);
     values[option] = value;
   }
@@ -41,16 +44,23 @@ function parseArguments(args) {
   }
   if ((host === 'example-multi-core') !== Boolean(values['--tickets-package']))
     throw Error('只有双 Core 示范须显式提供 --tickets-package');
-  for (const key of ['--deployment', '--platform-package', '--rental-package', '--client', '--platform-client', '--output'])
+  for (const key of ['--deployment', '--platform-package', '--rental-package', '--output'])
     if (!values[key] || !path.isAbsolute(values[key])) throw Error(key + ' 须为显式绝对路径');
   if ((values['--ai'] === 'enabled') !== Boolean(values['--ai-data-package'])) throw Error('只有 AI enabled 必须提供 --ai-data-package');
-  for (const key of ['--ai-data-package', '--tickets-package', '--deps', '--source-provenance']) if (values[key] && !path.isAbsolute(values[key])) throw Error(key + ' 须为绝对路径');
+  for (const key of ['--ai-data-package', '--tickets-package', '--deps', '--source-provenance', '--platform-repo', '--core-repo', '--client', '--platform-client'])
+    if (values[key] && !path.isAbsolute(values[key])) throw Error(key + ' 须为绝对路径');
+  const fixed = ['--source-provenance', '--platform-repo', '--core-repo'].some(key => values[key]);
+  if (fixed && (!values['--source-provenance'] || !values['--platform-repo'] || !values['--core-repo']))
+    throw Error('双仓打包须同时提供 --source-provenance、--platform-repo 和 --core-repo');
+  if (fixed ? values['--client'] || values['--platform-client'] : !values['--client'] || !values['--platform-client'])
+    throw Error('双仓从锁定 schema 生成编译声明；旧单仓须显式提供 --client 和 --platform-client 绝对路径');
   if (!values['--output'].endsWith('.tgz')) throw Error('--output 须为尚不存在的 .tgz 文件');
   if (!values['--platform-package'].endsWith('.tgz')) throw Error('--platform-package 须为锁定的完整底座源码 .tgz');
   return { aiMode: values['--ai'], host, ...(values['--mcp-entry'] ? { mcpEntry: values['--mcp-entry'] } : {}),
     ticketsPackage: values['--tickets-package'], deployment: values['--deployment'], rentalPackage: values['--rental-package'],
     platformPackage: values['--platform-package'],
     aiDataPackage: values['--ai-data-package'], sourceProvenance: values['--source-provenance'], client: values['--client'], platformClient: values['--platform-client'],
+    platformRepo: values['--platform-repo'], coreRepo: values['--core-repo'],
     output: values['--output'], deps: values['--deps'] || path.join(root, 'node_modules') };
 }
 
@@ -88,19 +98,17 @@ function readTree(directory, allowed) {
   visit(directory); return files;
 }
 
-function publicApi() {
-  // These are this checkout's already-built formal modules, never executable
-  // code loaded from the caller's candidate package directory.
+function publicApi(read = require) {
   return {
-    ...require('@rental-os/core-contracts'),
-    ...require('@rental-os/core-contracts/archive'),
-    ...require('@rental-os/core-contracts/deployment'),
-    ...require('@rental-os/core-contracts/package'),
-    ...require('@rental-os/core-contracts/platform-data-package'),
-    ...require('@rental-os/core-contracts/platform-source'),
-    ...require('@rental-os/platform-core-host/core-package-preflight'),
-    ...require('@rental-os/platform-api/data-plan'),
-    ...require(path.join(root, 'apps/rental-api/dist/prepare-deployment.js')),
+    ...read('@rental-os/core-contracts'),
+    ...read('@rental-os/core-contracts/archive'),
+    ...read('@rental-os/core-contracts/deployment'),
+    ...read('@rental-os/core-contracts/package'),
+    ...read('@rental-os/core-contracts/platform-data-package'),
+    ...read('@rental-os/core-contracts/platform-source'),
+    ...read('@rental-os/platform-core-host/core-package-preflight'),
+    ...read('@rental-os/platform-api/data-plan'),
+    ...read(path.join(root, 'apps/rental-api/dist/prepare-deployment.js')),
   };
 }
 
@@ -411,8 +419,87 @@ function requireHostSourceProvenance(bytes, npmLock, lock, host, aiMode, mcpEntr
   return source;
 }
 
+/** 收据由同一进程的固定源编译产生；调用方提供的产物摘要不能代替实际 emit。 */
+function requireFixedRuntime(sourceFiles, sourceBytes) {
+  const build = trustedBuilds.get(sourceFiles);
+  if (!build || !sourceBytes || build.sourceSha256 !== hash(sourceBytes)
+    || build.npmLockSha256 !== hash(sourceFiles.get('package-lock.json')))
+    throw Error('双仓打包缺少同一固定源码和投影锁的实际构建');
+  const sources = JSON.parse(Buffer.from(sourceBytes)).files;
+  if (sourceFiles.size !== 1 + sources.length + build.evidence.files.length)
+    throw Error('双仓运行产物或源码文件集合与实际构建不同');
+  for (const { path: file, sha256 } of sources)
+    if (!sourceFiles.has(file) || hash(sourceFiles.get(file)) !== sha256)
+      throw Error('双仓源码输入与实际构建不同：' + file);
+  for (const { file, sha256 } of build.evidence.files)
+    if (!sourceFiles.has(file) || hash(sourceFiles.get(file)) !== sha256)
+      throw Error('双仓运行产物与固定源码编译不同：' + file);
+  return build;
+}
+
+function compileFixedRuntime({ workspace, sourceBytes, deploymentFiles, deps, aiMode, release, platformApi }) {
+  const { createBuild, verifyContracts } = require('./check-rental-package-build.cjs');
+  const { snapshotFromFiles } = require('./rental-build-snapshot.cjs');
+  const { generatePrismaDeclarations } = require('./verify-rental-distribution.cjs');
+  const { createMemoryBuild } = require('./rental-build-memory.cjs');
+  const snapshot = snapshotFromFiles(workspace.platform.source.commit, new Map([...workspace.files]
+    .map(([file, bytes]) => [path.resolve(root, file).split(path.sep).join('/'), bytes])));
+  const build = createBuild(deps, { snapshot, quiet: true });
+  const dependencies = JSON.parse(text(workspace.files, 'package-lock.json')).packages;
+  if (dependencies['node_modules/typescript']?.version !== build.ts.version
+    || ['prisma', '@prisma/client'].some(name => dependencies['node_modules/' + name]?.version !== '5.22.0'))
+    throw Error('双仓编译器或 Prisma 声明生成器与投影锁不同');
+  const schemas = { platform: text(workspace.platform.files, 'apps/platform-api/prisma/schema.prisma'),
+    rental: text(deploymentFiles, 'schema.prisma') };
+  generatePrismaDeclarations(build, [['public', schemas.platform], ['rental', schemas.rental]]);
+  const selection = (host, mode) => {
+    const client = path.join(root, `apps/${host}-api/generated/client/index.d.ts`);
+    return Object.freeze({ client, mode, schema: schemas[host], declarations: build.virtual.get(client.split(path.sep).join('/')) });
+  };
+  const selections = Object.freeze({ platform: selection('platform', 'platform'),
+    rental: selection('rental', aiMode === 'enabled' ? 'rental-ai' : 'rental') });
+  for (const directory of ['apps/platform-api', 'apps/rental-api', 'packages/rental-core', 'packages/ai-native-server'])
+    build.selectedClients.set(path.resolve(root, directory).split(path.sep).join('/'), directory === 'apps/platform-api' ? selections.platform : selections.rental);
+  verifyContracts(build);
+  const platformBuild = compileRentalPlatformSource({ platformFiles: workspace.platform.files, release,
+    selection: selections.platform, dependencyDirectory: deps, ts: build.ts, api: platformApi });
+  for (const [file, bytes] of platformBuild.generated) if (!file.endsWith('/package.json'))
+    build.outputs.set(path.resolve(root, file).split(path.sep).join('/'), bytes.toString('utf8'));
+  build.compile('packages/rental-core/tsconfig.json');
+  if (workspace.files.has('packages/ai-native-data/package.json')) build.compile('packages/ai-native-data/tsconfig.json');
+  build.compile('apps/rental-api/tsconfig.json');
+  if (aiMode === 'enabled') {
+    build.compile('packages/ai-native-server/tsconfig.json');
+    build.compile('apps/rental-api/tsconfig.ai.json');
+  }
+  const sourceFiles = new Map(workspace.files);
+  const outputs = [...build.outputs].map(([file, content]) => [path.relative(root, file).split(path.sep).join('/'), Buffer.from(content)])
+    .filter(([file]) => /^(?:apps|packages)\/[^/]+\/dist(?:-[^/]+)?\/.*\.(?:js|cjs|json|d\.ts)$/u.test(file))
+    .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
+  for (const [file, bytes] of outputs) sourceFiles.set(file, bytes);
+  const memory = createMemoryBuild(build);
+  const api = publicApi(name => memory.load(path.isAbsolute(name) ? name : build.exported(name, true)));
+  const sourceSha256 = hash(sourceBytes), npmLockSha256 = hash(sourceFiles.get('package-lock.json'));
+  const evidence = { format: 'rental-host-fixed-build-1', sourceSha256, npmLockSha256,
+    platform: workspace.platform.source, rental: workspace.rental.source,
+    deploymentLockSha256: hash(deploymentFiles.get('core.deployment.lock.json')),
+    compiler: { version: build.ts.version, sha256: hash(readOrdinary(build.requireDeps.resolve('typescript'))) },
+    clients: Object.entries(selections).map(([host, selected]) => ({ host, mode: selected.mode,
+      schemaSha256: hash(selected.schema), declarationsSha256: hash(selected.declarations) })),
+    projects: build.stages, files: outputs.map(([file, bytes]) => ({ file, sha256: hash(bytes) })) };
+  trustedBuilds.set(sourceFiles, { api, sourceSha256, npmLockSha256, evidence, selections, ts: build.ts, platformBuild });
+  return { sourceFiles, selections, ts: build.ts };
+}
+
 function createRentalHostContext(input) {
-  const api = publicApi(), { aiMode, sourceFiles, platformFiles, rentalFiles, ticketsFiles, aiFiles, deploymentFiles, ts, selections } = input;
+  const { aiMode, sourceFiles, platformFiles, rentalFiles, ticketsFiles, aiFiles, deploymentFiles, ts, selections } = input;
+  const sourceProvenanceBytes = sourceFiles.get(sourceProvenanceFile);
+  const fixed = (sourceFiles.has(sourceProvenanceFile) || trustedBuilds.has(sourceFiles)) && requireFixedRuntime(sourceFiles, sourceProvenanceBytes);
+  if (fixed && (selections !== fixed.selections || ts !== fixed.ts
+    || hash(deploymentFiles.get('core.deployment.lock.json')) !== fixed.evidence.deploymentLockSha256
+    || hash(deploymentFiles.get('schema.prisma')) !== fixed.evidence.clients.find(client => client.host === 'rental').schemaSha256))
+    throw Error('双仓打包与实际构建的 Client 或部署材料不同');
+  const api = fixed ? fixed.api : publicApi();
   const host = input.host ?? 'rental', directory = rentalHostDirectory(host), multi = host === 'example-multi-core';
   if (!['enabled', 'disabled'].includes(aiMode)) throw Error('须明确选择宿主 AI 模式');
   const mcpEntry = input.mcpEntry === undefined ? undefined : requireMcpEntry(input.mcpEntry, host);
@@ -427,8 +514,6 @@ function createRentalHostContext(input) {
     || (lock.dataCapabilities?.length || 0) !== (aiMode === 'enabled' ? 1 : 0)
     || aiMode === 'enabled' && lock.dataCapabilities[0].id !== 'ai-native'
     || (aiMode === 'enabled') !== Boolean(aiFiles)) throw Error('部署锁、固定包与显式 AI 选择不一致');
-  const sourceProvenanceFile = 'development.workspace.json';
-  const sourceProvenanceBytes = sourceFiles.get(sourceProvenanceFile);
   if (sourceProvenanceBytes) requireHostSourceProvenance(sourceProvenanceBytes, sourceFiles.get('package-lock.json'), lock, host, aiMode, mcpEntry);
   const publicSchema = text(sourceFiles, 'apps/platform-api/prisma/schema.prisma');
   if (publicSchema !== text(platformFiles, 'apps/platform-api/prisma/schema.prisma'))
@@ -497,6 +582,13 @@ function createRentalHostContext(input) {
   for (const [file, bytes] of deploymentFiles) files.set('apps/rental-api/prisma-deployment/' + file, bytes);
   files.set('rental-host.deployment-provenance.json', json(describeRentalDeployment(api, lock, deploymentFiles, platform)));
   if (sourceProvenanceBytes) files.set(sourceProvenanceFile, sourceProvenanceBytes);
+  let buildProvenance;
+  if (fixed) {
+    const bytes = json({ ...fixed.evidence, files: fixed.evidence.files.filter(({ file }) => files.has(file)
+      && ![...fixedPackages.keys()].some(directory => file.startsWith(directory + '/'))) });
+    files.set(hostBuildFile, bytes);
+    buildProvenance = { file: hostBuildFile, sha256: hash(bytes) };
+  }
   files.set('LICENSE', Buffer.from(text(sourceFiles, 'LICENSE')));
   const entry = mcpEntry ?? directory + (aiMode === 'enabled' ? '/dist-ai/ai-main.js' : '/dist/main.js');
   if (mcpEntry) requireMcpStartup(files, entry, ts);
@@ -508,10 +600,12 @@ function createRentalHostContext(input) {
     const locked = projected.lock.packages[lockedDependency(projected.lock, owner, name)];
     if (!locked || locked.dev) throw Error('运行依赖不在生产锁闭包：' + name);
   }
-  // 先拒绝部署材料、所选 Client、锁闭包及入口依赖错误，再做六包源码编译。
-  // 两次读取之间不接受缓存收据；产物仍逐字节复算，成功输出才替换成固定源码的规范元数据。
-  const platformBuild = compileRentalPlatformSource({ platformFiles, release: lock.platform,
+  // 双仓公共产物已在同一构建中复算；旧路径仍在打包前与原底座归档逐字节比较。
+  const platformBuild = fixed?.platformBuild ?? compileRentalPlatformSource({ platformFiles, release: lock.platform,
     selection: selections.platform, dependencyDirectory: input.dependencyDirectory, ts, api });
+  if (fixed && (api.createCoreArchive(platformFiles).sha256 !== lock.platform.sha256
+    || !isDeepStrictEqual(platformBuild.evidence.release, lock.platform)))
+    throw Error('双仓打包底座与实际编译材料不同');
   requireMatchingPublicRuntime(sourceFiles, platformFiles, platformBuild);
   for (const [file, bytes] of platformBuild.generated) files.set(file, bytes);
   files.set('package.json', json(projected.root)); files.set('package-lock.json', json(projected.lock));
@@ -535,6 +629,7 @@ function createRentalHostContext(input) {
     mcpMode: mcpEntry ? 'enabled' : 'disabled', ...(mcpEntry ? { mcpEntry } : {}),
     deploymentProvenance: 'rental-host.deployment-provenance.json',
     ...(sourceProvenanceBytes ? { sourceProvenance: { file: sourceProvenanceFile, sha256: hash(sourceProvenanceBytes) } } : {}),
+    ...(buildProvenance ? { buildProvenance } : {}),
     target: 'linux-bookworm', prismaVersion: '5.22.0', entry, clients,
     deploymentLockSha256: hash(deploymentFiles.get('core.deployment.lock.json')), coreSha256: rentalPin.sha256,
     ...(multi ? { additionalCorePackages: [{ id: ticketsPin.manifest.id, sha256: ticketsPin.sha256 }] } : {}),
@@ -546,10 +641,12 @@ function createRentalHostContext(input) {
 }
 
 function collectInputs(options) {
+  const defaultProvenance = path.join(root, sourceProvenanceFile);
+  if (options.sourceProvenance) return collectFixedInputs(options);
+  if (options.platformRepo || options.coreRepo || fs.existsSync(defaultProvenance))
+    throw Error('双仓源码不能使用旧单仓打包入口；须提供来源回执和两个固定 Git 仓库');
   const api = publicApi(), sourceFiles = new Map([['package-lock.json', readOrdinary(path.join(root, 'package-lock.json'))],
     ['LICENSE', readOrdinary(path.join(root, 'LICENSE'))]]);
-  const sourceProvenance = options.sourceProvenance ?? path.join(root, 'development.workspace.json');
-  if (options.sourceProvenance || fs.existsSync(sourceProvenance)) sourceFiles.set('development.workspace.json', readOrdinary(sourceProvenance));
   const deploymentFiles = readTree(options.deployment, file => file === 'schema.prisma' || file === 'core.deployment.lock.json'
     || file === 'migrations/migration_lock.toml' || /^migrations\/[^/]+\/migration\.sql$/u.test(file));
   const lock = api.CoreDeploymentLockSchema.parse(JSON.parse(text(deploymentFiles, 'core.deployment.lock.json')));
@@ -593,6 +690,43 @@ function collectInputs(options) {
     dependencyDirectory: options.deps };
 }
 
+async function collectFixedInputs(options) {
+  if (!options.platformRepo || !options.coreRepo) throw Error('双仓打包缺少固定底座或 Rental Git 仓库');
+  if (options.host !== 'rental') throw Error('双仓打包暂只接受来源清单中的单 Rental 宿主');
+  if (options.mcpEntry) throw Error('正式双仓 MCP 发行缺少已锁定的 MCP 数据贡献和原账适配');
+  const sourceBytes = readOrdinary(options.sourceProvenance);
+  const declared = JSON.parse(sourceBytes.toString('utf8'));
+  const deploymentFiles = readTree(options.deployment, file => file === 'schema.prisma' || file === 'core.deployment.lock.json'
+    || file === 'migrations/migration_lock.toml' || /^migrations\/[^/]+\/migration\.sql$/u.test(file));
+  const proposedLock = JSON.parse(text(deploymentFiles, 'core.deployment.lock.json'));
+  const platformSource = proposedLock.platform?.source;
+  const rentalSource = proposedLock.cores?.find(pin => pin.manifest.id === 'rental')?.manifest.source;
+  if (!platformSource || !rentalSource) throw Error('双仓打包缺少锁定的底座和 Rental 源码身份');
+  const { compileFixedPlatformContracts, createRentalDevelopmentWorkspace } = require('./prepare-rental-workspace.cjs');
+  const contracts = compileFixedPlatformContracts(options.platformRepo, platformSource.commit, options.deps, true);
+  const load = name => contracts.load(contracts.exported(name, true));
+  const api = { ...load('@rental-os/core-contracts'), ...load('@rental-os/core-contracts/archive'),
+    ...load('@rental-os/core-contracts/package'), ...load('@rental-os/core-contracts/platform-data-package'),
+    ...load('@rental-os/core-contracts/platform-source') };
+  const lock = api.CoreDeploymentLockSchema.parse(proposedLock);
+  const workspace = await createRentalDevelopmentWorkspace({ repo: options.platformRepo, repository: platformSource.repository,
+    commit: platformSource.commit, coreRepo: options.coreRepo, coreCommit: rentalSource.commit,
+    mode: 'release', profile: declared.profile, ai: options.aiMode === 'enabled' }, api);
+  requireHostSourceProvenance(sourceBytes, workspace.files.get('package-lock.json'), lock, options.host, options.aiMode);
+  if (!Buffer.from(workspace.files.get(sourceProvenanceFile)).equals(sourceBytes))
+    throw Error('双仓来源回执与固定 Git 源码组合不同');
+  const platformArchive = readOrdinary(options.platformPackage, api.CORE_ARCHIVE_LIMITS.totalBytes);
+  const platformFiles = api.readCoreArchive(platformArchive, lock.platform.sha256).files;
+  if (api.createCoreArchive(workspace.platform.files).sha256 !== lock.platform.sha256)
+    throw Error('锁定底座源码归档与固定 Git 源码不同');
+  const rentalFiles = api.readCorePackageFiles(options.rentalPackage, api.CORE_ARCHIVE_LIMITS.fileBytes, api.CORE_ARCHIVE_LIMITS.totalBytes);
+  const aiFiles = options.aiDataPackage && api.readPlatformDataCapabilityPackage(options.aiDataPackage, lock.dataCapabilities?.[0]).files;
+  const compiled = compileFixedRuntime({ workspace, sourceBytes, deploymentFiles, deps: options.deps, aiMode: options.aiMode,
+    release: lock.platform, platformApi: api });
+  return { ...compiled, aiMode: options.aiMode, host: options.host, dependencyDirectory: options.deps,
+    platformFiles, rentalFiles, aiFiles, deploymentFiles };
+}
+
 function writeArchive(output, bytes) {
   const file = path.resolve(output); ordinaryDirectories(path.dirname(file));
   if (!file.endsWith('.tgz')) throw Error('输出须为新的 .tgz 文件');
@@ -629,17 +763,22 @@ function main(args) {
   ordinaryDirectories(path.dirname(options.output));
   if (fs.existsSync(options.output)) throw Error('目标归档已存在，不覆盖用户产物');
   if (within(path.join(root, 'docs'), options.output)) throw Error('发行产物不能写入私有资料目录');
-  const result = createRentalHostContext(collectInputs(options)); writeArchive(options.output, result.bytes);
-  return { status: 'packaged', aiMode: options.aiMode, ...(result.receipt.mcpEntry ? { mcpEntry: result.receipt.mcpEntry } : {}),
-    output: options.output, sha256: result.sha256,
-    deploymentProvenance: { file: result.receipt.deploymentProvenance,
-      sha256: hash(result.files.get(result.receipt.deploymentProvenance)) },
-    ...(result.receipt.sourceProvenance ? { sourceProvenance: result.receipt.sourceProvenance } : {}),
-    files: result.files.size, bytes: result.bytes.length, imageBuild: 'not-run', deployment: 'pending' };
+  const pack = input => {
+    const result = createRentalHostContext(input); writeArchive(options.output, result.bytes);
+    return { status: 'packaged', aiMode: options.aiMode, ...(result.receipt.mcpEntry ? { mcpEntry: result.receipt.mcpEntry } : {}),
+      output: options.output, sha256: result.sha256,
+      deploymentProvenance: { file: result.receipt.deploymentProvenance,
+        sha256: hash(result.files.get(result.receipt.deploymentProvenance)) },
+      ...(result.receipt.sourceProvenance ? { sourceProvenance: result.receipt.sourceProvenance, buildProvenance: result.receipt.buildProvenance } : {}),
+      files: result.files.size, bytes: result.bytes.length, imageBuild: 'not-run', deployment: 'pending' };
+  };
+  const input = collectInputs(options);
+  return options.sourceProvenance ? input.then(pack) : pack(input);
 }
 if (require.main === module) {
-  try { process.stdout.write(JSON.stringify(main(process.argv.slice(2))) + '\n'); }
-  catch (error) { process.stderr.write((error instanceof Error ? error.message : '独立宿主打包失败') + '\n'); process.exitCode = 1; }
+  Promise.resolve().then(() => main(process.argv.slice(2)))
+    .then(result => process.stdout.write(JSON.stringify(result) + '\n'))
+    .catch(error => { process.stderr.write((error instanceof Error ? error.message : '独立宿主打包失败') + '\n'); process.exitCode = 1; });
 }
 module.exports = { parseArguments, createRentalHostContext, collectInputs, checkRuntimeClosure,
   readOrdinary, readTree, createRuntimeVerifier, describeRentalDeployment, requireHostSourceProvenance, writeArchive, main };

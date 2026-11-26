@@ -162,10 +162,7 @@ function isSource(file) {
     && !/\.tsbuildinfo$/u.test(file);
 }
 
-async function createRentalDevelopmentWorkspace(options, api) {
-  const platform = await api.readPlatformSourceFromGit(options.repo,
-    { repository: repositoryUrl(options.repository), commit: options.commit });
-  const rental = readIndependentRentalSource(options.coreRepo, options.coreCommit, { mode: options.mode ?? 'development' });
+function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
   if (rental.source.repository.toLowerCase() === platform.source.repository.toLowerCase())
     throw Error('Rental 开发来源须是独立仓库');
   const profile = options.profile ?? 'domain';
@@ -183,7 +180,12 @@ async function createRentalDevelopmentWorkspace(options, api) {
   }
   for (const directory of required) if (!selected.some(entry => entry.target === directory))
     throw Error('独立源码尚未交付所选范围：' + directory + '；禁止从底座旧业务目录补齐');
-  const extras = [...supportWorkspaces, ...(options.ai ? ['packages/ai-native-data', 'packages/ai-native-server'] : []),
+  const needsAiData = selected.some(({ target }) => {
+    const metadata = JSON.parse(rental.snapshot.files.get(slash(path.join(root, target, 'package.json'))));
+    return Object.hasOwn(metadata.dependencies ?? {}, '@rental-os/ai-native-data');
+  });
+  const extras = [...supportWorkspaces, ...(options.ai || needsAiData ? ['packages/ai-native-data'] : []),
+    ...(options.ai ? ['packages/ai-native-server'] : []),
     ...(options.mcp ? ['packages/mcp-server'] : [])];
   const support = readBuildSnapshot(options.commit, options.repo, [...extras, ...supportScripts]);
   const files = new Map(platform.files);
@@ -307,6 +309,13 @@ async function createRentalDevelopmentWorkspace(options, api) {
   return { files, platform, rental };
 }
 
+async function createRentalDevelopmentWorkspace(options, api) {
+  const platform = await api.readPlatformSourceFromGit(options.repo,
+    { repository: repositoryUrl(options.repository), commit: options.commit });
+  const rental = readIndependentRentalSource(options.coreRepo, options.coreCommit, { mode: options.mode ?? 'development' });
+  return projectRentalDevelopmentWorkspace(options, platform, rental, api);
+}
+
 function argumentsOf(args) {
   const result = {};
   const names = { '--repo': 'repo', '--repository': 'repository', '--commit': 'commit',
@@ -324,13 +333,19 @@ function argumentsOf(args) {
   return result;
 }
 
-async function main(args) {
-  const options = argumentsOf(args);
-  // 编译所选固定底座的正式出口，不消费本机可能过期的dist。
+function compileFixedPlatformContracts(repo, commit, deps, quiet = false) {
   const { createBuild } = require('./check-rental-package-build.cjs');
-  const build = createBuild(path.join(options.repo, 'node_modules'), { snapshot: readRentalBuildSupport(options.commit, options.repo) });
+  const snapshot = readBuildSnapshot(commit, repo, ['package.json', 'package-lock.json', 'tsconfig.base.json',
+    'packages/platform-contracts', 'packages/core-contracts']);
+  const build = createBuild(deps, { snapshot, quiet });
   build.compile('packages/platform-contracts/tsconfig.json');
   build.compile('packages/core-contracts/tsconfig.json');
+  return build;
+}
+
+async function main(args) {
+  const options = argumentsOf(args);
+  const build = compileFixedPlatformContracts(options.repo, options.commit, path.join(options.repo, 'node_modules'));
   const platformApi = build.load(build.exported('@rental-os/core-contracts/platform-source', true));
   const { PLATFORM_SOURCE_WORKSPACES } = platformApi;
   const { files } = await createRentalDevelopmentWorkspace(options, { ...platformApi, PLATFORM_SOURCE_WORKSPACES });
@@ -347,4 +362,5 @@ async function main(args) {
 }
 
 if (require.main === module) main(process.argv.slice(2)).catch(error => { console.error(error.message); process.exitCode = 1; });
-module.exports = { readIndependentRentalSource, mapRentalSource, readRentalBuildSupport, composeRentalBuildSnapshot, createRentalDevelopmentWorkspace, argumentsOf, main };
+module.exports = { readIndependentRentalSource, mapRentalSource, readRentalBuildSupport, composeRentalBuildSnapshot,
+  createRentalDevelopmentWorkspace, projectRentalDevelopmentWorkspace, compileFixedPlatformContracts, argumentsOf, main };

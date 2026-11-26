@@ -69,8 +69,8 @@ function fixedPortableSource(options, documentationSource, buildDirectory) {
     packageRoot: rental.layout.paths.find(entry => entry.target === 'packages/rental-core').source };
 }
 
-function selectedPrisma(build) {
-  const { deps, requireDeps, ts, virtual, load, exported } = build;
+function generatePrismaDeclarations(build, schemas) {
+  const { deps, requireDeps, virtual } = build;
   for (const name of ['prisma', '@prisma/client'])
     assert.equal(JSON.parse(fs.readFileSync(`${deps}/${name}/package.json`, 'utf8')).version, '5.22.0');
   const cliFile = deps + '/prisma/build/index.js', cli = fs.readFileSync(cliFile, 'utf8');
@@ -83,6 +83,23 @@ function selectedPrisma(build) {
   const wasm = new Function('S', 'require', '__dirname', cli.slice(start, end) + ';return yI();')(
     S, createRequire(cliFile), path.dirname(cliFile));
   const generator = requireDeps('@prisma/client/generator-build/index.js');
+  const declarations = [];
+  for (const [label, text] of schemas) {
+    const dmmf = JSON.parse(wasm.get_dmmf(JSON.stringify({ prismaSchema: text, noColor: true })));
+    const types = generator.dmmfToTypes(generator.externalToInternalDmmf(dmmf))
+      .replace(/(['"])(?:\.\/runtime\/library|@prisma\/client\/library)\1/gu, '"@prisma/client/runtime/library"');
+    const directory = slash(path.join(root, `apps/${label === 'public' ? 'platform' : 'rental'}-api/generated/client`));
+    virtual.set(directory + '/index.d.ts', types);
+    virtual.set(directory + '/schema.prisma', text);
+    declarations.push({ schema: label, models: dmmf.datamodel.models.length,
+      sha256: createHash('sha256').update(text).digest('hex') });
+  }
+  build.prismaWasm = wasm;
+  if (!build.quiet) console.log(JSON.stringify({ prisma: '5.22.0', declarations, diskOutputs: 0 }));
+}
+
+function selectedPrisma(build) {
+  const { ts, load, exported } = build;
   const publicSchema = build.sourceRead(path.join(root, 'apps/platform-api/prisma/schema.prisma'));
   // This file is a literal relation contribution with only an erased type import.
   // The schema bootstrap needs it before the complete Rental server can compile.
@@ -96,24 +113,13 @@ function selectedPrisma(build) {
     id: 'rental', schema: build.sourceRead(path.join(root, 'packages/rental-core/prisma/schema.prisma')),
     publicRelations: relationModule.exports.RENTAL_PRISMA_PUBLIC_RELATIONS
   }]);
-  const declarations = [];
-  for (const [label, text] of [['rental', schema], ['public', publicSchema]]) {
-    const dmmf = JSON.parse(wasm.get_dmmf(JSON.stringify({ prismaSchema: text, noColor: true })));
-    const types = generator.dmmfToTypes(generator.externalToInternalDmmf(dmmf))
-      .replace(/(['"])(?:\.\/runtime\/library|@prisma\/client\/library)\1/gu, '"@prisma/client/runtime/library"');
-    const directory = slash(path.join(root, `apps/${label === 'public' ? 'platform' : 'rental'}-api/generated/client`));
-    virtual.set(directory + '/index.d.ts', types);
-    virtual.set(directory + '/schema.prisma', text);
-    if (label === 'rental') {
-      for (const pkg of ['packages/rental-core', 'apps/rental-api']) build.selectedClients.set(slash(path.join(root, pkg)),
-        { client: directory + '/index.d.ts', mode: 'rental' });
-    } else build.selectedClients.set(slash(path.join(root, 'apps/platform-api')), { client: directory + '/index.d.ts', mode: 'platform' });
-    declarations.push({ schema: label, models: dmmf.datamodel.models.length,
-      sha256: createHash('sha256').update(text).digest('hex') });
-  }
-  console.log(JSON.stringify({ prisma: '5.22.0', declarations, diskOutputs: 0 }));
+  generatePrismaDeclarations(build, [['rental', schema], ['public', publicSchema]]);
+  const rentalClient = slash(path.join(root, 'apps/rental-api/generated/client/index.d.ts'));
+  for (const pkg of ['packages/rental-core', 'apps/rental-api']) build.selectedClients.set(slash(path.join(root, pkg)),
+    { client: rentalClient, mode: 'rental' });
+  build.selectedClients.set(slash(path.join(root, 'apps/platform-api')),
+    { client: slash(path.join(root, 'apps/platform-api/generated/client/index.d.ts')), mode: 'platform' });
   build.prismaSchema = schema;
-  build.prismaWasm = wasm;
   return { schema, publicSchema, publicRelations: relationModule.exports.RENTAL_PRISMA_PUBLIC_RELATIONS };
 }
 
@@ -390,4 +396,4 @@ async function main(args) {
 if (require.main === module) {
   main(process.argv.slice(2)).catch(error => { console.error(error.stack); process.exitCode = 1; });
 }
-module.exports = { selectedPrisma, verifyServer, verifyNative, verifyPackage, verifyConsumers, attachPrismaRuntime };
+module.exports = { generatePrismaDeclarations, selectedPrisma, verifyServer, verifyNative, verifyPackage, verifyConsumers, attachPrismaRuntime };

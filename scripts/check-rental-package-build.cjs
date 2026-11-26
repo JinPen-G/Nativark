@@ -258,7 +258,7 @@ function createBuild(dependencyDirectory, settings = {}) {
       sourceFiles: program.getSourceFiles().filter(file => !file.isDeclarationFile).length,
       outputs: emitted.size, diagnostics: 0 };
     stages.push(stage);
-    console.log(JSON.stringify(stage));
+    if (!settings.quiet) console.log(JSON.stringify(stage));
     return { program, emitted };
   }
   const loaded = new Map();
@@ -291,7 +291,7 @@ function createBuild(dependencyDirectory, settings = {}) {
     return module.exports;
   }
   return { ts, outputs, virtual, packages, stages, runtimeAliases, selectedClients, compile, exported, load, requireDeps, deps,
-    snapshot, sourceRead, readDirectory };
+    snapshot, sourceRead, readDirectory, quiet: settings.quiet };
 }
 
 function verifyContracts(build) {
@@ -339,7 +339,7 @@ function verifyContracts(build) {
       retainedRuntimeExports++;
     }
   }
-  console.log(JSON.stringify({ sharedRentalEntries: references.size,
+  if (!build.quiet) console.log(JSON.stringify({ sharedRentalEntries: references.size,
     retainedRuntimeExports, sharedRuntimeExports: Object.keys(shared).length, diskOutputs: 0 }));
 }
 

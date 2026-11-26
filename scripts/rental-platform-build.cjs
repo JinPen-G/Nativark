@@ -24,12 +24,14 @@ function compileRentalPlatformSource(input) {
     throw Error('须提供完整底座归档文件与明确只读编译依赖目录');
   const archive = api.createCoreArchive(platformFiles);
   if (archive.sha256 !== release.sha256) throw Error('底座源码完整归档摘要与启动锁不一致');
-  if (!api.inspectCorePackageArtifact({ kind: 'platform', release, bytes: archive.bytes }, undefined, {}).ok)
-    throw Error('底座归档未通过原源码发行检查');
   const source = api.createPlatformSource(platformFiles, release.source);
-  if (source.files.size !== platformFiles.size || [...source.files].some(([file, bytes]) =>
+  if (source.version !== release.versions.platform || source.files.size !== platformFiles.size || [...source.files].some(([file, bytes]) =>
     !platformFiles.has(file) || !Buffer.from(platformFiles.get(file)).equals(bytes)))
     throw Error('底座归档与原固定来源文件集不一致');
+  for (const migration of release.data.migrations) {
+    const bytes = platformFiles.get('apps/platform-api/' + migration.file);
+    if (!bytes || hash(bytes) !== migration.sha256) throw Error('底座迁移资源与固定发行的数据合同不一致：' + migration.file);
+  }
   const readSource = file => {
     const bytes = platformFiles.get(file);
     if (!bytes?.length) throw Error('底座源码缺少原材料：' + file);
