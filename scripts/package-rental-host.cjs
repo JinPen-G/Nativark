@@ -1,6 +1,7 @@
 'use strict';
 /** 独立 Rental 宿主的离线打包入口。双仓发行从固定 Git 源码在内存重建，
  * 旧单仓路径仍消费已编译产物并逐字节复算公共六包。两者均核对固定包及 prepared 部署材料。
+ * --development 从双仓固定开发提交准备普通宿主，不要求 Tag，不可进入服务器更新。
  * 输出确定性 Linux Docker 上下文；镜像构建才安装原锁依赖并生成目标平台 Client。
  * 本命令不读 .env、不安装、不生成 Client、不启动进程/服务、不连接库或办理迁移。 */
 const fs = require('node:fs'), path = require('node:path');
@@ -402,14 +403,14 @@ function describeRentalDeployment(api, lock, deploymentFiles, platform) {
 }
 
 /** 双仓运行归档须和已准备的版本、选择及 npm 源锁投影在同一次组合中。 */
-function requireHostSourceProvenance(bytes, npmLock, lock, host, aiMode, mcpEntry) {
+function requireSourceProvenance(bytes, npmLock, lock, host, aiMode, mcpEntry, mode) {
   const source = JSON.parse(Buffer.from(bytes).toString('utf8'));
   const rental = lock.cores.find(pin => pin.manifest.id === 'rental')?.manifest;
-  if (source.format !== 'nativark-core-development-source-2' || source.mode !== 'release'
+  if (source.format !== 'nativark-core-development-source-2' || source.mode !== mode
     || source.host !== host || !['host', 'full'].includes(source.profile)
     || source.ai !== (aiMode === 'enabled') || source.mcp !== Boolean(mcpEntry)
     || !rental || !isDeepStrictEqual(source.core?.source, rental.source)
-    || source.core.version !== rental.version || source.core.tag !== 'v' + rental.version
+    || source.core.version !== rental.version || source.core.tag !== (mode === 'release' ? 'v' + rental.version : undefined)
     || !isDeepStrictEqual(source.platform?.source, lock.platform.source)
     || source.platform.version !== lock.platform.versions.platform
     || source.npmLocks?.projected?.sha256 !== hash(npmLock))
@@ -417,6 +418,10 @@ function requireHostSourceProvenance(bytes, npmLock, lock, host, aiMode, mcpEntr
   // 当前正式准备器只交付 AI 数据能力，MCP 所用五份 SQL 尚无同锁的数据贡献。
   if (mcpEntry) throw Error('正式双仓 MCP 发行缺少已锁定的 MCP 数据贡献和原账适配');
   return source;
+}
+
+function requireHostSourceProvenance(bytes, npmLock, lock, host, aiMode, mcpEntry) {
+  return requireSourceProvenance(bytes, npmLock, lock, host, aiMode, mcpEntry, 'release');
 }
 
 /** 收据由同一进程的固定源编译产生；调用方提供的产物摘要不能代替实际 emit。 */
@@ -441,7 +446,6 @@ function compileFixedRuntime({ workspace, sourceBytes, deploymentFiles, deps, ai
   const { createBuild, verifyContracts } = require('./check-rental-package-build.cjs');
   const { snapshotFromFiles } = require('./rental-build-snapshot.cjs');
   const { generatePrismaDeclarations } = require('./verify-rental-distribution.cjs');
-  const { createMemoryBuild } = require('./rental-build-memory.cjs');
   const snapshot = snapshotFromFiles(workspace.platform.source.commit, new Map([...workspace.files]
     .map(([file, bytes]) => [path.resolve(root, file).split(path.sep).join('/'), bytes])));
   const build = createBuild(deps, { snapshot, quiet: true });
@@ -472,6 +476,11 @@ function compileFixedRuntime({ workspace, sourceBytes, deploymentFiles, deps, ai
     build.compile('packages/ai-native-server/tsconfig.json');
     build.compile('apps/rental-api/tsconfig.ai.json');
   }
+  return bindFixedRuntime(build, workspace, sourceBytes, deploymentFiles, selections, platformBuild, 'release');
+}
+
+function bindFixedRuntime(build, workspace, sourceBytes, deploymentFiles, selections, platformBuild, mode) {
+  const { createMemoryBuild } = require('./rental-build-memory.cjs');
   const sourceFiles = new Map(workspace.files);
   const outputs = [...build.outputs].map(([file, content]) => [path.relative(root, file).split(path.sep).join('/'), Buffer.from(content)])
     .filter(([file]) => /^(?:apps|packages)\/[^/]+\/dist(?:-[^/]+)?\/.*\.(?:js|cjs|json|d\.ts)$/u.test(file))
@@ -487,7 +496,7 @@ function compileFixedRuntime({ workspace, sourceBytes, deploymentFiles, deps, ai
     clients: Object.entries(selections).map(([host, selected]) => ({ host, mode: selected.mode,
       schemaSha256: hash(selected.schema), declarationsSha256: hash(selected.declarations) })),
     projects: build.stages, files: outputs.map(([file, bytes]) => ({ file, sha256: hash(bytes) })) };
-  trustedBuilds.set(sourceFiles, { api, sourceSha256, npmLockSha256, evidence, selections, ts: build.ts, platformBuild });
+  trustedBuilds.set(sourceFiles, { api, sourceSha256, npmLockSha256, evidence, selections, ts: build.ts, platformBuild, mode });
   return { sourceFiles, selections, ts: build.ts };
 }
 
@@ -495,6 +504,7 @@ function createRentalHostContext(input) {
   const { aiMode, sourceFiles, platformFiles, rentalFiles, ticketsFiles, aiFiles, deploymentFiles, ts, selections } = input;
   const sourceProvenanceBytes = sourceFiles.get(sourceProvenanceFile);
   const fixed = (sourceFiles.has(sourceProvenanceFile) || trustedBuilds.has(sourceFiles)) && requireFixedRuntime(sourceFiles, sourceProvenanceBytes);
+  const development = fixed?.mode === 'development';
   if (fixed && (selections !== fixed.selections || ts !== fixed.ts
     || hash(deploymentFiles.get('core.deployment.lock.json')) !== fixed.evidence.deploymentLockSha256
     || hash(deploymentFiles.get('schema.prisma')) !== fixed.evidence.clients.find(client => client.host === 'rental').schemaSha256))
@@ -514,7 +524,9 @@ function createRentalHostContext(input) {
     || (lock.dataCapabilities?.length || 0) !== (aiMode === 'enabled' ? 1 : 0)
     || aiMode === 'enabled' && lock.dataCapabilities[0].id !== 'ai-native'
     || (aiMode === 'enabled') !== Boolean(aiFiles)) throw Error('部署锁、固定包与显式 AI 选择不一致');
-  if (sourceProvenanceBytes) requireHostSourceProvenance(sourceProvenanceBytes, sourceFiles.get('package-lock.json'), lock, host, aiMode, mcpEntry);
+  if (development && (host !== 'rental' || aiMode !== 'disabled' || mcpEntry)) throw Error('开发运行包只支持普通单 Rental 宿主');
+  if (sourceProvenanceBytes) requireSourceProvenance(sourceProvenanceBytes, sourceFiles.get('package-lock.json'), lock, host, aiMode, mcpEntry,
+    development ? 'development' : 'release');
   const publicSchema = text(sourceFiles, 'apps/platform-api/prisma/schema.prisma');
   if (publicSchema !== text(platformFiles, 'apps/platform-api/prisma/schema.prisma'))
     throw Error('实际公共 schema 与固定底座源码不同');
@@ -613,6 +625,12 @@ function createRentalHostContext(input) {
   files.set('.dockerignore', Buffer.from('**/node_modules\n**/generated\n**/.git\n**/.env\n**/.env.*\ndocs\noutput\n'));
   files.set('verify-runtime.cjs', Buffer.from(createRuntimeVerifier('rental-host.context.json', Boolean(mcpEntry))));
   files.set('README.md', Buffer.from('# 独立 Rental 宿主镜像上下文\n\n' +
+    (development ? '这是固定双仓开发组合，只用于独立新建的开发/冒烟库。不要用它更新已有安装、覆盖同版本发行或选作服务器候选。\n\n' +
+      '使用 Node 24.13.0。在解包根按运行锁执行 `npm ci --include=dev --ignore-scripts`，按 Dockerfile 的两条生成命令生成专属 Client，再运行 `node verify-runtime.cjs`。' +
+      '部署方配置专用 MySQL 的 `DATABASE_URL` 和 `AUTH_TOKEN_SECRET`，以 `apps/rental-api/prisma-deployment/schema.prisma` 执行 Prisma 5.22 迁移；' +
+      '设置初始口令后执行 `node apps/platform-api/dist/initialize.js`。' +
+      '设置 `RENTAL_AI_MODE=disabled` 和指向随包 `apps/rental-api/prisma-deployment/core.deployment.lock.json` 的绝对 `RENTAL_DEPLOYMENT_LOCK`，再运行 `node apps/rental-api/dist/main.js`。' +
+      '登录后依次登记部署准入、授权测试租户、分配成员和绑定 Core。\n\n' : '') +
     '本目录消费固定 Rental 包、所选 AI 数据包及原 prepared 锁/迁移。rental-host.context.json 记录实际字节摘要；不将作者工作区或包版本名当作已部署来源。\n\n' +
     '在目标 Linux 平台执行 `docker build --target runtime -t rental-host .`。构建按原 npm 锁安装依赖，并在镜像内用 Prisma 5.22.0 分别生成公共和所选宿主 Client；不会复制 Windows 引擎或默认 Client。外部镜像、apt/npm/引擎下载与实际构建须在部署环境核验。\n\n' +
     `镜像启动入口固定为 ${entry}，AI=${aiMode}。运行前由部署负责人配置 DATABASE_URL、AUTH_TOKEN_SECRET 及必要的原集成配置，沿原迁移账/物理观察办理数据库准备。候选材料位于 apps/rental-api/prisma-deployment；不得用它替代迁移收据。\n\n` +
@@ -626,6 +644,7 @@ function createRentalHostContext(input) {
       platformFiles, lock.platform.source, api.pinCoreDocumentationLinks)));
   }
   const receipt = { format: 'rental-host-context-1', host, aiMode, imageBuild: 'not-run', deployment: 'pending',
+    ...(development ? { sourceMode: 'development', releaseApproved: false, serverUpdateEligible: false } : {}),
     mcpMode: mcpEntry ? 'enabled' : 'disabled', ...(mcpEntry ? { mcpEntry } : {}),
     deploymentProvenance: 'rental-host.deployment-provenance.json',
     ...(sourceProvenanceBytes ? { sourceProvenance: { file: sourceProvenanceFile, sha256: hash(sourceProvenanceBytes) } } : {}),
@@ -638,6 +657,58 @@ function createRentalHostContext(input) {
     files: [...files].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([file, bytes]) => ({ file, sha256: hash(bytes) })) };
   files.set('rental-host.context.json', json(receipt));
   return { files, receipt, ...api.createCoreArchive(files) };
+}
+
+/** Build an untagged development candidate without relaxing the release CLI. */
+async function prepareRentalDevelopmentHost({ repo, repository, commit, coreRepo, coreCommit, deps }) {
+  const { compileFixedPlatformContracts, createRentalDevelopmentWorkspace } = require('./prepare-rental-workspace.cjs');
+  const { createBuild, verifyContracts } = require('./check-rental-package-build.cjs');
+  const { snapshotFromFiles } = require('./rental-build-snapshot.cjs');
+  const { verifyServer, verifyNative, rentalPackageInputs } = require('./verify-rental-distribution.cjs');
+  const { createMemoryBuild } = require('./rental-build-memory.cjs');
+  const contracts = compileFixedPlatformContracts(repo, commit, deps, true);
+  const loadContract = name => contracts.load(contracts.exported('@rental-os/core-contracts' + name, true));
+  const platformApi = { ...loadContract(''), ...loadContract('/platform-source'), ...loadContract('/archive') };
+  const workspace = await createRentalDevelopmentWorkspace({ repo, repository, commit, coreRepo, coreCommit,
+    mode: 'development', profile: 'host' }, platformApi);
+  const sourceBytes = workspace.files.get(sourceProvenanceFile);
+  const absolute = file => path.resolve(root, file).split(path.sep).join('/');
+  const build = createBuild(deps, { snapshot: snapshotFromFiles(commit,
+    new Map([...workspace.files].map(([file, bytes]) => [absolute(file), bytes]))), quiet: true });
+  if (JSON.parse(text(workspace.files, 'package-lock.json')).packages['node_modules/typescript']?.version !== build.ts.version)
+    throw Error('开发宿主编译器与双仓投影锁不一致');
+  verifyContracts(build);
+  const schemas = verifyServer(build);
+  for (const directory of ['apps/platform-api', 'packages/ai-native-data', 'apps/rental-api']) build.compile(directory + '/tsconfig.json');
+  verifyNative(build);
+  const memory = createMemoryBuild(build);
+  const load = name => memory.load(build.exported('@rental-os/' + name, true));
+  const platform = load('platform-api/data-plan').createPublicPlatformDataPlan();
+  const release = { versions: { platform: workspace.platform.version, contract: platformApi.CORE_CONTRACT_VERSION,
+    node: targetNodeVersion, capabilities: {} }, source: workspace.platform.source,
+  sha256: platformApi.createCoreArchive(workspace.platform.files).sha256, data: platform.data };
+  const sourceDirectory = 'packages/rental-core';
+  const packed = load('rental-api/package').createRentalHostPackage({ files: rentalPackageInputs(build),
+    source: workspace.rental.source, sourceDirectory, platformSource: workspace.platform.source, host: release.versions,
+    platformGuide: text(workspace.platform.files, 'packages/core-contracts/README.md') });
+  const rentalFiles = platformApi.readCoreArchive(packed.bytes, packed.sha256).files;
+  const deployment = memory.load(path.join(root, 'apps/rental-api/dist/prepare-deployment.js')).createRentalDeploymentFiles({
+    release, pin: { manifest: packed.manifest, sha256: packed.sha256 }, coreFiles: rentalFiles,
+    publicSchema: schemas.publicSchema, publicMigrations: platform.migrationNames.map((name, index) => ({ name,
+      sql: workspace.platform.files.get('apps/platform-api/' + platform.data.migrations[index].file) })) });
+  const pathFor = name => path.join(root, 'apps', name + '-api/generated/client/index.d.ts');
+  const selections = { platform: { mode: 'platform', client: pathFor('platform'), schema: schemas.publicSchema,
+    declarations: build.virtual.get(absolute(pathFor('platform'))) }, rental: { mode: 'rental', client: pathFor('rental'),
+    schema: schemas.schema, declarations: build.virtual.get(absolute(pathFor('rental'))) } };
+  // Same independent public replay used by release packing. In the development
+  // projection it also gives the ordinary API the exact public runtime bytes.
+  const platformBuild = compileRentalPlatformSource({ platformFiles: workspace.platform.files, release,
+    selection: selections.platform, dependencyDirectory: deps, ts: build.ts, api: platformApi });
+  for (const [file, bytes] of platformBuild.generated) if (!file.endsWith('/package.json'))
+    build.outputs.set(absolute(file), Buffer.from(bytes).toString('utf8'));
+  const compiled = bindFixedRuntime(build, workspace, sourceBytes, deployment.files, selections, platformBuild, 'development');
+  return createRentalHostContext({ ...compiled, aiMode: 'disabled', platformFiles: workspace.platform.files,
+    rentalFiles, deploymentFiles: deployment.files, dependencyDirectory: deps });
 }
 
 function collectInputs(options) {
@@ -759,6 +830,7 @@ function writeArchive(output, bytes) {
 }
 
 function main(args) {
+  if (args[0] === '--development') return packageDevelopment(args.slice(1));
   const options = parseArguments(args);
   ordinaryDirectories(path.dirname(options.output));
   if (fs.existsSync(options.output)) throw Error('目标归档已存在，不覆盖用户产物');
@@ -774,6 +846,27 @@ function main(args) {
   };
   const input = collectInputs(options);
   return options.sourceProvenance ? input.then(pack) : pack(input);
+}
+
+async function packageDevelopment(args) {
+  const options = {}, names = { '--repo': 'repo', '--repository': 'repository', '--commit': 'commit',
+    '--core-repo': 'coreRepo', '--core-commit': 'coreCommit', '--deps': 'deps', '--output': 'output' };
+  for (let index = 0; index < args.length; index += 2) {
+    const flag = args[index], name = names[flag], value = args[index + 1];
+    if (!Object.hasOwn(names, flag) || !value || value.startsWith('--') || Object.hasOwn(options, name))
+      throw Error('未知、重复或缺少值的开发宿主选项');
+    options[name] = value;
+  }
+  if (!options.repo || !options.repository || !options.coreRepo || !/^[a-f0-9]{40}$/u.test(options.commit ?? '')
+    || !/^[a-f0-9]{40}$/u.test(options.coreCommit ?? '') || !path.isAbsolute(options.output ?? '')
+    || options.deps && !path.isAbsolute(options.deps)) throw Error('开发宿主须指定双仓目录、底座仓库地址、两个完整提交和新归档绝对路径');
+  if (!options.output.endsWith('.tgz') || within(path.join(root, 'docs'), options.output) || fs.existsSync(options.output))
+    throw Error('输出须为私有资料目录之外、尚不存在的 .tgz 文件');
+  ordinaryDirectories(path.dirname(options.output));
+  const result = await prepareRentalDevelopmentHost({ ...options, deps: options.deps ?? path.resolve(options.repo, 'node_modules') });
+  writeArchive(options.output, result.bytes);
+  return { status: 'packaged', sourceMode: 'development', releaseApproved: false, serverUpdateEligible: false,
+    output: options.output, files: result.files.size, bytes: result.bytes.length, sha256: result.sha256, deployment: 'pending' };
 }
 if (require.main === module) {
   Promise.resolve().then(() => main(process.argv.slice(2)))

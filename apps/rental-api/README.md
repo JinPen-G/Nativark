@@ -2,6 +2,16 @@
 
 本目录组合公共平台与 Rental 标准包，持有唯一数据库、认证、Guard 和业务实例。独立 Nest 根模块和启动入口已提供；启动前必须通过真实挂载处理器的接点核对。未接齐的处理器会在 Client 构造、连接和监听前拒绝，不能通过漏挂路由或关闭核对来启用。
 
+## 固定双仓普通开发运行包
+
+在已按底座锁准备编译依赖的 Zelo 检出，使用 Node 24.13.0 运行：
+
+```sh
+node scripts/package-rental-host.cjs --development --repo <Zelo仓目录> --repository https://github.com/JinPen-G/Nativark --commit <Zelo完整SHA> --core-repo <Rental仓目录> --core-commit <Rental完整SHA> --output <新归档绝对路径.tgz>
+```
+
+解包后按随包 README 和 Dockerfile 安装锁定依赖、生成专属 Client、核对运行包，再用隔离的新库启动普通 Rental API。开发提交不必打 Tag；归档记录两仓来源、投影锁、构建产物和原迁移账名。开发包不能用于更新已有安装或作为服务器候选。后台和四端继续使用同版 `host` / `full` 源码组合。
+
 ## 入口与生命周期
 
 | 入口 | 职责 |

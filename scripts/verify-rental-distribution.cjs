@@ -178,10 +178,8 @@ function verifyNative(build) {
   return files;
 }
 
-function verifyPackage(build, portable, buildSource) {
-  build.compile('apps/platform-api/tsconfig.json');
-  build.compile('packages/ai-native-data/tsconfig.json');
-  build.compile('apps/rental-api/tsconfig.json');
+/** Package inputs come only from the fixed source map and this build's actual emits. */
+function rentalPackageInputs(build) {
   const packageRoot = slash(path.join(root, rentalSourceDirectory));
   const files = new Map();
   if (!build.snapshot) throw Error('标准归档须从固定 Git 快照编译，不能给活动 WIP 标旧 HEAD 来源');
@@ -198,6 +196,14 @@ function verifyPackage(build, portable, buildSource) {
       files.set(file.slice(packageRoot.length + 1), Buffer.from(text));
   }
   if (!files.has('LICENSE')) files.set('LICENSE', build.snapshot.files.get(slash(path.join(root, 'LICENSE'))));
+  return files;
+}
+
+function verifyPackage(build, portable, buildSource) {
+  build.compile('apps/platform-api/tsconfig.json');
+  build.compile('packages/ai-native-data/tsconfig.json');
+  build.compile('apps/rental-api/tsconfig.json');
+  const files = rentalPackageInputs(build), packageRoot = slash(path.join(root, rentalSourceDirectory));
   const source = portable?.source ?? buildSource ?? { repository: sourceRepository(), commit: build.snapshot.commit };
   // 校验所选 Git 底座和实际 Node，不能用固定的虚构宿主版本验证 Core 依赖。
   const host = portable?.host ?? {
@@ -396,4 +402,4 @@ async function main(args) {
 if (require.main === module) {
   main(process.argv.slice(2)).catch(error => { console.error(error.stack); process.exitCode = 1; });
 }
-module.exports = { generatePrismaDeclarations, selectedPrisma, verifyServer, verifyNative, verifyPackage, verifyConsumers, attachPrismaRuntime };
+module.exports = { generatePrismaDeclarations, selectedPrisma, verifyServer, verifyNative, rentalPackageInputs, verifyPackage, verifyConsumers, attachPrismaRuntime };
