@@ -10,5 +10,6 @@
       "@/lib/usePrefersReducedMotion": ["../../packages/platform-admin/src/lib/usePrefersReducedMotion.ts"]
     }
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src", "vite.config.ts"],
+  "exclude": ["src/start-ai.tsx"]
 }

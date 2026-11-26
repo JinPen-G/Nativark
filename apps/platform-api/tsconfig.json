@@ -9,5 +9,5 @@
     "incremental": false
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["dist"]
+  "exclude": ["dist", "dist-ai", "src/ai-main.ts", "src/ai-data.ts", "src/ai-access.ts"]
 }

@@ -12,7 +12,9 @@ export default defineConfig(({ mode }) => {
   return {
     envDir: false,
     publicDir: platform.publicDir, envPrefix: [], define: publicEnvironmentDefinitions("admin", env),
-    plugins: [...platform.plugins, tailwindcss(), react()],
+    plugins: [...(mode === "public-ai" ? [{ name: "platform-public-ai-entry",
+      transformIndexHtml: { order: "pre" as const, handler: (html: string) => html.replace("/src/start.tsx", "/src/start-ai.tsx") }
+    }] : []), ...platform.plugins, tailwindcss(), react()],
     css: { postcss: { plugins: platform.postcss } },
     resolve: { alias: platform.alias, extensions: platform.extensions },
     server: { port: Number(process.env.PORT ?? 5176), proxy: { "/api": { target: apiProxyTarget(env), changeOrigin: true } } }

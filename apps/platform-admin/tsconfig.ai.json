@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["src/start-ai.tsx", "src/vite-env.d.ts", "vite.config.ts"],
+  "exclude": []
+}

@@ -15,9 +15,12 @@
   "scripts": {
     "prebuild": "npm run build -w @rental-os/platform-core-host",
     "build": "tsc -p tsconfig.json",
+    "build:ai": "tsc -p tsconfig.ai.json",
     "prelint": "npm run build -w @rental-os/platform-core-host",
     "lint": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/main.js",
+    "start:ai": "node dist-ai/ai-main.js",
+    "grant:ai": "node dist-ai/ai-access.js",
     "initialize": "node dist/initialize.js",
     "prisma:generate": "prisma generate --schema prisma/schema.prisma",
     "prisma:validate": "prisma validate --schema prisma/schema.prisma",

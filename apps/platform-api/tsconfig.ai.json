@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "outDir": "dist-ai", "paths": { "@prisma/client": ["./generated/client/index.d.ts"] } },
+  "include": ["src/ai-main.ts", "src/ai-access.ts"],
+  "exclude": ["dist", "dist-ai"]
+}

@@ -1,10 +1,10 @@
-/** 公共宿主启动入口；只消费进程配置，业务Core由受控装配另外选择。导入本文件会监听端口。 */
+/** 公共宿主显式启动入口。引用不监听，已选宿主复用原认证、请求生命周期及进程配置。 */
 import "reflect-metadata";
-import { ValidationPipe } from "@nestjs/common";
+import { ValidationPipe, type DynamicModule, type Type } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { requestIdentityMiddleware } from "@rental-os/platform-server";
 
-async function bootstrap() {
+export async function bootstrapPlatform(select: () => Promise<Type<unknown> | DynamicModule>) {
   if (!process.env.DATABASE_URL?.trim()) throw new Error("公共宿主必须配置独立DATABASE_URL");
   if (!process.env.AUTH_TOKEN_SECRET?.trim()) throw new Error("公共宿主必须配置AUTH_TOKEN_SECRET");
   if (process.env.PLATFORM_DATA_SOURCE && process.env.PLATFORM_DATA_SOURCE !== "mysql")
@@ -14,8 +14,7 @@ async function bootstrap() {
   const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
   if (!Number.isSafeInteger(trustProxyHops) || trustProxyHops < 0) throw new Error("TRUST_PROXY_HOPS 须为非负整数");
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("API_PORT必须为1-65535的整数");
-  const { PlatformAppModule } = await import("./app.module");
-  const app = await NestFactory.create(PlatformAppModule);
+  const app = await NestFactory.create(await select());
   try {
     // 只按部署方声明的代理跳数解析客户端地址；缺省不采信转发头。
     if (trustProxyHops > 0) app.getHttpAdapter().getInstance().set("trust proxy", trustProxyHops);
@@ -31,4 +30,4 @@ async function bootstrap() {
   }
 }
 
-void bootstrap();
+if (require.main === module) void bootstrapPlatform(async () => (await import("./app.module")).PlatformAppModule);

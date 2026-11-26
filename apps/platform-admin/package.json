@@ -10,6 +10,7 @@
     "dev": "vite --host 127.0.0.1 --strictPort",
     "prebuild": "npm run build -w @rental-os/platform-core-host",
     "build": "tsc -p tsconfig.json && vite build",
+    "build:ai": "tsc -p tsconfig.ai.json && vite build --mode public-ai --outDir dist-ai",
     "lint": "tsc -p tsconfig.json",
     "prelint": "npm run build -w @rental-os/platform-core-host"
   },

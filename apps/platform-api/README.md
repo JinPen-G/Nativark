@@ -37,6 +37,22 @@ npm run start -w @rental-os/platform-api
 
 构建成功后，可用 `node packages/platform-server/dist/platform-openapi.js` 读取同版本公共接口资料。Web 的代理、首次改密和默认空态见[公共后台步骤](../platform-admin/README.md#本地使用)。已有组合库切换沿下方迁移边界核定。
 
+## 选装公共 AI 管理
+
+默认入口没有 AI。需要在零 Core 环境管理平台模型、费率、预算和额度时，使用同一固定组合的公共 AI 服务 SDK `0.2.1`、数据 SDK `0.2.1` 和独立数据包 `0.2.0`。从原公共 schema 与锁定的数据包生成此宿主的 115 模型 Client，再运行 `npm run build:ai -w @rental-os/platform-api`。选装工程不使用默认 Client 或旧混合 SDK。[服务包构建配置](../../packages/ai-native-server/tsconfig.public.json) · [数据包工厂](../../packages/ai-native-data/src/public-data-package.ts)
+
+`start:ai` 使用原 `CORE_DEPLOYMENT_LOCK_FILE`、新安装的 `PLATFORM_AI_DATA_PACKAGE_DIR` 两个绝对路径，以及服务端固定的 `PLATFORM_AI_PROFILE_ID`。锁只能包含公共底座和一个公共 AI 数据包，包目录、版本、摘要及所选 Client 均须匹配。此入口不会安装包、应用迁移、建立默认模型或发起模型调用。实际接口走原 Guard、同一数据库/事务和原账观察；使用者仍须具有 `system:ai-provider:view` 或 `system:ai-provider:manage`，选装入口不会给默认角色授权。[显式启动与装配](src/ai-main.ts)
+
+从已包含选装入口的固定 Zelo 提交准备源码组合，使用 [选装归档工具](../../scripts/prepare-platform-public-ai.cjs)：
+
+```sh
+node scripts/prepare-platform-public-ai.cjs --repo . --repository https://github.com/JinPen-G/Nativark --commit <完整SHA> --out <新tgz绝对路径>
+```
+
+在解包目录使用 Node 24.13.0，按锁安装、生成 Client 并构建。部署方仅对专用新库运行 `npm run db:migrate:deploy` 和 `npm run db:initialize`，将 `CORE_DEPLOYMENT_LOCK_FILE`、`PLATFORM_AI_DATA_PACKAGE_DIR` 分别指向解包中的 `apps/platform-api/prisma-deployment/core.deployment.lock.json` 和 `public-ai-data` 的绝对路径。旧混合库继续使用原发行及原账，不能重跑公共 AI 初始 SQL。
+
+用部署账号执行 `npm run grant:ai -- --role role_saas_admin --access manage`，显式给新库的初始 SaaS 角色登记并授予读/写；也可以指定实际要授权的 SaaS 角色 ID，`--access view` 只添加查看权限。命令核对实际迁移账、数据结构及角色归属，保留其他角色和原授权，以同一事务写审计。重复执行不会重复授权；默认初始化与启动均不授权。配置 `PLATFORM_AI_PROFILE_ID` 后运行 `npm start`，再用[配套公共 AI 后台](../platform-admin/README.md#选装公共-ai-管理)进入已有设置页。
+
 反向代理部署可设置进程配置 `TRUST_PROXY_HOPS` 为非负安全整数，默认 `0` 不信任转发头。只在 API 无法绕过代理直达、代理链跳数固定且入口代理正确重写转发头时，按实际跳数配置（例如单层受控代理设为 `1`）。公共限流继续使用 Express 据此解析的 `request.ip`，不直接采信任意 `X-Forwarded-For`，演示预约仍为每地址 5 次 / 600 秒，邀请阈值也保持原规则。非法配置在创建应用前拒绝。[启动实现](src/main.ts)
 
 ## 实现与功能入口

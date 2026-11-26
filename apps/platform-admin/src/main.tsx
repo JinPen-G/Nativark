@@ -4,7 +4,9 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { applyMotionPreference, isMotionReduced } from "@rental-os/platform-admin/motion";
 import { MotionGlobalConfig } from "motion/react";
-import { PlatformAdminApp } from "./App";
+import type { ComponentType } from "react";
 
-applyMotionPreference(); MotionGlobalConfig.skipAnimations = isMotionReduced();
-createRoot(document.getElementById("root")!).render(<StrictMode><PlatformAdminApp /></StrictMode>);
+export function mountPublicAdmin(App: ComponentType) {
+  applyMotionPreference(); MotionGlobalConfig.skipAnimations = isMotionReduced();
+  createRoot(document.getElementById("root")!).render(<StrictMode><App /></StrictMode>);
+}
