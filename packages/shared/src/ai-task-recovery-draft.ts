@@ -1,7 +1,7 @@
 import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT,
   type AiTaskEventDraft, type AiTaskStatusDraft, type AiStepStatusDraft } from './ai-task-draft';
-import type { AiTaskRunnerOutcomeDraft } from '@rental-os/platform-contracts/ai-task';
-export type { AiTaskRunnerOutcomeDraft } from '@rental-os/platform-contracts/ai-task';
+import type { AiTaskRunnerOutcomeDraft, AiTaskResourceKindDraft } from '@rental-os/platform-contracts/ai-task';
+export type { AiTaskRunnerOutcomeDraft, AiTaskResourceKindDraft } from '@rental-os/platform-contracts/ai-task';
 import { validateAiSceneRequestReceiptDraft, type AiSceneRequestReadDraft, type AiSceneRequestReceiptDraft } from './ai-scene-request-draft';
 import type { AiConversationTurnObservationDraft } from './ai-conversation-draft';
 import { AI_ERROR_CODES, type AiErrorCode } from './ai-native';
@@ -10,8 +10,6 @@ import { leafClosed as object, leafEnum as choice, leafId as id, leafInt as inte
   leafList as list, leafTime, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
 
 export const AI_TASK_RECOVERY_READ_VERSION = 'ain-task-recovery-read-1' as const;
-/** Existing task-resource units, not monetary/provider usage. */
-export type AiTaskResourceKindDraft = 'steps' | 'calls' | 'active_ms' | 'output_bytes';
 
 /** Canonical persisted observation. Decimal strings preserve counters; null is
  * absent evidence, never zero. No raw tool/model payload, credentials or lease.

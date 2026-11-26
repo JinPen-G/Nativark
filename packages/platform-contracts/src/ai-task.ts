@@ -9,6 +9,7 @@ export const AI_TASK_STATUSES_DRAFT = Object.freeze([
 export type AiTaskStatusDraft = typeof AI_TASK_STATUSES_DRAFT[number];
 export const AI_STEP_STATUSES_DRAFT = Object.freeze(["pending", "running", "succeeded", "failed", "unknown", "cancelled"] as const);
 export type AiStepStatusDraft = typeof AI_STEP_STATUSES_DRAFT[number];
+export type AiTaskResourceKindDraft = 'steps' | 'calls' | 'active_ms' | 'output_bytes';
 export const AI_TASK_TERMINAL_STATUSES_DRAFT: readonly AiTaskStatusDraft[] = Object.freeze([
   "succeeded", "partially_succeeded", "failed", "cancelled"
 ]);

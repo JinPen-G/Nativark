@@ -1,4 +1,4 @@
-import type { AiTaskResourceKindDraft } from '@rental-os/shared';
+import type { AiTaskResourceKindDraft } from '@rental-os/platform-contracts/ai-task';
 export type AiTaskExecutionResource = AiTaskResourceKindDraft;
 export type AiTaskExecutionCounters = Readonly<Record<AiTaskExecutionResource, bigint>>;
 export interface AiTaskExecutionPolicy {

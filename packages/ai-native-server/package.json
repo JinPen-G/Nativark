@@ -38,6 +38,9 @@
       "task-persistence": [
         "dist/task-persistence.d.ts"
       ],
+      "task-resource-ledger": [
+        "dist/task-resource-ledger.d.ts"
+      ],
       "public-tenant-task-authority": [
         "dist/public-tenant-task-authority.d.ts"
       ],
@@ -103,6 +106,10 @@
     "./task-persistence": {
       "types": "./dist/task-persistence.d.ts",
       "default": "./dist/task-persistence.js"
+    },
+    "./task-resource-ledger": {
+      "types": "./dist/task-resource-ledger.d.ts",
+      "default": "./dist/task-resource-ledger.js"
     },
     "./public-tenant-task-authority": {
       "types": "./dist/public-tenant-task-authority.d.ts",

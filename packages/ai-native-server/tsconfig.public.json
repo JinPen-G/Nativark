@@ -7,6 +7,7 @@
     "src/request-binding.ts",
     "src/task-transactions.ts",
     "src/task-persistence.ts",
+    "src/task-resource-ledger.ts",
     "src/public-tenant-task-authority.ts",
     "src/platform-transactions.ts",
     "src/tenant-configuration-transactions.ts",
