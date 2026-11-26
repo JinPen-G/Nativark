@@ -1,0 +1,2 @@
+# 迁移摘要按原始字节核验，Windows 检出也必须保留 LF。
+migrations/*.sql text eol=lf

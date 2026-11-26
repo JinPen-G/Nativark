@@ -1,0 +1,6 @@
+{
+  // 仅源码工作区的验证入口；发行入口为 index.tsx，由消费宿主的公共后台配置编译。
+  "extends": "../../platform-admin/tsconfig.json",
+  "compilerOptions": { "noEmit": true, "incremental": false },
+  "include": ["*.tsx", "../../platform-admin/src/**/*.d.ts"]
+}
