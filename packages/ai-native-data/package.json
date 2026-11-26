@@ -28,6 +28,15 @@
       ],
       "mysql-data": [
         "dist/mysql-data.d.ts"
+      ],
+      "public-data": [
+        "dist/public-data.d.ts"
+      ],
+      "public-data-package": [
+        "dist/public-data-package.d.ts"
+      ],
+      "public-mysql-data": [
+        "dist/public-mysql-data.d.ts"
       ]
     }
   },
@@ -55,6 +64,18 @@
     "./mysql-data": {
       "types": "./dist/mysql-data.d.ts",
       "default": "./dist/mysql-data.js"
+    },
+    "./public-data": {
+      "types": "./dist/public-data.d.ts",
+      "default": "./dist/public-data.js"
+    },
+    "./public-data-package": {
+      "types": "./dist/public-data-package.d.ts",
+      "default": "./dist/public-data-package.js"
+    },
+    "./public-mysql-data": {
+      "types": "./dist/public-mysql-data.d.ts",
+      "default": "./dist/public-mysql-data.js"
     }
   },
   "scripts": {

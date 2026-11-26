@@ -2,7 +2,17 @@
 
 本包承接原 AI Native 的持久模型和 SQL 材料，供显式选择 AI 的宿主在同一数据库、同一 Prisma Client 和原业务事务中使用。Runtime、Gateway、Worker、租户授权与原财务 / 删除账由各自服务负责，数据贡献归独立平台能力 `ai-native`。
 
-本版提供固定数据贡献、完整构建包校验、新库候选及 MySQL 结构计划。公共数据为 40 模型、`0.1.8`，Rental 为 121 模型、`0.1.0`，选择本包再加入原 AI 的 86 模型和 16 枚举，组合为 **247 模型、35 枚举**。原 API 为 241 模型，差出的 6 个对象归平台 Core 访问、绑定及操作。固定材料与前置以 [provenance](prisma/provenance.json) 和 [preparation](src/preparation.ts) 为准。
+## 公共新安装与 Rental 扩展
+
+新安装可以选用独立的[公共 AI 数据发行 `0.2.0`](README.public.md)。[公共 schema](prisma-public/schema.prisma)和[公共 SQL](prisma-public/20261126000000-initial.sql)包含 74 个 AI 模型、15 个枚举及 220 条语句。`prisma-public/` 与旧 `prisma/` 分开。[公共来源表](prisma-public/provenance.json)逐模型、枚举、语句绑定旧材料；[发行工厂](src/public-data-package.ts)只打包公共入口及材料。工作区的 `0.1.1` 元数据仅维持旧消费者，公共归档独立使用 `0.2.0`，既有固定 `0.1.1` 归档继续按原发布摘要读取。
+
+[Rental 扩展](../../apps/rental-api/src/ai-data-extension.ts)通过 `@rental-os/rental-api/ai-data-extension` 贡献 12 个模型、1 个枚举及 [31 条 SQL](../../apps/rental-api/prisma/ai-extension/20261126000000-initial.sql)，包括报价选单、批准重准备、预约交接、履约检查和业务失败出箱。它把原 Rental 关系接回同一 Prisma Client。公共 41 + 公共 AI 74 + Rental 121 + Rental AI 12，组合为 **248 模型、35 枚举**。公共 AI 物理观察在该组合中同时核对扩展对公共 AI 表追加的六条原外键。[扩展来源表](../../apps/rental-api/prisma/ai-extension/provenance.json)
+
+公共新安装可以用现有平台数据能力合同准备迁移。新 Rental 组合需要在 Rental 基线和公共 AI 都完成后才应用扩展。当前[通用迁移组合](../core-contracts/src/deployment.ts)将普通 Core 迁移排在平台能力前，不能直接登记扩展。扩展模块提供固定材料、前置、schema 和只读结构计划，完整扩展迁移登记由所选部署宿主处理。旧混合安装仍使用下文的 58 份迁移及原收据。
+
+## 原混合安装兼容基线
+
+原提取基线是公共数据 40 模型、`0.1.8`，Rental 121 模型、`0.1.0`，再加入原 AI 的 86 模型和 16 枚举，组合 **247 模型、35 枚举**。原 API 的 241 模型与其相差 6 个平台 Core 访问、绑定及操作对象。原数据仍提供固定贡献、完整包校验、新库候选及 MySQL 结构计划。固定材料以[原来源表](prisma/provenance.json)和[原准备入口](src/preparation.ts)为准。
 
 ## 入口与组合
 
@@ -91,7 +101,7 @@ const prepared = createAiNativeDataPreparation({ baseSchema, contribution: ai })
 2. 将发行资料加入所选部署锁的 `dataCapabilities`，使用 `checkPlatformDataCapabilities(lock)` 核数据前置。Core 安装检查使用 `coreDeploymentHostVersions(lock)` 的同一版本视图。本版材料支持公共数据 `0.1.8`、`0.1.9` 与 Rental 数据 `0.1.0`、`0.1.1` 的已声明范围和 initial 摘要。公共 `0.1.9` 仅追加独立限流表，原公共40模型与AI材料保持，组合为248模型。Rental `0.1.1` 只追加[六张换货工作流表](../rental-core/prisma/migrations/20261125010000_rental_exchange_workflow/migration.sql)，不改原 schema、initial 或 AI 依赖的表、列和键；六表不与 AI 的58份迁移重名，仍按公共 → Rental完整迁移链 → AI 的顺序准备。固定提取基线仍为公共40模型/`0.1.8`、Rental121模型/`0.1.0`，来源和58份SQL摘要不变。公共数据 `0.1.10`、Rental 数据 `0.1.2` 及之后须另行验证兼容。
 3. 以 `createCoreMigrationDeployment({ lock, platform, cores, dataCapabilities })` 准备完整迁移集合。`dataCapabilities` 是能力 ID 到完整已核包字节的 Map，必须覆盖锁中的全部所选能力。另用上面的 schema 组合器形成同一宿主的完整 schema，再沿宿主准备入口保存新的待部署目录。
 
-部署组合核对公共 → Core → 平台能力的实际目录排序，缺包、摘要变化或混入未选择能力都会拒绝。`createAiNativeDataPreparation` 仅返回 AI 材料，完整部署与最终 schema 由宿主组合；结果仍为 `prepared / pending`。
+原混合部署组合核对公共 → Core → 平台能力的实际目录排序，缺包、摘要变化或混入未选择能力都会拒绝。`createAiNativeDataPreparation` 仅返回 AI 材料，完整部署与最终 schema 由宿主组合；结果仍为 `prepared / pending`。
 
 更新已选择的 AI 数据能力时，向 `planCoreUpdate` 提交 `{ kind: "platform-capability", capabilityId: "ai-native", release }`。预检保留底座及其他 Core／能力，只核前进版本、不可变旧迁移、当前物理版本和原执行状态。缺观察、同版本资料改写、降版、unknown 或未选模块还需迁移时都拒绝；它不执行更新或补写成功账。[独立更新合同](../core-contracts/README.md#分别更新底座或一个-core)
 
@@ -103,7 +113,7 @@ const prepared = createAiNativeDataPreparation({ baseSchema, contribution: ai })
 - `createRentalDeploymentFiles` 核固定公共、Rental 及显式 AI 完整包，组合最终 schema / 迁移 / 部署锁。CLI 只写本宿主的新候选目录，结果保持 prepared / pending。[部署准备](../../apps/rental-api/src/prepare-deployment.ts)
 - `composeRentalAiApplication` 从部署锁定位同一安装包，用 requireAiNativeDataPackage 和 MySQL 计划供给实际装配。原账 / 物理观察由同一 Native 提供，AI 请求再核 requireDataCapabilityAvailable("ai-native")，普通 Rental 使用自己的原准入路径。[AI 装配](../../apps/rental-api/src/ai-assembly.ts) · [同一宿主](../../apps/rental-api/src/assembly.ts) · [宿主构建与运行](../../apps/rental-api/README.md)
 
-本版依赖 Rental 的原关联，公共 40 模型宿主须先具备已声明的 Rental 数据前置。选择数据、准备迁移、当前物理 / 原账可用和 AI 工具发布各由对应入口核定。
+以上入口沿用原混合版本，需要已声明的 Rental 数据前置。选择数据、准备迁移、当前物理 / 原账可用和 AI 工具发布各由对应入口核定。
 
 ## 真实物理观察与旧库边界
 

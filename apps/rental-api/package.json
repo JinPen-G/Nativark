@@ -37,6 +37,10 @@
       "types": "./dist-ai/ai-app.module.d.ts",
       "default": "./dist-ai/ai-app.module.js"
     },
+    "./ai-data-extension": {
+      "types": "./dist-ai/ai-data-extension.d.ts",
+      "default": "./dist-ai/ai-data-extension.js"
+    },
     "./mcp-bootstrap": {
       "types": "./dist-mcp/mcp-bootstrap.d.ts",
       "default": "./dist-mcp/mcp-bootstrap.js"
@@ -75,6 +79,9 @@
       ],
       "ai-app-module": [
         "dist-ai/ai-app.module.d.ts"
+      ],
+      "ai-data-extension": [
+        "dist-ai/ai-data-extension.d.ts"
       ],
       "mcp-bootstrap": [
         "dist-mcp/mcp-bootstrap.d.ts"

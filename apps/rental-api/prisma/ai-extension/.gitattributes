@@ -1,0 +1,5 @@
+# Fixed SQL, schema and provenance are hashed as bytes on every host.
+# The original SQL splitter preserves indentation at removed comment lines.
+20261126000000-initial.sql -text whitespace=-blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+schema.prisma -text
+provenance.json -text

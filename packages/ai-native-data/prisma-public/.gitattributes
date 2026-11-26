@@ -1,0 +1,4 @@
+# Fixed SQL, schema and provenance are hashed as bytes on every host.
+*.sql -text
+schema.prisma -text
+provenance.json -text

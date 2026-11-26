@@ -1,0 +1,2540 @@
+{
+  "formatVersion": 1,
+  "kind": "fresh-install-only",
+  "source": {
+    "commit": "8ff0dd81f8df2d022a46c0c3bf9b8d13832adb3e",
+    "schema": "packages/ai-native-data/prisma/schema.prisma",
+    "sha256": "874f53dfb556563d84eb2f1877c9df771a6fe904db979731c6acdd9590cf67bc"
+  },
+  "models": [
+    {
+      "name": "AiTenantModelConfiguration",
+      "table": "ai_tenant_model_configurations",
+      "originalSha256": "10d62a725ab0e159c5876e69c67b77b9c05e83e437c87d33853f42ac09e6bfa0"
+    },
+    {
+      "name": "AiModelConfigurationOperation",
+      "table": "ai_model_configuration_operations",
+      "originalSha256": "fd3884351d6878d6955ce106ba99e8e5887b6b6a3518de4efc970c5f87088dcd"
+    },
+    {
+      "name": "AiProviderProfile",
+      "table": "ai_provider_profiles",
+      "originalSha256": "7d9c08220abac53f7f37362167bd1507a09a143b7a8a232d66f2550e4d916fed"
+    },
+    {
+      "name": "AiTextCapabilityReceipt",
+      "table": "ai_text_capability_receipts",
+      "originalSha256": "3188272b2c47e74d9be17fc1170292d14faa2ef5e7dc79cbd3d830ee1932b694"
+    },
+    {
+      "name": "AiPlatformModelConnection",
+      "table": "ai_platform_model_connections",
+      "originalSha256": "86d9c3b979b0e4d5fddc8e2b840728882434062e96cf314b817f9a3d86396982"
+    },
+    {
+      "name": "AiProviderCapabilityEvidence",
+      "table": "ai_provider_capability_evidence",
+      "originalSha256": "6e6486fc2893aadff7d746a1e92827aafd7ef628b308d117e083c8ad15e82fca"
+    },
+    {
+      "name": "AiInvocationAdmission",
+      "table": "ai_invocation_admissions",
+      "originalSha256": "d1ec9cae4f8621f23ca6baef3d81dc47693e9535544a4da92d60cf52c65b6ecc"
+    },
+    {
+      "name": "AiUsageReservation",
+      "table": "ai_usage_reservations",
+      "originalSha256": "01834d318dd7d0acc1912ed90dfee60d06b8fd7b34673d6c10b5263dc3e61e65"
+    },
+    {
+      "name": "AiUsageLedgerEntry",
+      "table": "ai_usage_ledger_entries",
+      "originalSha256": "543bfad8b5118b0b2f8eeed72e68d86e2aed87469e1f27959f05914108d3109d"
+    },
+    {
+      "name": "AiGatewayInvocation",
+      "table": "ai_gateway_invocations",
+      "originalSha256": "f29f074b3388e404d8b0605aa62387cd15902634afcb54456378a4788ab35512"
+    },
+    {
+      "name": "AiGatewayToolCallBinding",
+      "table": "ai_gateway_tool_call_bindings",
+      "originalSha256": "43e0a7027e5e6a524ce792e06fc5cda15952a944482700b8a896dda91f3197b8"
+    },
+    {
+      "name": "AiGatewayAccountingReceipt",
+      "table": "ai_gateway_accounting_receipts",
+      "originalSha256": "a48c88ac204111995c80684d710c5ff68b6a6080a7bb10209d842806eb73cc86"
+    },
+    {
+      "name": "AiTaskExecutionBudget",
+      "table": "ai_task_execution_budgets",
+      "originalSha256": "7219bff042e1bb0b0eb3d24adda86cfb8ddd0694d671741a7077ba2e16ee698f"
+    },
+    {
+      "name": "AiTaskExecutionCharge",
+      "table": "ai_task_execution_charges",
+      "originalSha256": "fdb0fdd1cbf5d4c13809ee7c5eae7c93b9791b8b7281d77e8704370a18510ade"
+    },
+    {
+      "name": "AiTaskRunPreparation",
+      "table": "ai_task_run_preparations",
+      "originalSha256": "2656929f72ed89da905b69e6ca972cd67f366f00999dec0a580e75acc625b310"
+    },
+    {
+      "name": "AiTaskRunOverhead",
+      "table": "ai_task_run_overheads",
+      "originalSha256": "a6b110e17a7b68d3bccf623e57c0b47b496f9bda64978b15bf6ad61b3ba4eae4"
+    },
+    {
+      "name": "AiTaskRunPlan",
+      "table": "ai_task_run_plans",
+      "originalSha256": "c78b07b941b71496d41d65692fe62847a17ebba879245a5080579f6b84267e32"
+    },
+    {
+      "name": "AiTaskPlanPolicy",
+      "table": "ai_task_plan_policies",
+      "originalSha256": "922b98abe33280bda8bb228d6a4f3aa9dc805cd02c7d1496408881f3093fa2f1"
+    },
+    {
+      "name": "AiTaskActionInput",
+      "table": "ai_task_action_inputs",
+      "originalSha256": "ceec2c073e5d3dbfb7e38e18ab3a7fc1369db0cd307610e30ecca26082b2be5b"
+    },
+    {
+      "name": "AiTaskActionPolicy",
+      "table": "ai_task_action_policies",
+      "originalSha256": "88172a515712cc23a0156e89e7ddc2f032abeafea05a425863e0b95c286bee8c"
+    },
+    {
+      "name": "AiClientSceneMaterial",
+      "table": "ai_client_scene_materials",
+      "originalSha256": "98e2be896ab26c4f08d42cca547904ddc7de08bda6a6cf6b45986fcda275c34e"
+    },
+    {
+      "name": "AiClientTaskPolicy",
+      "table": "ai_client_task_policies",
+      "originalSha256": "3de8e10cd83a931709bb7bfabb5fdcf86c5340e15e225dafd229332ff401cb6f"
+    },
+    {
+      "name": "AiClientTaskInput",
+      "table": "ai_client_task_inputs",
+      "originalSha256": "672435a0be46fdded2820cce47f745f1896a872ae4f66d83814ef8d299242c52"
+    },
+    {
+      "name": "AiAutomationSubject",
+      "table": "ai_automation_subjects",
+      "originalSha256": "6287f1dd62e1588e6b3209027d4508321c839d9dcfeb61fefbaea52b01b7b2f4"
+    },
+    {
+      "name": "AiAutomationPolicy",
+      "table": "ai_automation_policies",
+      "originalSha256": "55f8c319516a7fd6698e6722b4c3fdd6f6d75d341874a8626765ab8dee646557"
+    },
+    {
+      "name": "AiAutomationInput",
+      "table": "ai_automation_inputs",
+      "originalSha256": "7abcc4eb72e4ab9174cc146c3169d59ff089744d0271aab23c090f02d60e92aa"
+    },
+    {
+      "name": "AiAutomationManagementGrant",
+      "table": "ai_automation_management_grants",
+      "originalSha256": "eb493d26a2a7c2cb69ff6a871801ab4db158f7a986956be9305a61dd161b2e60"
+    },
+    {
+      "name": "AiAutomationPolicyPreparation",
+      "table": "ai_automation_policy_preparations",
+      "originalSha256": "88f0f2ea5abb17977431afa4249e9cf2927c6c1d047d9f5c008bbfc2c330a61e"
+    },
+    {
+      "name": "AiAutomationPolicyManagementOperation",
+      "table": "ai_automation_policy_management_operations",
+      "originalSha256": "4eba9b600193d0c10af6646b5746462da187121d793bedacad4ab694966bab88"
+    },
+    {
+      "name": "AiAutomationReviewGrant",
+      "table": "ai_automation_review_grants",
+      "originalSha256": "90b6451421bcc5e59b2a89c55811a6a05fc5a08665594f92a3f303f2184b4dce"
+    },
+    {
+      "name": "AiAutomationReviewOperation",
+      "table": "ai_automation_review_operations",
+      "originalSha256": "65dd928f29d1f105d511f876cc7ea664571d30c0b4ac660651306ba3df87cde0"
+    },
+    {
+      "name": "AiKnowledgeActionPolicy",
+      "table": "ai_knowledge_action_policies",
+      "originalSha256": "217afc839166efbf42a8c57f0ca71f21b3055805ef3a3ca472e04ea29dbbb8f1"
+    },
+    {
+      "name": "AiKnowledgePolicyManagementAuthority",
+      "table": "ai_knowledge_policy_management_authorities",
+      "originalSha256": "35064b313936427626c95a248efe5450d56bffb5bdab0d423084f982d1be8d9d"
+    },
+    {
+      "name": "AiKnowledgePolicyPreparationTarget",
+      "table": "ai_knowledge_policy_preparation_targets",
+      "originalSha256": "4d56fc59082c27532f68fe28425556b9b79faf9b316226d04ffe01da72898e16"
+    },
+    {
+      "name": "AiKnowledgePolicyPreparation",
+      "table": "ai_knowledge_policy_preparations",
+      "originalSha256": "284eccc07fb2d75f0ad27d2492ee2b101e7827ae80a6c6bc6b8a370fd35df7ad"
+    },
+    {
+      "name": "AiKnowledgePolicyManagementOperation",
+      "table": "ai_knowledge_policy_management_operations",
+      "originalSha256": "40e4cf41bfbcbf848dcc3ccdfbb465c15b9e3e748fbadba278453b8c2c556a2a"
+    },
+    {
+      "name": "AiTaskResultArtifact",
+      "table": "ai_task_result_artifacts",
+      "originalSha256": "ed0f275170394cea6e1abe73049de00374daf4836172b680f4ad70fc95da98f8"
+    },
+    {
+      "name": "AiTaskExecutionPhaseStart",
+      "table": "ai_task_execution_phase_starts",
+      "originalSha256": "e4ad3edb8fcf055ee6c7df2d2f258a29c7babb71dcffaa00825a66f64c1b0d50"
+    },
+    {
+      "name": "AiTaskExecutionPhaseReceipt",
+      "table": "ai_task_execution_phase_receipts",
+      "originalSha256": "9b9e114f791a8e139e353ecf441d07de8a95e07261a24a797eda0678c57d0e25"
+    },
+    {
+      "name": "AiTaskInputRequest",
+      "table": "ai_task_input_requests",
+      "originalSha256": "45e72a01af51994417391b3c99a423317b5a62e3b9d178d6edceee35b98644c9"
+    },
+    {
+      "name": "AiTaskInputReceipt",
+      "table": "ai_task_input_receipts",
+      "originalSha256": "af7f74693a951c629379c333e0bdd3048c87e56f75d811ba0ae8ec49448dee19"
+    },
+    {
+      "name": "AiBudgetPolicy",
+      "table": "ai_budget_policies",
+      "originalSha256": "aa8ff866d29eb8aa82a6a7d1eecb56417f4d533eefce2c1303b5f0e435c75a61"
+    },
+    {
+      "name": "AiBudgetReservation",
+      "table": "ai_budget_reservations",
+      "originalSha256": "b872771c25cc5bd70aca8e90e7535eff49b7509d3aa193b407a7edd743c3f613"
+    },
+    {
+      "name": "AiTenantAiAllowance",
+      "table": "ai_tenant_ai_allowances",
+      "originalSha256": "6af2623a5aca61d5d94ba8266e1aa5fb9170eccb8e6565ce8fc21255cb223fe9"
+    },
+    {
+      "name": "AiTenantAiCreditRequest",
+      "table": "ai_tenant_ai_credit_requests",
+      "originalSha256": "7081befb5460c04082dc1b341fc3f53eaed8c1ca3314e6d55c7f0065f9b30e6a"
+    },
+    {
+      "name": "AiBudgetLedgerEntry",
+      "table": "ai_budget_ledger_entries",
+      "originalSha256": "c66933c8475d629fe54d19e8ca5e221b7ab52419e59dd41591b88ba7e834b06b"
+    },
+    {
+      "name": "AiBudgetAllocation",
+      "table": "ai_budget_allocations",
+      "originalSha256": "59978daa49c024414a4b610583cd845986f904083f4b0dd4a8867b171490cd2b"
+    },
+    {
+      "name": "AiKnowledgeDocument",
+      "table": "ai_knowledge_documents",
+      "originalSha256": "560915f105748cad84726081e77636c7aceb4456a39d6c6780af01537b749700"
+    },
+    {
+      "name": "AiKnowledgeVersion",
+      "table": "ai_knowledge_versions",
+      "originalSha256": "d5cba8816126329211709f2f66ea7ce6bf2f91b4cadec2c8258ccbd769870daa"
+    },
+    {
+      "name": "AiKnowledgeChunk",
+      "table": "ai_knowledge_chunks",
+      "originalSha256": "711d07d36fadc83bf365e6aa5ab4b6c81255ceab80af5c499ec3f3e035a93827"
+    },
+    {
+      "name": "AiKnowledgeOperation",
+      "table": "ai_knowledge_operations",
+      "originalSha256": "d2eee3df8c83f9e02472320f6090c0a77664f84cbba3b0cabf9f1d864cd1df58"
+    },
+    {
+      "name": "AiKnowledgeAcl",
+      "table": "ai_knowledge_acl",
+      "originalSha256": "3cafd65b6af7d66aea65af214184ea9f65c10d9551a909cb8915ce2e40d59578"
+    },
+    {
+      "name": "AiKnowledgeIndexGeneration",
+      "table": "ai_knowledge_index_generations",
+      "originalSha256": "4017648bcd293e275fa1e532e5211d4116e7469c5a415f906ce036f2e82dd026"
+    },
+    {
+      "name": "AiStructuredMemory",
+      "table": "ai_structured_memories",
+      "originalSha256": "3d5eca07faff59081265054fcf9741df404050070c8248dbd44b42c98ebcc4f1"
+    },
+    {
+      "name": "AiMemoryOperation",
+      "table": "ai_memory_operations",
+      "originalSha256": "9d585cc0f8ca66838288e5eff0d035bffa3151eea025b085d7498b6d06ff0078"
+    },
+    {
+      "name": "AiHumanConfirmation",
+      "table": "ai_human_confirmations",
+      "originalSha256": "3704e497ef4b26b9e441907ba7b58eaec177f69ffdc6037de21bd669fe4e33dc"
+    },
+    {
+      "name": "AiConversation",
+      "table": "ai_conversations",
+      "originalSha256": "6fffdaf7f09db2f86316e47a76eb1651588506d31cdf4daadd5d51b5e4890e08"
+    },
+    {
+      "name": "AiConversationTurn",
+      "table": "ai_conversation_turns",
+      "originalSha256": "e417deeec580ba77534bc721d5bd167e1ede378dcc4d7a0ee9a3d1a246955cc8"
+    },
+    {
+      "name": "AiConversationOperation",
+      "table": "ai_conversation_operations",
+      "originalSha256": "4789ab22a3616f297fbc42268de6c7c408485b60f37149677e8e3447510d9fc3"
+    },
+    {
+      "name": "AiTaskOriginalRequest",
+      "table": "ai_task_original_requests",
+      "originalSha256": "661f57a7f679950fc6fdbb1a3e715ab5c592fd12185316d5c8ef9fb6909ed680"
+    },
+    {
+      "name": "AiScope",
+      "table": "ai_scopes",
+      "originalSha256": "0e6cd1831ddbcb69a0aed179133c9dc5e22d6bacbcf935a2a8552e838eb18705"
+    },
+    {
+      "name": "AiLegacyB02Scope",
+      "table": "ai_legacy_b02_scopes",
+      "originalSha256": "9b49f573f0c0d70adb7e3a9c493695226fbdb7c2629501a50744966dc0032a6e"
+    },
+    {
+      "name": "AiTask",
+      "table": "ai_tasks",
+      "originalSha256": "a8d79b59f599b1297a0a8394dc8bab45f118fcbe16d25a1ffb29ee598ac18975"
+    },
+    {
+      "name": "AiRun",
+      "table": "ai_runs",
+      "originalSha256": "19d09bc170ef0ad49e6b19f385ad31bcd94474dd65281267a0ce6579e7073e8d"
+    },
+    {
+      "name": "AiStep",
+      "table": "ai_steps",
+      "originalSha256": "714ea43e0a1b1aaee681ca494ad707598ebc9eb285add61f6f21e90594c19251"
+    },
+    {
+      "name": "AiProposal",
+      "table": "ai_proposals",
+      "originalSha256": "da86f623137a83ae8b09460767d704636b5ef3a49fd6b8cb94d01a0ac996d49e"
+    },
+    {
+      "name": "AiProposalVersion",
+      "table": "ai_proposal_versions",
+      "originalSha256": "69130ff80b1aff3ea2697170fb2e4b08d380872ca45aa43e2e7bf7d7d6af6009"
+    },
+    {
+      "name": "AiProposalAction",
+      "table": "ai_proposal_actions",
+      "originalSha256": "4f9e1e7dcd932890287792a8c0be303b26abcacb9899d56d393dc48b29f83882"
+    },
+    {
+      "name": "AiApproval",
+      "table": "ai_approvals",
+      "originalSha256": "3bbfc3a65221d30ff9f610236a8c719714c5ffbcfd5d60e1e4df76821a60256d"
+    },
+    {
+      "name": "AiApprovalConsumption",
+      "table": "ai_approval_consumptions",
+      "originalSha256": "5f7f0b436ab0ad13e70f11e982f8a26b94ef55a04aee2ed6879c2de4ea2a8865"
+    },
+    {
+      "name": "AiTaskEvent",
+      "table": "ai_task_events",
+      "originalSha256": "cbaafa05c3e4dfd195e9185356544b6e1a7e10f64de21a91c2a088d0ce014f5d"
+    },
+    {
+      "name": "AiGatewayPriceRecord",
+      "table": "ai_gateway_price_records",
+      "originalSha256": "00a12e71d9d6cae6398f4d20822bc3f17f83eff7d48e83fd9d06994f58341835"
+    },
+    {
+      "name": "AiGatewayInputBoundRecord",
+      "table": "ai_gateway_input_bound_records",
+      "originalSha256": "3723ea2b10a1bf9c8e26c60182df1f770a4ec64284afc9e14b6bbd36d720d973"
+    },
+    {
+      "name": "AiDataErasure",
+      "table": "ai_data_erasures",
+      "originalSha256": "f7c4e7cc3d4d49ffd7426301aeb5eea0e867edb53a347b23c56d078aa6621136"
+    }
+  ],
+  "enums": [
+    {
+      "name": "AiProviderProfileRole",
+      "originalSha256": "e1c0f6178550c35033423d10f75f19fbe080ec88fdf4cd6020711eca2ec71f2a"
+    },
+    {
+      "name": "AiTaskExecutionResource",
+      "originalSha256": "8b8bc64ff169fd72eeeffa80accc3fad6777e9b0f0a932abc67daf2fd24828ba"
+    },
+    {
+      "name": "AiTaskExecutionChargeStatus",
+      "originalSha256": "c0833ffdeca45835c1ff1341fcfdc7fd5f17e29f77e594d206fde19aa4f76129"
+    },
+    {
+      "name": "AiClientTaskDispatchState",
+      "originalSha256": "b969944ce72d33e1bdd2c85cd6bc447aac9fb8b7652490003e8887486bee8d47"
+    },
+    {
+      "name": "AiTaskInputRequestStatus",
+      "originalSha256": "12730c8fa499a3293fee296403ff421473ad05a5b6c0734b1840f5561e29a7d4"
+    },
+    {
+      "name": "AiScopeKind",
+      "originalSha256": "4968ec044b72abff2e927ff3b079e6701c7d23f895bba4b4d2d0fc2883fed1a0"
+    },
+    {
+      "name": "AiAudience",
+      "originalSha256": "ced058318f501859b656c8428fa47bb21fe9c762759724f1a3944794ecda5a85"
+    },
+    {
+      "name": "AiActorKind",
+      "originalSha256": "28b7044f3206fe1701e0e0af9c02aa22692058cb57b0e33516ebe5b9c30057fd"
+    },
+    {
+      "name": "AiTaskStatus",
+      "originalSha256": "4622efce92f2cdd64a9a14c733218b22872f97818e4b8aef04a119eda1171e67"
+    },
+    {
+      "name": "AiStepStatus",
+      "originalSha256": "dc30539e7b32e77aa9ae16c514bb9ac804e7e7695407b81367caeface3fae837"
+    },
+    {
+      "name": "AiStepEffect",
+      "originalSha256": "0d655806c0a70e58da54acf3cabadb7c31ff5f54202522df7a6f6b89bbd64fbf"
+    },
+    {
+      "name": "AiProposalStatus",
+      "originalSha256": "d4ab15b69b40ff7bea00d12ca8d632bcd9e40e65d72b4d1b00c67006a42870fe"
+    },
+    {
+      "name": "AiApprovalDecision",
+      "originalSha256": "6776e320180ce2358abbed42d65d6289255f2e1ee5ca4f152e73124b988b19cd"
+    },
+    {
+      "name": "AiApprovalConsumptionStatus",
+      "originalSha256": "2179818259c542aa0d3c86b61821f2595e14ee43ebfae2cc1c40374e41008e5e"
+    },
+    {
+      "name": "AiTaskOriginalRequestStatus",
+      "originalSha256": "45c04087a8ed516b8f90455a644fe64922a4b950a9bbc9544749026bc6fa317d"
+    }
+  ],
+  "sourceMigrations": [
+    {
+      "id": "ai-native.20261003050000",
+      "file": "prisma/migrations/20261003050000_ai_b02_scope_preserve/migration.sql",
+      "name": "platform-capability.ai-native.20261003050000",
+      "originalName": "20261003050000_ai_b02_scope_preserve",
+      "sha256": "26c34f16115cfd08360a265de56d62ca7778befd1a93fa426233a250cf8f05a4"
+    },
+    {
+      "id": "ai-native.20261003060000",
+      "file": "prisma/migrations/20261003060000_ai_task_foundation/migration.sql",
+      "name": "platform-capability.ai-native.20261003060000",
+      "originalName": "20261003060000_ai_task_foundation",
+      "sha256": "65a2e86239c5449a7703f96329d0f060c5eae1eccfbcc567b122602e48c6b3cb"
+    },
+    {
+      "id": "ai-native.20261003070000",
+      "file": "prisma/migrations/20261003070000_ai_task_creation_identity/migration.sql",
+      "name": "platform-capability.ai-native.20261003070000",
+      "originalName": "20261003070000_ai_task_creation_identity",
+      "sha256": "904c2c11f31ec85bcb937c9955bef10f7bbe72a3abf3dd93a2481e670e266abc"
+    },
+    {
+      "id": "ai-native.20261003160000",
+      "file": "prisma/migrations/20261003160000_ai_provider_profiles/migration.sql",
+      "name": "platform-capability.ai-native.20261003160000",
+      "originalName": "20261003160000_ai_provider_profiles",
+      "sha256": "b03cb5022a4983015d5d6d7e7e58f352147abf0035b53936bb521d4553225a33"
+    },
+    {
+      "id": "ai-native.20261004010000",
+      "file": "prisma/migrations/20261004010000_ai_budget_subsystem/migration.sql",
+      "name": "platform-capability.ai-native.20261004010000",
+      "originalName": "20261004010000_ai_budget_subsystem",
+      "sha256": "6bae016df50f5daf83f06fb032772c7a60d759f3e3493be5a9bac0d67c9c083e"
+    },
+    {
+      "id": "ai-native.20261004023000",
+      "file": "prisma/migrations/20261004023000_ai_budget_ledger_replay_guard/migration.sql",
+      "name": "platform-capability.ai-native.20261004023000",
+      "originalName": "20261004023000_ai_budget_ledger_replay_guard",
+      "sha256": "b67e7f3395680439a5ac26ef13d4dc85ab689949a5ca8ecc26ce194854dce00f"
+    },
+    {
+      "id": "ai-native.20261005010000",
+      "file": "prisma/migrations/20261005010000_ai_tenant_model_configuration/migration.sql",
+      "name": "platform-capability.ai-native.20261005010000",
+      "originalName": "20261005010000_ai_tenant_model_configuration",
+      "sha256": "62500c38b2572e59860f7882e49ab9e4b6a0f24c1b79a11ec6cfc2271cec8143"
+    },
+    {
+      "id": "ai-native.20261005020000",
+      "file": "prisma/migrations/20261005020000_ai_platform_model_connection/migration.sql",
+      "name": "platform-capability.ai-native.20261005020000",
+      "originalName": "20261005020000_ai_platform_model_connection",
+      "sha256": "7f0ddc5aeed125d7544aae0af6437fa4a3eef42e6196d681bba29e53d606b8d5"
+    },
+    {
+      "id": "ai-native.20261005030000",
+      "file": "prisma/migrations/20261005030000_ai_budget_configuration_binding/migration.sql",
+      "name": "platform-capability.ai-native.20261005030000",
+      "originalName": "20261005030000_ai_budget_configuration_binding",
+      "sha256": "99a5ed1230920c543622046b79bd64840bd54f5c7380d33e077dbec531272c9e"
+    },
+    {
+      "id": "ai-native.20261005040000",
+      "file": "prisma/migrations/20261005040000_ai_gateway_invocation_binding/migration.sql",
+      "name": "platform-capability.ai-native.20261005040000",
+      "originalName": "20261005040000_ai_gateway_invocation_binding",
+      "sha256": "53a5a7ac0b891415c747c0d2b9263386015cdba55c4d30d53ee79eae2807aefd"
+    },
+    {
+      "id": "ai-native.20261005050000",
+      "file": "prisma/migrations/20261005050000_ai_task_execution_resources/migration.sql",
+      "name": "platform-capability.ai-native.20261005050000",
+      "originalName": "20261005050000_ai_task_execution_resources",
+      "sha256": "3c3b27ce1bb79401d76bbd55b01fee1c4e873817aed935108086f59bf19faec7"
+    },
+    {
+      "id": "ai-native.20261005060000",
+      "file": "prisma/migrations/20261005060000_ai_gateway_accounting_receipts/migration.sql",
+      "name": "platform-capability.ai-native.20261005060000",
+      "originalName": "20261005060000_ai_gateway_accounting_receipts",
+      "sha256": "cd6842c131b6f4371be29578d65e1b1ab5d3489ad3c379c1a6684dd3cd8886d6"
+    },
+    {
+      "id": "ai-native.20261006010000",
+      "file": "prisma/migrations/20261006010000_ai_task_plan_result_evidence/migration.sql",
+      "name": "platform-capability.ai-native.20261006010000",
+      "originalName": "20261006010000_ai_task_plan_result_evidence",
+      "sha256": "178485850f37fef8c44fe40b79dd5dc370e929f5d88c611237b130a92ddda9ba"
+    },
+    {
+      "id": "ai-native.20261006020000",
+      "file": "prisma/migrations/20261006020000_ai_task_action_policies/migration.sql",
+      "name": "platform-capability.ai-native.20261006020000",
+      "originalName": "20261006020000_ai_task_action_policies",
+      "sha256": "d6ae8a9ca122c22f44fd029a979c232b5ea9e06fdc3d85199b8b79b55146b26a"
+    },
+    {
+      "id": "ai-native.20261006030000",
+      "file": "prisma/migrations/20261006030000_ai_task_input_receipts/migration.sql",
+      "name": "platform-capability.ai-native.20261006030000",
+      "originalName": "20261006030000_ai_task_input_receipts",
+      "sha256": "2a912df1993ec40a9dfc73d262d16e73490e32cd6404517e2f26456d965eddf7"
+    },
+    {
+      "id": "ai-native.20261006040000",
+      "file": "prisma/migrations/20261006040000_ai_knowledge_operation_state/migration.sql",
+      "name": "platform-capability.ai-native.20261006040000",
+      "originalName": "20261006040000_ai_knowledge_operation_state",
+      "sha256": "59a918a460b156ab6351b17cb75d3333344b8555fc86f3070430bf98cb01bb04"
+    },
+    {
+      "id": "ai-native.20261006050000",
+      "file": "prisma/migrations/20261006050000_ai_memory_persistence_state/migration.sql",
+      "name": "platform-capability.ai-native.20261006050000",
+      "originalName": "20261006050000_ai_memory_persistence_state",
+      "sha256": "282050f8f49d37eeccc40d3d20dc4c5f783c3c337cdd924dc66d2b198f089c72"
+    },
+    {
+      "id": "ai-native.20261006070000",
+      "file": "prisma/migrations/20261006070000_ai_task_plan_policy_inputs/migration.sql",
+      "name": "platform-capability.ai-native.20261006070000",
+      "originalName": "20261006070000_ai_task_plan_policy_inputs",
+      "sha256": "c1bfa8b2f6e0a0d5c464e93ace16c196a5b3cc16d6894cb6e3e5073f3241431a"
+    },
+    {
+      "id": "ai-native.20261007010000",
+      "file": "prisma/migrations/20261007010000_ai_knowledge_action_policies/migration.sql",
+      "name": "platform-capability.ai-native.20261007010000",
+      "originalName": "20261007010000_ai_knowledge_action_policies",
+      "sha256": "9dd971769672b7f026dd8598fb1463ec945050f7cec194c1047fd2ee47bd6222"
+    },
+    {
+      "id": "ai-native.20261007190000",
+      "file": "prisma/migrations/20261007190000_ai_native_scene_requests/migration.sql",
+      "name": "platform-capability.ai-native.20261007190000",
+      "originalName": "20261007190000_ai_native_scene_requests",
+      "sha256": "7fd4a037d491274f973bba7339fce8758c503f5dd47ffcdba7cc5e64602e01c7"
+    },
+    {
+      "id": "ai-native.20261008120000",
+      "file": "prisma/migrations/20261008120000_ai_task_execution_phases/migration.sql",
+      "name": "platform-capability.ai-native.20261008120000",
+      "originalName": "20261008120000_ai_task_execution_phases",
+      "sha256": "9f154dd97c89c770ab072d692b1b07baa9387ee07f60ed498112c46ddf7e6535"
+    },
+    {
+      "id": "ai-native.20261008133000",
+      "file": "prisma/migrations/20261008133000_ai_automation_policy_inputs/migration.sql",
+      "name": "platform-capability.ai-native.20261008133000",
+      "originalName": "20261008133000_ai_automation_policy_inputs",
+      "sha256": "8e9d6cb84bb6af2c14fadab6ba5acdc7034959814c96e10ccd038941280686eb"
+    },
+    {
+      "id": "ai-native.20261008140000",
+      "file": "prisma/migrations/20261008140000_ai_client_scene_materials/migration.sql",
+      "name": "platform-capability.ai-native.20261008140000",
+      "originalName": "20261008140000_ai_client_scene_materials",
+      "sha256": "1a0897c749dab96a5de0a5c2b8f7a86c7248909fd2be756c67edfe56bd9c4d59"
+    },
+    {
+      "id": "ai-native.20261008143000",
+      "file": "prisma/migrations/20261008143000_ai_automation_human_review/migration.sql",
+      "name": "platform-capability.ai-native.20261008143000",
+      "originalName": "20261008143000_ai_automation_human_review",
+      "sha256": "cbec08bf154bdff7b114ea4e7341a5b4096e84d819b6ce5cd1735e36a13742f0"
+    },
+    {
+      "id": "ai-native.20261008150000",
+      "file": "prisma/migrations/20261008150000_ai_automation_policy_management/migration.sql",
+      "name": "platform-capability.ai-native.20261008150000",
+      "originalName": "20261008150000_ai_automation_policy_management",
+      "sha256": "9d429f55f9312974d1e06a29af4cc5cfa2c405b116764da4df84ca0a23f76e56"
+    },
+    {
+      "id": "ai-native.20261008153000",
+      "file": "prisma/migrations/20261008153000_ai_client_task_policy/migration.sql",
+      "name": "platform-capability.ai-native.20261008153000",
+      "originalName": "20261008153000_ai_client_task_policy",
+      "sha256": "8350b94c2a5749e64bd7f3cc3041765c263edb4fdb75a4d816e6c866b6ea7ee9"
+    },
+    {
+      "id": "ai-native.20261009131000",
+      "file": "prisma/migrations/20261009131000_ai_knowledge_policy_management/migration.sql",
+      "name": "platform-capability.ai-native.20261009131000",
+      "originalName": "20261009131000_ai_knowledge_policy_management",
+      "sha256": "498547d21f65c9be1036aec3faf026decdda37cd8e76bba2396c62264b6b7281"
+    },
+    {
+      "id": "ai-native.20261009132000",
+      "file": "prisma/migrations/20261009132000_ai_knowledge_policy_preparation_targets/migration.sql",
+      "name": "platform-capability.ai-native.20261009132000",
+      "originalName": "20261009132000_ai_knowledge_policy_preparation_targets",
+      "sha256": "577ec8730abb8782b5ac953037589053cf71b1df5bdf679728daa5ab40e769ca"
+    },
+    {
+      "id": "ai-native.20261009133000",
+      "file": "prisma/migrations/20261009133000_ai_run_input_continuation/migration.sql",
+      "name": "platform-capability.ai-native.20261009133000",
+      "originalName": "20261009133000_ai_run_input_continuation",
+      "sha256": "c3103f415b4ab2286031a2318edb56ce4a9d53e7ab01df431ab33a554113c875"
+    },
+    {
+      "id": "ai-native.20261011120000",
+      "file": "prisma/migrations/20261011120000_ai_text_capability_receipts/migration.sql",
+      "name": "platform-capability.ai-native.20261011120000",
+      "originalName": "20261011120000_ai_text_capability_receipts",
+      "sha256": "1f2f01d7197070f5950ace62a20a3677370b4a98e499ee8d167a8e7fc285e466"
+    },
+    {
+      "id": "ai-native.20261012000100",
+      "file": "prisma/migrations/20261012000100_ai_client_task_execution_gate/migration.sql",
+      "name": "platform-capability.ai-native.20261012000100",
+      "originalName": "20261012000100_ai_client_task_execution_gate",
+      "sha256": "aaa070f714d35d92259376a591b0f18202fd467cc423a3354d3805f6d9551e0c"
+    },
+    {
+      "id": "ai-native.20261012000200",
+      "file": "prisma/migrations/20261012000200_ai_client_task_input_actions/migration.sql",
+      "name": "platform-capability.ai-native.20261012000200",
+      "originalName": "20261012000200_ai_client_task_input_actions",
+      "sha256": "c8925a2fa71ca0389ac7d73cc144977bdb8569af3b3e21355b58019d22e1763a"
+    },
+    {
+      "id": "ai-native.20261012000300",
+      "file": "prisma/migrations/20261012000300_ai_client_task_cancel_action/migration.sql",
+      "name": "platform-capability.ai-native.20261012000300",
+      "originalName": "20261012000300_ai_client_task_cancel_action",
+      "sha256": "dd31883aab961b08236273c29c6e1de574d1ad0a66bbde9d191b27f22b62fa80"
+    },
+    {
+      "id": "ai-native.20261015120000",
+      "file": "prisma/migrations/20261015120000_ai_gateway_pricing_records/migration.sql",
+      "name": "platform-capability.ai-native.20261015120000",
+      "originalName": "20261015120000_ai_gateway_pricing_records",
+      "sha256": "195b8be748eb8798f0024acddce4f5100761cc11d92e6e51adbf6e43906f8663"
+    },
+    {
+      "id": "ai-native.20261015130000",
+      "file": "prisma/migrations/20261015130000_ai_data_retention/migration.sql",
+      "name": "platform-capability.ai-native.20261015130000",
+      "originalName": "20261015130000_ai_data_retention",
+      "sha256": "e3cae686bc3951c2ff0cad8c952765b5416c12493c9461158d3c122b7bc08f1d"
+    },
+    {
+      "id": "ai-native.20261018090000",
+      "file": "prisma/migrations/20261018090000_ai_tenant_service_gate/migration.sql",
+      "name": "platform-capability.ai-native.20261018090000",
+      "originalName": "20261018090000_ai_tenant_service_gate",
+      "sha256": "c50489d2a85b93d5c9d7283a854f5fb1f7c66e72796ac63190bdd51b6901093b"
+    },
+    {
+      "id": "ai-native.20261018100000",
+      "file": "prisma/migrations/20261018100000_ai_model_configuration_operations/migration.sql",
+      "name": "platform-capability.ai-native.20261018100000",
+      "originalName": "20261018100000_ai_model_configuration_operations",
+      "sha256": "5a13d17f000af8d3a2cefeb2a0a9b2f77e9435846531f29d43c04e63483b4c94"
+    },
+    {
+      "id": "ai-native.20261019100000",
+      "file": "prisma/migrations/20261019100000_ai_gateway_usage_billing_details/migration.sql",
+      "name": "platform-capability.ai-native.20261019100000",
+      "originalName": "20261019100000_ai_gateway_usage_billing_details",
+      "sha256": "182816729d7b35bdd478355ae368bd9d8ab10d3d6229a9fca46fd88fa368af08"
+    },
+    {
+      "id": "ai-native.20261024000000",
+      "file": "prisma/migrations/20261024000000_platform_admission_attribution/migration.sql",
+      "name": "platform-capability.ai-native.20261024000000",
+      "originalName": "20261024000000_platform_admission_attribution",
+      "sha256": "2fa9fcc160040c718eae7dd628b7b398795ebc3e4cbb00ba6f9f56b28fa06c66"
+    },
+    {
+      "id": "ai-native.20261026100000",
+      "file": "prisma/migrations/20261026100000_ai_migration_contract_alignment/migration.sql",
+      "name": "platform-capability.ai-native.20261026100000",
+      "originalName": "20261026100000_ai_migration_contract_alignment",
+      "sha256": "b13f046ee4cb28aa7eb25432a942e279d032539c395d699f58a441efa01b4a26"
+    },
+    {
+      "id": "ai-native.20261027200000",
+      "file": "prisma/migrations/20261027200000_ai_platform_credit_controls/migration.sql",
+      "name": "platform-capability.ai-native.20261027200000",
+      "originalName": "20261027200000_ai_platform_credit_controls",
+      "sha256": "068233d501eff0994a0f5b7b16e9b75b6a343837084d4b48b634cd704a7d21cf"
+    },
+    {
+      "id": "ai-native.20261029010000",
+      "file": "prisma/migrations/20261029010000_ai_conversations/migration.sql",
+      "name": "platform-capability.ai-native.20261029010000",
+      "originalName": "20261029010000_ai_conversations",
+      "sha256": "b635a52a8f4bc2db8854148a3a803aeef1c1b3943bfdbd1e9811f95bfafc0a5e"
+    },
+    {
+      "id": "ai-native.20261031000100",
+      "file": "prisma/migrations/20261031000100_original_request_creation_fence/migration.sql",
+      "name": "platform-capability.ai-native.20261031000100",
+      "originalName": "20261031000100_original_request_creation_fence",
+      "sha256": "93671fa41803888f69db559d71afc82c2fa4894e89cc1795d85d842b846dc596"
+    },
+    {
+      "id": "ai-native.20261105230000",
+      "file": "prisma/migrations/20261105230000_ai_task_event_contract_alignment/migration.sql",
+      "name": "platform-capability.ai-native.20261105230000",
+      "originalName": "20261105230000_ai_task_event_contract_alignment",
+      "sha256": "818deaa1b5fd2f9a7c81e999541461bc3f433edb1aa652824598d8ec9e767a09"
+    },
+    {
+      "id": "ai-native.20261107190000",
+      "file": "prisma/migrations/20261107190000_ai_gateway_tool_call_bindings/migration.sql",
+      "name": "platform-capability.ai-native.20261107190000",
+      "originalName": "20261107190000_ai_gateway_tool_call_bindings",
+      "sha256": "861a05b906ff837af8bc2d01e47fb9cbe912ce7da9d33a5c9e15c3838428de38"
+    },
+    {
+      "id": "ai-native.20261107203000",
+      "file": "prisma/migrations/20261107203000_ai_task_run_preparation/migration.sql",
+      "name": "platform-capability.ai-native.20261107203000",
+      "originalName": "20261107203000_ai_task_run_preparation",
+      "sha256": "b3281d892509198c98fd3016956e5c4138807744e6f92173b09daab19b75abd0"
+    },
+    {
+      "id": "ai-native.20261108010000",
+      "file": "prisma/migrations/20261108010000_ai_task_run_overheads/migration.sql",
+      "name": "platform-capability.ai-native.20261108010000",
+      "originalName": "20261108010000_ai_task_run_overheads",
+      "sha256": "11d02f1dc7c2092d477c5987f5c4f2d08be356725d9713d5c57eb69d5b2bc42f"
+    }
+  ],
+  "statements": [
+    {
+      "sourceMigration": "ai-native.20261003050000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "6c502d11b799830ffda4d13b80fbb1d0018ac604162fb40cc522d8b1ccbedbb4",
+      "table": "ai_legacy_b02_scopes",
+      "outputIndex": 0,
+      "outputSha256": "6c502d11b799830ffda4d13b80fbb1d0018ac604162fb40cc522d8b1ccbedbb4"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "9d24b7755982cc6f705324717635d966d93434e69b6b21a6fc7cd37ad08dcefa",
+      "table": "ai_scopes",
+      "outputIndex": 1,
+      "outputSha256": "9d24b7755982cc6f705324717635d966d93434e69b6b21a6fc7cd37ad08dcefa"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "47a2c214fbc93b795db39fba494e12363c5c93cb2d2dbd3e4bc0acbea84e86f8",
+      "table": "ai_tasks",
+      "outputIndex": 2,
+      "outputSha256": "47a2c214fbc93b795db39fba494e12363c5c93cb2d2dbd3e4bc0acbea84e86f8"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 2,
+      "sourceStatementSha256": "8d24f9810d98bf245abf1dd8903ddfbe1f92af771a17f151cfc735a5241a0c2d",
+      "table": "ai_runs",
+      "outputIndex": 3,
+      "outputSha256": "8d24f9810d98bf245abf1dd8903ddfbe1f92af771a17f151cfc735a5241a0c2d"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 3,
+      "sourceStatementSha256": "c4fe208f3937fa90c553b5339cc64468da148128f41f9504ff718c9ce8852067",
+      "table": "ai_steps",
+      "outputIndex": 4,
+      "outputSha256": "c4fe208f3937fa90c553b5339cc64468da148128f41f9504ff718c9ce8852067"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 4,
+      "sourceStatementSha256": "0c6f9ae164dd576180140e34f3b819bb39df5a9c1003ee47c122907ab4a11e87",
+      "table": "ai_proposals",
+      "outputIndex": 5,
+      "outputSha256": "0c6f9ae164dd576180140e34f3b819bb39df5a9c1003ee47c122907ab4a11e87"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 5,
+      "sourceStatementSha256": "6e2668043bee45c1706c31042cc38c6e1315c8e94a4aad2a51f14af549266f99",
+      "table": "ai_proposal_versions",
+      "outputIndex": 6,
+      "outputSha256": "6e2668043bee45c1706c31042cc38c6e1315c8e94a4aad2a51f14af549266f99"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 6,
+      "sourceStatementSha256": "4c382587f27b2118edeaaff982cd57110955bdc4a18e2e36ae486c104e71ae35",
+      "table": "ai_proposal_actions",
+      "outputIndex": 7,
+      "outputSha256": "4c382587f27b2118edeaaff982cd57110955bdc4a18e2e36ae486c104e71ae35"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 7,
+      "sourceStatementSha256": "d6f5ce0ca7daaf8940a3da884f268b6820b27774f85aa8954c7c871dfb78a271",
+      "table": "ai_approvals",
+      "outputIndex": 8,
+      "outputSha256": "d6f5ce0ca7daaf8940a3da884f268b6820b27774f85aa8954c7c871dfb78a271"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 8,
+      "sourceStatementSha256": "8033233936bce079776920accd25973750a11860753ef0d95896df2093c8d160",
+      "table": "ai_approval_consumptions",
+      "outputIndex": 9,
+      "outputSha256": "8033233936bce079776920accd25973750a11860753ef0d95896df2093c8d160"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 9,
+      "sourceStatementSha256": "5a162372b9f51cc3a98358419f9e1498fa1c98cb8709f7bb43c8ac8ba25ff9b2",
+      "table": "ai_task_events",
+      "outputIndex": 10,
+      "outputSha256": "5a162372b9f51cc3a98358419f9e1498fa1c98cb8709f7bb43c8ac8ba25ff9b2"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 10,
+      "sourceStatementSha256": "af8c1a980fb4d8dc8adcbb67d324ebe1909b1aec9124dabc52ef50c589ad0d3d",
+      "table": "ai_scopes",
+      "outputIndex": 11,
+      "outputSha256": "af8c1a980fb4d8dc8adcbb67d324ebe1909b1aec9124dabc52ef50c589ad0d3d"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 12,
+      "sourceStatementSha256": "2a96dc238e570a29d0008b609f87c1e1cf98ffe0fcc91a75fa2221c7501bd28b",
+      "table": "ai_tasks",
+      "outputIndex": 12,
+      "outputSha256": "2a96dc238e570a29d0008b609f87c1e1cf98ffe0fcc91a75fa2221c7501bd28b"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 13,
+      "sourceStatementSha256": "bff170eeb6870585dfecded2fb560711879e6fbb1b460c1e369a86b69667c201",
+      "table": "ai_runs",
+      "outputIndex": 13,
+      "outputSha256": "bff170eeb6870585dfecded2fb560711879e6fbb1b460c1e369a86b69667c201"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 14,
+      "sourceStatementSha256": "2f4927ad31c4d8f8da686b0e5fc91850c7210f4a7395c4d8be45338e18321b37",
+      "table": "ai_steps",
+      "outputIndex": 14,
+      "outputSha256": "2f4927ad31c4d8f8da686b0e5fc91850c7210f4a7395c4d8be45338e18321b37"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 15,
+      "sourceStatementSha256": "d5abd1c3d94432a588d1e095013d9e12f455464f9a9a74981fdfdeefd36c1b94",
+      "table": "ai_steps",
+      "outputIndex": 15,
+      "outputSha256": "d5abd1c3d94432a588d1e095013d9e12f455464f9a9a74981fdfdeefd36c1b94"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 16,
+      "sourceStatementSha256": "131bd79175af90f0816a7ca790d5ce46d7e6915a0e728ea88e5915e7c960cbe9",
+      "table": "ai_proposals",
+      "outputIndex": 16,
+      "outputSha256": "131bd79175af90f0816a7ca790d5ce46d7e6915a0e728ea88e5915e7c960cbe9"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 17,
+      "sourceStatementSha256": "d7a218904de3eda71b7368e5495e6b9ef977c3b7b1d9ad58c2c1fb4256383997",
+      "table": "ai_proposals",
+      "outputIndex": 17,
+      "outputSha256": "d7a218904de3eda71b7368e5495e6b9ef977c3b7b1d9ad58c2c1fb4256383997"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 18,
+      "sourceStatementSha256": "3c844af1a3fa8e3ff213070036642e912f59d69bd7906ff828557c642d66800b",
+      "table": "ai_proposal_versions",
+      "outputIndex": 18,
+      "outputSha256": "3c844af1a3fa8e3ff213070036642e912f59d69bd7906ff828557c642d66800b"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 19,
+      "sourceStatementSha256": "a0e2dc3d8ded7f108937c020a2946640a2c461e151672524dff3be2d48f10158",
+      "table": "ai_proposal_actions",
+      "outputIndex": 19,
+      "outputSha256": "a0e2dc3d8ded7f108937c020a2946640a2c461e151672524dff3be2d48f10158"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 20,
+      "sourceStatementSha256": "7829d4987351ce800e571bd5bc5b66c71856ddc95e6eb8cf764fb7886fa42c19",
+      "table": "ai_proposal_actions",
+      "outputIndex": 20,
+      "outputSha256": "7829d4987351ce800e571bd5bc5b66c71856ddc95e6eb8cf764fb7886fa42c19"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 21,
+      "sourceStatementSha256": "605438dd0f5de68e582475d4266e3d12015eb2cb79f8bab882ba28aa3668abe9",
+      "table": "ai_approvals",
+      "outputIndex": 21,
+      "outputSha256": "605438dd0f5de68e582475d4266e3d12015eb2cb79f8bab882ba28aa3668abe9"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 22,
+      "sourceStatementSha256": "cb997f0a2ec4188beb8ad33c1ebb5aa8dbc38ac214960d48cfa76ccf0ad2c9cf",
+      "table": "ai_approval_consumptions",
+      "outputIndex": 22,
+      "outputSha256": "cb997f0a2ec4188beb8ad33c1ebb5aa8dbc38ac214960d48cfa76ccf0ad2c9cf"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 23,
+      "sourceStatementSha256": "508750d8777f6bbbdcb059760a8f13e91a117645a844a413177736744d5a5e22",
+      "table": "ai_approval_consumptions",
+      "outputIndex": 23,
+      "outputSha256": "508750d8777f6bbbdcb059760a8f13e91a117645a844a413177736744d5a5e22"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 24,
+      "sourceStatementSha256": "8e2f3ed44ccc1bf16bab7baca7d3b559634bd0876382925e5a365b97b3b9beeb",
+      "table": "ai_task_events",
+      "outputIndex": 24,
+      "outputSha256": "8e2f3ed44ccc1bf16bab7baca7d3b559634bd0876382925e5a365b97b3b9beeb"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 25,
+      "sourceStatementSha256": "d3a18ef96d0920baa1c9b5a145aea106946cf2309a2cb8666d4fc0d18eb18f74",
+      "table": "ai_scopes",
+      "outputIndex": 25,
+      "outputSha256": "d3a18ef96d0920baa1c9b5a145aea106946cf2309a2cb8666d4fc0d18eb18f74"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 26,
+      "sourceStatementSha256": "a2fc5390bdd6f17f6bbdb29ca254bcf12711b5fd5f80bd1600729eb2c2cb3369",
+      "table": "ai_tasks",
+      "outputIndex": 26,
+      "outputSha256": "a2fc5390bdd6f17f6bbdb29ca254bcf12711b5fd5f80bd1600729eb2c2cb3369"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 27,
+      "sourceStatementSha256": "1477f96eb619b60a9d9a6206b939742c484c1e212e185e8d9a29421a21d1fea3",
+      "table": "ai_tasks",
+      "outputIndex": 27,
+      "outputSha256": "1477f96eb619b60a9d9a6206b939742c484c1e212e185e8d9a29421a21d1fea3"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 28,
+      "sourceStatementSha256": "a0e90a03a23641bd4be20654aecdc203d37c9b7a96615a2e44059c0307d9b959",
+      "table": "ai_tasks",
+      "outputIndex": 28,
+      "outputSha256": "a0e90a03a23641bd4be20654aecdc203d37c9b7a96615a2e44059c0307d9b959"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 29,
+      "sourceStatementSha256": "af4758345232fa9815ad93c224c0eba49d32d9639918cd33cd0a42330d4dad32",
+      "table": "ai_tasks",
+      "outputIndex": 29,
+      "outputSha256": "af4758345232fa9815ad93c224c0eba49d32d9639918cd33cd0a42330d4dad32"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 30,
+      "sourceStatementSha256": "d9f408beeef60d53a43dd6e18d71cee93fdfbc54929c2b840a39fc61d2370ae0",
+      "table": "ai_runs",
+      "outputIndex": 30,
+      "outputSha256": "d9f408beeef60d53a43dd6e18d71cee93fdfbc54929c2b840a39fc61d2370ae0"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 31,
+      "sourceStatementSha256": "11004378d8bf137c69c24dcb90be193faebabad8eb67d623a1c3df751efcbe2e",
+      "table": "ai_runs",
+      "outputIndex": 31,
+      "outputSha256": "11004378d8bf137c69c24dcb90be193faebabad8eb67d623a1c3df751efcbe2e"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 32,
+      "sourceStatementSha256": "e8f0d02f0324bd64fd49bf41e550e5e8987a74f80fdc6de5cdacc1febd13c735",
+      "table": "ai_steps",
+      "outputIndex": 32,
+      "outputSha256": "e8f0d02f0324bd64fd49bf41e550e5e8987a74f80fdc6de5cdacc1febd13c735"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 33,
+      "sourceStatementSha256": "d1e88e8e8ea09ed47d72167677b19ac5cbb792c582da76e04eac7273c45a39c4",
+      "table": "ai_steps",
+      "outputIndex": 33,
+      "outputSha256": "d1e88e8e8ea09ed47d72167677b19ac5cbb792c582da76e04eac7273c45a39c4"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 34,
+      "sourceStatementSha256": "3910857137c13f51a69d237f36201ebfdbf791250103bb0da77fb1530aacc2ad",
+      "table": "ai_proposals",
+      "outputIndex": 34,
+      "outputSha256": "3910857137c13f51a69d237f36201ebfdbf791250103bb0da77fb1530aacc2ad"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 35,
+      "sourceStatementSha256": "877ad154dc4e87e0b9224a4e1d98daecab584a3545bffd2c5bd7e0d0f281b5c9",
+      "table": "ai_proposal_versions",
+      "outputIndex": 35,
+      "outputSha256": "877ad154dc4e87e0b9224a4e1d98daecab584a3545bffd2c5bd7e0d0f281b5c9"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 36,
+      "sourceStatementSha256": "34263c931fa5ee4f99aa7ef5c58224de6b9056a912993393c5703598c9a57af4",
+      "table": "ai_proposal_versions",
+      "outputIndex": 36,
+      "outputSha256": "34263c931fa5ee4f99aa7ef5c58224de6b9056a912993393c5703598c9a57af4"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 37,
+      "sourceStatementSha256": "9d3ae602ad9252864062509c857f771d8aa61418b2f43727d415289e03edb360",
+      "table": "ai_proposal_actions",
+      "outputIndex": 37,
+      "outputSha256": "9d3ae602ad9252864062509c857f771d8aa61418b2f43727d415289e03edb360"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 38,
+      "sourceStatementSha256": "173736679fc57e71e22502f41e45c2aeb35fa5d2f10a52892abd5fce11172355",
+      "table": "ai_approvals",
+      "outputIndex": 38,
+      "outputSha256": "173736679fc57e71e22502f41e45c2aeb35fa5d2f10a52892abd5fce11172355"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 39,
+      "sourceStatementSha256": "6957e0aea73ecbf3b43f691d2f191455b5584d8993d38e3f7ccd4e46f7721699",
+      "table": "ai_approvals",
+      "outputIndex": 39,
+      "outputSha256": "6957e0aea73ecbf3b43f691d2f191455b5584d8993d38e3f7ccd4e46f7721699"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 40,
+      "sourceStatementSha256": "2b2a2bf9a342583d764f6c66e69986479cde81351406af430ddaa6fdf94d5eeb",
+      "table": "ai_approval_consumptions",
+      "outputIndex": 40,
+      "outputSha256": "2b2a2bf9a342583d764f6c66e69986479cde81351406af430ddaa6fdf94d5eeb"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 41,
+      "sourceStatementSha256": "4fd022d22e92dafa4100cb1eedd22ec38664828c53ed4d4c7dfca248d52f0bc4",
+      "table": "ai_task_events",
+      "outputIndex": 41,
+      "outputSha256": "4fd022d22e92dafa4100cb1eedd22ec38664828c53ed4d4c7dfca248d52f0bc4"
+    },
+    {
+      "sourceMigration": "ai-native.20261003060000",
+      "sourceIndex": 42,
+      "sourceStatementSha256": "08f715c42b118147ae75de4d9c3af9ade1687fac206c777440cbcb49f231d8d3",
+      "table": "ai_task_events",
+      "outputIndex": 42,
+      "outputSha256": "08f715c42b118147ae75de4d9c3af9ade1687fac206c777440cbcb49f231d8d3"
+    },
+    {
+      "sourceMigration": "ai-native.20261003070000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "9b62da675bc9ef43d598d4ed7709357aeb62f59c64a55b6fbd841f31d7e2d4f6",
+      "table": "ai_tasks",
+      "outputIndex": 43,
+      "outputSha256": "9b62da675bc9ef43d598d4ed7709357aeb62f59c64a55b6fbd841f31d7e2d4f6"
+    },
+    {
+      "sourceMigration": "ai-native.20261003070000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "4099dbe91865999d91e636a9c5e39bc47de455137ea2e9808de2752a38247b45",
+      "table": "ai_tasks",
+      "outputIndex": 44,
+      "outputSha256": "4099dbe91865999d91e636a9c5e39bc47de455137ea2e9808de2752a38247b45"
+    },
+    {
+      "sourceMigration": "ai-native.20261003070000",
+      "sourceIndex": 2,
+      "sourceStatementSha256": "9005959aca74c609be450a5d55655716f885977655eac171a6974987f6bbb511",
+      "table": "ai_tasks",
+      "outputIndex": 45,
+      "outputSha256": "9005959aca74c609be450a5d55655716f885977655eac171a6974987f6bbb511"
+    },
+    {
+      "sourceMigration": "ai-native.20261003160000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "35e9ad4c2c2706ab73a0d48857238b7ff425c88dac18f4acdcb4ffeb114849c4",
+      "table": "ai_invocation_admissions",
+      "outputIndex": 46,
+      "outputSha256": "35e9ad4c2c2706ab73a0d48857238b7ff425c88dac18f4acdcb4ffeb114849c4"
+    },
+    {
+      "sourceMigration": "ai-native.20261003160000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "8bbee6cc54b21dc114676c4192cf9a940949e7af0ac93a944e24b6b5a974c858",
+      "table": "ai_usage_reservations",
+      "outputIndex": 47,
+      "outputSha256": "8bbee6cc54b21dc114676c4192cf9a940949e7af0ac93a944e24b6b5a974c858"
+    },
+    {
+      "sourceMigration": "ai-native.20261003160000",
+      "sourceIndex": 2,
+      "sourceStatementSha256": "1f9645c33462c35df05d09fe73b9ddfef64018bedf01e1a8dbec6813704000b0",
+      "table": "ai_usage_ledger_entries",
+      "outputIndex": 48,
+      "outputSha256": "1f9645c33462c35df05d09fe73b9ddfef64018bedf01e1a8dbec6813704000b0"
+    },
+    {
+      "sourceMigration": "ai-native.20261003160000",
+      "sourceIndex": 3,
+      "sourceStatementSha256": "a513237344dbb98f14658c70631845323c5984bf2feac8c43ff79d0e69c06a6b",
+      "table": "ai_knowledge_documents",
+      "outputIndex": 49,
+      "outputSha256": "a513237344dbb98f14658c70631845323c5984bf2feac8c43ff79d0e69c06a6b"
+    },
+    {
+      "sourceMigration": "ai-native.20261003160000",
+      "sourceIndex": 4,
+      "sourceStatementSha256": "7feae4d7156038fd5c2891c23817b8e79ba5ffba1eb8cfd261e4d3ba06f73de9",
+      "table": "ai_knowledge_versions",
+      "outputIndex": 50,
+      "outputSha256": "7feae4d7156038fd5c2891c23817b8e79ba5ffba1eb8cfd261e4d3ba06f73de9"
+    },
+    {
+      "sourceMigration": "ai-native.20261003160000",
+      "sourceIndex": 5,
+      "sourceStatementSha256": "505c97e35394a14d805b04c5388f4c5d9588c2c9de7c19e9e67ded91b620943f",
+      "table": "ai_knowledge_chunks",
+      "outputIndex": 51,
+      "outputSha256": "505c97e35394a14d805b04c5388f4c5d9588c2c9de7c19e9e67ded91b620943f"
+    },
+    {
+      "sourceMigration": "ai-native.20261003160000",
+      "sourceIndex": 6,
+      "sourceStatementSha256": "e5140a5334987e18e10cb48d02c4f8a6f57c39d1026809df49b45a061a50276b",
+      "table": "ai_knowledge_acl",
+      "outputIndex": 52,
+      "outputSha256": "e5140a5334987e18e10cb48d02c4f8a6f57c39d1026809df49b45a061a50276b"
+    },
+    {
+      "sourceMigration": "ai-native.20261003160000",
+      "sourceIndex": 7,
+      "sourceStatementSha256": "352d39027fbefb397e5ec1753859c0e75b13be403eb5f22f619e40f26bdf6a0d",
+      "table": "ai_knowledge_index_generations",
+      "outputIndex": 53,
+      "outputSha256": "352d39027fbefb397e5ec1753859c0e75b13be403eb5f22f619e40f26bdf6a0d"
+    },
+    {
+      "sourceMigration": "ai-native.20261003160000",
+      "sourceIndex": 8,
+      "sourceStatementSha256": "f07c0feef25c644f5330e27d8665085c694eee4f1b70f7b469cb69af73bc8c34",
+      "table": "ai_structured_memories",
+      "outputIndex": 54,
+      "outputSha256": "f07c0feef25c644f5330e27d8665085c694eee4f1b70f7b469cb69af73bc8c34"
+    },
+    {
+      "sourceMigration": "ai-native.20261003160000",
+      "sourceIndex": 9,
+      "sourceStatementSha256": "efa1fdb38f148d13025d6d9768587825b9a5c0d1288d48b0b069cb075a84a90f",
+      "table": "ai_human_confirmations",
+      "outputIndex": 55,
+      "outputSha256": "efa1fdb38f148d13025d6d9768587825b9a5c0d1288d48b0b069cb075a84a90f"
+    },
+    {
+      "sourceMigration": "ai-native.20261003160000",
+      "sourceIndex": 10,
+      "sourceStatementSha256": "98a7c18ae3c77a4bb4c4032a541f04ec9dbb22146cf36d61bcd3bbf3ae74040c",
+      "table": "ai_provider_profiles",
+      "outputIndex": 56,
+      "outputSha256": "98a7c18ae3c77a4bb4c4032a541f04ec9dbb22146cf36d61bcd3bbf3ae74040c"
+    },
+    {
+      "sourceMigration": "ai-native.20261003160000",
+      "sourceIndex": 11,
+      "sourceStatementSha256": "1996d7ca8fd87d8c7eda7aaf24b39e0488de230c2aea9f3a25f190e95b969b55",
+      "table": "ai_provider_capability_evidence",
+      "outputIndex": 57,
+      "outputSha256": "1996d7ca8fd87d8c7eda7aaf24b39e0488de230c2aea9f3a25f190e95b969b55"
+    },
+    {
+      "sourceMigration": "ai-native.20261004010000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "4c0152e030ad6ebed6e30570370e41ea5812adc9472b05fa3d88e6eb3769d6c7",
+      "table": "ai_budget_policies",
+      "outputIndex": 58,
+      "outputSha256": "4c0152e030ad6ebed6e30570370e41ea5812adc9472b05fa3d88e6eb3769d6c7"
+    },
+    {
+      "sourceMigration": "ai-native.20261004010000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "65cd38b5cb41a4b3f8f9a86bb01b82e503b915ce334f85751d274dd2c6c7328b",
+      "table": "ai_budget_reservations",
+      "outputIndex": 59,
+      "outputSha256": "65cd38b5cb41a4b3f8f9a86bb01b82e503b915ce334f85751d274dd2c6c7328b"
+    },
+    {
+      "sourceMigration": "ai-native.20261004010000",
+      "sourceIndex": 2,
+      "sourceStatementSha256": "e5e57b733ccd111ed2ced73f3c0ef46e70d31efc027683355acb2c9a0a01adff",
+      "table": "ai_budget_ledger_entries",
+      "outputIndex": 60,
+      "outputSha256": "e5e57b733ccd111ed2ced73f3c0ef46e70d31efc027683355acb2c9a0a01adff"
+    },
+    {
+      "sourceMigration": "ai-native.20261004010000",
+      "sourceIndex": 3,
+      "sourceStatementSha256": "352f241184bafc4d04017048a71242a6692090cfb97a9517a78b4275a6eedd28",
+      "table": "ai_budget_allocations",
+      "outputIndex": 61,
+      "outputSha256": "352f241184bafc4d04017048a71242a6692090cfb97a9517a78b4275a6eedd28"
+    },
+    {
+      "sourceMigration": "ai-native.20261004023000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "076371397e427c7971c3a7a5a30a5a47c05f878d471f00a0ba14963a833c8529",
+      "table": "ai_budget_ledger_entries",
+      "outputIndex": 62,
+      "outputSha256": "076371397e427c7971c3a7a5a30a5a47c05f878d471f00a0ba14963a833c8529"
+    },
+    {
+      "sourceMigration": "ai-native.20261005010000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "d58d9093d1bea5b50cb124de9e3d5546ff367ee304a0029eb6b200e08d3b9399",
+      "table": "ai_tenant_model_configurations",
+      "outputIndex": 63,
+      "outputSha256": "d58d9093d1bea5b50cb124de9e3d5546ff367ee304a0029eb6b200e08d3b9399"
+    },
+    {
+      "sourceMigration": "ai-native.20261005020000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "c0f59c7af7a2c6d51e32324f505b890952f7ff6286cb9631c01df7643d5894be",
+      "table": "ai_platform_model_connections",
+      "outputIndex": 64,
+      "outputSha256": "c0f59c7af7a2c6d51e32324f505b890952f7ff6286cb9631c01df7643d5894be"
+    },
+    {
+      "sourceMigration": "ai-native.20261005030000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "25b3ad03fa04997dc9b0d78dadf34dfb11a09f9c5f5d4142a487d09ff5c7d84c",
+      "table": "ai_budget_reservations",
+      "outputIndex": 65,
+      "outputSha256": "25b3ad03fa04997dc9b0d78dadf34dfb11a09f9c5f5d4142a487d09ff5c7d84c"
+    },
+    {
+      "sourceMigration": "ai-native.20261005040000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "621659a65d00529c3cbcc26523072c197afcfbacf6bcae7523d7c88c6674773b",
+      "table": "ai_gateway_invocations",
+      "outputIndex": 66,
+      "outputSha256": "621659a65d00529c3cbcc26523072c197afcfbacf6bcae7523d7c88c6674773b"
+    },
+    {
+      "sourceMigration": "ai-native.20261005050000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "d83f6e59ea78f904ff1dc023dee00a0bf2472a10a4777742cec3bf3027922d2e",
+      "table": "ai_steps",
+      "outputIndex": 67,
+      "outputSha256": "d83f6e59ea78f904ff1dc023dee00a0bf2472a10a4777742cec3bf3027922d2e"
+    },
+    {
+      "sourceMigration": "ai-native.20261005050000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "466e5ba908a00894c182d1d9f519b710fd214303a6925ab562db6cc08c37a063",
+      "table": "ai_gateway_invocations",
+      "outputIndex": 68,
+      "outputSha256": "466e5ba908a00894c182d1d9f519b710fd214303a6925ab562db6cc08c37a063"
+    },
+    {
+      "sourceMigration": "ai-native.20261005050000",
+      "sourceIndex": 2,
+      "sourceStatementSha256": "142b7e4acb85e186107a0814512282fe3f59d3d617e08711856524cd82a9cb7c",
+      "table": "ai_task_execution_budgets",
+      "outputIndex": 69,
+      "outputSha256": "142b7e4acb85e186107a0814512282fe3f59d3d617e08711856524cd82a9cb7c"
+    },
+    {
+      "sourceMigration": "ai-native.20261005050000",
+      "sourceIndex": 3,
+      "sourceStatementSha256": "8873a6956dbd79ecba7349089282634bd2d0f7916fc178e250484ba2695b6db3",
+      "table": "ai_task_execution_charges",
+      "outputIndex": 70,
+      "outputSha256": "8873a6956dbd79ecba7349089282634bd2d0f7916fc178e250484ba2695b6db3"
+    },
+    {
+      "sourceMigration": "ai-native.20261005060000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "a3b20288ecce340c5b4b1b9d97ed7c9075faa443fc057bdc13c34ae6a5004815",
+      "table": "ai_invocation_admissions",
+      "outputIndex": 71,
+      "outputSha256": "a3b20288ecce340c5b4b1b9d97ed7c9075faa443fc057bdc13c34ae6a5004815"
+    },
+    {
+      "sourceMigration": "ai-native.20261005060000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "a907e161213a593c9b9b4176c9bb8d5ae9b44551ccac5c493a89d0d1570ba6e6",
+      "table": "ai_budget_reservations",
+      "outputIndex": 72,
+      "outputSha256": "a907e161213a593c9b9b4176c9bb8d5ae9b44551ccac5c493a89d0d1570ba6e6"
+    },
+    {
+      "sourceMigration": "ai-native.20261005060000",
+      "sourceIndex": 2,
+      "sourceStatementSha256": "b352f35c1831003341837bccc5006227a68e5906a4dc63cfbbc713a2a9a9d756",
+      "table": "ai_gateway_accounting_receipts",
+      "outputIndex": 73,
+      "outputSha256": "b352f35c1831003341837bccc5006227a68e5906a4dc63cfbbc713a2a9a9d756"
+    },
+    {
+      "sourceMigration": "ai-native.20261006010000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "6c6c84137ecae8d57ab399614f0d48fa53b7e23c41e8ecffb36ccdbe17c8bd3a",
+      "table": "ai_task_run_plans",
+      "outputIndex": 74,
+      "outputSha256": "6c6c84137ecae8d57ab399614f0d48fa53b7e23c41e8ecffb36ccdbe17c8bd3a"
+    },
+    {
+      "sourceMigration": "ai-native.20261006010000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "3c0dffbbc113a2afde3c1a4e5765ea3e53f623dd8b0c1c64c142bc1ec3e46ae0",
+      "table": "ai_task_result_artifacts",
+      "outputIndex": 75,
+      "outputSha256": "3c0dffbbc113a2afde3c1a4e5765ea3e53f623dd8b0c1c64c142bc1ec3e46ae0"
+    },
+    {
+      "sourceMigration": "ai-native.20261006020000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "e2f19b448d890fa8ab8d43bddf6227bfd9adae6f082529590469ee8fe78422f4",
+      "table": "ai_task_action_policies",
+      "outputIndex": 76,
+      "outputSha256": "e2f19b448d890fa8ab8d43bddf6227bfd9adae6f082529590469ee8fe78422f4"
+    },
+    {
+      "sourceMigration": "ai-native.20261006030000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "540b2bbdef623d7ed1524548bfccd746f232e3c564c1052d1de8d01750079d86",
+      "table": "ai_task_run_plans",
+      "outputIndex": 77,
+      "outputSha256": "540b2bbdef623d7ed1524548bfccd746f232e3c564c1052d1de8d01750079d86"
+    },
+    {
+      "sourceMigration": "ai-native.20261006030000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "600493c7e73bd76ac16a661471af1a2bb22a712eb88633cd8000964f4d13b460",
+      "table": "ai_task_result_artifacts",
+      "outputIndex": 78,
+      "outputSha256": "600493c7e73bd76ac16a661471af1a2bb22a712eb88633cd8000964f4d13b460"
+    },
+    {
+      "sourceMigration": "ai-native.20261006030000",
+      "sourceIndex": 2,
+      "sourceStatementSha256": "a33ae7acbcd61b7d40c1d37a5a83ad550f2feda6e8faaf69e95b62a4d1090877",
+      "table": "ai_task_input_requests",
+      "outputIndex": 79,
+      "outputSha256": "a33ae7acbcd61b7d40c1d37a5a83ad550f2feda6e8faaf69e95b62a4d1090877"
+    },
+    {
+      "sourceMigration": "ai-native.20261006030000",
+      "sourceIndex": 3,
+      "sourceStatementSha256": "46a0275e810118aaad9b785e743e256ad53c0dc460cf4f90d7179c76b74ee837",
+      "table": "ai_task_input_receipts",
+      "outputIndex": 80,
+      "outputSha256": "46a0275e810118aaad9b785e743e256ad53c0dc460cf4f90d7179c76b74ee837"
+    },
+    {
+      "sourceMigration": "ai-native.20261006030000",
+      "sourceIndex": 4,
+      "sourceStatementSha256": "7184b62d085c9b709d6a3d1a8279d7e8e83ed52205638da1d9bc0291f5d165e3",
+      "table": "ai_task_input_requests",
+      "outputIndex": 81,
+      "outputSha256": "7184b62d085c9b709d6a3d1a8279d7e8e83ed52205638da1d9bc0291f5d165e3"
+    },
+    {
+      "sourceMigration": "ai-native.20261006030000",
+      "sourceIndex": 5,
+      "sourceStatementSha256": "b3189fb27d06b750ed010c5dbc3e26a469d01e087864edfb1c78e319db80ca06",
+      "table": "ai_task_input_requests",
+      "outputIndex": 82,
+      "outputSha256": "b3189fb27d06b750ed010c5dbc3e26a469d01e087864edfb1c78e319db80ca06"
+    },
+    {
+      "sourceMigration": "ai-native.20261006030000",
+      "sourceIndex": 6,
+      "sourceStatementSha256": "8cfbae7c5d3997df914fb08b42ee9eba390f456d68a56d421345ff9f93663cff",
+      "table": "ai_task_input_receipts",
+      "outputIndex": 83,
+      "outputSha256": "8cfbae7c5d3997df914fb08b42ee9eba390f456d68a56d421345ff9f93663cff"
+    },
+    {
+      "sourceMigration": "ai-native.20261006040000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "b56806783599c2a7bb195c038a9a238dfe1c0d9b61c2150b649af74a9a54c391",
+      "table": "ai_knowledge_documents",
+      "outputIndex": 84,
+      "outputSha256": "b56806783599c2a7bb195c038a9a238dfe1c0d9b61c2150b649af74a9a54c391"
+    },
+    {
+      "sourceMigration": "ai-native.20261006040000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "71c6f64ac724e8154febce28ca62dd382f22b697e1bd7a306b3aea5568462f7b",
+      "table": "ai_knowledge_chunks",
+      "outputIndex": 85,
+      "outputSha256": "71c6f64ac724e8154febce28ca62dd382f22b697e1bd7a306b3aea5568462f7b"
+    },
+    {
+      "sourceMigration": "ai-native.20261006040000",
+      "sourceIndex": 2,
+      "sourceStatementSha256": "1261dfecce6e415cb9921c03bdcf3be67341c3b41260b4eb36daa58eaa8338b8",
+      "table": "ai_knowledge_operations",
+      "outputIndex": 86,
+      "outputSha256": "1261dfecce6e415cb9921c03bdcf3be67341c3b41260b4eb36daa58eaa8338b8"
+    },
+    {
+      "sourceMigration": "ai-native.20261006050000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "5b3dcdd7660917c8a06d015091cc8c955d3b51d9c07d5dd0eec9635f39f5b2b6",
+      "table": "ai_structured_memories",
+      "outputIndex": 87,
+      "outputSha256": "5b3dcdd7660917c8a06d015091cc8c955d3b51d9c07d5dd0eec9635f39f5b2b6"
+    },
+    {
+      "sourceMigration": "ai-native.20261006050000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "c383460f24754ed7b3ef26be5b665d2e688d65aad6ee7e4e553869b9d54bccab",
+      "table": "ai_human_confirmations",
+      "outputIndex": 88,
+      "outputSha256": "c383460f24754ed7b3ef26be5b665d2e688d65aad6ee7e4e553869b9d54bccab"
+    },
+    {
+      "sourceMigration": "ai-native.20261006050000",
+      "sourceIndex": 2,
+      "sourceStatementSha256": "781062ec9f55b65a5f8799ae166ff1e5c21441c62f4d863c45a9e6f18bb72308",
+      "table": "ai_memory_operations",
+      "outputIndex": 89,
+      "outputSha256": "781062ec9f55b65a5f8799ae166ff1e5c21441c62f4d863c45a9e6f18bb72308"
+    },
+    {
+      "sourceMigration": "ai-native.20261006070000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "9ae2ea75588fbed2f937d096dd9cc27c17467b6ca293fd99349651a67dddedf1",
+      "table": "ai_task_plan_policies",
+      "outputIndex": 90,
+      "outputSha256": "9ae2ea75588fbed2f937d096dd9cc27c17467b6ca293fd99349651a67dddedf1"
+    },
+    {
+      "sourceMigration": "ai-native.20261006070000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "b45d6a07fcef44101b22ed517905cbfd12b600fb7881bede235c9d8af0475c40",
+      "table": "ai_task_action_inputs",
+      "outputIndex": 91,
+      "outputSha256": "b45d6a07fcef44101b22ed517905cbfd12b600fb7881bede235c9d8af0475c40"
+    },
+    {
+      "sourceMigration": "ai-native.20261006070000",
+      "sourceIndex": 2,
+      "sourceStatementSha256": "41edeb7a312134d3c171dc4a9ce2edd8071db682d2a338c1e6dc322b35584d52",
+      "table": "ai_task_plan_policies",
+      "outputIndex": 92,
+      "outputSha256": "41edeb7a312134d3c171dc4a9ce2edd8071db682d2a338c1e6dc322b35584d52"
+    },
+    {
+      "sourceMigration": "ai-native.20261006070000",
+      "sourceIndex": 3,
+      "sourceStatementSha256": "772a0f41823f1aec5d9c91371cf5586ff769f6d23f5151621253deff22d094e5",
+      "table": "ai_task_action_inputs",
+      "outputIndex": 93,
+      "outputSha256": "772a0f41823f1aec5d9c91371cf5586ff769f6d23f5151621253deff22d094e5"
+    },
+    {
+      "sourceMigration": "ai-native.20261007010000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "eda1f4631236ab523a43f427eb32bf195ab6d7182f96c0085aae116a53ac512b",
+      "table": "ai_knowledge_action_policies",
+      "outputIndex": 94,
+      "outputSha256": "eda1f4631236ab523a43f427eb32bf195ab6d7182f96c0085aae116a53ac512b"
+    },
+    {
+      "sourceMigration": "ai-native.20261007190000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "986fb926d3ac6e75add4fad856660f538e37d476a16d8b00ab437012354bebc0",
+      "table": "ai_task_original_requests",
+      "outputIndex": 95,
+      "outputSha256": "986fb926d3ac6e75add4fad856660f538e37d476a16d8b00ab437012354bebc0"
+    },
+    {
+      "sourceMigration": "ai-native.20261007190000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "3e8a887191a31c79d17334de53085dea0b1cfc07a870d0cc18e590606499e182",
+      "table": "ai_task_original_requests",
+      "outputIndex": 96,
+      "outputSha256": "3e8a887191a31c79d17334de53085dea0b1cfc07a870d0cc18e590606499e182"
+    },
+    {
+      "sourceMigration": "ai-native.20261007190000",
+      "sourceIndex": 2,
+      "sourceStatementSha256": "909205a060a905efce05c74d9d34166d6eb487b0f3942289392dd0b2a87eab20",
+      "table": "ai_task_original_requests",
+      "outputIndex": 97,
+      "outputSha256": "909205a060a905efce05c74d9d34166d6eb487b0f3942289392dd0b2a87eab20"
+    },
+    {
+      "sourceMigration": "ai-native.20261008120000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "035d781aa4d1c98d91b2faebb1e185d1821a6f4f23709e2b9ca507987d5d6a35",
+      "table": "ai_task_execution_phase_starts",
+      "outputIndex": 98,
+      "outputSha256": "035d781aa4d1c98d91b2faebb1e185d1821a6f4f23709e2b9ca507987d5d6a35"
+    },
+    {
+      "sourceMigration": "ai-native.20261008120000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "8d63aef98d833e2f91b4298c30c7a8910c25893e4f8ed4adc5be0549bf0c50f4",
+      "table": "ai_task_execution_phase_receipts",
+      "outputIndex": 99,
+      "outputSha256": "8d63aef98d833e2f91b4298c30c7a8910c25893e4f8ed4adc5be0549bf0c50f4"
+    },
+    {
+      "sourceMigration": "ai-native.20261008120000",
+      "sourceIndex": 2,
+      "sourceStatementSha256": "ae1073b543ba76fd23b3729aa2199ccf2432b0f33a11b3344c5a65afef9cfac9",
+      "table": "ai_approvals",
+      "outputIndex": 100,
+      "outputSha256": "ae1073b543ba76fd23b3729aa2199ccf2432b0f33a11b3344c5a65afef9cfac9"
+    },
+    {
+      "sourceMigration": "ai-native.20261008120000",
+      "sourceIndex": 3,
+      "sourceStatementSha256": "7fe5ebdbe940d65e440b09e2d1ac518e5d976e6e1d64aca7115852acb1b2f65b",
+      "table": "ai_task_execution_phase_starts",
+      "outputIndex": 101,
+      "outputSha256": "7fe5ebdbe940d65e440b09e2d1ac518e5d976e6e1d64aca7115852acb1b2f65b"
+    },
+    {
+      "sourceMigration": "ai-native.20261008120000",
+      "sourceIndex": 4,
+      "sourceStatementSha256": "7380b62a05f7c3e2c7d24641d1ca7238088ec1a9c07786fd9ec4945fbf2be4fc",
+      "table": "ai_task_execution_phase_starts",
+      "outputIndex": 102,
+      "outputSha256": "7380b62a05f7c3e2c7d24641d1ca7238088ec1a9c07786fd9ec4945fbf2be4fc"
+    },
+    {
+      "sourceMigration": "ai-native.20261008120000",
+      "sourceIndex": 5,
+      "sourceStatementSha256": "985c78cc240d5f7a0eae26803e52e192bee4b6989c0cab5bcd467b8c9646f82a",
+      "table": "ai_task_execution_phase_starts",
+      "outputIndex": 103,
+      "outputSha256": "985c78cc240d5f7a0eae26803e52e192bee4b6989c0cab5bcd467b8c9646f82a"
+    },
+    {
+      "sourceMigration": "ai-native.20261008120000",
+      "sourceIndex": 6,
+      "sourceStatementSha256": "58ded8186eb1f1e16b58f4bb315f9ba323d84fd67a03f56bf87a0a26693f5722",
+      "table": "ai_task_execution_phase_starts",
+      "outputIndex": 104,
+      "outputSha256": "58ded8186eb1f1e16b58f4bb315f9ba323d84fd67a03f56bf87a0a26693f5722"
+    },
+    {
+      "sourceMigration": "ai-native.20261008120000",
+      "sourceIndex": 7,
+      "sourceStatementSha256": "b50d4f292450ceab6189d01b907d377d067ba96d9c1bee1bf7d8832c9d335341",
+      "table": "ai_task_execution_phase_starts",
+      "outputIndex": 105,
+      "outputSha256": "b50d4f292450ceab6189d01b907d377d067ba96d9c1bee1bf7d8832c9d335341"
+    },
+    {
+      "sourceMigration": "ai-native.20261008120000",
+      "sourceIndex": 8,
+      "sourceStatementSha256": "bfa95dc14e57bac7c0d8044ed1c01f4095133cd66f5eb709258879ca5c28b8d7",
+      "table": "ai_task_execution_phase_starts",
+      "outputIndex": 106,
+      "outputSha256": "bfa95dc14e57bac7c0d8044ed1c01f4095133cd66f5eb709258879ca5c28b8d7"
+    },
+    {
+      "sourceMigration": "ai-native.20261008120000",
+      "sourceIndex": 9,
+      "sourceStatementSha256": "f2d14d70ee1db3f2c8763cc8dcff5532d0eb8fe0ca7b178212a542834c1ed4b4",
+      "table": "ai_task_execution_phase_starts",
+      "outputIndex": 107,
+      "outputSha256": "f2d14d70ee1db3f2c8763cc8dcff5532d0eb8fe0ca7b178212a542834c1ed4b4"
+    },
+    {
+      "sourceMigration": "ai-native.20261008120000",
+      "sourceIndex": 10,
+      "sourceStatementSha256": "65004e37c7587e0e9a628397f599717b4853052d7bd7302b0e013c8d4df70453",
+      "table": "ai_task_execution_phase_starts",
+      "outputIndex": 108,
+      "outputSha256": "65004e37c7587e0e9a628397f599717b4853052d7bd7302b0e013c8d4df70453"
+    },
+    {
+      "sourceMigration": "ai-native.20261008120000",
+      "sourceIndex": 11,
+      "sourceStatementSha256": "214200ae8e4288484dae18538c0b2d884f40687d3f75a029e3d63a7e90f9dab3",
+      "table": "ai_task_execution_phase_starts",
+      "outputIndex": 109,
+      "outputSha256": "214200ae8e4288484dae18538c0b2d884f40687d3f75a029e3d63a7e90f9dab3"
+    },
+    {
+      "sourceMigration": "ai-native.20261008120000",
+      "sourceIndex": 12,
+      "sourceStatementSha256": "1155bf1cfb51e2408c2152b6d375e84c5894106b85d1b0c9fef81412d755e3bb",
+      "table": "ai_task_execution_phase_starts",
+      "outputIndex": 110,
+      "outputSha256": "1155bf1cfb51e2408c2152b6d375e84c5894106b85d1b0c9fef81412d755e3bb"
+    },
+    {
+      "sourceMigration": "ai-native.20261008120000",
+      "sourceIndex": 13,
+      "sourceStatementSha256": "f2abbe16d4e6661f68b88ea23f4631f1a1de3d673581d752f7c2d8d37ad1d494",
+      "table": "ai_task_execution_phase_receipts",
+      "outputIndex": 111,
+      "outputSha256": "f2abbe16d4e6661f68b88ea23f4631f1a1de3d673581d752f7c2d8d37ad1d494"
+    },
+    {
+      "sourceMigration": "ai-native.20261008120000",
+      "sourceIndex": 14,
+      "sourceStatementSha256": "0ef2b93820b317c0c156f804eadba1950115a28ef753d3491ad876c865bab7a6",
+      "table": "ai_task_execution_phase_receipts",
+      "outputIndex": 112,
+      "outputSha256": "0ef2b93820b317c0c156f804eadba1950115a28ef753d3491ad876c865bab7a6"
+    },
+    {
+      "sourceMigration": "ai-native.20261008120000",
+      "sourceIndex": 15,
+      "sourceStatementSha256": "245fdeaa26a3442e419759eb4c69ff0f58d3800e1b9aaa7ef91838bf4bac7a56",
+      "table": "ai_task_execution_phase_receipts",
+      "outputIndex": 113,
+      "outputSha256": "245fdeaa26a3442e419759eb4c69ff0f58d3800e1b9aaa7ef91838bf4bac7a56"
+    },
+    {
+      "sourceMigration": "ai-native.20261008120000",
+      "sourceIndex": 16,
+      "sourceStatementSha256": "a353cb34c8e12aacd8eee22db315cdc3903bfd6de0112c9ea8a76bb3b03d0f3d",
+      "table": "ai_task_execution_phase_starts",
+      "outputIndex": 114,
+      "outputSha256": "a353cb34c8e12aacd8eee22db315cdc3903bfd6de0112c9ea8a76bb3b03d0f3d"
+    },
+    {
+      "sourceMigration": "ai-native.20261008120000",
+      "sourceIndex": 17,
+      "sourceStatementSha256": "c743f2a9668abce9f760160afdaf0b38ddc53cc32aa7f437c54a39fb4bb377b9",
+      "table": "ai_task_execution_phase_receipts",
+      "outputIndex": 115,
+      "outputSha256": "c743f2a9668abce9f760160afdaf0b38ddc53cc32aa7f437c54a39fb4bb377b9"
+    },
+    {
+      "sourceMigration": "ai-native.20261008133000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "2eb95a452463da455ed8d9bebe555f3ad0ec160cec2dfa71633bfb11aad5c6b4",
+      "table": "ai_scopes",
+      "outputIndex": 116,
+      "outputSha256": "2eb95a452463da455ed8d9bebe555f3ad0ec160cec2dfa71633bfb11aad5c6b4"
+    },
+    {
+      "sourceMigration": "ai-native.20261008133000",
+      "sourceIndex": 2,
+      "sourceStatementSha256": "94bbaee24960999c06475ced2f3d626b4312c994a0d41c1a9f4029ead3626150",
+      "table": "ai_automation_subjects",
+      "outputIndex": 117,
+      "outputSha256": "d36c88faddc34a0955528f5143a00f8bb1b61d77a106792e47a755e444be7572",
+      "extractedForeignKey": "CONSTRAINT `ai_automation_subject_workspace_fk` FOREIGN KEY (`tenantId`, `workspaceId`) REFERENCES `business_workspaces` (`tenantId`, `id`) ON DELETE RESTRICT ON UPDATE RESTRICT"
+    },
+    {
+      "sourceMigration": "ai-native.20261008133000",
+      "sourceIndex": 3,
+      "sourceStatementSha256": "860de82bcbfa580de17ace05c22f0606aea6ef7acc3a7a6210744d6607379e8a",
+      "table": "ai_automation_policies",
+      "outputIndex": 118,
+      "outputSha256": "860de82bcbfa580de17ace05c22f0606aea6ef7acc3a7a6210744d6607379e8a"
+    },
+    {
+      "sourceMigration": "ai-native.20261008133000",
+      "sourceIndex": 4,
+      "sourceStatementSha256": "e24561f6669f5b461f9e36158eaadb82b13c88e512483caf204bf408449bb102",
+      "table": "ai_automation_inputs",
+      "outputIndex": 119,
+      "outputSha256": "e62835fb5038ad28f2149859e04597fa3dedd24a0a10e9288b67ad395c4321a4",
+      "extractedForeignKey": "CONSTRAINT `ai_automation_input_event_fk` FOREIGN KEY (`tenantId`, `workspaceId`, `eventId`) REFERENCES `ai_business_failure_outbox` (`tenantId`, `workspaceId`, `id`) ON DELETE RESTRICT ON UPDATE RESTRICT"
+    },
+    {
+      "sourceMigration": "ai-native.20261008140000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "f6d237e03bc8c776df0def064616db2115665966095012d596fa2f6cf8e9c7a8",
+      "table": "ai_client_scene_materials",
+      "outputIndex": 120,
+      "outputSha256": "24ecd4ec01fdab3e0a32138bbf694b4898a136b9d39de3bda8b33a4d7e28cf13",
+      "extractedForeignKey": "CONSTRAINT `ai_client_materials_workspace_fk` FOREIGN KEY (`tenantId`, `workspaceId`)\n    REFERENCES `business_workspaces` (`tenantId`, `id`) ON DELETE RESTRICT ON UPDATE RESTRICT"
+    },
+    {
+      "sourceMigration": "ai-native.20261008143000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "eb8f20e0ff7783556e2cb443fb95e3c3e4a19915cea04947c1dc85b673c4c31f",
+      "table": "ai_automation_inputs",
+      "outputIndex": 121,
+      "outputSha256": "eb8f20e0ff7783556e2cb443fb95e3c3e4a19915cea04947c1dc85b673c4c31f"
+    },
+    {
+      "sourceMigration": "ai-native.20261008143000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "d12f3abad1ac06ce991f8a0c567290d8108b7dec6fef791035add3a851b79a60",
+      "table": "ai_automation_review_grants",
+      "outputIndex": 122,
+      "outputSha256": "d12f3abad1ac06ce991f8a0c567290d8108b7dec6fef791035add3a851b79a60"
+    },
+    {
+      "sourceMigration": "ai-native.20261008143000",
+      "sourceIndex": 2,
+      "sourceStatementSha256": "ae53987362c80c544c1d80f5076b957fba9b32f84a63008eb7fd3164b8d84f39",
+      "table": "ai_automation_review_operations",
+      "outputIndex": 123,
+      "outputSha256": "ae53987362c80c544c1d80f5076b957fba9b32f84a63008eb7fd3164b8d84f39"
+    },
+    {
+      "sourceMigration": "ai-native.20261008150000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "4ae77806036ffaae7c78dadf67c2089810aac535bb7b1b7a2a871b2488a0f304",
+      "table": "ai_automation_subjects",
+      "outputIndex": 124,
+      "outputSha256": "4ae77806036ffaae7c78dadf67c2089810aac535bb7b1b7a2a871b2488a0f304"
+    },
+    {
+      "sourceMigration": "ai-native.20261008150000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "b7ca9076f52e91de54e89ad81d4eb8b189b254b8218dc888f8a5eb4cd32d1e40",
+      "table": "ai_automation_policies",
+      "outputIndex": 125,
+      "outputSha256": "b7ca9076f52e91de54e89ad81d4eb8b189b254b8218dc888f8a5eb4cd32d1e40"
+    },
+    {
+      "sourceMigration": "ai-native.20261008150000",
+      "sourceIndex": 2,
+      "sourceStatementSha256": "3b68dc21bba601df84b8fc4c01ffbe3441f920bfcf0c5fb6442628112f9f5f60",
+      "table": "ai_automation_management_grants",
+      "outputIndex": 126,
+      "outputSha256": "3b68dc21bba601df84b8fc4c01ffbe3441f920bfcf0c5fb6442628112f9f5f60"
+    },
+    {
+      "sourceMigration": "ai-native.20261008150000",
+      "sourceIndex": 3,
+      "sourceStatementSha256": "37ec1c0196e62a3e97097a9a786e71940ad5d49323978c5f258b6802b13927e8",
+      "table": "ai_automation_policy_preparations",
+      "outputIndex": 127,
+      "outputSha256": "37ec1c0196e62a3e97097a9a786e71940ad5d49323978c5f258b6802b13927e8"
+    },
+    {
+      "sourceMigration": "ai-native.20261008150000",
+      "sourceIndex": 4,
+      "sourceStatementSha256": "6ebdd072fa1da3cf711e32184c8f16b67c1a4d78eeaf10e572bef225cbb2b2ad",
+      "table": "ai_automation_policy_management_operations",
+      "outputIndex": 128,
+      "outputSha256": "6ebdd072fa1da3cf711e32184c8f16b67c1a4d78eeaf10e572bef225cbb2b2ad"
+    },
+    {
+      "sourceMigration": "ai-native.20261008153000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "8e5abaf6c503050bbafd994dbf520843c5e4c3d4d349bac4024191be9eca51db",
+      "table": "ai_client_scene_materials",
+      "outputIndex": 129,
+      "outputSha256": "8e5abaf6c503050bbafd994dbf520843c5e4c3d4d349bac4024191be9eca51db"
+    },
+    {
+      "sourceMigration": "ai-native.20261008153000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "fb949cfabb9a2c7b76e224d7b7b2832560dd6065dc3579a58feb3d984cb24e7e",
+      "table": "ai_client_task_policies",
+      "outputIndex": 130,
+      "outputSha256": "cb8943e14dfdeb6368fc482da7e4fe8170aaab014e666d0c6bf473e73ef6cea9",
+      "extractedForeignKey": "CONSTRAINT `ai_client_task_policy_workspace_fk` FOREIGN KEY (`tenantId`, `workspaceId`)\n    REFERENCES `business_workspaces` (`tenantId`, `id`) ON DELETE RESTRICT ON UPDATE RESTRICT"
+    },
+    {
+      "sourceMigration": "ai-native.20261008153000",
+      "sourceIndex": 2,
+      "sourceStatementSha256": "63e05c28cbd167618ea9f8dbde77cae227411bfc7104cfa8b94133169b58dd62",
+      "table": "ai_client_task_inputs",
+      "outputIndex": 131,
+      "outputSha256": "63e05c28cbd167618ea9f8dbde77cae227411bfc7104cfa8b94133169b58dd62"
+    },
+    {
+      "sourceMigration": "ai-native.20261009131000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "c9745a5d80d1609947d30970240d2cf426583e39475e6342a51c9464f9ad2181",
+      "table": "ai_knowledge_policy_management_authorities",
+      "outputIndex": 132,
+      "outputSha256": "c9745a5d80d1609947d30970240d2cf426583e39475e6342a51c9464f9ad2181"
+    },
+    {
+      "sourceMigration": "ai-native.20261009131000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "45414297b94eace6c43a73e9d7b50e0598082248f243d850aa3198fb9f022741",
+      "table": "ai_knowledge_policy_preparations",
+      "outputIndex": 133,
+      "outputSha256": "45414297b94eace6c43a73e9d7b50e0598082248f243d850aa3198fb9f022741"
+    },
+    {
+      "sourceMigration": "ai-native.20261009131000",
+      "sourceIndex": 2,
+      "sourceStatementSha256": "a4ca0ea7265ccfaa18215e03748820a346494f24b6afc869d741e8448a1b93bc",
+      "table": "ai_knowledge_policy_management_operations",
+      "outputIndex": 134,
+      "outputSha256": "a4ca0ea7265ccfaa18215e03748820a346494f24b6afc869d741e8448a1b93bc"
+    },
+    {
+      "sourceMigration": "ai-native.20261009131000",
+      "sourceIndex": 4,
+      "sourceStatementSha256": "6620fd195731ccdcfdcf33852d20efc0bc4c89ef2b95f871de89c55f548cdeea",
+      "table": "ai_knowledge_policy_preparations",
+      "outputIndex": 135,
+      "outputSha256": "6620fd195731ccdcfdcf33852d20efc0bc4c89ef2b95f871de89c55f548cdeea"
+    },
+    {
+      "sourceMigration": "ai-native.20261009131000",
+      "sourceIndex": 5,
+      "sourceStatementSha256": "382cc22a40b057d51cec833e74c5ebb944a777d63c8bbb479117bed0bac03d6e",
+      "table": "ai_knowledge_policy_management_operations",
+      "outputIndex": 136,
+      "outputSha256": "382cc22a40b057d51cec833e74c5ebb944a777d63c8bbb479117bed0bac03d6e"
+    },
+    {
+      "sourceMigration": "ai-native.20261009132000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "dc43a85f98b4a76bfecbf168aaef986701282a18b3cdd7bc0f8ae44a59b22a2c",
+      "table": "ai_knowledge_policy_management_authorities",
+      "outputIndex": 137,
+      "outputSha256": "dc43a85f98b4a76bfecbf168aaef986701282a18b3cdd7bc0f8ae44a59b22a2c"
+    },
+    {
+      "sourceMigration": "ai-native.20261009132000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "e4fa23d3a96c1b67c3071fdc6989010484ed38855a3aa2155bdc2e2be86ab79f",
+      "table": "ai_knowledge_policy_preparation_targets",
+      "outputIndex": 138,
+      "outputSha256": "e4fa23d3a96c1b67c3071fdc6989010484ed38855a3aa2155bdc2e2be86ab79f"
+    },
+    {
+      "sourceMigration": "ai-native.20261009132000",
+      "sourceIndex": 2,
+      "sourceStatementSha256": "5915ef60a9b96a9aa32b2df8b0880afdd4e143ee26745fc8a8add2596f90fe82",
+      "table": "ai_knowledge_policy_preparation_targets",
+      "outputIndex": 139,
+      "outputSha256": "5915ef60a9b96a9aa32b2df8b0880afdd4e143ee26745fc8a8add2596f90fe82"
+    },
+    {
+      "sourceMigration": "ai-native.20261009133000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "f7269b63eb46f0f6433dce552ea8d50a331ee67384849d3d493ced468ad26995",
+      "table": "ai_runs",
+      "outputIndex": 140,
+      "outputSha256": "f7269b63eb46f0f6433dce552ea8d50a331ee67384849d3d493ced468ad26995"
+    },
+    {
+      "sourceMigration": "ai-native.20261011120000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "96c64e61a0752789cbd5e4dc713341b604835414c4fc12daf8632ca63130f426",
+      "table": "ai_text_capability_receipts",
+      "outputIndex": 141,
+      "outputSha256": "96c64e61a0752789cbd5e4dc713341b604835414c4fc12daf8632ca63130f426"
+    },
+    {
+      "sourceMigration": "ai-native.20261012000100",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "d74d52bdefb4048ff34a8763de6ec7e4c840cd70450106bc06288e62b7c20042",
+      "table": "ai_client_task_policies",
+      "outputIndex": 142,
+      "outputSha256": "d74d52bdefb4048ff34a8763de6ec7e4c840cd70450106bc06288e62b7c20042"
+    },
+    {
+      "sourceMigration": "ai-native.20261012000200",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "f06a006efe854582938bc6d6ec4afcffaf9809b448db69f7b65882a4cb0c248e",
+      "table": "ai_client_task_policies",
+      "outputIndex": 143,
+      "outputSha256": "f06a006efe854582938bc6d6ec4afcffaf9809b448db69f7b65882a4cb0c248e"
+    },
+    {
+      "sourceMigration": "ai-native.20261012000300",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "5b85be81377fd4b2ad74cafccec28369c1a05169bc5d60f0fbff96c65e7b4f25",
+      "table": "ai_client_task_policies",
+      "outputIndex": 144,
+      "outputSha256": "5b85be81377fd4b2ad74cafccec28369c1a05169bc5d60f0fbff96c65e7b4f25"
+    },
+    {
+      "sourceMigration": "ai-native.20261015120000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "ad39b5c823b247e87cdb9914e5c0a9071df0887c23255577c09cd52130f3eeec",
+      "table": "ai_gateway_price_records",
+      "outputIndex": 145,
+      "outputSha256": "ad39b5c823b247e87cdb9914e5c0a9071df0887c23255577c09cd52130f3eeec"
+    },
+    {
+      "sourceMigration": "ai-native.20261015120000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "dfd02d2596abd6b10bb3a8ff0e97c9d0e00d81199b9d9d735ebd2f640d6d73a5",
+      "table": "ai_gateway_input_bound_records",
+      "outputIndex": 146,
+      "outputSha256": "dfd02d2596abd6b10bb3a8ff0e97c9d0e00d81199b9d9d735ebd2f640d6d73a5"
+    },
+    {
+      "sourceMigration": "ai-native.20261015130000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "31a1324a7ab86b2ab0125b27ea5e34d71b8f167057d7e4a05b1aeb0d4934f218",
+      "table": "ai_client_scene_materials",
+      "outputIndex": 147,
+      "outputSha256": "31a1324a7ab86b2ab0125b27ea5e34d71b8f167057d7e4a05b1aeb0d4934f218"
+    },
+    {
+      "sourceMigration": "ai-native.20261015130000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "3650a97cecab7379ee2c076deb2453b5631d1364f0bc76e16d44547038db9981",
+      "table": "ai_task_original_requests",
+      "outputIndex": 148,
+      "outputSha256": "3650a97cecab7379ee2c076deb2453b5631d1364f0bc76e16d44547038db9981"
+    },
+    {
+      "sourceMigration": "ai-native.20261015130000",
+      "sourceIndex": 2,
+      "sourceStatementSha256": "c73504b6cf33976547e77c2780b20f8ede2a7f169c56ed2dc3b0055ca28c1417",
+      "table": "ai_data_erasures",
+      "outputIndex": 149,
+      "outputSha256": "c73504b6cf33976547e77c2780b20f8ede2a7f169c56ed2dc3b0055ca28c1417"
+    },
+    {
+      "sourceMigration": "ai-native.20261018090000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "2bbb778fbb42e4dc11b82b5c8618e0213093464f93cff2984ef2dfcdbc6e2bff",
+      "table": "ai_tenant_model_configurations",
+      "outputIndex": 150,
+      "outputSha256": "2bbb778fbb42e4dc11b82b5c8618e0213093464f93cff2984ef2dfcdbc6e2bff"
+    },
+    {
+      "sourceMigration": "ai-native.20261018100000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "2925575e5095e8a40d59b1d12525b600cb69a7724044992c69beac68078b9cf9",
+      "table": "ai_model_configuration_operations",
+      "outputIndex": 151,
+      "outputSha256": "2925575e5095e8a40d59b1d12525b600cb69a7724044992c69beac68078b9cf9"
+    },
+    {
+      "sourceMigration": "ai-native.20261018100000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "8b8b824f3f700bbf850a927a60fb149b44e7d3a526460d4683769136c99e821a",
+      "table": "ai_model_configuration_operations",
+      "outputIndex": 152,
+      "outputSha256": "8b8b824f3f700bbf850a927a60fb149b44e7d3a526460d4683769136c99e821a"
+    },
+    {
+      "sourceMigration": "ai-native.20261019100000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "b1e98fcd453930d809b666c04fd4eab1ba13501310a09f489982094f441ede87",
+      "table": "ai_gateway_accounting_receipts",
+      "outputIndex": 153,
+      "outputSha256": "b1e98fcd453930d809b666c04fd4eab1ba13501310a09f489982094f441ede87"
+    },
+    {
+      "sourceMigration": "ai-native.20261024000000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "0656a61679ed872a19d2e79978d603b3755b4f8dbec9f4b6f4f99222cd8c54d1",
+      "table": "ai_invocation_admissions",
+      "outputIndex": 154,
+      "outputSha256": "0656a61679ed872a19d2e79978d603b3755b4f8dbec9f4b6f4f99222cd8c54d1"
+    },
+    {
+      "sourceMigration": "ai-native.20261024000000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "f902c056554b6ad4c1bd892babe022e7cedacfd3c5aa33c6b64395bacf13d4db",
+      "table": "ai_invocation_admissions",
+      "outputIndex": 155,
+      "outputSha256": "f902c056554b6ad4c1bd892babe022e7cedacfd3c5aa33c6b64395bacf13d4db"
+    },
+    {
+      "sourceMigration": "ai-native.20261024000000",
+      "sourceIndex": 2,
+      "sourceStatementSha256": "018c608460469cb80dda0fe20898852c90fe293f2d5d53ed31aa4c6e508a2f13",
+      "table": "ai_invocation_admissions",
+      "outputIndex": 156,
+      "outputSha256": "018c608460469cb80dda0fe20898852c90fe293f2d5d53ed31aa4c6e508a2f13"
+    },
+    {
+      "sourceMigration": "ai-native.20261024000000",
+      "sourceIndex": 3,
+      "sourceStatementSha256": "1cca57e76e9e9ea3855c8a9019b0ab0fcfcbf86c22bff390c8f2da5c9e5ca956",
+      "table": "ai_invocation_admissions",
+      "outputIndex": 157,
+      "outputSha256": "1cca57e76e9e9ea3855c8a9019b0ab0fcfcbf86c22bff390c8f2da5c9e5ca956"
+    },
+    {
+      "sourceMigration": "ai-native.20261024000000",
+      "sourceIndex": 4,
+      "sourceStatementSha256": "e712fdf3372f989a06bfd6955ddff40f9e7cee0d69dfd1df7222a060cab75daa",
+      "table": "ai_invocation_admissions",
+      "outputIndex": 158,
+      "outputSha256": "e712fdf3372f989a06bfd6955ddff40f9e7cee0d69dfd1df7222a060cab75daa"
+    },
+    {
+      "sourceMigration": "ai-native.20261024000000",
+      "sourceIndex": 5,
+      "sourceStatementSha256": "fcfbe121e9f53d7e5dcda99786a411f64127f44ff6ca275ce7adb33eb90a922b",
+      "table": "ai_gateway_accounting_receipts",
+      "outputIndex": 159,
+      "outputSha256": "fcfbe121e9f53d7e5dcda99786a411f64127f44ff6ca275ce7adb33eb90a922b"
+    },
+    {
+      "sourceMigration": "ai-native.20261024000000",
+      "sourceIndex": 6,
+      "sourceStatementSha256": "d6c244feee3bb78c73bbca7a684383ae2b32a59ea28c0b9a266a4ad90ff5721e",
+      "table": "ai_gateway_accounting_receipts",
+      "outputIndex": 160,
+      "outputSha256": "d6c244feee3bb78c73bbca7a684383ae2b32a59ea28c0b9a266a4ad90ff5721e"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "bf9bc8dff66b4902a755a4bd379c1c1d5fcd7e9ea28e68814638c4f9eda04208",
+      "table": "ai_budget_allocations",
+      "outputIndex": 161,
+      "outputSha256": "bf9bc8dff66b4902a755a4bd379c1c1d5fcd7e9ea28e68814638c4f9eda04208"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "9f89496498854445b6061e1b217d9daac1e75b7a7a3ef9f3f93f2b8439f4bf69",
+      "table": "ai_budget_allocations",
+      "outputIndex": 162,
+      "outputSha256": "9f89496498854445b6061e1b217d9daac1e75b7a7a3ef9f3f93f2b8439f4bf69"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 2,
+      "sourceStatementSha256": "f06e9e97d336b0c2c4cf0287caa5381e4a5b8457120ad2630dc60df2a9bce5da",
+      "table": "ai_budget_ledger_entries",
+      "outputIndex": 163,
+      "outputSha256": "f06e9e97d336b0c2c4cf0287caa5381e4a5b8457120ad2630dc60df2a9bce5da"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 3,
+      "sourceStatementSha256": "4ffa3fbb78151db69c34057dd0ea549d1fe6c884647fb5061a59161f4d5a840a",
+      "table": "ai_budget_policies",
+      "outputIndex": 164,
+      "outputSha256": "4ffa3fbb78151db69c34057dd0ea549d1fe6c884647fb5061a59161f4d5a840a"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 4,
+      "sourceStatementSha256": "bb8fd36dcdc928c8c2e838b959d0927909f5a7ba002b56b39b88c80c276fec35",
+      "table": "ai_gateway_accounting_receipts",
+      "outputIndex": 165,
+      "outputSha256": "bb8fd36dcdc928c8c2e838b959d0927909f5a7ba002b56b39b88c80c276fec35"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 5,
+      "sourceStatementSha256": "774d70468de38cf4304cbcf645f71f20232344c4ee4147ef8fb80e354dc1bb4d",
+      "table": "ai_gateway_accounting_receipts",
+      "outputIndex": 166,
+      "outputSha256": "774d70468de38cf4304cbcf645f71f20232344c4ee4147ef8fb80e354dc1bb4d"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 6,
+      "sourceStatementSha256": "e2b82c80cfa667ca132666591f3b4131939639fffa388718263295aacb9c6028",
+      "table": "ai_gateway_accounting_receipts",
+      "outputIndex": 167,
+      "outputSha256": "e2b82c80cfa667ca132666591f3b4131939639fffa388718263295aacb9c6028"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 7,
+      "sourceStatementSha256": "e910852f5b37f93f21214b7af31eb1c70d58c2cb9b44645502d55733651ea2f2",
+      "table": "ai_gateway_invocations",
+      "outputIndex": 168,
+      "outputSha256": "e910852f5b37f93f21214b7af31eb1c70d58c2cb9b44645502d55733651ea2f2"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 8,
+      "sourceStatementSha256": "73b774ec6320a9ca91451675f4570dfded2c1bc87d0965c92c9644b17386a1bc",
+      "table": "ai_gateway_invocations",
+      "outputIndex": 169,
+      "outputSha256": "73b774ec6320a9ca91451675f4570dfded2c1bc87d0965c92c9644b17386a1bc"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 9,
+      "sourceStatementSha256": "2cfb94fa6119b1c572919d7bcd809feddeb7867a0358db0e72ba22d3e786b659",
+      "table": "ai_knowledge_acl",
+      "outputIndex": 170,
+      "outputSha256": "2cfb94fa6119b1c572919d7bcd809feddeb7867a0358db0e72ba22d3e786b659"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 10,
+      "sourceStatementSha256": "c5c4fdc7008c7c8b870e38ad34322aaab95c032a68c46e8ce750316c221206e5",
+      "table": "ai_knowledge_chunks",
+      "outputIndex": 171,
+      "outputSha256": "c5c4fdc7008c7c8b870e38ad34322aaab95c032a68c46e8ce750316c221206e5"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 11,
+      "sourceStatementSha256": "bb5b3501160a03e6a2dca365d22b3f7a86484be13b460e5366a969b1ce808383",
+      "table": "ai_knowledge_operations",
+      "outputIndex": 172,
+      "outputSha256": "bb5b3501160a03e6a2dca365d22b3f7a86484be13b460e5366a969b1ce808383"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 12,
+      "sourceStatementSha256": "1466d9cc99530688259f5cbbbf087c0da3dad77aba51f08876f350ef31b58843",
+      "table": "ai_knowledge_versions",
+      "outputIndex": 173,
+      "outputSha256": "1466d9cc99530688259f5cbbbf087c0da3dad77aba51f08876f350ef31b58843"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 13,
+      "sourceStatementSha256": "0bcb97d26b30e9e02f76f42c1f671408650a49fb056b8608b44d26c77f35735c",
+      "table": "ai_platform_model_connections",
+      "outputIndex": 174,
+      "outputSha256": "0bcb97d26b30e9e02f76f42c1f671408650a49fb056b8608b44d26c77f35735c"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 14,
+      "sourceStatementSha256": "9a3a434d2b8ff298e9ec279cafa97b78586f5dd4565b70c302abe27acf14e317",
+      "table": "ai_provider_capability_evidence",
+      "outputIndex": 175,
+      "outputSha256": "9a3a434d2b8ff298e9ec279cafa97b78586f5dd4565b70c302abe27acf14e317"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 15,
+      "sourceStatementSha256": "4f129c4a1f58b94efdbdde37fb90d5bb8818e11149ad2f25cf3f86946b910ca1",
+      "table": "ai_provider_profiles",
+      "outputIndex": 176,
+      "outputSha256": "4f129c4a1f58b94efdbdde37fb90d5bb8818e11149ad2f25cf3f86946b910ca1"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 16,
+      "sourceStatementSha256": "831aeb31d0e0840bd419f4ec1f11a5397c9c1f3ab57b75db837ee1f7b717ba32",
+      "table": "ai_task_execution_budgets",
+      "outputIndex": 177,
+      "outputSha256": "831aeb31d0e0840bd419f4ec1f11a5397c9c1f3ab57b75db837ee1f7b717ba32"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 17,
+      "sourceStatementSha256": "b3617b2f3bdb2cbc59dab711c2eaecbc41e1518a640cf6c51b652d6fb6dcebd0",
+      "table": "ai_task_execution_charges",
+      "outputIndex": 178,
+      "outputSha256": "b3617b2f3bdb2cbc59dab711c2eaecbc41e1518a640cf6c51b652d6fb6dcebd0"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 18,
+      "sourceStatementSha256": "b372e8a48cabffc8ce9575eb17ad4d1b3a6cf105a24917ea4feafadb6b9e3473",
+      "table": "ai_task_execution_charges",
+      "outputIndex": 179,
+      "outputSha256": "b372e8a48cabffc8ce9575eb17ad4d1b3a6cf105a24917ea4feafadb6b9e3473"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 19,
+      "sourceStatementSha256": "700aa698a197e9ebcb1b8a4c8c8cc64ff0fc410a64255f6684d77a6f42cfab0f",
+      "table": "ai_task_execution_charges",
+      "outputIndex": 180,
+      "outputSha256": "700aa698a197e9ebcb1b8a4c8c8cc64ff0fc410a64255f6684d77a6f42cfab0f"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 20,
+      "sourceStatementSha256": "25e4e4737ba6981a3b9fd4ba5fcfaebf005092a5937ff150d55e2804e35d8d77",
+      "table": "ai_task_execution_charges",
+      "outputIndex": 181,
+      "outputSha256": "25e4e4737ba6981a3b9fd4ba5fcfaebf005092a5937ff150d55e2804e35d8d77"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 21,
+      "sourceStatementSha256": "b3b2a03be8da4e9b497f002c096c91b94f64a2a30368533b9a60645e92283aa8",
+      "table": "ai_tenant_model_configurations",
+      "outputIndex": 182,
+      "outputSha256": "b3b2a03be8da4e9b497f002c096c91b94f64a2a30368533b9a60645e92283aa8"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 22,
+      "sourceStatementSha256": "83dfe9d63271a79177d4811ea00c8c77cbf447b8a2a79fdc8e95a637b694e32f",
+      "table": "ai_budget_policies",
+      "outputIndex": 183,
+      "outputSha256": "83dfe9d63271a79177d4811ea00c8c77cbf447b8a2a79fdc8e95a637b694e32f"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 23,
+      "sourceStatementSha256": "5f43075094d0d6cf3d25749c35dd00948bfdfaf8b0f62a7e2ff8a38dc4a51817",
+      "table": "ai_budget_reservations",
+      "outputIndex": 184,
+      "outputSha256": "5f43075094d0d6cf3d25749c35dd00948bfdfaf8b0f62a7e2ff8a38dc4a51817"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 24,
+      "sourceStatementSha256": "7b3c8147d61c576adda21e55792686fe77001a5491ed5780a7f9afeeede423ca",
+      "table": "ai_human_confirmations",
+      "outputIndex": 185,
+      "outputSha256": "7b3c8147d61c576adda21e55792686fe77001a5491ed5780a7f9afeeede423ca"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 25,
+      "sourceStatementSha256": "b626b7e6629d0e3cb5b9e585f6b5075cf0aa2e0bb96c1ed72f795be9e0e5e96f",
+      "table": "ai_invocation_admissions",
+      "outputIndex": 186,
+      "outputSha256": "b626b7e6629d0e3cb5b9e585f6b5075cf0aa2e0bb96c1ed72f795be9e0e5e96f"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 26,
+      "sourceStatementSha256": "3689478ed887e916a2a4388a0d6d35c5a7a030b9ed3a76772ebf8e0dd218dc30",
+      "table": "ai_knowledge_documents",
+      "outputIndex": 187,
+      "outputSha256": "3689478ed887e916a2a4388a0d6d35c5a7a030b9ed3a76772ebf8e0dd218dc30"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 27,
+      "sourceStatementSha256": "f9f06c14567ef8956d2226ebd24f786556c0bfa403e25fc5a1138e8f990a8ac1",
+      "table": "ai_provider_capability_evidence",
+      "outputIndex": 188,
+      "outputSha256": "f9f06c14567ef8956d2226ebd24f786556c0bfa403e25fc5a1138e8f990a8ac1"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 28,
+      "sourceStatementSha256": "e3a963416813516cb186cdd0a8f65b30292a039c23fb86388ed95c00e47cd537",
+      "table": "ai_provider_profiles",
+      "outputIndex": 189,
+      "outputSha256": "e3a963416813516cb186cdd0a8f65b30292a039c23fb86388ed95c00e47cd537"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 29,
+      "sourceStatementSha256": "886a214d54a7d8bc07bca30487f5639a21c93825214af0bfec400cb9443da975",
+      "table": "ai_structured_memories",
+      "outputIndex": 190,
+      "outputSha256": "886a214d54a7d8bc07bca30487f5639a21c93825214af0bfec400cb9443da975"
+    },
+    {
+      "sourceMigration": "ai-native.20261026100000",
+      "sourceIndex": 30,
+      "sourceStatementSha256": "694deba0f1450e6e35848760e045086d44c8856e430154d53d9419befabd610f",
+      "table": "ai_usage_reservations",
+      "outputIndex": 191,
+      "outputSha256": "694deba0f1450e6e35848760e045086d44c8856e430154d53d9419befabd610f"
+    },
+    {
+      "sourceMigration": "ai-native.20261027200000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "726390f47fc10925c3509238e73ea89bb45c2aa6288a087652511be1c7c91b01",
+      "table": "ai_budget_reservations",
+      "outputIndex": 192,
+      "outputSha256": "726390f47fc10925c3509238e73ea89bb45c2aa6288a087652511be1c7c91b01"
+    },
+    {
+      "sourceMigration": "ai-native.20261027200000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "aaae5ab28e991689ab9795ba41b42b04b302b980fd24433764ef1ada4eb2839d",
+      "table": "ai_budget_reservations",
+      "outputIndex": 193,
+      "outputSha256": "aaae5ab28e991689ab9795ba41b42b04b302b980fd24433764ef1ada4eb2839d"
+    },
+    {
+      "sourceMigration": "ai-native.20261027200000",
+      "sourceIndex": 2,
+      "sourceStatementSha256": "0b0c9c328b68434722a60356e93348e79ef90e033222221a6054400ba399b4d7",
+      "table": "ai_tenant_ai_allowances",
+      "outputIndex": 194,
+      "outputSha256": "0b0c9c328b68434722a60356e93348e79ef90e033222221a6054400ba399b4d7"
+    },
+    {
+      "sourceMigration": "ai-native.20261027200000",
+      "sourceIndex": 3,
+      "sourceStatementSha256": "6585c15a7794485ea69bb4cb41a20f0985a3b42545f78697fff6c78ff531c8db",
+      "table": "ai_tenant_ai_credit_requests",
+      "outputIndex": 195,
+      "outputSha256": "6585c15a7794485ea69bb4cb41a20f0985a3b42545f78697fff6c78ff531c8db"
+    },
+    {
+      "sourceMigration": "ai-native.20261027200000",
+      "sourceIndex": 4,
+      "sourceStatementSha256": "b398ca65bc22c44a6f9523842eacfe0e4b6a06be9f45d8d1a878258a1c2ec5d0",
+      "table": "ai_budget_reservations",
+      "outputIndex": 196,
+      "outputSha256": "b398ca65bc22c44a6f9523842eacfe0e4b6a06be9f45d8d1a878258a1c2ec5d0"
+    },
+    {
+      "sourceMigration": "ai-native.20261027200000",
+      "sourceIndex": 5,
+      "sourceStatementSha256": "d01d21270f03eac1594003fc33eaf49cd639f9867867b64dc3c3b1441e7c6c4d",
+      "table": "ai_gateway_invocations",
+      "outputIndex": 197,
+      "outputSha256": "d01d21270f03eac1594003fc33eaf49cd639f9867867b64dc3c3b1441e7c6c4d"
+    },
+    {
+      "sourceMigration": "ai-native.20261029010000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "07a1b0ea314b17e72c04beceffe40629409d5691acabb6a2e80d4cb7c0118d6e",
+      "table": "ai_conversations",
+      "outputIndex": 198,
+      "outputSha256": "07a1b0ea314b17e72c04beceffe40629409d5691acabb6a2e80d4cb7c0118d6e"
+    },
+    {
+      "sourceMigration": "ai-native.20261029010000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "6ae8193ba6a85b427533b3f992b7dd0581a6f06d9146d3f15a04c7d3f00911b2",
+      "table": "ai_conversation_turns",
+      "outputIndex": 199,
+      "outputSha256": "6ae8193ba6a85b427533b3f992b7dd0581a6f06d9146d3f15a04c7d3f00911b2"
+    },
+    {
+      "sourceMigration": "ai-native.20261029010000",
+      "sourceIndex": 2,
+      "sourceStatementSha256": "815ac41ff139775b76d5014daebf610410843cc6c571950ed3c88dcba1fe6bc5",
+      "table": "ai_conversation_operations",
+      "outputIndex": 200,
+      "outputSha256": "815ac41ff139775b76d5014daebf610410843cc6c571950ed3c88dcba1fe6bc5"
+    },
+    {
+      "sourceMigration": "ai-native.20261029010000",
+      "sourceIndex": 3,
+      "sourceStatementSha256": "9dd8b09b01f38608a5ecca7a939c11659b6457ed39ea12be6004af5e5345a01c",
+      "table": "ai_conversations",
+      "outputIndex": 201,
+      "outputSha256": "9dd8b09b01f38608a5ecca7a939c11659b6457ed39ea12be6004af5e5345a01c"
+    },
+    {
+      "sourceMigration": "ai-native.20261029010000",
+      "sourceIndex": 4,
+      "sourceStatementSha256": "1fb00e657e1bfad2334aac7b1e34a57b8174ab4bcd63a241c2800784cf081a4d",
+      "table": "ai_conversation_turns",
+      "outputIndex": 202,
+      "outputSha256": "1fb00e657e1bfad2334aac7b1e34a57b8174ab4bcd63a241c2800784cf081a4d"
+    },
+    {
+      "sourceMigration": "ai-native.20261029010000",
+      "sourceIndex": 5,
+      "sourceStatementSha256": "f55c44bfeb2ccd92566c4a1aa28b4598404b832a64f6e502646371a244ab3706",
+      "table": "ai_conversation_turns",
+      "outputIndex": 203,
+      "outputSha256": "f55c44bfeb2ccd92566c4a1aa28b4598404b832a64f6e502646371a244ab3706"
+    },
+    {
+      "sourceMigration": "ai-native.20261029010000",
+      "sourceIndex": 6,
+      "sourceStatementSha256": "24061203954c726dc4bf4280dee24df8695ad1b483b10e187ec7d30ff7f4b180",
+      "table": "ai_conversation_operations",
+      "outputIndex": 204,
+      "outputSha256": "24061203954c726dc4bf4280dee24df8695ad1b483b10e187ec7d30ff7f4b180"
+    },
+    {
+      "sourceMigration": "ai-native.20261031000100",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "928e5758dc5ddac76f74a741691cc2112d6848199da1f72efde1cc2a42a9b6d9",
+      "table": "ai_task_original_requests",
+      "outputIndex": 205,
+      "outputSha256": "928e5758dc5ddac76f74a741691cc2112d6848199da1f72efde1cc2a42a9b6d9"
+    },
+    {
+      "sourceMigration": "ai-native.20261105230000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "ed05d90961641f8c36e6fc85767593d130fa8f178a88a062d277e1c493f32741",
+      "table": "ai_task_events",
+      "outputIndex": 206,
+      "outputSha256": "ed05d90961641f8c36e6fc85767593d130fa8f178a88a062d277e1c493f32741"
+    },
+    {
+      "sourceMigration": "ai-native.20261107190000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "6ee4683a2f04867e43a6c6bb62542c952e5303eb35481d60d480b15d6cc006dc",
+      "table": "ai_gateway_tool_call_bindings",
+      "outputIndex": 207,
+      "outputSha256": "6ee4683a2f04867e43a6c6bb62542c952e5303eb35481d60d480b15d6cc006dc"
+    },
+    {
+      "sourceMigration": "ai-native.20261107203000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "a156d231d2f77bf15f303bea35c9c4d25be13dc14db071af926676e8765f53d8",
+      "table": "ai_task_run_preparations",
+      "outputIndex": 208,
+      "outputSha256": "a156d231d2f77bf15f303bea35c9c4d25be13dc14db071af926676e8765f53d8"
+    },
+    {
+      "sourceMigration": "ai-native.20261107203000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "1cd58c207287b9868515b382d49c9abc34c6c3c7d1c467daf6eb92bd862fecd6",
+      "table": "ai_task_run_preparations",
+      "outputIndex": 209,
+      "outputSha256": "1cd58c207287b9868515b382d49c9abc34c6c3c7d1c467daf6eb92bd862fecd6"
+    },
+    {
+      "sourceMigration": "ai-native.20261107203000",
+      "sourceIndex": 2,
+      "sourceStatementSha256": "aecff947577e722487ad9dad93edb7aa936d4b8d4cea6190a70fff351b8dc445",
+      "table": "ai_task_run_preparations",
+      "outputIndex": 210,
+      "outputSha256": "aecff947577e722487ad9dad93edb7aa936d4b8d4cea6190a70fff351b8dc445"
+    },
+    {
+      "sourceMigration": "ai-native.20261107203000",
+      "sourceIndex": 3,
+      "sourceStatementSha256": "dd20842f8ad0199b0994be438f921976454e6c579862406fcf852b96867e971e",
+      "table": "ai_task_run_preparations",
+      "outputIndex": 211,
+      "outputSha256": "dd20842f8ad0199b0994be438f921976454e6c579862406fcf852b96867e971e"
+    },
+    {
+      "sourceMigration": "ai-native.20261107203000",
+      "sourceIndex": 4,
+      "sourceStatementSha256": "b6fa22f6a748af9b35237e5e15d3c7b33a29f7d4532b49b9eb0e4580df8bebac",
+      "table": "ai_task_run_preparations",
+      "outputIndex": 212,
+      "outputSha256": "b6fa22f6a748af9b35237e5e15d3c7b33a29f7d4532b49b9eb0e4580df8bebac"
+    },
+    {
+      "sourceMigration": "ai-native.20261107203000",
+      "sourceIndex": 5,
+      "sourceStatementSha256": "64cf3340d30dac01ffe9206ac993e66f7d81573167d7b669cbc53f03ead50029",
+      "table": "ai_task_run_preparations",
+      "outputIndex": 213,
+      "outputSha256": "64cf3340d30dac01ffe9206ac993e66f7d81573167d7b669cbc53f03ead50029"
+    },
+    {
+      "sourceMigration": "ai-native.20261108010000",
+      "sourceIndex": 0,
+      "sourceStatementSha256": "f4bcbfb5dbfacb0fcd0cb985ec9ffcfaab7e6d5d52d25d07165fb86e96c6ae7f",
+      "table": "ai_task_run_overheads",
+      "outputIndex": 214,
+      "outputSha256": "f4bcbfb5dbfacb0fcd0cb985ec9ffcfaab7e6d5d52d25d07165fb86e96c6ae7f"
+    },
+    {
+      "sourceMigration": "ai-native.20261108010000",
+      "sourceIndex": 1,
+      "sourceStatementSha256": "0affc6ab1d45552738b3749108ed134f1791b89ff02d674cb7f68a10359d857f",
+      "table": "ai_task_run_overheads",
+      "outputIndex": 215,
+      "outputSha256": "0affc6ab1d45552738b3749108ed134f1791b89ff02d674cb7f68a10359d857f"
+    },
+    {
+      "sourceMigration": "ai-native.20261108010000",
+      "sourceIndex": 2,
+      "sourceStatementSha256": "e34c836f5cef291bb576313e458fe2d035d94481781ff6ecbda164467cc4e760",
+      "table": "ai_task_run_overheads",
+      "outputIndex": 216,
+      "outputSha256": "e34c836f5cef291bb576313e458fe2d035d94481781ff6ecbda164467cc4e760"
+    },
+    {
+      "sourceMigration": "ai-native.20261108010000",
+      "sourceIndex": 3,
+      "sourceStatementSha256": "4e207bfeee897fa22a2846056d4f59aefc9709b90d8094f67c0094ed2e95057a",
+      "table": "ai_task_run_overheads",
+      "outputIndex": 217,
+      "outputSha256": "4e207bfeee897fa22a2846056d4f59aefc9709b90d8094f67c0094ed2e95057a"
+    },
+    {
+      "sourceMigration": "ai-native.20261108010000",
+      "sourceIndex": 4,
+      "sourceStatementSha256": "c1ca59d1b1247880324f0873c43f8f71c8121829e11c8c5ed1cce8b4bf8468ca",
+      "table": "ai_task_run_overheads",
+      "outputIndex": 218,
+      "outputSha256": "c1ca59d1b1247880324f0873c43f8f71c8121829e11c8c5ed1cce8b4bf8468ca"
+    },
+    {
+      "sourceMigration": "ai-native.20261108010000",
+      "sourceIndex": 5,
+      "sourceStatementSha256": "e58d59a971aec170d828813980c5d4537ac7ff94502d4281b022c5c823c4fd9f",
+      "table": "ai_task_run_overheads",
+      "outputIndex": 219,
+      "outputSha256": "e58d59a971aec170d828813980c5d4537ac7ff94502d4281b022c5c823c4fd9f"
+    }
+  ]
+}
