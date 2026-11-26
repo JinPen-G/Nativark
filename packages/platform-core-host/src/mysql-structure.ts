@@ -272,6 +272,9 @@ export function mysqlCheckShape(clause: string): string | undefined {
         if (name?.kind !== "word" || !["utf8mb4", "ascii", "binary"].includes(name.value)) throw new Error("未知CHAR字符集");
         charset = name.value;
       }
+      // MySQL 8.4 serializes unary BINARY as CAST(... AS CHAR CHARSET binary).
+      // A length would truncate the value and is not equivalent to BINARY.
+      if (charset === "binary" && length === "default") return ["binary", input];
       return ["cast", "char", length, charset, input];
     });
     const arity = Object.hasOwn(arities, value) ? arities[value] : undefined;
