@@ -5,10 +5,9 @@ const path = require('node:path');
 const ts = require('typescript');
 const React = require('react');
 
-function sourceFile(relative) {
+function sourceFile(relative, required = true) {
   relative = relative.replaceAll("\\", "/");
   const root = path.resolve(__dirname, '..');
-  if (relative === 'apps/admin/src/app/locale.tsx' || relative === 'apps/admin/src/components/ui/LiveRefresh.tsx') return path.resolve(root, relative);
   const candidates = [
     relative.replace(/^apps\/admin\/src\/registry\//u, "packages/ui-arc/vendor/registry/"),
     relative.replace(/^apps\/admin\/src\/features\/membership\//u, 'packages/rental-core/admin/membership/'),
@@ -16,22 +15,23 @@ function sourceFile(relative) {
     relative.replace(/^apps\/admin\/src\/features\/fulfillment\//u, 'packages/rental-core/admin/locations/'),
     relative.replace(/^apps\/admin\/src\//u, 'packages/platform-admin/src/'),
   ].filter(candidate => candidate !== relative);
-  candidates.push(relative);
+  if (!relative.startsWith('apps/admin/')) candidates.push(relative);
   for (const candidate of candidates) {
     for (const suffix of ['', '.ts', '.tsx', '/index.ts']) {
       const filename = path.resolve(root, candidate + suffix);
       if (fs.existsSync(filename) && fs.statSync(filename).isFile()) return filename;
     }
   }
-  return path.resolve(root, relative);
+  if (required) throw new Error('Current source is missing: ' + relative);
+  return undefined;
 }
 
-function dependencyFile(name, filename) {
+function dependencyFile(name, filename, required = true) {
   if (name === "@/app/locale") return sourceFile("packages/platform-admin/src/app/locale.tsx");
   const root = path.resolve(__dirname, '..');
   if (name.startsWith('@/') && filename.replaceAll('\\', '/').includes('/packages/ui-arc/vendor/')) return sourceFile('packages/ui-arc/vendor/' + name.slice(2));
-  if (name.startsWith('@/')) return sourceFile('apps/admin/src/' + name.slice(2));
-  if (name.startsWith('.')) return sourceFile(path.relative(root, path.resolve(path.dirname(filename), name)));
+  if (name.startsWith('@/')) return sourceFile('apps/admin/src/' + name.slice(2), required);
+  if (name.startsWith('.')) return sourceFile(path.relative(root, path.resolve(path.dirname(filename), name)), required);
   const packageName = /^@rental-os\/([^/]+)(.*)$/u.exec(name);
   if (!packageName) return undefined;
   const packageRoot = path.join(root, 'packages', packageName[1]);
@@ -44,14 +44,17 @@ function dependencyFile(name, filename) {
   return sourceFile(path.relative(root, path.join(packageRoot, source)));
 }
 
-function load(file, dependencies = {}) {
+function load(file, dependencies = {}, modules = new Map()) {
   const root = path.resolve(__dirname, '..');
   const original = path.resolve(root, file);
   const filename = sourceFile(file);
   if (filename.endsWith('.css')) return { __esModule: true, default: {} };
+  // 一次装载沿 CommonJS 保留循环导出；每个用例/热刷新仍取得自己的模块实例。
+  if (modules.has(filename)) return modules.get(filename).exports;
   const source = fs.readFileSync(filename, 'utf8');
   const code = ts.transpileModule(source, { fileName: filename, compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
   const exported = { exports: {} };
+  modules.set(filename, exported);
   const aliases = { '@rental-os/platform-admin/ui': '@/components/ui', '@rental-os/platform-admin/locale': '@/app/locale' };
   // 复用订单列表用例的同源解析，迁移后的导入继续消费原 fixture。
   new Function('require', 'module', 'exports', code)(name => {
@@ -59,9 +62,9 @@ function load(file, dependencies = {}) {
     if (Object.hasOwn(dependencies, aliases[name])) return dependencies[aliases[name]];
     const target = dependencyFile(name, filename);
     if (target) {
-      const equivalent = Object.keys(dependencies).find(key => dependencyFile(key, original) === target);
+      const equivalent = Object.keys(dependencies).find(key => dependencyFile(key, original, false) === target);
       if (equivalent) return dependencies[equivalent];
-      return load(path.relative(root, target), dependencies);
+      return load(path.relative(root, target), dependencies, modules);
     }
     return require(name);
   }, exported, exported.exports);
@@ -103,7 +106,7 @@ test('page tools remain beside their content while only the primary action enter
     './workspace/WorkspaceHeader': { useWorkspaceHeader: () => ({}), WorkspacePageTitle: 'header-title', WorkspacePageActions: 'header-actions' },
   };
   const { PageHeading } = load('packages/platform-admin/src/components/PageHeading.tsx', dependencies);
-  const { PageHeader } = load('apps/admin/src/components/PageHeader.tsx', { ...dependencies, '@rental-os/platform-admin/shell': { PageHeading } });
+  const PageHeader = props => React.createElement(PageHeading, { ...props, brandName: 'Example' });
   const props = { title: '设置', extra: React.createElement('button', null, '保存'), navigation: React.createElement('button', null, '返回'), tools: React.createElement('button', null, '刷新') };
   const form = React.createElement('form', { id: 'current-draft' }, React.createElement('input', { name: 'draft', defaultValue: 'retain me' }));
   const markup = renderToStaticMarkup(React.createElement(PageHeader, { ...props, view: form }));
@@ -245,7 +248,7 @@ test('locale consumers keep their provider when the translation module is refres
   global.window = { localStorage: { getItem: () => 'en-US' } };
   try {
     const ExistingConsumer = () => React.createElement('span', null, previous.useLocale().t('无权访问'));
-    const markup = require('react-dom/server').renderToStaticMarkup(React.createElement(refreshed.LocaleProvider, null, React.createElement(ExistingConsumer)));
+    const markup = require('react-dom/server').renderToStaticMarkup(React.createElement(refreshed.LocaleProvider, { messages: { '无权访问': 'Access denied' } }, React.createElement(ExistingConsumer)));
     assert.match(markup, /Access denied/, 'A retained page must consume the refreshed provider without becoming blank.');
   } finally { if (originalWindow === undefined) delete global.window; else global.window = originalWindow; }
 });
@@ -524,8 +527,7 @@ test('live refresh is opt-in, pauses while editing, stops on denial and resets a
   let state;
   const { useLiveRefresh, useListQueryIdentity } = load('apps/admin/src/components/ui/LiveRefresh.tsx', {
     react: { ...React, useState: initial => { state ??= initial; return [state, next => { state = typeof next === 'function' ? next(state) : next; }]; }, useEffect: effect => effect() },
-    '@/features/auth/authStore': { useAuthStore: selector => selector(identity) },
-    './BusinessUiScope': { useBusinessUiScope: () => ({ identity: useListQueryIdentity() }) },
+    './BusinessUiScope': { useBusinessUiScope: () => ({ identity: JSON.stringify(identity) }) },
     '@/app/locale': {}, './Switch': {}
   });
   let live = useLiveRefresh('orders');
@@ -547,9 +549,15 @@ test('list identity ignores permission ordering but retains access and organizat
   let identity = { tenant: { tenantId: 'tenant' }, currentWorkspaceId: 'workspace', user: {
     id: 'operator', permissions, dataScope: 'self_org', organizationId: 'org-a', locationScope: { mode: 'selected', locationIds: ['one'] }
   } };
-  const { useListQueryIdentity } = load('apps/admin/src/components/ui/LiveRefresh.tsx', {
-    '@rental-os/platform-admin/source/components/ui/LiveRefresh': {},
-    react: {}, '@/features/auth/authStore': { useAuthStore: selector => selector(identity) }, '@/app/locale': {}, './Switch': {}
+  // 身份生成属于所选 Rental 宿主；公共 LiveRefresh 只消费宿主提供的 scope。
+  const file = sourceFile('packages/rental-core/admin/browser-host.tsx');
+  const ast = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+  let queryScope;
+  const find = node => { if (ts.isPropertyAssignment(node) && node.name.getText(ast) === 'queryScope') queryScope = node.initializer; ts.forEachChild(node, find); };
+  find(ast); assert.ok(queryScope, 'Current Rental query scope must exist');
+  const readScope = new Function('auth', 'return ' + queryScope.getText(ast));
+  const { useListQueryIdentity } = load('packages/platform-admin/src/components/ui/LiveRefresh.tsx', {
+    react: {}, './BusinessUiScope': { useBusinessUiScope: () => ({ identity: readScope(identity) }) }, '@/app/locale': {}, './Switch': {}
   });
   const original = useListQueryIdentity();
   identity = { ...identity, user: { ...identity.user, permissions: ['assets:view', 'catalog:view', 'catalog:view'] } };
@@ -725,10 +733,9 @@ test('lazy settings panels stay hidden after visiting and release their content 
 
 test('restored message center preserves shared inbox state, original folders, undo, filters and keyboard actions', async () => {
   const vm = require('node:vm'), root = path.resolve(__dirname, '..');
-  const fixtureAst = ts.createSourceFile('fixture.cjs', fs.readFileSync(path.join(root, 'tests/enterprise-consumers.test.cjs'), 'utf8'), ts.ScriptTarget.Latest, true);
-  const fixture = fixtureAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'reactHost');
+  const { reactHost: fixture } = require('./fixtures/react-host.cjs');
   assert.ok(fixture);
-  const hooks = () => new Function('assert', fixture.getText(fixtureAst) + ';return reactHost();')(assert);
+  const hooks = fixture;
   const pageHooks = hooks(), listHooks = hooks(), updates = [], restores = [];
   const stub = name => props => React.createElement(name, props);
   const icons = Object.fromEntries(['Bell', 'ClipboardCheck', 'ClipboardList', 'Sparkles', 'Wrench', 'Archive', 'Clock3', 'RotateCcw', 'Undo2'].map(name => [name, stub(name)]));
