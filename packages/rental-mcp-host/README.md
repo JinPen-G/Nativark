@@ -39,6 +39,8 @@
 
 `createOriginalMcpResultReadTools` 从原 `createReadTools(current)` 获取本次宿主的 OAuth store、grant 权威、Core 参加者和预算数据库。调用方按正式出口传入原 MCP 构造器和该读取的真实所有者；每项分别提供当前权限与 ALS、原持久目标定位及当前绑定审计、发布和闭合字段投影。可用 `combineOriginalMcpReadTools(catalog, results)` 交回同一服务注册，目录保留原路径。默认宿主仍只装配目录。
 
+旧镜像在此目录编译 `@rental-os/rental-mcp-host`。这里的业务 schema 装配和会话／销售校验器是独立 Rental 同源文件的临时镜像；旧 switch 在本包选原读者，不能改用公共工作中心的返回合同。两仓读取器同源同步，本处兼容副本随旧业务迁出。公共 MCP 继续只提供通用校验与运输。
+
 业务所有者在该回调的同一 Native 绑定原读者，原 Web Bearer、目录 Guard 和原私有结果 schema 都不能替代它。会话沿公共关联读取；Task 沿原请求仓储、适用资源和持久动作策略；报价、选单、提案、订单沿原窄读方法。字段政策只接当前主体、Native 和固定目的地，不接凭据；原读取和 release 结束后各自的租约失效。没有相应权限、读者、绑定或放行的结果保持不可用；原键、过期、`not_observed` 与 `unknown` 仍按原证据解释。
 
 选装工厂仅为服务端登记的 `quoteReceipt` 使用 [Core 原报价收据入口](src/original-mcp-core-access.ts)。租户 Core 授权已登记为停用时，仍须有当前 OAuth grant、成员分配、兼容的原绑定、可读的物理数据，以及同一原用途、报价对象和字段的当前权限。读取原收据沿同一原目标和调用账计量；目录、其他操作和新业务继续走各自的原门禁。工具名称或请求字段不能开启善后权限。

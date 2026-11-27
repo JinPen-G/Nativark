@@ -4,8 +4,8 @@
 const { isBuiltin } = require('node:module');
 const { posix } = require('node:path');
 
-const compatibility = ['conversation-list-read', 'conversation-operation-read', 'conversation-result-read',
-  'quote-selection-read', 'selected-proposal-read', 'selected-order-result-read'];
+const compatibility = ['quote-selection-read', 'selected-proposal-read', 'selected-order-result-read'];
+const synchronousEsm = new Set(['./original-read-tool', './original-task-recovery-read']);
 const assets = ['data-contribution.json', 'prisma/schema.prisma', 'mysql-oauth-schema.sql', 'mysql-read-budget-schema.sql',
   'mysql-catalog-goal-schema.sql', 'mysql-catalog-goal-intent-schema.sql', 'mysql-catalog-goal-adoption-schema.sql'];
 const publicPackages = new Set(['@modelcontextprotocol/server', '@rental-os/platform-contracts',
@@ -27,8 +27,6 @@ function assemblePublicMcpPackage(sources, emitted, ts) {
     throw Error('公共 MCP 包身份或安装入口无效');
   delete metadata.scripts;
   delete metadata.devDependencies;
-  delete metadata.peerDependencies['@rental-os/shared'];
-  delete metadata.peerDependenciesMeta['@rental-os/shared'];
   for (const key of compatibility) {
     delete metadata.exports['./' + key];
     delete metadata.typesVersions['*'][key];
@@ -43,9 +41,10 @@ function assemblePublicMcpPackage(sources, emitted, ts) {
   const roots = [];
   for (const [name, entry] of Object.entries(metadata.exports)) {
     if (name === './data-contribution.json' && entry === './data-contribution.json') continue;
+    const expectedKeys = synchronousEsm.has(name) ? 3 : 2;
     if (name.includes('*') || !/^\.\/dist\/[a-z0-9-]+\.js$/u.test(entry?.import)
       || !/^\.\/dist\/[a-z0-9-]+\.d\.ts$/u.test(entry?.types)
-      || Object.keys(entry).length !== 2
+      || Object.keys(entry).length !== expectedKeys || (expectedKeys === 3 && entry.require !== entry.import)
       || (name === '.' ? metadata.types !== entry.types : metadata.typesVersions['*'][name.slice(2)]?.[0] !== entry.types.slice(2)))
       throw Error(`公共 MCP 运行与类型出口不一致：${name}`);
     roots.push(entry.import.slice(2), entry.types.slice(2));

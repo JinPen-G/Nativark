@@ -19,14 +19,13 @@
 `@modelcontextprotocol/server` 2.2.0、TypeScript 6.0.3 和 Node 类型 22.20.1 已登记在包声明与根锁文件中。准备本检出的 npm workspace 依赖后，在仓库根执行以下构建和类型命令。[依赖锁](../../package-lock.json)
 
 ```bash
-npm run build -w @rental-os/shared
 npm run build -w @rental-os/mcp-server
 npm run typecheck -w @rental-os/mcp-server
 ```
 
-不装 Rental 的宿主可用 [公共编译配置](tsconfig.public.json) 和 [装包入口](public-package.cjs) 生成同名的公共包候选。先构建公共前置，从固定源码编译该配置；`assemblePublicMcpPackage(sources, emitted, ts)` 接包相对来源字节和当次 `dist-public` 相对产物，返回可交公共归档工具的文件集合。正式源带原 `LICENSE`、公共 README、五份原 SQL 和 schema；不从旧 dist 拾取产物。包保留运输、OAuth、持久计量和 `original-task-recovery-read`，会话与 Rental 销售的旧组合子出口留在完整包。公共 Task 直接从 `@rental-os/platform-contracts/ai-original-result` 取同源闭合合同，宿主继续承担原授权、对象、原目标和字段政策。[公共包说明](README.public.md)
+不装 Rental 的宿主可用 [公共编译配置](tsconfig.public.json) 和 [装包入口](public-package.cjs) 生成同名的公共包候选。先构建公共前置，从固定源码编译该配置；`assemblePublicMcpPackage(sources, emitted, ts)` 接包相对来源字节和当次 `dist-public` 相对产物，返回可交公共归档工具的文件集合。正式源带原 `LICENSE`、公共 README、五份原 SQL 和 schema；不从旧 dist 拾取产物。包保留运输、OAuth、持久计量、公共工作中心和旧原请求恢复读取。[公共包说明](README.public.md)
 
-旧组合的会话与 Rental 销售候选仍消费可选 peer `@rental-os/shared` 0.1.0 的运行时和声明。所消费的 schema、声明和 JS 须来自同一版本产物。Task 原读使用公共合同，基础运输与公共 Task 子出口都可独立于 shared 加载。[shared 正式出口](../shared/src/index.ts)
+公共包及完整编译都不依赖混合 Shared 或 Rental。`work-center-read` 消费 `@rental-os/platform-contracts/ai-work-center`。旧 Rental 会话/销售合同在独立 Rental MCP 参加者，复用 `/original-read-tool` 的 schema 装配和快照。旧组合上的三个销售 import 名保留以供固定宿主加载，构造须由 Rental 参加者提供；公共归档不含这些兼容名。原合同存在不代表已发布。
 
 Rental 固定工具码与运输名由 `@rental-os/rental-mcp-host/capability-mapping` 提供，通用包不反向导出该业务映射。宿主通过本包原有 `McpReadTool`、`McpReadPublication`、`McpReadAuthority`、`McpReadAccounting` 和 `McpReadRelease` 显式绑定业务参加者。其他 Core 可按同一闭合 schema 和当前授权端口登记自己的受控读取；缺少生产者时保持不可用。[Rental 接入](../rental-mcp-host/README.md)
 
@@ -235,13 +234,12 @@ Rental 固定映射中的四项原只读码由 `@rental-os/rental-mcp-host/capab
 
 | 原结果候选出口 | 精确读取与约束 |
 | --- | --- |
-| `conversation-result-read` | conversation / admission / result 与原请求、Task / Run 来源链匹配，unknown / failed / stale / erased 保留原状态。[源码](src/conversation-result-read.ts) |
+| `work-center-read` | 从正式公共工作中心合同装配 Task、Task 结果、会话摘要和会话原结果。校验原 locator，原权威仍须核属主、Task/Run/Artifact 与可读范围。[源码](src/work-center-read.ts) |
+| `conversation-result-read` | 同一公共工作中心的会话原结果入口；旧 Rental 业务结果保留原 schema、原目标和权限，由独立 Rental 参加者读取。[源码](src/conversation-result-read.ts) |
 | `conversation-operation-read` | 原 operationKey 完全一致，observed / not_observed 只描述原收据。[源码](src/conversation-operation-read.ts) |
 | `conversation-list-read` | 一页 active / archived，1～20 条，末项游标与 page_not_total。[源码](src/conversation-list-read.ts) |
 | `original-task-recovery-read` | 原 inputRef 到 Task / 步骤，unknown actionId 与核对指引保持。[源码](src/original-task-recovery-read.ts) |
-| `quote-selection-read` | 原 inputRef / selection 及历史依据，selected_not_approved / expired / superseded 保持。[源码](src/quote-selection-read.ts) |
-| `selected-proposal-read` | 原 Task / proposal / revision / reviewedPayloadHash 与单建单动作匹配，决定与执行各归原入口。[源码](src/selected-proposal-read.ts) |
-| `selected-order-result-read` | 请求绑定 readResult，复验原选择 / Task / Run / inputHash、批准消费与 Core 收据，unknown 保持原键。[源码](src/selected-order-result-read.ts) |
+| Rental 销售原读 | 选单、提案、订单的原 schema、匹配与实际权威由独立 `@rental-os/rental-mcp-host` 供给，unknown 保持原键。 |
 
 上述候选以各自所有者的原完整契约及普通 JSON 快照校验私有请求 / 结果，分别最多 32 KiB / 128 KiB，所需原 schema 组件须完整供给。MCP 外发另需闭合投影 schema、publication / authority / accounting / release，并服从 2,000 字符 / 50 条 / 完整 64 KiB 响应。原 reader 负责当前本人、空间、哈希、祖先及读后权限，结果候选读取保持原状态与禁止自动重试。
 

@@ -186,6 +186,15 @@
       "types": "./dist/conversation-result-read.d.ts",
       "import": "./dist/conversation-result-read.js"
     },
+    "./work-center-read": {
+      "types": "./dist/work-center-read.d.ts",
+      "import": "./dist/work-center-read.js"
+    },
+    "./original-read-tool": {
+      "types": "./dist/original-read-tool.d.ts",
+      "import": "./dist/original-read-tool.js",
+      "require": "./dist/original-read-tool.js"
+    },
     "./selected-proposal-read": {
       "types": "./dist/selected-proposal-read.d.ts",
       "import": "./dist/selected-proposal-read.js"
@@ -200,7 +209,8 @@
     },
     "./original-task-recovery-read": {
       "types": "./dist/original-task-recovery-read.d.ts",
-      "import": "./dist/original-task-recovery-read.js"
+      "import": "./dist/original-task-recovery-read.js",
+      "require": "./dist/original-task-recovery-read.js"
     },
     "./conversation-operation-read": {
       "types": "./dist/conversation-operation-read.d.ts",
@@ -237,8 +247,7 @@
   "peerDependencies": {
     "@rental-os/core-contracts": "0.1.0",
     "@rental-os/core-host": "0.1.0",
-    "@rental-os/platform-core-host": "0.1.0",
-    "@rental-os/shared": "0.1.0"
+    "@rental-os/platform-core-host": "0.1.0"
   },
   "peerDependenciesMeta": {
     "@rental-os/core-contracts": {
@@ -248,9 +257,6 @@
       "optional": true
     },
     "@rental-os/platform-core-host": {
-      "optional": true
-    },
-    "@rental-os/shared": {
       "optional": true
     }
   },
@@ -392,6 +398,12 @@
       ],
       "conversation-result-read": [
         "dist/conversation-result-read.d.ts"
+      ],
+      "work-center-read": [
+        "dist/work-center-read.d.ts"
+      ],
+      "original-read-tool": [
+        "dist/original-read-tool.d.ts"
       ],
       "selected-proposal-read": [
         "dist/selected-proposal-read.d.ts"

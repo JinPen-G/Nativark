@@ -7,12 +7,14 @@ import { createCoreArchive } from '@rental-os/core-contracts/archive';
 import { readPlatformDataCapabilityPackage, requirePlatformDataCapabilityFiles } from '@rental-os/core-contracts/platform-data-package';
 
 const schema = { file: 'prisma/schema.prisma', sha256: '8c3ad36c896693d3d056a9d1b067bf8c26cf222ed5aeadf7a1e367ae30fe7a63' } as const;
-// These are exact pairs for the old combined package, the current combined
-// package and the public package. They share the same original data version.
+// Each build shape is pinned independently; existing installed shapes keep
+// their original data version and migration identities.
 const packageShapes = new Map([
   ['ce4caeecbd0b4b81a879f02d4e845b6f7eb8fbaf8b5b89024c670a6a8afb1202', '723a3e360d87002c026dd2278aea1d386e4d78ccf6d16b5d1c24fae9ab9b46ff'],
   ['f0386e52ce9bc6a49e0df9189bc7f81815bc67f7785dcbb10ca4358ae8e5a486', '720b367462add2cfba45bb0a3eb65347f6cc2cc8ea18d9d994f32cb0c7063277'],
   ['26ca72466491f81e793101c349bc291f34935aa73f902c9eaa5f7ea32707ae6a', '5b83831e3b469e8efc453870873f5bf9c443ee551d27da1414cfb3b57edb37f9'],
+  ['2d6b422be72a6d4f1373ad8de3f1f491e9a40d9450e1a54c944b7d3b164f3e3b', 'ecd9f801f0e9d5f871ad95782942f794645b523282490ceabb23192f2e04c4d6'],
+  ['691cd5e26ab2a7c4699fceecd34eb70fbf4eae0e15192b875511fb13c05e447d', '25d80b0e0fbeae7dfbf8cfc889d52e33772cb36f43a700156bf5c082042a07ca'],
 ]);
 const migrations = [
   { id: 'mcp.0001-oauth', file: 'mysql-oauth-schema.sql', sha256: 'aa8f6004c1be402bd6adeda56bba9275d820cfdea43d52483429e684b5ddded4', requires: [] },

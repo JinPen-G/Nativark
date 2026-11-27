@@ -2,11 +2,13 @@
  * scope, filtering and cursor order; this adapter never aggregates or mutates pages. */
 import { fromJsonSchema } from "@modelcontextprotocol/server";
 import type { JsonSchemaType } from "@modelcontextprotocol/server";
-import { AI_CONVERSATION_HTTP_DRAFT } from "@rental-os/shared";
-import type { AiConversationListDraft, AiConversationListResponseDraft } from "@rental-os/shared";
+import { AI_PUBLIC_WORK_CENTER_OPERATIONS, AI_PUBLIC_WORK_CENTER_SCHEMAS } from "@rental-os/platform-contracts/ai-work-center";
 import type { McpReadTool } from "./read-tools.js";
 import { snapshotJson } from "./json-snapshot.js";
-import { originalReadSchema } from "./original-read-schema.js";
+import { assembleNamedOriginalReadSchema } from "./assemble-original-read-schema.js";
+
+interface AiConversationListDraft { draftVersion: string; status: "active" | "archived"; limit: number; beforeId?: string; capabilityCode?: string }
+interface AiConversationListResponseDraft { items: { status: string; conversationId: string; capabilityCode: string }[]; nextBeforeId: string | null }
 
 export interface ConversationListReadBinding {
   /** Fixed publication metadata, never supplied by a client or model. */
@@ -25,10 +27,10 @@ export interface ConversationListReadBinding {
  * This never fetches a following page, reports totals or starts a Task/model.
  */
 export function createConversationListRead(binding: ConversationListReadBinding): McpReadTool {
-  const contract = AI_CONVERSATION_HTTP_DRAFT.operations.list;
-  const inputSchema = originalReadSchema(contract.request);
+  const [, , request, response] = AI_PUBLIC_WORK_CENTER_OPERATIONS.list;
+  const inputSchema = assembleNamedOriginalReadSchema(AI_PUBLIC_WORK_CENTER_SCHEMAS, request);
   const input = fromJsonSchema<AiConversationListDraft>(inputSchema);
-  const originalOutput = fromJsonSchema<AiConversationListResponseDraft>(originalReadSchema(contract.response));
+  const originalOutput = fromJsonSchema<AiConversationListResponseDraft>(assembleNamedOriginalReadSchema(AI_PUBLIC_WORK_CENTER_SCHEMAS, response));
   const outputSchema = structuredClone(binding.outputSchema), read = binding.read.bind(binding);
   if (outputSchema.type !== "object" || outputSchema.additionalProperties !== false) throw new TypeError("Original external list schema must be a closed object");
   fromJsonSchema(outputSchema);
@@ -48,7 +50,8 @@ export function createConversationListRead(binding: ConversationListReadBinding)
       const checked = await originalOutput["~standard"].validate(JSON.parse(text));
       if (checked.issues || signal.aborted) throw new Error("Original list unavailable");
       const page = checked.value;
-      if (page.items.length > command.limit || page.items.some(item => item.status !== command.status)) throw new Error("Original list unavailable");
+      if (page.items.length > command.limit || page.items.some(item => item.status !== command.status
+        || command.capabilityCode !== undefined && item.capabilityCode !== command.capabilityCode)) throw new Error("Original list unavailable");
       // Preserve the original cursor. A repeated/non-page cursor would turn a
       // bounded original page into a misleading or looping client continuation.
       const ids = page.items.map(item => item.conversationId);

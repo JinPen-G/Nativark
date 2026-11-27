@@ -36,6 +36,30 @@
       "types": "./dist/original-mcp-catalog-read-tools.d.ts",
       "default": "./dist/original-mcp-catalog-read-tools.js"
     },
+    "./quote-selection-read": {
+      "types": "./dist/quote-selection-read.d.ts",
+      "default": "./dist/quote-selection-read.js"
+    },
+    "./selected-proposal-read": {
+      "types": "./dist/selected-proposal-read.d.ts",
+      "default": "./dist/selected-proposal-read.js"
+    },
+    "./selected-order-result-read": {
+      "types": "./dist/selected-order-result-read.d.ts",
+      "default": "./dist/selected-order-result-read.js"
+    },
+    "./rental-conversation-list-read": {
+      "types": "./dist/rental-conversation-list-read.d.ts",
+      "default": "./dist/rental-conversation-list-read.js"
+    },
+    "./rental-conversation-operation-read": {
+      "types": "./dist/rental-conversation-operation-read.d.ts",
+      "default": "./dist/rental-conversation-operation-read.js"
+    },
+    "./rental-conversation-result-read": {
+      "types": "./dist/rental-conversation-result-read.d.ts",
+      "default": "./dist/rental-conversation-result-read.js"
+    },
     "./original-mcp-result-read-tools": {
       "types": "./dist/original-mcp-result-read-tools.d.ts",
       "default": "./dist/original-mcp-result-read-tools.js"
@@ -185,6 +209,24 @@
       ],
       "original-mcp-catalog-read-tools": [
         "dist/original-mcp-catalog-read-tools.d.ts"
+      ],
+      "quote-selection-read": [
+        "dist/quote-selection-read.d.ts"
+      ],
+      "selected-proposal-read": [
+        "dist/selected-proposal-read.d.ts"
+      ],
+      "selected-order-result-read": [
+        "dist/selected-order-result-read.d.ts"
+      ],
+      "rental-conversation-list-read": [
+        "dist/rental-conversation-list-read.d.ts"
+      ],
+      "rental-conversation-operation-read": [
+        "dist/rental-conversation-operation-read.d.ts"
+      ],
+      "rental-conversation-result-read": [
+        "dist/rental-conversation-result-read.d.ts"
       ],
       "original-mcp-result-read-tools": [
         "dist/original-mcp-result-read-tools.d.ts"

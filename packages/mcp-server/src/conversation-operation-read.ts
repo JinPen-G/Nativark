@@ -2,11 +2,13 @@
  * not proof of no commit; this adapter never replays a mutation or cancels a Task. */
 import { fromJsonSchema } from "@modelcontextprotocol/server";
 import type { JsonSchemaType } from "@modelcontextprotocol/server";
-import { AI_CONVERSATION_HTTP_DRAFT } from "@rental-os/shared";
-import type { AiConversationOperationRequestDraft, AiConversationOperationObservationDraft } from "@rental-os/shared";
+import { AI_PUBLIC_WORK_CENTER_OPERATIONS, AI_PUBLIC_WORK_CENTER_SCHEMAS } from "@rental-os/platform-contracts/ai-work-center";
 import type { McpReadTool } from "./read-tools.js";
 import { snapshotJson } from "./json-snapshot.js";
-import { originalReadSchema } from "./original-read-schema.js";
+import { assembleNamedOriginalReadSchema } from "./assemble-original-read-schema.js";
+
+interface AiConversationOperationRequestDraft { draftVersion: string; operationKey: string }
+interface AiConversationOperationObservationDraft { draftVersion: string; operationKey: string }
 
 export interface ConversationOperationReadBinding {
   /** Fixed metadata from the capability owner; no caller-selected operation. */
@@ -25,10 +27,10 @@ export interface ConversationOperationReadBinding {
  * No model dispatch, listener, new operation key or business mutation is created.
  */
 export function createConversationOperationRead(binding: ConversationOperationReadBinding): McpReadTool {
-  const contract = AI_CONVERSATION_HTTP_DRAFT.operations.operation;
-  const inputSchema = originalReadSchema(contract.request);
+  const [, , request, response] = AI_PUBLIC_WORK_CENTER_OPERATIONS.operation;
+  const inputSchema = assembleNamedOriginalReadSchema(AI_PUBLIC_WORK_CENTER_SCHEMAS, request);
   const input = fromJsonSchema<AiConversationOperationRequestDraft>(inputSchema);
-  const originalOutput = fromJsonSchema<AiConversationOperationObservationDraft>(originalReadSchema(contract.response));
+  const originalOutput = fromJsonSchema<AiConversationOperationObservationDraft>(assembleNamedOriginalReadSchema(AI_PUBLIC_WORK_CENTER_SCHEMAS, response));
   const outputSchema = structuredClone(binding.outputSchema), read = binding.read.bind(binding);
   if (outputSchema.type !== "object" || outputSchema.additionalProperties !== false) throw new TypeError("Original external operation schema must be a closed object");
   fromJsonSchema(outputSchema);
@@ -46,7 +48,8 @@ export function createConversationOperationRead(binding: ConversationOperationRe
       const text = JSON.stringify(snapshotJson(response, { stringCharacters: 131_072, arrayItems: 50 }));
       if (Buffer.byteLength(text, "utf8") > 131_072) throw new Error("Original operation unavailable");
       const checked = await originalOutput["~standard"].validate(JSON.parse(text));
-      if (checked.issues || signal.aborted || checked.value.operationKey !== command.operationKey) throw new Error("Original operation unavailable");
+      if (checked.issues || signal.aborted || checked.value.operationKey !== command.operationKey
+        || checked.value.draftVersion !== command.draftVersion) throw new Error("Original operation unavailable");
       return checked.value;
     },
   };

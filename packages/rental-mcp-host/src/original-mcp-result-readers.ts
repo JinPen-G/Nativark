@@ -5,17 +5,24 @@ import { createOriginalConversationResultRead } from '@rental-os/ai-native-serve
 import { bindRentalOriginalSaleReads, bindRentalOriginalTaskRecoveryReadIn, rentalOriginalResultComponents } from '@rental-os/ai-native-server/runtime/rental-adapters/original-result-reads';
 import { validateAiSceneModelObservation } from '@rental-os/ai-native-server/runtime/scenes/scene-observation-contracts';
 import { originalRequestReferenceSchema } from '@rental-os/ai-native-server/runtime/task-request/original-request.validation';
-import type { createConversationResultRead } from '@rental-os/mcp-server/conversation-result-read' with { 'resolution-mode': 'import' };
 import type { createOriginalTaskRecoveryRead } from '@rental-os/mcp-server/original-task-recovery-read' with { 'resolution-mode': 'import' };
-import type { createQuoteSelectionRead } from '@rental-os/mcp-server/quote-selection-read' with { 'resolution-mode': 'import' };
-import type { createSelectedProposalRead } from '@rental-os/mcp-server/selected-proposal-read' with { 'resolution-mode': 'import' };
-import type { createSelectedOrderResultRead } from '@rental-os/mcp-server/selected-order-result-read' with { 'resolution-mode': 'import' };
+import { createRentalConversationResultRead } from './rental-conversation-result-read';
+import { createQuoteSelectionRead } from './quote-selection-read';
+import { createSelectedProposalRead } from './selected-proposal-read';
+import { createSelectedOrderResultRead } from './selected-order-result-read';
+import type { OriginalReadRuntime } from './original-read-schema';
 import type { McpReadTool } from '@rental-os/mcp-server' with { 'resolution-mode': 'import' };
 import type { OriginalMcpReadCallRef } from '@rental-os/mcp-server/persistent-read-accounting' with { 'resolution-mode': 'import' };
 import { AI_ORIGINAL_RESULT_LOCATOR_SCHEMAS,
   type AiConversationTurnReferenceDraft, type AiSceneRequestReadDraft } from '@rental-os/platform-contracts/ai-original-result';
 import { createOriginalMcpRequestAuthority } from './original-mcp-request-authority';
 import type { OriginalMcpCatalogReadContext, OriginalMcpReadSubject } from './original-mcp-read-context';
+
+// The legacy combined host is CommonJS. These two modules are synchronous ESM
+// on the host's pinned Node version; the public modules have no startup I/O.
+const loadOriginalReadRuntime = (): OriginalReadRuntime => require('@rental-os/mcp-server/original-read-tool');
+const loadOriginalRecovery = (): { createOriginalTaskRecoveryRead: typeof createOriginalTaskRecoveryRead } =>
+  require('@rental-os/mcp-server/original-task-recovery-read');
 
 export interface OriginalMcpResultCustody {
   readonly native: Prisma.TransactionClient;
@@ -44,11 +51,18 @@ export const originalMcpResultKinds: readonly OriginalMcpResultKind[] = Object.f
   'conversation', 'taskRecovery', 'quoteReceipt', 'quoteSelection', 'selectedProposal', 'selectedOrderResult'
 ]);
 export interface OriginalMcpResultReaderExports {
-  createConversationResultRead: typeof createConversationResultRead;
-  createOriginalTaskRecoveryRead: typeof createOriginalTaskRecoveryRead;
-  createQuoteSelectionRead: typeof createQuoteSelectionRead;
-  createSelectedProposalRead: typeof createSelectedProposalRead;
-  createSelectedOrderResultRead: typeof createSelectedOrderResultRead;
+  createOriginalTaskRecoveryRead?: typeof createOriginalTaskRecoveryRead;
+  /** Legacy source compatibility only. Rental validators are always selected
+   * locally, so these names cannot substitute the public work-center schema. */
+  createConversationResultRead?: (...args: never[]) => unknown;
+  createQuoteSelectionRead?: (...args: never[]) => unknown;
+  createSelectedProposalRead?: (...args: never[]) => unknown;
+  createSelectedOrderResultRead?: (...args: never[]) => unknown;
+  /** Optional original transport utility injection. */
+  fromJsonSchema?: OriginalReadRuntime['fromJsonSchema'];
+  assembleOriginalReadSchema?: OriginalReadRuntime['assembleOriginalReadSchema'];
+  assembleNamedOriginalReadSchema?: OriginalReadRuntime['assembleNamedOriginalReadSchema'];
+  snapshotJson?: OriginalReadRuntime['snapshotJson'];
 }
 
 type Reader = McpReadTool['read'];
@@ -96,14 +110,19 @@ export function originalMcpResultTool<K extends OriginalMcpResultKind>(mcp: Orig
     }
   };
   const read = withReader(dispatch);
+  if (kind === 'taskRecovery') return (mcp.createOriginalTaskRecoveryRead ?? loadOriginalRecovery().createOriginalTaskRecoveryRead)({ ...descriptor, read });
+  if (kind === 'quoteReceipt') return { ...descriptor, inputSchema: structuredClone(AI_ORIGINAL_RESULT_LOCATOR_SCHEMAS.AiSceneRequestReadDraft), read };
+  const { fromJsonSchema, assembleOriginalReadSchema, assembleNamedOriginalReadSchema, snapshotJson } = mcp;
+  const runtime = typeof fromJsonSchema === 'function' && typeof assembleOriginalReadSchema === 'function'
+    && typeof assembleNamedOriginalReadSchema === 'function' && typeof snapshotJson === 'function'
+    ? { fromJsonSchema, assembleOriginalReadSchema, assembleNamedOriginalReadSchema, snapshotJson }
+    : loadOriginalReadRuntime();
   switch (kind) {
-    case 'conversation': return mcp.createConversationResultRead({ ...descriptor,
-      originalSchemas: rentalOriginalResultComponents() as Parameters<typeof createConversationResultRead>[0]['originalSchemas'], read });
-    case 'taskRecovery': return mcp.createOriginalTaskRecoveryRead({ ...descriptor, read });
-    case 'quoteReceipt': return { ...descriptor, inputSchema: structuredClone(AI_ORIGINAL_RESULT_LOCATOR_SCHEMAS.AiSceneRequestReadDraft), read };
-    case 'quoteSelection': return mcp.createQuoteSelectionRead({ ...descriptor, read });
-    case 'selectedProposal': return mcp.createSelectedProposalRead({ ...descriptor, read });
-    case 'selectedOrderResult': return mcp.createSelectedOrderResultRead({ ...descriptor, read });
+    case 'conversation': return createRentalConversationResultRead({ ...descriptor,
+      originalSchemas: rentalOriginalResultComponents() as Parameters<typeof createRentalConversationResultRead>[0]['originalSchemas'], read }, runtime);
+    case 'quoteSelection': return createQuoteSelectionRead({ ...descriptor, read }, runtime);
+    case 'selectedProposal': return createSelectedProposalRead({ ...descriptor, read }, runtime);
+    case 'selectedOrderResult': return createSelectedOrderResultRead({ ...descriptor, read }, runtime);
     default: throw unavailable();
   }
 }

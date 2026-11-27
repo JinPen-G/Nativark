@@ -84,6 +84,13 @@ for (const [name, status] of [["SIGINT", 130], ["SIGTERM", 143]]) process.once(n
 });
 const sourceResolver = require("../scripts/controller-sources.cjs").createControllerSourceLoader(root, dependencyDirectory);
 const sourceCache = new Map();
+// The fixed two-repository source projection places these files under
+// packages/rental-mcp-host. A paired development checkout can point at the
+// independently owned package without copying its implementation into Zelo.
+const rentalMcpOwner = path.resolve(process.env.MCP_TEST_RENTAL_HOST_SOURCE || path.join(root, "packages/rental-mcp-host"));
+const rentalReadSource = file => path.relative(root, path.join(rentalMcpOwner, "src", file + ".ts"));
+const originalReadRuntime = () => source("packages/mcp-server/src/original-read-tool.ts");
+const legacyRead = (module, key) => binding => source(rentalReadSource(module))[key](binding, originalReadRuntime());
 function source(relative) {
   const file = path.join(root, relative);
   if (sourceCache.has(file)) return sourceCache.get(file);
@@ -92,13 +99,20 @@ function source(relative) {
     fileName: file,
   }).outputText;
   const module = { exports: {} };
+  sourceCache.set(file, module.exports);
   const localRequire = specifier => {
-    const dependency = sourceResolver.resolveSource(file, specifier, true);
+    // Relative modules of the independently owned adapter remain in that same
+    // package. No external package can be resolved through this path.
+    const dependency = specifier.startsWith(".") && file.startsWith(rentalMcpOwner + path.sep)
+      ? path.resolve(path.dirname(file), specifier.replace(/\.js$/u, "") + ".ts")
+      : sourceResolver.resolveSource(file, specifier, true);
     return dependency ? source(path.relative(root, dependency)) : installed(specifier);
   };
-  new Function("require", "module", "exports", javascript)(localRequire, module, module.exports);
-  sourceCache.set(file, module.exports);
-  return module.exports;
+  try {
+    new Function("require", "module", "exports", javascript)(localRequire, module, module.exports);
+    sourceCache.set(file, module.exports);
+    return module.exports;
+  } catch (error) { sourceCache.delete(file); throw error; }
 }
 const { createProtectedMcpEndpoint, createIntrospectionVerifier, ResourceAuthorizationError } = source("packages/mcp-server/src/index.ts");
 // Harness discovery has its own source prerequisite, independent of the official SDK.
@@ -1295,8 +1309,7 @@ async function verifyConversationRead(t, createRead) {
 }
 
 test("original conversation result read preserves public references without dispatch", async t => {
-  const { createConversationResultRead } = source("packages/mcp-server/src/conversation-result-read.ts");
-  await verifyConversationRead(t, createConversationResultRead);
+  await verifyConversationRead(t, legacyRead("rental-conversation-result-read", "createRentalConversationResultRead"));
 });
 
 function taskRecovery(state = "observed") {
@@ -1307,6 +1320,52 @@ function taskRecovery(state = "observed") {
       status: "unknown", effect: "possible", resultAvailable: true, nextAction: "reconcile_original_action" }], hasMore: false,
     automaticExecution: false, nextAction: "existing_runner_recovery", observedResults: "preserved_even_if_task_cancelled", snapshot: "bounded_sequential_read" };
 }
+
+async function verifyPublicWorkCenterReads(create) {
+  const version = "ain-conversation-draft-2", observedAt = "2026-11-27T00:00:00.000Z";
+  const { AI_TASK_DRAFT_VERSION: taskVersion } = source("packages/platform-contracts/src/ai-task.ts");
+  const task = { taskId: "task-a", runId: "run-a" }, conversation = { draftVersion: version, conversationId: "conversation-a" };
+  const turn = { ...conversation, admissionKey: "admission-a" };
+  const originalResult = { contractVersion: taskVersion, ...task, resultId: "result-a", status: "unknown", diagnostic: null,
+    contentHash: "a".repeat(64), activeMs: "42", outputBytes: "0", observedAt,
+    execution: "read_only_no_start_no_reconnect_side_effect", businessExecution: "not_inferred_from_model_result" };
+  const cases = {
+    task: [task, { contractVersion: taskVersion, ...task, status: "running", runStatus: "running", revision: 1,
+      resultId: originalResult.resultId, execution: "observed_original_task" }, "runId"],
+    taskResult: [{ taskId: task.taskId, resultId: originalResult.resultId }, originalResult, "taskId"],
+    conversation: [conversation, { ...conversation, capabilityCode: "ai.capability.text", status: "active", revision: 1,
+      createdAt: observedAt, updatedAt: observedAt, currentTurn: null, taskCancellation: "separate_original_operation", businessRecords: "not_modified" }, "conversationId"],
+    conversationResult: [{ ...turn, resultId: originalResult.resultId }, { ...turn, status: "observed", result: originalResult,
+      execution: "read_only_no_start_no_dispatch" }, "admissionKey"],
+  };
+  const projection = { type: "object", additionalProperties: false, properties: { status: { type: "string" } }, required: ["status"] };
+  for (const [kind, [command, original, locator]] of Object.entries(cases)) {
+    let calls = 0, observed = original;
+    const tool = create(kind, { name: "original_read_fixture", description: "Original work-center observation.", outputSchema: projection,
+      async read(value) { assert.deepEqual(value, command); assert(Object.isFrozen(value)); calls++; return observed; } });
+    await assert.rejects(tool.read({ ...command, actorId: "caller-supplied" }, signal()));
+    assert.equal(calls, 0);
+    assert.deepEqual(await tool.read(command, signal()), original);
+    assert.deepEqual(tool.outputSchema, projection);
+    observed = { ...original, [locator]: "other-original" };
+    await assert.rejects(tool.read(command, signal()));
+    observed = { ...original, payload: "private original data" };
+    await assert.rejects(tool.read(command, signal()));
+    if (kind === "conversationResult") {
+      observed = { ...original, result: null, status: "not_observed" };
+      assert.deepEqual(await tool.read(command, signal()), observed);
+      observed = { ...original, status: "not_observed" };
+      await assert.rejects(tool.read(command, signal()));
+      observed = { ...original, result: { ...originalResult, resultId: "other-result" } };
+      await assert.rejects(tool.read(command, signal()));
+    }
+  }
+  assert.throws(() => create("reconcile", {}), /unavailable/u);
+}
+
+test("public work-center reads preserve original locators, unknown and closed fields", async () => {
+  await verifyPublicWorkCenterReads(source("packages/mcp-server/src/work-center-read.ts").createWorkCenterOriginalRead);
+});
 
 test("public original Task read preserves closed request and nested recovery branches", async () => {
   const { createOriginalTaskRecoveryRead } = source("packages/mcp-server/src/original-task-recovery-read.ts");
@@ -1496,7 +1555,7 @@ async function verifySelectedProposalRead(t, createRead) {
 }
 
 test("selected proposal read preserves original review without approval or execution", async t => {
-  await verifySelectedProposalRead(t, source("packages/mcp-server/src/selected-proposal-read.ts").createSelectedProposalRead);
+  await verifySelectedProposalRead(t, legacyRead("selected-proposal-read", "createSelectedProposalRead"));
 });
 
 function quoteSelectionReceipt(state = "selected_not_approved") {
@@ -1581,7 +1640,7 @@ async function verifyQuoteSelectionRead(t, createRead) {
 }
 
 test("quote selection read preserves trusted receipt without selecting or approval", async t => {
-  await verifyQuoteSelectionRead(t, source("packages/mcp-server/src/quote-selection-read.ts").createQuoteSelectionRead);
+  await verifyQuoteSelectionRead(t, legacyRead("quote-selection-read", "createQuoteSelectionRead"));
 });
 
 function selectedOrderResult(status = "committed") {
@@ -1665,7 +1724,7 @@ async function verifySelectedOrderResultRead(t, createRead) {
 }
 
 test("selected order result read preserves original receipt and uncertainty without execution", async t => {
-  await verifySelectedOrderResultRead(t, source("packages/mcp-server/src/selected-order-result-read.ts").createSelectedOrderResultRead);
+  await verifySelectedOrderResultRead(t, legacyRead("selected-order-result-read", "createSelectedOrderResultRead"));
 });
 
 function conversationOperation(status = "observed", operation = "create") {
@@ -1752,7 +1811,7 @@ async function verifyOperationRead(t, createRead) {
 }
 
 test("original conversation operation read keeps exact keys without replay", async t => {
-  await verifyOperationRead(t, source("packages/mcp-server/src/conversation-operation-read.ts").createConversationOperationRead);
+  await verifyOperationRead(t, legacyRead("rental-conversation-operation-read", "createRentalConversationOperationRead"));
 });
 
 function conversationPage(count = 1, status = "active") {
@@ -1825,7 +1884,7 @@ async function verifyConversationList(t, createRead) {
 }
 
 test("original conversation list reads one bounded page without totals", async t => {
-  await verifyConversationList(t, source("packages/mcp-server/src/conversation-list-read.ts").createConversationListRead);
+  await verifyConversationList(t, legacyRead("rental-conversation-list-read", "createRentalConversationListRead"));
 });
 
 async function verifyOriginalSelectedOrderComposition(t, createRead, createSelectionRead, createProposalRead) {
@@ -2191,6 +2250,7 @@ test("compiled MCP package exports load and serve both eras without source trans
     ...configured.options, outDir: path.join(staged, "dist"), typeRoots,
     paths: { "@modelcontextprotocol/server": [serverTypes], "@rental-os/shared": [path.join(stagedShared, "dist/index.d.ts")],
       "@rental-os/platform-contracts/ai-original-result": [publicResultTypes],
+      "@rental-os/platform-contracts/ai-work-center": [path.join(path.dirname(publicResultTypes), "ai-work-center.d.ts")],
       zod: [path.join(path.dirname(installed.resolve("zod/package.json")), "index.d.cts")] },
   });
   const diagnostics = ts.getPreEmitDiagnostics(program);
@@ -2200,12 +2260,16 @@ test("compiled MCP package exports load and serve both eras without source trans
   assert.equal(emitted.diagnostics.length, 0);
   // Compile the Rental mapping in its own package; its MCP port resolves only
   // the emitted public declarations, preserving the CJS/ESM package boundary.
-  const rentalRoot = path.join(root, "packages/rental-mcp-host"), stagedRental = path.join(output, "node_modules/@rental-os/rental-mcp-host");
+  const rentalRoot = rentalMcpOwner, stagedRental = path.join(output, "node_modules/@rental-os/rental-mcp-host");
   fs.mkdirSync(stagedRental, { recursive: true });
   fs.copyFileSync(path.join(rentalRoot, "package.json"), path.join(stagedRental, "package.json"));
-  const mappingProgram = ts.createProgram([path.join(rentalRoot, "src/capability-mapping.ts")], {
+  const mappingProgram = ts.createProgram(["capability-mapping", "rental-conversation-result-read", "rental-conversation-list-read",
+    "rental-conversation-operation-read", "quote-selection-read", "selected-proposal-read", "selected-order-result-read"]
+    .map(file => path.join(rentalRoot, "src", file + ".ts")), {
     ...program.getCompilerOptions(), rootDir: path.join(rentalRoot, "src"), outDir: path.join(stagedRental, "dist"),
-    paths: { ...program.getCompilerOptions().paths, "@rental-os/mcp-server": [path.join(staged, "dist/index.d.ts")] },
+    paths: { ...program.getCompilerOptions().paths, "@rental-os/mcp-server": [path.join(staged, "dist/index.d.ts")],
+      "@rental-os/mcp-server/original-read-tool": [path.join(staged, "dist/original-read-tool.d.ts")],
+      "@rental-os/platform-contracts/ai-gateway": [path.join(path.dirname(publicResultTypes), "ai-gateway.d.ts")] },
   });
   const mappingDiagnostics = ts.getPreEmitDiagnostics(mappingProgram);
   assert.equal(mappingDiagnostics.length, 0, mappingDiagnostics.map(d => ts.flattenDiagnosticMessageText(d.messageText, "\n")).join("\n"));
@@ -2235,27 +2299,30 @@ test("compiled MCP package exports load and serve both eras without source trans
     'import type { McpBusinessReadCode } from "@rental-os/rental-mcp-host/capability-mapping";',
     'const readCode: McpBusinessReadCode = "rental.catalog.search";',
     'void readCode;',
-    'import { createConversationResultRead } from "@rental-os/mcp-server/conversation-result-read";',
-    'import type { ConversationResultReadBinding } from "@rental-os/mcp-server/conversation-result-read";',
-    'export const resultRead = (binding: ConversationResultReadBinding) => createConversationResultRead(binding);',
+    'import * as originalRuntime from "@rental-os/mcp-server/original-read-tool";',
+    'import { createWorkCenterOriginalRead } from "@rental-os/mcp-server/work-center-read";',
+    'export { createWorkCenterOriginalRead };',
+    'import { createRentalConversationResultRead } from "@rental-os/rental-mcp-host/rental-conversation-result-read";',
+    'import type { RentalConversationResultReadBinding } from "@rental-os/rental-mcp-host/rental-conversation-result-read";',
+    'export const resultRead = (binding: RentalConversationResultReadBinding) => createRentalConversationResultRead(binding, originalRuntime);',
     'import { createOriginalTaskRecoveryRead } from "@rental-os/mcp-server/original-task-recovery-read";',
     'import type { OriginalTaskRecoveryReadBinding } from "@rental-os/mcp-server/original-task-recovery-read";',
     'export const recoveryRead = (binding: OriginalTaskRecoveryReadBinding) => createOriginalTaskRecoveryRead(binding);',
-    'import { createSelectedOrderResultRead } from "@rental-os/mcp-server/selected-order-result-read";',
-    'import type { SelectedOrderResultReadBinding } from "@rental-os/mcp-server/selected-order-result-read";',
-    'export const selectedOrderRead = (binding: SelectedOrderResultReadBinding) => createSelectedOrderResultRead(binding);',
-    'import { createQuoteSelectionRead } from "@rental-os/mcp-server/quote-selection-read";',
-    'import type { QuoteSelectionReadBinding } from "@rental-os/mcp-server/quote-selection-read";',
-    'export const selectionRead = (binding: QuoteSelectionReadBinding) => createQuoteSelectionRead(binding);',
-    'import { createSelectedProposalRead } from "@rental-os/mcp-server/selected-proposal-read";',
-    'import type { SelectedProposalReadBinding } from "@rental-os/mcp-server/selected-proposal-read";',
-    'export const proposalRead = (binding: SelectedProposalReadBinding) => createSelectedProposalRead(binding);',
-    'import { createConversationOperationRead } from "@rental-os/mcp-server/conversation-operation-read";',
-    'import type { ConversationOperationReadBinding } from "@rental-os/mcp-server/conversation-operation-read";',
-    'export const operationRead = (binding: ConversationOperationReadBinding) => createConversationOperationRead(binding);',
-    'import { createConversationListRead } from "@rental-os/mcp-server/conversation-list-read";',
-    'import type { ConversationListReadBinding } from "@rental-os/mcp-server/conversation-list-read";',
-    'export const listRead = (binding: ConversationListReadBinding) => createConversationListRead(binding);',
+    'import { createSelectedOrderResultRead } from "@rental-os/rental-mcp-host/selected-order-result-read";',
+    'import type { SelectedOrderResultReadBinding } from "@rental-os/rental-mcp-host/selected-order-result-read";',
+    'export const selectedOrderRead = (binding: SelectedOrderResultReadBinding) => createSelectedOrderResultRead(binding, originalRuntime);',
+    'import { createQuoteSelectionRead } from "@rental-os/rental-mcp-host/quote-selection-read";',
+    'import type { QuoteSelectionReadBinding } from "@rental-os/rental-mcp-host/quote-selection-read";',
+    'export const selectionRead = (binding: QuoteSelectionReadBinding) => createQuoteSelectionRead(binding, originalRuntime);',
+    'import { createSelectedProposalRead } from "@rental-os/rental-mcp-host/selected-proposal-read";',
+    'import type { SelectedProposalReadBinding } from "@rental-os/rental-mcp-host/selected-proposal-read";',
+    'export const proposalRead = (binding: SelectedProposalReadBinding) => createSelectedProposalRead(binding, originalRuntime);',
+    'import { createRentalConversationOperationRead } from "@rental-os/rental-mcp-host/rental-conversation-operation-read";',
+    'import type { ConversationOperationReadBinding } from "@rental-os/rental-mcp-host/rental-conversation-operation-read";',
+    'export const operationRead = (binding: ConversationOperationReadBinding) => createRentalConversationOperationRead(binding, originalRuntime);',
+    'import { createRentalConversationListRead } from "@rental-os/rental-mcp-host/rental-conversation-list-read";',
+    'import type { ConversationListReadBinding } from "@rental-os/rental-mcp-host/rental-conversation-list-read";',
+    'export const listRead = (binding: ConversationListReadBinding) => createRentalConversationListRead(binding, originalRuntime);',
     'import type { ProtectedMcpConfig, ResourceTokenVerifier, VerifiedResourceToken, McpInstructionsProvider, McpPromptsProvider, McpResources, McpResourceDescriptor } from "@rental-os/mcp-server";',
     'export const resourceUri = (descriptor: McpResourceDescriptor): string => descriptor.uri;',
     'export function resourceEndpoint(configuration: ProtectedMcpConfig, resources: McpResources, verifier: ResourceTokenVerifier) { return createProtectedMcpEndpoint({ ...configuration, resources }, verifier); }',
@@ -2302,6 +2369,7 @@ test("compiled MCP package exports load and serve both eras without source trans
   await verifyAuthorizationCodeBinding(t, compiled.assertAuthorizationCodeBinding, compiled.oauthTokens.OAuthTokenRequestError);
   await verifyOAuthTokenEndpoint(t, compiled.oauthTokens, compiled.assertAuthorizationCodeBinding);
   await verifyAuthorizationMetadata(t, compiled.createAuthorizationServerMetadata);
+  await verifyPublicWorkCenterReads(compiled.createWorkCenterOriginalRead);
   await verifyConversationRead(t, compiled.resultRead);
   await verifyTaskRecoveryRead(t, compiled.recoveryRead);
   await verifySelectedOrderResultRead(t, compiled.selectedOrderRead);
