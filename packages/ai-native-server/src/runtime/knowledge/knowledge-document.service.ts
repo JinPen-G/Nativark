@@ -1,18 +1,23 @@
 import { createHash } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
-import { AI_KNOWLEDGE_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
+import { type AiExecutionContext } from '@rental-os/platform-contracts/ai-gateway';
+import { AI_KNOWLEDGE_DRAFT_VERSION } from '@rental-os/platform-contracts';
 import type { KnowledgeDocumentPorts, KnowledgeRecord, KnowledgeAction, KnowledgeAuthorizationRequest, KnowledgeRepositoryPort } from './knowledge.ports';
 import { KnowledgeCommitUnknownError, KnowledgeError, requiredPort } from './knowledge-errors';
 import { assertRecord, authorize, draftInput, fingerprint, mutationInput, operationFingerprint, parse, validateChunks, queueIndex } from './knowledge-validation';
-import { inspectRetentionSource, lockRetentionSourceScope } from '../privacy/retention-model-sources';
-import { eraseRetainedSourceTaskBodies } from '../privacy/retention-task-bodies';
-import { AiTaskRepositoryError } from '../ai-task.repository';
+import { AiTaskRepositoryError } from '../../task-errors';
 import { AI_RETENTION_POLICY } from '../privacy/retention-policy';
 
 /** Server-only binding to the ORIGINAL repository transaction. The caller
  * supplies its transaction-bound repository, not another storage/runtime chain.
  * The server composition owns this port; HTTP and model input never supply it. */
+export type KnowledgeDeletionOwner = { tenantId: string; workspaceId: string };
 export interface KnowledgeDocumentRetention {
+  lockSource(tx: Prisma.TransactionClient, scope: AiExecutionContext['scope']): Promise<{ scopeId: string; owner: KnowledgeDeletionOwner }>;
+  inspectSource(tx: Prisma.TransactionClient, scopeId: string, kind: 'knowledge', resourceId: string,
+    owner: KnowledgeDeletionOwner): Promise<'clear' | 'held' | 'unavailable'>;
+  eraseCopies(tx: Prisma.TransactionClient, input: { scopeId: string; owner: KnowledgeDeletionOwner;
+    kind: 'knowledge'; resourceId: string; now: Date; check(): Promise<void> }): Promise<unknown>;
   withTransaction<T>(work: (tx: Prisma.TransactionClient, repository: KnowledgeRepositoryPort) => Promise<T>): Promise<T>;
 }
 
@@ -66,14 +71,16 @@ export class KnowledgeDocumentService {
       return 'committed' as const;
     }
     if (before.parseOperationId) throw new KnowledgeCommitUnknownError();
-    if (typeof this.retention?.withTransaction !== 'function') {
+    const retention = this.retention;
+    if (!retention || [retention.withTransaction, retention.lockSource, retention.inspectSource, retention.eraseCopies]
+      .some(method => typeof method !== 'function')) {
       throw Object.assign(new KnowledgeError('unavailable'), { reason: 'source_retention_not_assembled' });
     }
     const contextHash = fingerprint(context), beforeHash = fingerprint(before);
     let attempted = false, completed = false;
     try {
-      return await this.retention.withTransaction(async (tx, repository) => {
-        const { scopeId, owner } = await lockRetentionSourceScope(tx, context.scope);
+      return await retention.withTransaction(async (tx, repository) => {
+        const { scopeId, owner } = await retention.lockSource(tx, context.scope);
         const original = await repository.operation(input.scope, input.documentId, input.operation.id);
         if (original) {
           if (original.fingerprint !== input.operation.fingerprint) throw new KnowledgeError('conflict');
@@ -84,7 +91,7 @@ export class KnowledgeDocumentService {
         }
         const current = await repository.read(input.scope, input.documentId);
         if (!current || fingerprint(current) !== beforeHash) throw new KnowledgeError('conflict');
-        const state = await inspectRetentionSource(tx, scopeId, 'knowledge', input.documentId, owner);
+        const state = await retention.inspectSource(tx, scopeId, 'knowledge', input.documentId, owner);
         if (state !== 'clear') throw Object.assign(new KnowledgeError(state === 'held' ? 'not_ready' : 'unavailable'), {
           reason: state === 'held' ? 'referenced_by_unresolved_task' : 'source_task_binding_unavailable',
         });
@@ -100,7 +107,7 @@ export class KnowledgeDocumentService {
         // Source CAS and original Task-body erasure share one transaction. Keep
         // original IDs/hashes, financial evidence and business phases; never
         // sign a replacement prompt or acknowledge partial propagation.
-        await eraseRetainedSourceTaskBodies(tx, { scopeId, owner, kind: 'knowledge', resourceId: input.documentId,
+        await retention.eraseCopies(tx, { scopeId, owner, kind: 'knowledge', resourceId: input.documentId,
           now: new Date(this.ports.clock.now()), check });
         const result = await repository.commit(input);
         if (result !== 'committed') throw new KnowledgeError('conflict');

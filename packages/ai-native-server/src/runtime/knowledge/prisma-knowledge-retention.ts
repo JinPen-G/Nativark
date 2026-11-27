@@ -1,25 +1,11 @@
-/** Binds original knowledge CAS to one Prisma transaction and scope lock.
- * Nested repository callbacks reuse this transaction; no new store, policy,
- * execution permission or background deletion is introduced. */
-import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
-import type { Prisma } from '@prisma/client';
-import type { KnowledgeDocumentRetention } from './knowledge-document.service';
-import { PrismaKnowledgeRepository, type KnowledgePrismaClient } from './prisma-knowledge.repository';
-import { unavailable } from './knowledge-errors';
+/** Existing Rental source visibility and propagation on the original transaction. */
+import type { KnowledgePrismaClient } from './prisma-knowledge.repository';
+import { bindPrismaKnowledgeRetention } from './knowledge-retention-participant';
+import { lockRetentionSourceScope, inspectRetentionSource } from '../privacy/retention-model-sources';
+import { eraseRetainedSourceTaskBodies } from '../privacy/retention-task-bodies';
 
-export function createPrismaKnowledgeRetention(db: KnowledgePrismaClient,
-  clock: () => Date): KnowledgeDocumentRetention {
-  return {
-    withTransaction: work => db.$transaction(async tx => {
-      const bound = new Proxy(db, { get(_target, key) {
-        if (key === '$transaction') return (callback: unknown) => {
-          if (typeof callback !== 'function') return unavailable();
-          return callback(tx);
-        };
-        const value = Reflect.get(tx, key);
-        return typeof value === 'function' ? value.bind(tx) : value;
-      } });
-      return work(tx, new PrismaKnowledgeRepository(bound, clock));
-    }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 }),
-  };
+export function createPrismaKnowledgeRetention(db: KnowledgePrismaClient, clock: () => Date) {
+  return bindPrismaKnowledgeRetention(db, clock, {
+    lockSource: lockRetentionSourceScope, inspectSource: inspectRetentionSource, eraseCopies: eraseRetainedSourceTaskBodies
+  });
 }

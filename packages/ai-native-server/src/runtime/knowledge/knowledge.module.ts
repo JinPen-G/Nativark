@@ -1,5 +1,5 @@
 import { Module, type DynamicModule } from '@nestjs/common';
-import type { AiGatewayPortDraft } from '@rental-os/shared';
+import type { AiGatewayPortDraft as PublicGateway } from '@rental-os/platform-contracts/ai-gateway';
 import type { KnowledgeDocumentPorts, KnowledgeContentPort, KnowledgeSearchAuthorizationPort, KnowledgeSearchPort, KnowledgeIndexPort, StructuredMemoryPorts } from './knowledge.ports';
 import { KnowledgeDocumentService, type KnowledgeDocumentRetention } from './knowledge-document.service';
 import { KnowledgePublicationService } from './knowledge-publication.service';
@@ -17,7 +17,7 @@ export interface KnowledgeModulePorts {
   /** Original persisted deletion transaction; absent hosts cannot delete. */
   retention?: KnowledgeDocumentRetention;
   content: KnowledgeContentPort; selection: KnowledgeSearchAuthorizationPort; search: KnowledgeSearchPort;
-  index: KnowledgeIndexPort; memory: StructuredMemoryPorts; gateway: AiGatewayPortDraft;
+  index: KnowledgeIndexPort; memory: StructuredMemoryPorts; gateway: PublicGateway<unknown>;
   cache: { maxEntries: number; maxBytes: number; ttlMs: number };
   policy: { sceneCode: string; maxOutputTokens: number };
 }

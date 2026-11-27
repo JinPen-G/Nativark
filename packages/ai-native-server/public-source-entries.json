@@ -1,0 +1,11 @@
+{
+  "format": "zelo-public-ai-source-entries-1",
+  "entries": [
+    "approval-persistence",
+    "knowledge-persistence",
+    "platform-retention",
+    "task-observation",
+    "runtime/public-approval-persistence",
+    "runtime/public-rental-adapter-ports"
+  ]
+}

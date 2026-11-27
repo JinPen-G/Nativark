@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { AI_KNOWLEDGE_DRAFT_VERSION, type AiExecutionContext, type AiKnowledgeRecallDraft, type AiKnowledgeSourceDraft } from '@rental-os/shared';
+import { type AiExecutionContext } from '@rental-os/platform-contracts/ai-gateway';
+import { AI_KNOWLEDGE_DRAFT_VERSION, type AiKnowledgeRecallDraft, type AiKnowledgeSourceDraft } from '@rental-os/platform-contracts';
 import type { KnowledgeSearchAuthorizationPort, KnowledgeSearchPort, KnowledgeDocumentConstraint } from './knowledge.ports';
 import { KnowledgeDocumentService } from './knowledge-document.service';
 import { KnowledgeSourceService } from './knowledge-source.service';

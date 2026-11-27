@@ -1,4 +1,4 @@
-import type { AiExecutionContext } from '@rental-os/shared';
+import type { AiExecutionContext } from '@rental-os/platform-contracts/ai-gateway';
 
 export type AiApprovalConsumptionStatus = 'reserved' | 'committed' | 'unknown' | 'failed_no_effect';
 

@@ -5,10 +5,13 @@ import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
-import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_TOOL_DRAFT_VERSION, type AiTaskConfirmationHistoryDraft } from '@rental-os/shared';
+import { AI_TASK_STATUSES_DRAFT } from '@rental-os/platform-contracts/ai-task';
+import { AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiTaskConfirmationHistoryDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError, type AiTaskRepository } from '../ai-task.repository';
 import { requestFingerprint as hash } from '@rental-os/platform-contracts/request-fingerprint';
 import { taskExecutionPhaseStore } from './task-execution-phase.store';
+import { aiTaskConfirmationEventSchema } from './task-confirmation-event';
+export { aiTaskConfirmationEventSchema } from './task-confirmation-event';
 import { waitingPayloadSchema } from './prisma-task-confirmation-checkpoint.source';
 import { aiTaskRunPlanSchema, aiTaskConfirmationPhaseVersion, aiTaskConfirmationPhasePayloadSchema, aiTaskResumedConfirmationSchema } from './prisma-task-run-evidence.repository';
 
@@ -17,10 +20,6 @@ const revision = z.number().int().min(1).max(4294967295);
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const validDate = (value: Date) => value instanceof Date && Number.isFinite(value.getTime());
-export const aiTaskConfirmationEventSchema = z.object({ data: z.object({ from: z.enum(AI_TASK_STATUSES_DRAFT), to: z.enum(AI_TASK_STATUSES_DRAFT), reason: z.string() }).strict(),
-  initiator: z.object({ kind: z.literal('worker'), id: z.string().min(1).max(191), actorKind: z.string(), actorId: z.string() }).strict(),
-  confirmation: z.object({ checkpointRef: id, phaseId: id }).passthrough() }).passthrough();
-
 export class PrismaTaskConfirmationHistoryReader {
   constructor(private readonly db: Pick<PrismaClient, '$transaction'>,
     private readonly tasks: Pick<AiTaskRepository, 'resolveAccess'>) {}

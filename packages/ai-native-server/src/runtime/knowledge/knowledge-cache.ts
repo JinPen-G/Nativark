@@ -1,5 +1,6 @@
 import { performance } from 'node:perf_hooks';
-import type { AiExecutionScope, AiKnowledgeChunkDraft } from '@rental-os/shared';
+import type { AiExecutionScope } from '@rental-os/platform-contracts/ai-gateway';
+import type { AiKnowledgeChunkDraft } from '@rental-os/platform-contracts';
 import type { KnowledgeClock, KnowledgeGrant } from './knowledge.ports';
 import { KnowledgeError, requiredPort } from './knowledge-errors';
 import { fingerprint, scopeKey } from './knowledge-validation';

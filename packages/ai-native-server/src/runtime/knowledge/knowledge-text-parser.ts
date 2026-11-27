@@ -1,5 +1,5 @@
 import { TextDecoder } from 'node:util';
-import { AI_KNOWLEDGE_DRAFT_VERSION, type AiKnowledgeChunkDraft, type AiKnowledgeDocumentDraft } from '@rental-os/shared';
+import { AI_KNOWLEDGE_DRAFT_VERSION, type AiKnowledgeChunkDraft, type AiKnowledgeDocumentDraft } from '@rental-os/platform-contracts';
 import type { KnowledgeParserPort } from './knowledge.ports';
 import { KnowledgeError } from './knowledge-errors';
 import { validateChunks } from './knowledge-validation';

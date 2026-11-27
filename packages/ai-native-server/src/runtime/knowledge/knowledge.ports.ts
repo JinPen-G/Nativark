@@ -1,7 +1,5 @@
-import type {
-  AiExecutionContext, AiExecutionScope, AiKnowledgeDocumentDraft, AiKnowledgeChunkDraft,
-  AiKnowledgeOwnerDraft, AiFactReference, AiKnowledgeSourceDraft, AiMemoryDraft, AiPreferenceValueDraft,
-} from '@rental-os/shared';
+import type { AiExecutionContext, AiExecutionScope } from '@rental-os/platform-contracts/ai-gateway';
+import type { AiKnowledgeDocumentDraft, AiKnowledgeChunkDraft, AiKnowledgeOwnerDraft, AiFactReference, AiKnowledgeSourceDraft, AiMemoryDraft, AiPreferenceValueDraft } from '@rental-os/platform-contracts';
 
 export interface KnowledgeUploadRevision {
   documentVersion: string; expectedRevision: number; aclRevision: number; targetVersion: string;

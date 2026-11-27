@@ -65,6 +65,7 @@ export { AI_USAGE_DRAFT_SCHEMAS } from "./ai-usage-draft-schemas";
 export { AI_EVENTS_DRAFT_SCHEMAS } from "./ai-events-draft-schemas";
 export { AI_INSPECTION_DRAFT_SCHEMAS } from "./ai-inspection-draft-schemas";
 export * from "./ai-proposal-draft";
+export type { AiProposalActionDraft, AiProposalPayloadDraft, AiProposalRecordDraft } from "./ai-proposal-draft";
 export { AI_PROPOSAL_DRAFT_SCHEMAS } from "./ai-proposal-draft-schemas";
 export * from "./ai-approval-application-draft";
 export { AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS } from "./ai-approval-application-draft-schemas";

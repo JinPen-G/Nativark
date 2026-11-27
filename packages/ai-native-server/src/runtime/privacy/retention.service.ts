@@ -11,6 +11,8 @@ import { AiTaskRepositoryError } from '../ai-task.repository';
 import { fingerprint } from '../knowledge/knowledge-validation';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 import { AI_RETENTION_POLICY } from './retention-policy';
+import { AiRetentionUnknown, aiRetentionReceiptSchema, aiRetentionReceiptsSchema } from './retention-receipt';
+export { AiRetentionUnknown, aiRetentionReceiptSchema, aiRetentionReceiptsSchema } from './retention-receipt';
 import { logRetentionPage, retentionCandidate } from './retention-page-observation';
 import { aiTaskHasUnresolvedEffects } from '../task-unresolved-effects';
 import { aiRetentionObjectHash } from './retention-binding';
@@ -34,19 +36,11 @@ export const aiRetentionCleanupSchema = z.object({ kind: z.enum(retentionKinds),
   limit: z.number().int().min(1).max(10).default(5),
   after: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u).optional() }).strict();
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
-export const aiRetentionReceiptSchema = z.object({ id: z.string().regex(/^[a-f0-9]{64}$/u) }).strict();
-export const aiRetentionReceiptsSchema = z.object({ limit: z.number().int().min(1).max(50).default(20),
-  before: z.string().datetime().optional() }).strict();
 export type RetentionKind = z.infer<typeof aiRetentionCleanupSchema>['kind'];
 type Session = { context: AiExecutionContext; hash: string; tenantId: string; workspaceId: string };
 const terminal = ['SUCCEEDED', 'PARTIALLY_SUCCEEDED', 'FAILED', 'CANCELLED'] as const;
 const refused = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-export class AiRetentionUnknown extends Error {
-  readonly code = 'AI_RESULT_UNKNOWN'; readonly retryable = false;
-  constructor() { super('AI_RESULT_UNKNOWN'); }
-}
-
 /** Explicit bounded maintenance, not Cron/startup work. Current full-workspace
  * operator + the existing AI/settings management permission are mandatory.
  * Receipt IDs never authorize deletion; every attempt rechecks source facts.

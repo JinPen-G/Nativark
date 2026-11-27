@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { AI_GATEWAY_DRAFT_VERSION, type AiExecutionContext, type AiGatewayIntentDraft, type AiGatewayPortDraft, type AiKnowledgeRecallDraft, type AiKnowledgeSourceDraft, type AiMemoryDraft } from '@rental-os/shared';
+import { AI_GATEWAY_DRAFT_VERSION, type AiExecutionContext, type AiGatewayIntentDraft, type AiGatewayPortDraft as PublicGateway } from '@rental-os/platform-contracts/ai-gateway';
+import { type AiKnowledgeRecallDraft, type AiKnowledgeSourceDraft, type AiMemoryDraft } from '@rental-os/platform-contracts';
 import type { KnowledgeAuthorizationPort } from './knowledge.ports';
 import { KnowledgeRetrievalService } from './knowledge-retrieval.service';
 import { KnowledgeSourceService } from './knowledge-source.service';
@@ -17,7 +18,7 @@ export class KnowledgeGatewayContext {
   private readonly policy: z.infer<typeof policySchema>;
   constructor(private readonly retrieval: KnowledgeRetrievalService, private readonly sources: KnowledgeSourceService,
     private readonly memory: StructuredMemoryService, private readonly authorization: KnowledgeAuthorizationPort,
-    private readonly gateway: AiGatewayPortDraft, policy: { sceneCode: string; maxOutputTokens: number }) {
+    private readonly gateway: PublicGateway<unknown>, policy: { sceneCode: string; maxOutputTokens: number }) {
     requiredPort(retrieval, ['recall']); requiredPort(sources, ['resolve', 'readChunk']); requiredPort(memory, ['read']);
     requiredPort(authorization, ['authorize']); requiredPort(gateway, ['invoke', 'stream']);
     this.policy = parse(policySchema, policy);

@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
-import { rentalPrismaNulls } from '@rental-os/rental-core/prisma-null-values';
 import type { Prisma, PrismaClient } from '@prisma/client';
-import type { AiExecutionContext, AiExecutionScope, AiKnowledgeOwnerDraft, AiMemoryDraft } from '@rental-os/shared';
+import type { AiExecutionContext, AiExecutionScope } from '@rental-os/platform-contracts/ai-gateway';
+import type { AiKnowledgeOwnerDraft, AiMemoryDraft } from '@rental-os/platform-contracts';
 import type { KnowledgeOperation, MemoryConfirmation, MemoryConfirmationPort, MemoryRepositoryPort } from './knowledge.ports';
 import { KnowledgeCommitUnknownError, KnowledgeError, unavailable } from './knowledge-errors';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
@@ -127,7 +127,7 @@ export class PrismaStructuredMemoryRepository implements MemoryRepositoryPort, M
             AND: [{ state: { path: '$.memoryId', equals: input.memoryId } },
               { state: { path: '$.owner.actorKind', equals: input.owner.actorKind } },
               { state: { path: '$.owner.actorId', equals: input.owner.actorId } }],
-          }, data: { status: 'revoked', state: rentalPrismaNulls.DbNull } });
+          }, data: { status: 'revoked', state: prismaRuntime.DbNull as unknown as Prisma.NullTypes.DbNull } });
         }
         await transaction.aiMemoryOperation.create({ data: { id: randomUUID(), memoryId: input.memoryId, tenantId: value.tenantId, workspaceId: value.workspaceId, operationId: input.operation.id, fingerprint: input.operation.fingerprint } });
         callbackCompleted = true;

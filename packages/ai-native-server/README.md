@@ -72,6 +72,10 @@
 
 [公共包清单](package.public.json)发布已拆公共出口，[公共 TypeScript 工程](tsconfig.public.json)编译实际 JS 和声明。按[公共安装说明](README.public.md)先核宿主专属 Client，再由[公共装包入口](public-package.cjs)从同次输出收集所有出口及所需依赖文件。旧混合包继续使用原 `package.json`、构建和历史数据锁。
 
+从固定源码独立构建公共服务时，先调用 `projectPublicAiServerSources(sources, ts)`。它按原公开出口及[选装入口清单](public-source-entries.json)选择 TypeScript 的传递依赖，并返回该次构建专用的 `package.json` 和 `tsconfig.public.json`。宿主用该配置和同一 115 模型 Client 编译，再把同一份投影与编译输出交给 `assemblePublicAiPackage`。原清单与原构建继续提供已有出口；附加入口只随实际编译了它们的产物交付。
+
+附加出口提供[原提案、批准和消费](src/approval-persistence.ts)、[知识存储](src/knowledge-persistence.ts)、[平台正文保留](src/platform-retention.ts)和[Task 事件观察](src/task-observation.ts)，以及给 Core 宿主使用的[窄事务及结果参加者](src/runtime/public-rental-adapter-ports.ts)。宿主注册原对象 ACL、批准依据、文件来源和同事务业务效果后，才能开放相应入口。Rental 工具枚举及效果确认继续由 Rental 注册，公共投影不携带 Rental 或旧 Shared。旧导入与历史收据沿原兼容包装器。
+
 完整原组合宿主从 [服务装配](../../apps/api/src/application-services.module.ts) 使用这些工厂。[独立 AI 宿主](../../apps/rental-api/src/ai-app.module.ts) 则显式选择 AI 数据贡献，由 [同实例装配](../../apps/rental-api/src/ai-composition.ts) 提供原 Auth、Guard、Core、数据库和文件权限。只有该宿主 [实际登记并审核的处理器](../../apps/rental-api/src/ai-http-policy.ts) 才发布为可调用能力；工厂、类型或合同存在不等于该宿主已开放全部 AI 路由。
 
 [批准订单授权桥](src/runtime/approval-execution/approved-order-route.authority.ts) 在进入隔离 Guard 前捕获原请求权威；完整 Guard 和身份一致性通过后，准备、读取与执行回调恢复同一原 ALS store。原 Task/批准/Core 事务和幂等仍由真实参加者裁定，失应答保持 unknown，不按新键重发。

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma, PrismaClient } from '@prisma/client';
-import type { AiExecutionContext } from '@rental-os/shared';
+import type { AiExecutionContext } from '@rental-os/platform-contracts/ai-gateway';
 import type { KnowledgeAuthorizationPort, KnowledgeIndexPort } from './knowledge.ports';
 import { KnowledgeCommitUnknownError, KnowledgeError, requiredPort, unavailable } from './knowledge-errors';
 import { authorize, fingerprint, knowledgeRecordSchema, parsePersisted, sameScope, scopeSchema } from './knowledge-validation';

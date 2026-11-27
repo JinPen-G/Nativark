@@ -552,3 +552,6 @@ export type { AsyncJobSummary, CreateAsyncJobRequest, PrintJobSummary, CreatePri
 
 export * from "./tenant-messaging";
 export * from "./ai-task";
+export * from "./ai-task-metadata";
+export * from "./ai-proposal";
+export * from "./ai-knowledge";

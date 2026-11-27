@@ -1,4 +1,4 @@
-import type { AiExecutionContext } from '@rental-os/shared';
+import type { AiExecutionContext } from '@rental-os/platform-contracts/ai-gateway';
 import type { KnowledgeRecord, KnowledgeAuthorizationRequest } from './knowledge.ports';
 import { KnowledgeDocumentService } from './knowledge-document.service';
 import { KnowledgeError } from './knowledge-errors';

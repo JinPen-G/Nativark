@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
-import type { AiExecutionContext } from '@rental-os/shared';
+import type { AiExecutionContext } from '@rental-os/platform-contracts/ai-gateway';
 import type { KnowledgeAuthorizationPort, KnowledgeDocumentConstraint, KnowledgeRepositoryPort, KnowledgeSearchAuthorizationPort } from './knowledge.ports';
 import { requiredPort, unavailable } from './knowledge-errors';
 import { authorize, fingerprint, id, sameScope } from './knowledge-validation';

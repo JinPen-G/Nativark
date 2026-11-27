@@ -1,4 +1,5 @@
-import type { AiExecutionContext, AiKnowledgeSourceDraft, AiKnowledgeChunkDraft } from '@rental-os/shared';
+import type { AiExecutionContext } from '@rental-os/platform-contracts/ai-gateway';
+import type { AiKnowledgeSourceDraft, AiKnowledgeChunkDraft } from '@rental-os/platform-contracts';
 import type { KnowledgeContentPort } from './knowledge.ports';
 import { KnowledgeCache } from './knowledge-cache';
 import { KnowledgeDocumentService } from './knowledge-document.service';

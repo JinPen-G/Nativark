@@ -7,6 +7,7 @@ import type { Prisma, PrismaClient, AiStep } from '@prisma/client';
 import { z } from 'zod';
 import { AI_TOOL_DRAFT_VERSION, AI_PROPOSAL_DRAFT_VERSION, type AiGatewayConfigReferenceDraft } from '@rental-os/shared';
 import { taskExecutionPhaseStore } from './task-execution-phase.store';
+import { aiTaskResumedConfirmationSchema as resumedConfirmationSchema, confirmationContinuationSchema } from './task-confirmation-event';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskExecutionBudgetError, type AiTaskExecutionSettlementRequest } from '../task-execution-budget.ports';
 import type { AiTaskExecutionScopeSource } from './prisma-task-execution-budget.repository';
@@ -35,12 +36,6 @@ export function aiTaskConfirmationPhaseVersion(tool: string) {
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
-const confirmationContinuationSchema = z.object({ checkpointRef: id.max(36), stepId: id.max(36),
-  stepRevision: z.number().int().positive().max(4294967294), decisionRef: id.max(36), decision: z.enum(['approved', 'rejected']),
-  remainingActiveMs: z.number().int().min(1).max(86400000), remainingOutputBytes: z.number().int().min(1).max(16777216) }).strict();
-const resumedConfirmationSchema = z.object({ data: z.object({ from: z.literal('waiting_confirmation'), to: z.literal('running'), reason: z.literal('resume') }).strict(),
-  confirmation: confirmationContinuationSchema.extend({ phaseId: id.max(36), contentHash: hash, runId: id.max(36),
-    runRevision: z.number().int().positive().max(4294967294), holderId: id, fencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u) }).strict() }).passthrough();
 const orderPhasePayloadSchema = z.object({ version: z.enum(['approved-order-wait-1', 'approved-settings-wait-1', 'approved-profile-wait-1']),
   binding: z.object({ scopeId: id.max(36), taskId: id.max(36), runId: id.max(36), stepId: id.max(36), actionId: id, inputRef: id.max(36), fingerprint: hash }).strict(),
   presentedLease: z.object({ taskId: id.max(36), runId: id.max(36), holderId: id, revision: z.number().int().positive().max(4294967294),

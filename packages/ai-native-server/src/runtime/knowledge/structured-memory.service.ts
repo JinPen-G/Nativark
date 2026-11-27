@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { AI_KNOWLEDGE_DRAFT_VERSION, type AiExecutionContext, type AiMemoryDraft, type AiMemoryChangeDraft } from '@rental-os/shared';
+import { type AiExecutionContext } from '@rental-os/platform-contracts/ai-gateway';
+import { AI_KNOWLEDGE_DRAFT_VERSION, type AiMemoryDraft, type AiMemoryChangeDraft } from '@rental-os/platform-contracts';
 import type { MemoryAction, MemoryConfirmation, StructuredMemoryPorts } from './knowledge.ports';
 import { KnowledgeError, requiredPort, unavailable } from './knowledge-errors';
 import { actor, confirmationSchema, fingerprint, id, operationFingerprint, parse, preferenceSchema, sameScope, scopeSchema } from './knowledge-validation';

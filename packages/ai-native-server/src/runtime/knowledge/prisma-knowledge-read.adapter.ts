@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import { AI_KNOWLEDGE_DRAFT_VERSION, type AiExecutionContext, type AiKnowledgeChunkDraft, type AiKnowledgeDocumentDraft, type AiKnowledgeSourceDraft, type AiFactReference } from '@rental-os/shared';
+import { type AiExecutionContext } from '@rental-os/platform-contracts/ai-gateway';
+import { AI_KNOWLEDGE_DRAFT_VERSION, type AiKnowledgeChunkDraft, type AiKnowledgeDocumentDraft, type AiKnowledgeSourceDraft, type AiFactReference } from '@rental-os/platform-contracts';
 import type { KnowledgeAuthorizationPort, KnowledgeClock, KnowledgeContentPort, KnowledgeRepositoryPort, KnowledgeSearchPort } from './knowledge.ports';
 import { requiredPort, unavailable } from './knowledge-errors';
 import { authorize, documentSourceSchema, fingerprint, id, parse, parsePersisted, sameScope, scopeSchema, validateChunks, visible, readKnowledgeChunkEvidence } from './knowledge-validation';

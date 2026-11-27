@@ -12,6 +12,8 @@ export interface PlatformAiManagementTransactionParticipant<Transaction extends 
   begin(transaction: Transaction, actorId: string): Promise<{
     revalidate(): Promise<void>;
     close(): void;
+    /** Current signed subject projected from this same original transaction. */
+    currentUser?(): Promise<SystemUserRow>;
   }>;
 }
 
@@ -37,11 +39,13 @@ export async function beginPlatformAiManagementTransaction<Transaction extends o
       lease = undefined;
       throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
     }
-    return Object.freeze({ async revalidate() {
-      binding.assertCurrent();
-      await lease!.revalidate();
-      binding.assertCurrent();
-    }, close });
+    const current = lease.currentUser?.bind(lease);
+    return Object.freeze({
+      async revalidate() { binding.assertCurrent(); await lease!.revalidate(); binding.assertCurrent(); },
+      ...(current && { async currentUser() {
+        binding.assertCurrent(); const user = await current(); binding.assertCurrent(); return user;
+      } }), close
+    });
   } catch (error) { close(); throw error; }
 }
 
@@ -86,13 +90,15 @@ export function createPlatformAiManagementTransactions<Transaction extends Platf
       const lease = targetTenantId === undefined ? await input.principalAuthority.lock(transaction, principal, principal.tenantId)
         : await input.principalAuthority.lock(transaction, principal, targetTenantId, undefined, false);
       verify(lease.user);
-      const revalidate = async () => {
+      const currentUser = async () => {
         check();
         await input.assertDataAvailable(transaction);
-        verify(await lease.revalidate());
+        const user = await lease.revalidate();
+        verify(user);
+        return user;
       };
-      await revalidate();
-      return Object.freeze({ revalidate, close: binding.close });
+      await currentUser();
+      return Object.freeze({ async revalidate() { await currentUser(); }, currentUser, close: binding.close });
     } catch (error) { binding.close(); throw error; }
   } });
 }

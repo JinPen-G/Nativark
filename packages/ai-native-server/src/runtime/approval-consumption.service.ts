@@ -1,4 +1,4 @@
-import { ModelGatewayError } from './model-gateway.ports';
+import { ModelGatewayError } from '@rental-os/platform-server/ai-gateway';
 import type {
   AiApprovalConsumptionAuthority,
   AiApprovalConsumptionInput,

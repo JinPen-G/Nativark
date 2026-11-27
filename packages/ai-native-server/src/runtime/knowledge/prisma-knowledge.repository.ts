@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma, PrismaClient } from '@prisma/client';
-import type { AiExecutionScope, AiKnowledgeChunkDraft } from '@rental-os/shared';
+import type { AiExecutionScope } from '@rental-os/platform-contracts/ai-gateway';
+import type { AiKnowledgeChunkDraft } from '@rental-os/platform-contracts';
 import type { KnowledgeOperation, KnowledgeRecord, KnowledgeRepositoryPort } from './knowledge.ports';
 import { KnowledgeCommitUnknownError, KnowledgeError, unavailable } from './knowledge-errors';
 import { id as knowledgeId, knowledgeFailureSchema, knowledgeRecordSchema, parse, parsePersisted, sameScope, scopeSchema, validateChunks, readKnowledgeChunkEvidence, persistedKnowledgeChunkSchema } from './knowledge-validation';

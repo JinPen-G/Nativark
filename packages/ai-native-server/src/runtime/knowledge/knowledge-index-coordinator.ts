@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { AiExecutionContext } from '@rental-os/shared';
+import type { AiExecutionContext } from '@rental-os/platform-contracts/ai-gateway';
 import type { KnowledgeIndexJob, KnowledgeIndexPort, KnowledgeRecord } from './knowledge.ports';
 import { KnowledgeDocumentService } from './knowledge-document.service';
 import { KnowledgeCommitUnknownError, KnowledgeError, requiredPort } from './knowledge-errors';

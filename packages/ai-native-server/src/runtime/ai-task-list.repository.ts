@@ -1,7 +1,10 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, type AiExecutionContext, type AiTaskMetadataPageDraft } from '@rental-os/shared';
-import { aiTaskAccessFromContext, AiTaskRepositoryError } from './ai-task.repository';
+import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT } from '@rental-os/platform-contracts/ai-task';
+import type { AiExecutionContext } from '@rental-os/platform-contracts/ai-gateway';
+import type { AiTaskMetadataPageDraft } from '@rental-os/platform-contracts';
+import { aiTaskAccessFromContext } from './task-owner-access';
+import { AiTaskRepositoryError } from '../task-errors';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 
 const taskId = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
