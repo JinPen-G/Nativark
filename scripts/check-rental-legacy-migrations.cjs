@@ -25,6 +25,7 @@ const PENDING = [
 ];
 const REPAIRED = '20261111220000_ai_failure_resource_sources';
 const REPAIRED_SQL = '3c9497cb22648d0c9c336208ab5ea4b209dd2b3f4d2253fe8fadddf83e5b9142';
+const EMPTY_LOG_SHA256 = createHash('sha256').update('').digest('hex');
 const LIMIT = 16 * 1024 * 1024;
 const sha = data => createHash('sha256').update(JSON.stringify(data)).digest('hex');
 
@@ -119,7 +120,11 @@ function checkObservation(text) {
       continue;
     }
     if (finished === null) return reject('unfinished_migration');
-    if (receipts.has(name) || logHash !== null || steps === 0 && (name !== REPAIRED || checksum !== REPAIRED_SQL))
+    // Prisma resolve writes an empty log for this repaired migration. The
+    // original rollback pairing and timestamp checks below remain mandatory.
+    const resolvedEmptyLog = name === REPAIRED && checksum === REPAIRED_SQL
+      && steps === 0 && logHash === EMPTY_LOG_SHA256;
+    if (receipts.has(name) || logHash !== null && !resolvedEmptyLog || steps === 0 && (name !== REPAIRED || checksum !== REPAIRED_SQL))
       return reject('invalid_success_receipt');
     receipts.set(name, { checksum, started, steps });
   }
