@@ -4,6 +4,10 @@
 
 [历史复建 CI](../../../.github/workflows/nativark-release.yml) 按固定历史 Git 提交使用该版本自己的 Dockerfile、锁及迁移材料。新发布使用下文同一次正式双仓 CI 的配对证据。服务器上已经安装的旧脚本仍须在维护窗口按来源及 SHA-256 核准同步，公共主线提交不会自动替换它。
 
+当前主线的 `start-dev.ps1 -Legacy`、Legacy 本地预检、旧 API 环境包装器，以及 `preflight`、`migration-status`、`backup`、`restore-drill`、`release-build`、`release-gate`、`upgrade-drill`、`restore-source` 八个旧 OPS CLI 均在加载旧配置或启动子进程前退出 1。Windows 的 `setup-local-mysql.ps1`、`backup-mysql.ps1`、`restore-mysql.ps1` 同样只返回迁址提示。需要原命令时，显式执行 `git worktree add --detach <独占目录> 46db0945dee92ac916f7265e95948943fc8b641d`，在该目录核对完整 HEAD、锁定依赖、Client 和隔离配置后再使用历史入口。默认公共启动仍按 8 个 workspace 预检；下述配对 `release-verify`、组合检查及库函数导入继续保留。
+
+旧 `apply-column-comments.cjs`（含 dry-run/repair 参数）和 `seed-demo-tenant.cjs` 也在环境、Prisma 及业务 HTTP/DB 访问前返回同一提示、退出 1；根 `db:comments*` 和 `db:seed:demo` 可以继续指向这些脚本。两者原本均为自执行 CLI，没有库出口；误用 `require`/`import` 时抛出同一迁址错误，不执行原正文或终止调用方进程。
+
 主仓库为 `JinPen-G/Zelo`，部署根为 `/home/ritiadm/zelo`。安装时保留 `nativark-demo` 项目、原镜像标签和 `# Nativark hourly update managed images` override 识别标记。已有 Compose 文件、证书、上传数据和私有媒体继续由现场维护。
 
 ## 独立 Rental 发布材料离线校验

@@ -7,6 +7,11 @@
  *
  * 安全边界：必须是本机 MySQL 的 rental_os 库，且只能操作固定 tenant_001/demo。
  */
+// 历史 CLI 无库出口：直调退出 1；误作库导入时抛同一提示，不执行原正文。
+const { LEGACY_CHECKOUT_MESSAGE, stopLegacyCommand } = require("./ops/legacy-checkout.cjs");
+if (require.main === module) stopLegacyCommand();
+throw new Error(LEGACY_CHECKOUT_MESSAGE);
+
 const fs = require("node:fs");
 const path = require("node:path");
 const { URL } = require("node:url");

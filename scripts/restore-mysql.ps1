@@ -8,6 +8,10 @@
 # 真实事故处置（把已验证备份恢复到新库并切换连接）仍是人工动作，
 # 不由本脚本代替决策。
 
+# Stop in this PowerShell process before starting the retired Node CLI.
+& "$PSScriptRoot/ops/legacy-checkout.ps1"
+exit 1
+
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $projectRoot

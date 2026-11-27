@@ -5,6 +5,10 @@
 # 现在统一委托给 scripts/ops/backup.cjs：连接信息只来自 DATABASE_URL，
 # 目标库必须通过专用库守卫，脚本本身不再持有任何默认库名或口令。
 
+# Stop in this PowerShell process before starting the retired Node CLI.
+& "$PSScriptRoot/ops/legacy-checkout.ps1"
+exit 1
+
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $projectRoot

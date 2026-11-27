@@ -2,6 +2,10 @@ param(
   [string]$DatabaseUrl = "mysql://rental_os:rental_os@localhost:3306/rental_os"
 )
 
+# Stop before Compose or environment-file preparation in this checkout.
+& "$PSScriptRoot/ops/legacy-checkout.ps1"
+exit 1
+
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $envFile = Join-Path $projectRoot ".env"
