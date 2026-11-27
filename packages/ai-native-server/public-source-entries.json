@@ -6,6 +6,7 @@
     "platform-retention",
     "task-observation",
     "runtime/public-approval-persistence",
-    "runtime/public-rental-adapter-ports"
+    "runtime/public-rental-adapter-ports",
+    "runtime/platform-retention-http"
   ]
 }

@@ -4,9 +4,9 @@
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import { AI_RETENTION_HTTP_SCHEMAS, AI_RETENTION_HTTP_CONTRACTS, AI_PLATFORM_RETENTION_HTTP_CONTRACTS,
-  type AiRetentionHttpRequestsDraft, type AiRetentionHttpResponsesDraft } from '@rental-os/shared';
-import { AiTaskRepositoryError } from '../ai-task.repository';
-import { AiRetentionUnknown } from './retention.service';
+  type AiRetentionHttpRequestsDraft, type AiRetentionHttpResponsesDraft } from '@rental-os/platform-contracts/ai-retention';
+import { AiTaskRepositoryError } from '../../task-errors';
+import { AiRetentionUnknown } from './retention-receipt';
 type Action = keyof typeof AI_RETENTION_HTTP_CONTRACTS;
 const ajv = new Ajv({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false }); addFormats(ajv);
 for (const [name, schema] of Object.entries(AI_RETENTION_HTTP_SCHEMAS)) ajv.addSchema(schema, `#/components/schemas/${name}`);

@@ -129,7 +129,7 @@ Core 停用后的已有回答及模型结果核对，由宿主 [只读处理器�
 
 [平台能力检测](src/runtime/platform-capability-probe/platform-capability-probe-request.factory.ts)保留所选宿主最初 Guard 的 SaaS 身份，区分查看与管理权限。[平台探测事务参加者](src/runtime/platform-capability-probe/platform-probe-transactions.ts)将原 input/Task/Run/Step/调用键绑定到原事务，并在提交前复验。唯一 Gateway 财务账与 Task 累计资源保持原职责；失应答只沿原键核对。平台探测仅在首个 Run 且整 Task 无补充输入时读取空输入历史，供应商派发还要求 PLATFORM/OPERATOR/SAAS_ADMIN 和 ai.capability.text 的原关联；不完整租户上下文拒绝进入平台分支。
 
-[隐私维护](src/runtime/privacy/retention.controller.ts)在工作空间及平台各保留清理与原收据两类 HTTP 能力。原清理事务先锁当前 Auth/Tenant/Core 或独立 SaaS 主体，再锁 Scope/内容，提交前复验；终态 Task 存在未决财务或业务效果仍不清理。protectStoredBodies、exportRestoreManifest、reapplyRestore 保持宿主专用，恢复不授予重发许可。
+[工作空间隐私入口](src/runtime/privacy/retention.controller.ts)及[平台保留 HTTP](src/runtime/platform-retention-http.ts)沿用原清理、收据及收据列表合同，宿主提供当前 Guard 请求范围。[公共平台保留](src/platform-retention.ts)的 `observe` 只读；`maintain` 的清理和正文保护在同一 Native 先锁当前主体及所选数据，再锁 Scope／内容，提交前复核。存在未决财务或业务效果时仍保留正文。清理失应答后读原删除收据，正文保护失应答后可重看同一游标，已保护正文保持原密文。正文保护、恢复清单签发及重放仍由宿主显式调用。
 
 经营政策由[原请求工厂](src/runtime/automation/human-automation-policy-request.composition.ts)进入[政策管理服务](src/runtime/automation/human-automation-policy-management.service.ts)。所选宿主保留最初 Guard 的请求身份，内部配置权限核验先由原 Guard 填充自己的验证作用域，再核当前主体与范围。确认授权和政策写入共用原事务，复用 Auth/Tenant/Core 参加者、政策 CAS 和原操作键，提交前复核当前权限及所有嵌套准备的期限。
 

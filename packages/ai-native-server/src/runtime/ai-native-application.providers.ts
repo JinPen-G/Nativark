@@ -34,11 +34,11 @@ import { z } from 'zod';
 import { NATIVE_MODEL_PROTOCOLS } from './native-model-protocols';
 import { SecretBox } from '@rental-os/platform-server/secret-box';
 import { PrismaService } from './rental-adapters/prisma.service';
-import { createAiBodyStorageDatabase } from './privacy/prisma-ai-body-storage';
+import { AI_NATIVE_BODY_DATABASE, createAiBodyStorageDatabase } from './public-rental-adapter-ports';
+export { AI_NATIVE_BODY_DATABASE } from './public-rental-adapter-ports';
 
 /** AI私有正文仓储视图。业务域保留原PrismaService，正文解密不授权限，
  * 原事务和收据不变；缺密钥时新正文写入／密文读取保持不可用。 */
-export const AI_NATIVE_BODY_DATABASE = Symbol('AI_NATIVE_BODY_DATABASE');
 export const AI_NATIVE_BODY_DATABASE_PROVIDER: FactoryProvider = {
   provide: AI_NATIVE_BODY_DATABASE, inject: [PrismaService, SecretBox],
   useFactory: (db: PrismaService, secrets: SecretBox) => createAiBodyStorageDatabase(db, secrets),
@@ -81,6 +81,9 @@ import { AiRetentionService } from './privacy/retention.service';
 import { AiPlatformRetentionService } from './privacy/platform-retention.service';
 import { AI_RETENTION_REQUESTS, AI_PLATFORM_RETENTION_REQUESTS,
   type AiRetentionRequestFactory, type AiPlatformRetentionRequestFactory } from './privacy/retention.controller';
+import { AI_NATIVE_RETENTION_RESTORE_CONFIGURATION, AI_NATIVE_PLATFORM_RETENTION_RESTORE_KEY_HASH,
+  platformRetentionRestoreKeyHash } from './platform-retention-http';
+export { AI_NATIVE_RETENTION_RESTORE_CONFIGURATION, AI_NATIVE_PLATFORM_RETENTION_RESTORE_KEY_HASH } from './platform-retention-http';
 import { PlatformModelConfigurationAuthority } from './platform-model-config.authority';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalTaskRecoveryReaders, composeRequestBoundOriginalTaskActionPolicies,
@@ -484,12 +487,8 @@ export const AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER: FactoryProvider = {
  * The private signing key and verified permits are supplied only by the backup
  * host. Missing configuration leaves original maintenance readable but cannot
  * authorize restore, change a ledger or start a service. */
-export const AI_NATIVE_RETENTION_RESTORE_CONFIGURATION = Symbol('AI_NATIVE_RETENTION_RESTORE_CONFIGURATION');
 function readRetentionRestoreKeyHash(value: unknown): string | undefined {
-  if (value === undefined) return undefined;
-  const parsed = z.object({ publicKeyHash: z.string().regex(/^[a-f0-9]{64}$/u) }).strict().safeParse(structuredClone(value));
-  if (!parsed.success) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-  return parsed.data.publicKeyHash;
+  return platformRetentionRestoreKeyHash(undefined, structuredClone(value));
 }
 export const AI_NATIVE_RETENTION_PROVIDER: FactoryProvider = {
   provide: AI_RETENTION_REQUESTS,
@@ -526,18 +525,12 @@ export const AI_NATIVE_RETENTION_PROVIDER: FactoryProvider = {
  * particular model Profile. Cleanup still checks manage, receipt reads view;
  * no workspace credentials or tenant-default scope are supplied. Restore key
  * hash is a trusted host setting, never an HTTP field or decoded secret. */
-export const AI_NATIVE_PLATFORM_RETENTION_RESTORE_KEY_HASH = Symbol('AI_NATIVE_PLATFORM_RETENTION_RESTORE_KEY_HASH');
 export const AI_NATIVE_PLATFORM_RETENTION_PROVIDER: FactoryProvider = {
   provide: AI_PLATFORM_RETENTION_REQUESTS,
   inject: [AI_NATIVE_BODY_DATABASE, ApiAuthGuard, { token: AI_NATIVE_PLATFORM_RETENTION_RESTORE_KEY_HASH, optional: true },
     { token: AI_NATIVE_RETENTION_RESTORE_CONFIGURATION, optional: true }],
   useFactory: (db: PrismaService, guard: ApiAuthGuard, keyHash?: unknown, value?: unknown): AiPlatformRetentionRequestFactory => {
-    if (keyHash !== undefined && (typeof keyHash !== 'string' || !/^[a-f0-9]{64}$/u.test(keyHash)))
-      throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-    const configuredHash = readRetentionRestoreKeyHash(value);
-    if (configuredHash !== undefined && keyHash !== undefined && configuredHash !== keyHash)
-      throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-    const restoreKeyHash = configuredHash ?? (keyHash as string | undefined);
+    const restoreKeyHash = platformRetentionRestoreKeyHash(keyHash, structuredClone(value));
     return request => {
       const header = request?.headers?.authorization;
       if (typeof header !== 'string' || header.length > 8192 || !/^Bearer [A-Za-z0-9._~+/-]+=*$/u.test(header))

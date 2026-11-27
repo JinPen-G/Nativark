@@ -8,3 +8,7 @@ export type { AiTaskRepositoryAuthority } from './task-persistence.repository';
 export { TaskEventReader, type TaskEventDatabase } from './task-event-reader';
 export { PlatformRetentionOperations, platformRetentionCleanupSchema, type PlatformRetentionIdentity } from './privacy/platform-retention';
 export { createAiTaskBodyErasure } from './privacy/task-body-erasure';
+export { createAiBodyStorageDatabase } from './privacy/prisma-ai-body-storage';
+
+/** The opted-in host binds this token to the same selected Client's AI view. */
+export const AI_NATIVE_BODY_DATABASE = Symbol('AI_NATIVE_BODY_DATABASE');
