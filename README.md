@@ -29,6 +29,29 @@ Domain applications plug into the base as standalone **Cores (business packages)
 
 ---
 
+## Interface Preview
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/media/zelo-dashboard-dark.png">
+    <img src=".github/media/zelo-dashboard-light.png" alt="Zelo Admin Console — Shared Shell and Dashboard (auto Light/Dark)" width="100%">
+  </picture>
+</p>
+<p align="center"><em>Shared multi-tenant admin shell with built-in Light/Dark themes, Agent/Admin work mode switcher, and bilingual EN/ZH UI (the hero preview adapts automatically to your GitHub theme).</em></p>
+
+| Platform Base — Encrypted Service Providers | Business Core Example — Assets & Inventory |
+| :---: | :---: |
+| ![Service Providers](.github/media/zelo-service-providers-light.png) | ![Business Core Workspace](.github/media/zelo-core-assets-light.png) |
+| *Out-of-the-box SMTP, Stripe, S3/OSS/COS & SMS connectors with encrypted credentials* | *Vertical Core (`Rental Core`) mounted cleanly into Zelo's shared shell & data-table primitives* |
+
+<details>
+<summary>View Dark Mode screenshot explicitly</summary>
+
+![Zelo Admin Console Dark Mode](.github/media/zelo-dashboard-dark.png)
+
+</details>
+
+---
 ## Why Zelo
 
 - **Zero-Core Standalone Runtime & One-Command Source Export**: Ships with standalone `platform-api` and `platform-admin` backed by 41 shared platform models and 14 base migrations. Run `npm run export:platform` to produce a clean base source archive containing zero industry business code.

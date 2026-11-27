@@ -29,6 +29,29 @@
 
 ---
 
+## 界面预览
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/media/zelo-dashboard-dark.png">
+    <img src=".github/media/zelo-dashboard-light.png" alt="Zelo 公共管理后台工作台（自动适配明暗主题）" width="100%">
+  </picture>
+</p>
+<p align="center"><em>统一多租户公共后台外壳，内置明/暗双主题、Agent/Admin 工作模式切换与中英文双语界面（上方主图随 GitHub 主题自动切换）。</em></p>
+
+| 公共底座 — 加密外部集成与服务商管理 | 业务 Core 示例 — 资产与库存台账 |
+| :---: | :---: |
+| ![服务商集成](.github/media/zelo-service-providers-light.png) | ![业务 Core 列表](.github/media/zelo-core-assets-light.png) |
+| *内置 SMTP、Stripe、S3/OSS/COS 与短信连接器及加密凭据管理* | *垂直业务包（`Rental Core`）无缝接入底座外壳与统一数据表格框架* |
+
+<details>
+<summary>展开查看暗色模式截图</summary>
+
+![Zelo 管理后台暗色模式](.github/media/zelo-dashboard-dark.png)
+
+</details>
+
+---
 ## 为什么选择 Zelo
 
 - **零 Core 独立运行与一键导出**：提供独立的 `platform-api` 与 `platform-admin`，开箱即用 41 个公共模型与 14 份基础迁移；运行 `npm run export:platform` 即可导出一份完全不含行业业务的纯净底座源码包。
