@@ -1,19 +1,15 @@
 const assert = require("node:assert/strict");
 const { createPublicKey, createSign, generateKeyPairSync } = require("node:crypto");
-const path = require("node:path");
 
 process.env.NODE_ENV = "test";
-require("ts-node").register({
-  transpileOnly: true,
-  compilerOptions: { module: "commonjs", moduleResolution: "node", experimentalDecorators: true, emitDecoratorMetadata: true }
-});
-
-const { FileStorageRuntimeService } = require(path.join(__dirname, "../apps/api/src/modules/integrations/file-storage.runtime.service"));
-const { PaymentRuntimeService } = require(path.join(__dirname, "../apps/api/src/modules/integrations/payment.runtime.service"));
-const { TenantIntegrationRuntimeService } = require(path.join(__dirname, "../apps/api/src/modules/integrations/tenant-integration.runtime.service"));
-const { TenantIntegrationConnectivityService } = require(path.join(__dirname, "../apps/api/src/modules/integrations/tenant-integration.connectivity.service"));
-const { TenantIntegrationService } = require(path.join(__dirname, "../apps/api/src/modules/integrations/tenant-integration.service"));
-const { Prisma } = require("@prisma/client");
+// 原探针实际实现均来自公共传输；不构造 Rental 业务服务或访问供应商。
+const { ObjectStorageProviderService: FileStorageRuntimeService } = require("@rental-os/platform-server/object-storage");
+const { PaymentProviderTransport: PaymentRuntimeService } = require("@rental-os/platform-server/integration-payment");
+const { TenantIntegrationRuntimeService } = require("@rental-os/platform-server/integration-sms");
+const { TenantIntegrationConnectivityService } = require("@rental-os/platform-server/integration-connectivity");
+const { TenantIntegrationService } = require("@rental-os/platform-server/tenant-integration");
+const { integrationTestWhere } = require("@rental-os/platform-server/integration-store");
+const { prismaRuntime: Prisma } = require("@rental-os/platform-server/prisma-runtime");
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048, privateKeyEncoding: { type: "pkcs8", format: "pem" }, publicKeyEncoding: { type: "spki", format: "pem" } });
 const calls = [];
@@ -61,8 +57,8 @@ const ossConfig = {
 };
 
 const smsRuntime = new TenantIntegrationRuntimeService({}, {});
-const fileRuntime = new FileStorageRuntimeService({}, {});
-const paymentRuntime = new PaymentRuntimeService({}, {}, {});
+const fileRuntime = new FileStorageRuntimeService();
+const paymentRuntime = new PaymentRuntimeService();
 
 async function runAdapterChecks() {
   global.fetch = async (url, init = {}) => {
@@ -188,6 +184,8 @@ async function runRevisionChecks() {
   const service = new TenantIntegrationService({ tenantIntegrationConfig: {
     findUnique: async () => structuredClone(row),
     updateMany: async ({ where, data }) => { if (!matches(where)) return { count: 0 }; Object.assign(row, structuredClone(data)); return { count: 1 }; }
+  }, updateTestConfiguration({ where, data }) {
+    return this.tenantIntegrationConfig.updateMany({ where: integrationTestWhere(where, Prisma.JsonNull), data });
   } }, { decrypt: value => JSON.parse(value) }, { record: async () => undefined });
   const read = () => service.testConfig('sms', 'aliyun_sms', { tenantId: row.tenantId });
   const claim = config => service.claimLiveTest({ tenantId: row.tenantId, configId: row.id, startedAt: new Date(), cooldownMs: 30000, revision: config.revision });
