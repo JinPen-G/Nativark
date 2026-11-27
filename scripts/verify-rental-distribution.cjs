@@ -3,7 +3,8 @@
  * 检查 Native 产物、标准归档/安装准备、可选 AI 数据及五端正式包消费。
  * 公开发行另核对独立仓根目录的固定标签与构建字节，准备成功后只写一个新归档。
  * 不安装依赖、实例化 Client、连接数据库、启动服务或发布 GitHub Release。
- * node scripts/verify-rental-distribution.cjs --commit <完整SHA> [--deps <只读node_modules>]
+ * node scripts/verify-rental-distribution.cjs --commit <底座SHA> --core-repo <独立仓> --core-commit <CoreSHA>
+ * node scripts/verify-rental-distribution.cjs --legacy-single-repo --commit <历史完整SHA> [--deps <只读node_modules>]
  * node scripts/verify-rental-distribution.cjs --portable --commit <构建SHA> --platform-commit <底座SHA>
  *   --source-repository <底座的规范仓库地址>
  *   --core-repo <独立仓根目录> --core-commit <v版本的提交SHA> --out <未占用的rental-版本.tgz>
@@ -18,8 +19,9 @@ const assert = require('node:assert/strict');
 const { execFileSync } = require('node:child_process');
 const { createBuild, verifyContracts } = require('./check-rental-package-build.cjs');
 const { createMemoryBuild } = require('./rental-build-memory.cjs');
-const { readBuildSnapshot } = require('./rental-build-snapshot.cjs');
-const { readIndependentRentalSource, readRentalBuildSupport, composeRentalBuildSnapshot } = require('./prepare-rental-workspace.cjs');
+const { readBuildSnapshot, snapshotFromFiles } = require('./rental-build-snapshot.cjs');
+const { readIndependentRentalSource, projectRentalDevelopmentWorkspace, compileFixedPlatformContracts,
+  composeRentalBuildSnapshot } = require('./prepare-rental-workspace.cjs');
 const root = path.resolve(__dirname, '..');
 const slash = file => path.resolve(file).split(path.sep).join('/');
 const rentalSourceDirectory = 'packages/rental-core';
@@ -27,7 +29,7 @@ const platformGuidePath = 'packages/core-contracts/README.md';
 const fullCommit = /^[a-f0-9]{40}$/u;
 
 function git(directory, args) {
-  return execFileSync('git', ['--no-replace-objects', ...args], { cwd: directory, maxBuffer: 16 * 1024 * 1024, windowsHide: true });
+  return execFileSync('git', ['--no-replace-objects', '--no-lazy-fetch', ...args], { cwd: directory, maxBuffer: 16 * 1024 * 1024, windowsHide: true });
 }
 
 function sourceRepository(directory = root, explicitRepository) {
@@ -40,7 +42,7 @@ function sourceRepository(directory = root, explicitRepository) {
   return url.href.replace(/\.git\/?$/u, '').replace(/\/$/u, '');
 }
 
-function fixedPortableSource(options, documentationSource, buildDirectory) {
+async function fixedPortableSource(options, documentationSource, buildDirectory, deps) {
   const directory = path.resolve(options.get('--core-repo'));
   if (slash(git(directory, ['rev-parse', '--show-toplevel']).toString('utf8').trim()) !== slash(directory))
     throw Error('公开 Core 来源须指定独立 Git 仓库根目录');
@@ -56,9 +58,9 @@ function fixedPortableSource(options, documentationSource, buildDirectory) {
   const legacySupport = rental.layoutKind === 'legacy-root';
   if (!legacySupport && !rental.layout.paths.some(entry => entry.target === 'apps/rental-api' && entry.roles.includes('host')))
     throw Error('正式发行缺少独立 Rental API 宿主源码；不能使用底座旧业务副本');
-  const snapshot = legacySupport ? readBuildSnapshot(documentationSource.commit, buildDirectory)
-    : readRentalBuildSupport(documentationSource.commit, buildDirectory, rental);
-  const combined = composeRentalBuildSnapshot(snapshot, rental, { legacySupport });
+  const combined = legacySupport
+    ? composeRentalBuildSnapshot(readBuildSnapshot(documentationSource.commit, buildDirectory), rental, { legacySupport: true })
+    : (await readDistributionWorkspace(documentationSource, buildDirectory, deps, rental, 'host', { preserveCore: true })).snapshot;
   const output = path.resolve(options.get('--out'));
   const relative = path.relative(root, output).split(path.sep);
   if (path.basename(output) !== `rental-${version}.tgz` || relative[0]?.toLowerCase() === 'docs')
@@ -67,6 +69,21 @@ function fixedPortableSource(options, documentationSource, buildDirectory) {
   return { source: { repository, commit }, tag, output, documentationSource, snapshot: combined,
     layout: rental.layoutKind, checkoutRepository: rental.checkoutRepository,
     packageRoot: rental.layout.paths.find(entry => entry.target === 'packages/rental-core').source };
+}
+
+/** Ordinary distribution and client builds use the same fixed source
+ * projection as the standalone runtime, rather than a second list of paths. */
+async function readDistributionWorkspace(source, repo, deps, rental, profile, { preserveCore = false } = {}) {
+  const contracts = compileFixedPlatformContracts(repo, source.commit, deps, true);
+  const api = contracts.load(contracts.exported('@rental-os/core-contracts/platform-source', true));
+  const platform = await api.readPlatformSourceFromGit(repo, source);
+  const workspace = projectRentalDevelopmentWorkspace({ repo, deps, commit: source.commit, profile }, platform, rental, api);
+  const files = new Map([...workspace.files].map(([file, bytes]) => [slash(path.join(root, file)), bytes]));
+  // Workspace projection rewrites navigation links and manifest script lists.
+  // The portable Core itself must keep its original inputs and archive identity.
+  if (preserveCore) for (const [file, bytes] of rental.snapshot.files) if (files.has(file) && file.startsWith(slash(rentalSourceDirectory) + '/'))
+    files.set(file, bytes);
+  return { snapshot: snapshotFromFiles(source.commit, files) };
 }
 
 function generatePrismaDeclarations(build, schemas) {
@@ -199,12 +216,12 @@ function rentalPackageInputs(build) {
   return files;
 }
 
-function verifyPackage(build, portable, buildSource) {
+function verifyPackage(build, portable, buildSource, independentSource) {
   build.compile('apps/platform-api/tsconfig.json');
   build.compile('packages/ai-native-data/tsconfig.json');
   build.compile('apps/rental-api/tsconfig.json');
   const files = rentalPackageInputs(build), packageRoot = slash(path.join(root, rentalSourceDirectory));
-  const source = portable?.source ?? buildSource ?? { repository: sourceRepository(), commit: build.snapshot.commit };
+  const source = portable?.source ?? independentSource ?? buildSource ?? { repository: sourceRepository(), commit: build.snapshot.commit };
   // 校验所选 Git 底座和实际 Node，不能用固定的虚构宿主版本验证 Core 依赖。
   const host = portable?.host ?? {
     platform: JSON.parse(build.sourceRead(path.join(root, 'package.json'))).version,
@@ -212,7 +229,8 @@ function verifyPackage(build, portable, buildSource) {
     node: process.versions.node, capabilities: {}
   };
   const packageFactory = build.load(build.exported('@rental-os/rental-api/package', true));
-  const input = { files, source, sourceDirectory: rentalSourceDirectory, platformSource: portable?.platformSource ?? source, host,
+  const input = { files, source, sourceDirectory: rentalSourceDirectory,
+    platformSource: portable?.platformSource ?? buildSource ?? source, host,
     documentationSource: portable?.documentationSource,
     platformGuide: portable?.platformGuide ?? build.sourceRead(path.join(root, platformGuidePath)) };
   const edition = portable ? 'portable' : 'legacy-host';
@@ -339,19 +357,26 @@ function verifyConsumers(build) {
 
 function parseArguments(args) {
   const options = new Map();
-  const portableKeys = ['--core-repo', '--core-commit', '--platform-commit', '--out'];
+  const sourceKeys = ['--core-repo', '--core-commit'];
+  const portableKeys = ['--platform-commit', '--out'];
   for (let index = 0; index < args.length; index++) {
     const key = args[index];
     if (options.has(key)) throw Error('重复发行核验选项：' + key);
-    if (key === '--portable') options.set(key, true);
-    else if (['--deps', '--commit', '--source-repository', '--build-repo', ...portableKeys].includes(key) && args[index + 1] && !args[index + 1].startsWith('--'))
+    if (['--portable', '--legacy-single-repo'].includes(key)) options.set(key, true);
+    else if (['--deps', '--commit', '--source-repository', '--build-repo', ...sourceKeys, ...portableKeys].includes(key) && args[index + 1] && !args[index + 1].startsWith('--'))
       options.set(key, args[++index]);
     else throw Error('未知或缺少值的发行核验选项：' + key);
   }
-  if (options.has('--portable') && ['--commit', ...portableKeys].some(key => !options.has(key)))
+  if (options.has('--portable') && ['--commit', ...sourceKeys, ...portableKeys].some(key => !options.has(key)))
     throw Error('公开发行须提供构建及底座提交、独立仓根目录、标签提交和新输出文件');
   if (!options.has('--portable') && portableKeys.some(key => options.has(key)))
     throw Error('公开发行选项须与 --portable 一起使用');
+  if (options.has('--legacy-single-repo')) {
+    if (!options.has('--commit') || options.has('--portable') || sourceKeys.some(key => options.has(key)))
+      throw Error('历史单仓核验只接受其固定 --commit；不与独立发行混用');
+  } else if (['--commit', ...sourceKeys].some(key => !options.has(key))) {
+    throw Error('Rental 核验须给出两个完整提交和独立仓目录；历史单仓请显式选 --legacy-single-repo');
+  }
   for (const key of ['--commit', '--core-commit', '--platform-commit'])
     if (options.has(key) && !fullCommit.test(options.get(key))) throw Error(`${key} 须为完整固定提交 SHA`);
   return options;
@@ -360,12 +385,15 @@ function parseArguments(args) {
 async function main(args) {
   const options = parseArguments(args);
   const deps = options.get('--deps') ?? path.join(root, 'node_modules');
-  const commit = options.get('--commit') ?? git(root, ['rev-parse', 'HEAD']).toString('ascii').trim();
+  const commit = options.get('--commit');
   const buildDirectory = options.get('--build-repo') ? path.resolve(options.get('--build-repo')) : root;
   const buildSource = { repository: sourceRepository(buildDirectory, options.get('--source-repository')), commit };
   const portable = options.has('--portable')
-    ? fixedPortableSource(options, buildSource, buildDirectory) : undefined;
-  const build = createBuild(deps, { snapshot: portable?.snapshot ?? readBuildSnapshot(commit, buildDirectory) });
+    ? await fixedPortableSource(options, buildSource, buildDirectory, deps) : undefined;
+  const independent = !portable && !options.has('--legacy-single-repo')
+    ? readIndependentRentalSource(options.get('--core-repo'), options.get('--core-commit'), { mode: 'development' }) : undefined;
+  const development = independent && await readDistributionWorkspace(buildSource, buildDirectory, deps, independent, 'full');
+  const build = createBuild(deps, { snapshot: portable?.snapshot ?? development?.snapshot ?? readBuildSnapshot(commit, buildDirectory) });
   verifyContracts(build);
   verifyServer(build);
   if (portable) {
@@ -383,7 +411,7 @@ async function main(args) {
   }
   verifyNative(build);
   await attachPrismaRuntime(build);
-  const packed = verifyPackage(build, portable, buildSource);
+  const packed = verifyPackage(build, portable, buildSource, independent?.source);
   if (portable) {
     const { writeArchive } = require('./package-rental-host.cjs');
     writeArchive(portable.output, packed.bytes);
@@ -396,10 +424,12 @@ async function main(args) {
     return;
   }
   verifyConsumers(build);
-  console.log(JSON.stringify({ status: 'passed', mode: 'rental-distribution', sourceCommit: commit, stages: build.stages.length,
+  console.log(JSON.stringify({ status: 'passed', mode: 'rental-distribution', sourceCommit: commit,
+    ...(development ? { rentalSource: independent.source, workspaceFiles: development.snapshot.files.size } : { sourceMode: 'legacy-single-repo' }), stages: build.stages.length,
     emittedFiles: build.outputs.size, diskOutputs: 0 }));
 }
 if (require.main === module) {
   main(process.argv.slice(2)).catch(error => { console.error(error.stack); process.exitCode = 1; });
 }
-module.exports = { generatePrismaDeclarations, selectedPrisma, verifyServer, verifyNative, rentalPackageInputs, verifyPackage, verifyConsumers, attachPrismaRuntime };
+module.exports = { generatePrismaDeclarations, selectedPrisma, verifyServer, verifyNative, rentalPackageInputs, verifyPackage,
+  verifyConsumers, attachPrismaRuntime, readDistributionWorkspace, main };

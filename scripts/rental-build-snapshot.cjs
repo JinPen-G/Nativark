@@ -5,7 +5,9 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const slash = file => path.resolve(file).split(path.sep).join('/');
-const selections = ['LICENSE', 'package.json', 'package-lock.json', 'tsconfig.base.json', 'config',
+// Compatibility for releases that used the complete single-repository build.
+// Double-source workspaces supply their own exact support paths below that boundary.
+const legacySelections = ['LICENSE', 'package.json', 'package-lock.json', 'tsconfig.base.json', 'config',
   'packages/core-contracts', 'packages/platform-contracts', 'packages/platform-server', 'packages/core-host',
   'packages/platform-core-host', 'packages/rental-core', 'packages/example-tickets-core', 'packages/shared', 'packages/web-client',
   'packages/platform-admin', 'packages/ui-arc', 'packages/ui-motiq', 'packages/ai-native-data',
@@ -15,12 +17,12 @@ const selections = ['LICENSE', 'package.json', 'package-lock.json', 'tsconfig.ba
   'apps/admin', 'apps/miniprogram', 'apps/staff-miniprogram',
   'scripts/miniprogram-shared-types.cjs', 'scripts/rental-client-vite.ts', 'scripts/prepare-rental-workspace.cjs'];
 
-function readBuildSnapshot(commit, directory = root, paths = selections, targetRoot = root) {
+function readBuildSnapshot(commit, directory = root, paths = legacySelections, targetRoot = root) {
   if (!/^[a-f0-9]{40}$/u.test(commit)) throw Error('构建快照须使用完整固定提交 SHA');
   if (!paths.length || paths.some(file => file !== '.' && (file.startsWith('/') || /[\\:]/u.test(file)
     || file.split('/').some(part => !part || part === '.' || part === '..'))))
     throw Error('构建快照只接受仓库相对文件范围');
-  const git = (args, input) => execFileSync('git', ['--no-replace-objects', ...args],
+  const git = (args, input) => execFileSync('git', ['--no-replace-objects', '--no-lazy-fetch', ...args],
     { cwd: directory, input, maxBuffer: 256 * 1024 * 1024, windowsHide: true });
   if (git(['rev-parse', '--verify', commit + '^{commit}']).toString().trim() !== commit)
     throw Error('构建快照不是固定提交对象');
@@ -72,4 +74,4 @@ function snapshotFromFiles(commit, files, targetRoot = root) {
   const entries = directory => directories.get(slash(directory));
   return { commit, files, directories, entries };
 }
-module.exports = { readBuildSnapshot, snapshotFromFiles, assertSourcePath, selections };
+module.exports = { readBuildSnapshot, snapshotFromFiles, assertSourcePath };

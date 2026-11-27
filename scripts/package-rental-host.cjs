@@ -772,7 +772,7 @@ async function prepareRentalDevelopmentHost({ repo, repository, commit, coreRepo
   const contracts = compileFixedPlatformContracts(repo, commit, deps, true);
   const loadContract = name => contracts.load(contracts.exported('@rental-os/core-contracts' + name, true));
   const platformApi = { ...loadContract(''), ...loadContract('/platform-source'), ...loadContract('/archive') };
-  const options = { repo, repository, commit, coreRepo, coreCommit, mode: 'development', profile: 'host',
+  const options = { repo, repository, commit, coreRepo, coreCommit, deps, mode: 'development', profile: 'host',
     ...(freshAi ? { ai: true, freshAi: true, mcp } : {}) };
   const workspace = await createRentalDevelopmentWorkspace(options, platformApi);
   const sourceBytes = workspace.files.get(sourceProvenanceFile);
@@ -938,7 +938,7 @@ async function collectFixedInputs(options) {
     ...load('@rental-os/core-contracts/platform-source') };
   const lock = api.CoreDeploymentLockSchema.parse(proposedLock);
   const workspace = await createRentalDevelopmentWorkspace({ repo: options.platformRepo, repository: platformSource.repository,
-    commit: platformSource.commit, coreRepo: options.coreRepo, coreCommit: rentalSource.commit,
+    commit: platformSource.commit, coreRepo: options.coreRepo, coreCommit: rentalSource.commit, deps: options.deps,
     mode: 'release', profile: declared.profile, ai: options.aiMode === 'enabled' }, api);
   requireHostSourceProvenance(sourceBytes, workspace.files.get('package-lock.json'), lock, options.host, options.aiMode);
   if (!Buffer.from(workspace.files.get(sourceProvenanceFile)).equals(sourceBytes))

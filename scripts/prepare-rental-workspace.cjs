@@ -6,14 +6,14 @@
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { createHash } = require('node:crypto');
-const { readBuildSnapshot, snapshotFromFiles, assertSourcePath, selections } = require('./rental-build-snapshot.cjs');
-const { projectWorkspaceLock, mergeSourceLocks } = require('./rental-host-lock.cjs');
+const { createRequire } = require('node:module');
+const { readBuildSnapshot, snapshotFromFiles, assertSourcePath } = require('./rental-build-snapshot.cjs');
+const { projectWorkspaceLock, mergeSourceLocks, lockedDependency } = require('./rental-host-lock.cjs');
 const root = path.resolve(__dirname, '..');
 const slash = file => path.resolve(file).split(path.sep).join('/');
 const json = value => Buffer.from(JSON.stringify(value, null, 2) + '\n');
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const coreDirectory = 'packages/rental-core';
-const supportWorkspaces = ['packages/shared', 'packages/web-client', 'packages/ai-native-admin'];
 const rentalApps = ['apps/rental-api', 'apps/rental-admin', 'apps/tenant-website', 'apps/enterprise-portal',
   'apps/miniprogram', 'apps/staff-miniprogram', 'apps/example-multi-core-api', 'apps/example-multi-core-admin'];
 const layoutFile = 'rental.source.json';
@@ -33,11 +33,13 @@ const supportScripts = [
 ];
 
 const freshAiHostExport = name => ['ai-app-module', 'ai-data-extension'].includes(name.replace(/^\.\//u, ''));
+const needsHistoricalWeb = rental => !rental.layout.paths.some(entry => entry.target === 'packages/web-client')
+  && (rental.layoutKind === 'legacy-root' || /^0\.1\.(?:[0-9]|1[0-4])$/u.test(rental.metadata.version));
 const freshMcpHostFiles = ['src/mcp-bootstrap.ts', 'src/mcp-composition.ts', 'src/mcp-fresh-initialize.ts',
   'src/mcp-fresh-main.ts', 'src/mcp-host.ts', 'tsconfig.mcp.json'];
 
 function git(directory, args) {
-  return execFileSync('git', ['--no-replace-objects', ...args],
+  return execFileSync('git', ['--no-replace-objects', '--no-lazy-fetch', ...args],
     { cwd: directory, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true }).trim();
 }
 
@@ -146,6 +148,17 @@ function readIndependentRentalSource(directory, commit, options = {}) {
     const bytes = raw.get(layout.lockfile);
     if (!bytes) throw Error('独立源码缺少声明的依赖锁');
     dependencyLock = JSON.parse(bytes.toString('utf8'));
+    if (dependencyLock?.lockfileVersion !== 3 || !dependencyLock.packages?.['']) throw Error('独立源码须提供 npm v3 锁');
+    // Scoped lock entries are addressed by their projected workspace path,
+    // so npm does not accidentally resolve the Web compilers to the root one.
+    for (const [file, entry] of Object.entries(dependencyLock.packages)) {
+      if (!file) continue;
+      if (!/^(?:(?:apps|packages)\/[a-z0-9-]+\/)?(?:node_modules\/(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+\/)*node_modules\/(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+$/iu.test(file)
+        || ((file.startsWith('apps/') || file.startsWith('packages/'))
+          && !layout.paths.some(({ target }) => file.startsWith(target + '/node_modules/')))
+        || file.split('/').some(part => part === '.' || part === '..') || entry?.link)
+        throw Error('独立依赖锁含非依赖路径或本地链接：' + file);
+    }
     dependencyLockSource = { path: layout.lockfile, bytes: bytes.length, sha256: sha256(bytes) };
   }
   const { snapshot } = mapped;
@@ -189,18 +202,42 @@ function composeRentalBuildSnapshot(support, rental, options = {}) {
   return result;
 }
 
-/** 新组合读取公共支持时不读取底座旧业务副本；历史发行另走显式legacySupport。 */
-function readRentalBuildSupport(commit, directory = root, rental) {
-  // Old declared sources used the compatibility support copy. Once the Core
-  // declares Web ownership, it is the only allowed source in the new build.
-  const independentWeb = rental?.layout.paths.some(entry => entry.target === 'packages/web-client');
-  return readBuildSnapshot(commit, directory, selections.filter(file => (!rentalOwned(file) || file === 'packages/web-client' && !independentWeb)
-    && !['apps/admin', 'apps/example-tickets-api', 'apps/example-tickets-admin', 'packages/example-tickets-core'].includes(file)));
-}
-
 function isSource(file) {
   return !file.split('/').some(part => /^(?:output|node_modules|\.git|dist(?:-[^/]+)?|generated|test|tests)$/iu.test(part))
     && !/\.tsbuildinfo$/u.test(file);
+}
+
+/** The fixed independent manifest is authoritative for local workspace identity.
+ * Registry pins still come from the fixed locks; no installation, resolution or
+ * read from a workspace's installed node_modules can construct that identity. */
+function bindIndependentWorkspaceLinks(lock, selected, workspaces, semver) {
+  const packages = { ...lock.packages };
+  for (const { target } of selected) {
+    const metadata = workspaces.get(target);
+    const key = 'node_modules/' + metadata.name;
+    const entry = packages[key];
+    if (entry && (entry.link !== true || entry.resolved !== target))
+      throw Error('独立工作区与锁定位置冲突：' + metadata.name);
+    if (!entry) packages[key] = { resolved: target, link: true };
+  }
+  for (const { target } of selected) {
+    const metadata = workspaces.get(target);
+    const dependencies = { ...Object.fromEntries(Object.entries(metadata.peerDependencies ?? {})
+      .filter(([name]) => !metadata.peerDependenciesMeta?.[name]?.optional)),
+      ...metadata.devDependencies, ...metadata.dependencies, ...metadata.optionalDependencies };
+    for (const [name, version] of Object.entries(dependencies)) {
+      const pinned = packages[lockedDependency({ packages }, target, name)];
+      if (pinned?.link ? workspaces.get(pinned.resolved)?.version === version
+        : pinned?.version && semver.satisfies(pinned.version, version)) continue;
+      if (!pinned && Object.hasOwn(metadata.optionalDependencies ?? {}, name)) continue;
+      throw Error('独立工作区依赖缺少兼容的固定来源：' + target + ' -> ' + name);
+    }
+    // Preserve older lock provenance when it already supplies these specs.
+    // In the detached case, the workspace specs were verified above against
+    // the exact existing records and need no old manifest in the base tree.
+    if (!Object.hasOwn(lock.packages, target)) packages[target] = metadata;
+  }
+  return { ...lock, packages };
 }
 
 function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
@@ -210,6 +247,10 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
   if (!['domain', 'host', 'full'].includes(profile)) throw Error('开发范围须为 domain、host 或 full');
   const required = profile === 'domain' ? [coreDirectory] : ['apps/rental-api', 'apps/rental-admin',
     ...(profile === 'full' ? ['apps/tenant-website', 'apps/enterprise-portal', 'apps/miniprogram', 'apps/staff-miniprogram'] : [])];
+  // Older locked layouts predate independent web-client. Keep their original
+  // projection only for the existing tags; new layouts must own this source.
+  const historicalWeb = needsHistoricalWeb(rental);
+  if (profile !== 'domain' && !historicalWeb) required.push('packages/web-client');
   if (options.mcp && !options.ai) throw Error('MCP 开发组合须同时选用 AI');
   if (options.freshAi && (!options.ai || profile === 'domain'))
     throw Error('新装 AI 只接受带宿主的显式组合');
@@ -235,8 +276,9 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
     const metadata = JSON.parse(rental.snapshot.files.get(slash(path.join(root, target, 'package.json'))));
     return Object.hasOwn(metadata.dependencies ?? {}, '@rental-os/ai-native-data');
   });
-  const independentWeb = rental.layout.paths.some(entry => entry.target === 'packages/web-client');
-  const extras = [...supportWorkspaces.filter(directory => directory !== 'packages/web-client' || !independentWeb),
+  // Shared still forwards Rental contracts; it is compatibility support for
+  // this composition, never part of the zero-Core platform profile.
+  const extras = ['packages/shared', ...(historicalWeb ? ['packages/web-client'] : []), 'packages/ai-native-admin',
     ...(options.ai || needsAiData ? ['packages/ai-native-data'] : []),
     ...(options.ai ? ['packages/ai-native-server'] : []),
     ...(options.mcp ? ['packages/mcp-server'] : [])];
@@ -326,7 +368,16 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
   const originalLockBytes = readBuildSnapshot(options.commit, options.repo, ['package-lock.json'])
     .files.get(slash(path.join(root, 'package-lock.json')));
   const originalLock = JSON.parse(originalLockBytes.toString('utf8'));
-  const projected = projectWorkspaceLock(mergeSourceLocks(originalLock, rental.dependencyLock), workspaces, developmentRoot,
+  const mergedLock = mergeSourceLocks(originalLock, rental.dependencyLock);
+  const semverPin = mergedLock.packages['node_modules/semver'];
+  const deps = path.resolve(options.deps ?? path.join(options.repo, 'node_modules'));
+  const fromDeps = createRequire(path.join(deps, 'semver/package.json'));
+  const semverManifest = fromDeps.resolve('semver/package.json');
+  if (!semverPin?.version || fromDeps(semverManifest).version !== semverPin.version
+    || slash(semverManifest) !== slash(path.join(deps, 'semver/package.json')))
+    throw Error('依赖范围核对须使用底座原锁中的 semver');
+  const compositionLock = bindIndependentWorkspaceLinks(mergedLock, selected, workspaces, fromDeps('semver'));
+  const projected = projectWorkspaceLock(compositionLock, workspaces, developmentRoot,
     { verifySpecifications: true });
   // 开发工作区继承固定底座的完整工具链，包括已锁定的可选开发 peer。
   // 运行包仍另做生产闭包投影，不能借该投影裁掉开发源码需要的依赖记录。
@@ -448,5 +499,5 @@ async function main(args) {
 }
 
 if (require.main === module) main(process.argv.slice(2)).catch(error => { console.error(error.message); process.exitCode = 1; });
-module.exports = { readIndependentRentalSource, mapRentalSource, readRentalBuildSupport, composeRentalBuildSnapshot,
+module.exports = { readIndependentRentalSource, mapRentalSource, composeRentalBuildSnapshot,
   createRentalDevelopmentWorkspace, projectRentalDevelopmentWorkspace, compileFixedPlatformContracts, argumentsOf, main };

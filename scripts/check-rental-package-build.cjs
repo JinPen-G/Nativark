@@ -1,7 +1,7 @@
 'use strict';
 /** 按真实包配置从空产物执行 TypeScript emit；包间只消费本次正式声明出口。
  * 所有产物保存在内存，不读旧 dist、不扩大 rootDir、不加载应用或业务环境。
- * --contracts-only 只验证 Rental 基础合同与 Shared 的无环构建和运行时兼容。
+ * --contracts-only 核固定双仓的 Rental/Shared 兼容合同；--platform-only 核零 Core。
  */
 const fs = require('node:fs');
 const path = require('node:path');
@@ -13,6 +13,8 @@ const { selectedCompilerOptions } = require('./build-selected-prisma.cjs');
 const root = path.resolve(__dirname, '..');
 const slash = file => path.resolve(file).split(path.sep).join('/');
 const inside = (directory, file) => file === directory || file.startsWith(directory + '/');
+const publicProjects = ['packages/platform-contracts', 'packages/core-contracts', 'packages/platform-server',
+  'packages/core-host', 'packages/platform-core-host', 'apps/platform-api', 'packages/platform-admin', 'apps/platform-admin'];
 
 function createBuild(dependencyDirectory, settings = {}) {
   const deps = slash(dependencyDirectory);
@@ -364,33 +366,57 @@ function verifyContracts(build) {
     retainedRuntimeExports, sharedRuntimeExports: Object.keys(shared).length, diskOutputs: 0 }));
 }
 
-function main(args) {
+async function main(args) {
   let deps = path.join(root, 'node_modules');
-  const options = {};
+  const options = {}, modes = new Set();
   for (let index = 0; index < args.length; index++) {
     if (args[index] === '--deps' && args[index + 1]) deps = args[++index];
-    else if (['--commit', '--build-repo', '--core-repo', '--core-commit', '--source-mode'].includes(args[index]) && args[index + 1]) {
+    else if (['--commit', '--build-repo', '--core-repo', '--core-commit', '--source-mode', '--source-repository'].includes(args[index])
+      && args[index + 1] && !args[index + 1].startsWith('--')) {
       const key = args[index];
       if (options[key]) throw Error('重复构建选项：' + key);
       options[key] = args[++index];
     }
-    else if (args[index] !== '--contracts-only') throw Error('未知构建核验选项：' + args[index]);
+    else if (['--contracts-only', '--platform-only', '--legacy-single-repo'].includes(args[index]) && !modes.has(args[index]))
+      modes.add(args[index]);
+    else throw Error('未知构建核验选项：' + args[index]);
   }
-  let snapshot;
-  if (Object.keys(options).length) {
-    if (!options['--commit'] || !options['--core-repo'] || !options['--core-commit'])
-      throw Error('双仓构建须提供两个完整SHA和独立源码目录');
-    const api = require('./prepare-rental-workspace.cjs');
-    const rental = api.readIndependentRentalSource(options['--core-repo'], options['--core-commit'], { mode: options['--source-mode'] ?? 'development' });
-    snapshot = api.composeRentalBuildSnapshot(api.readRentalBuildSupport(options['--commit'], options['--build-repo'] ?? root, rental), rental);
+  const platformOnly = modes.has('--platform-only'), legacy = modes.has('--legacy-single-repo');
+  const commit = options['--commit'], repo = path.resolve(options['--build-repo'] ?? root);
+  const source = { commit, repository: options['--source-repository'] ?? 'https://github.com/JinPen-G/Nativark' };
+  const hasRental = ['--core-repo', '--core-commit', '--source-mode'].some(option => options[option]);
+  if (!commit || (platformOnly && (legacy || modes.has('--contracts-only'))) || ((platformOnly || legacy) && hasRental))
+    throw Error('须提供固定 --commit；零 Core、双仓与历史单仓核验不能混用');
+  const { readBuildSnapshot, snapshotFromFiles } = require('./rental-build-snapshot.cjs');
+  const { compileFixedPlatformContracts, readIndependentRentalSource } = require('./prepare-rental-workspace.cjs');
+  const { generatePrismaDeclarations, readDistributionWorkspace } = require('./verify-rental-distribution.cjs');
+  if (platformOnly) {
+    const contract = compileFixedPlatformContracts(repo, commit, deps, true);
+    const api = contract.load(contract.exported('@rental-os/core-contracts/platform-source', true));
+    const platform = await api.readPlatformSourceFromGit(repo, source);
+    const snapshot = snapshotFromFiles(commit, new Map([...platform.files].map(([file, bytes]) => [slash(path.join(root, file)), bytes])));
+    const build = createBuild(deps, { snapshot, quiet: true });
+    if ([...snapshot.files.keys()].some(file => /\/(?:apps\/(?:rental-|api\/)|packages\/(?:rental-|shared\/|web-client\/))/u.test(file.slice(slash(root).length))))
+      throw Error('零 Core 构建含 Rental 或旧 Shared 源码');
+    const schema = platform.files.get('apps/platform-api/prisma/schema.prisma').toString('utf8');
+    generatePrismaDeclarations(build, [['public', schema]]);
+    build.selectedClients.set(slash(path.join(root, 'apps/platform-api')),
+      { client: slash(path.join(root, 'apps/platform-api/generated/client/index.d.ts')), mode: 'platform' });
+    for (const project of publicProjects) build.compile(project + '/tsconfig.json');
+    console.log(JSON.stringify({ status: 'passed', mode: 'platform-only', source, projects: build.stages, diskOutputs: 0 }));
+    return;
   }
+  if (!legacy && (!options['--core-repo'] || !options['--core-commit']))
+    throw Error('Rental 合同核验须给出两个完整提交和独立仓目录；旧单仓请显式选 --legacy-single-repo');
+  const rental = legacy ? undefined : readIndependentRentalSource(options['--core-repo'], options['--core-commit'],
+    { mode: options['--source-mode'] ?? 'development' });
+  const snapshot = legacy ? readBuildSnapshot(commit, repo) : (await readDistributionWorkspace(source, repo, deps, rental, 'domain')).snapshot;
   const build = createBuild(deps, { snapshot });
   verifyContracts(build);
   console.log(JSON.stringify({ status: 'passed', mode: 'contracts', typescript: build.ts.version,
+    source, ...(rental ? { rentalSource: rental.source } : { sourceMode: 'legacy-single-repo' }),
     stages: build.stages.length, emittedFiles: build.outputs.size, diskOutputs: 0 }));
 }
-if (require.main === module) {
-  try { main(process.argv.slice(2)); }
-  catch (error) { console.error(error.stack); process.exitCode = 1; }
-}
 module.exports = { createBuild, verifyContracts };
+if (require.main === module)
+  main(process.argv.slice(2)).catch(error => { console.error(error.stack); process.exitCode = 1; });

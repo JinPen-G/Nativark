@@ -223,8 +223,8 @@ The public admin listens on `http://127.0.0.1:5176` and the API on port 3091 by 
 
 ### 4. Option B: Run a Core Host or the Full Composite Dev Entry
 
-- **Standalone Single-Core / Multi-Core Host**: See [Tickets 5-Step Guide](apps/example-tickets-api/README.md#单工单的五步), [Rental Standalone Host](apps/rental-api/README.md), or [Multi-Core Admin](apps/example-multi-core-admin/README.md).
-- **Full Composite Dev Entry (Base + Built-in Rental Core + AI)**: Against an isolated dev database configured in `.env` (including `SEED_PLATFORM_PASSWORD` and `SEED_DEMO_PASSWORD`), run:
+- **Standalone hosts**: See the [Tickets guide](apps/example-tickets-api/README.md#单工单的五步) or [the independent Rental host](https://github.com/JinPen-G/Zelo-rental-core/blob/main/workspace/apps/rental-api/README.md). The standalone Rental API, admin, four client apps, Web session package, and domain package come from the Rental repository. Pin both repositories by full commit SHA.
+- **Reproduce a legacy composite release**: Use its original API/Web images or rebuild with `build:legacy` at its recorded Git commit, preserving that version's configuration and migration receipts. Run the commands below only in a pinned checkout that still contains the complete legacy stack, against an isolated development database:
 
 ```bash
 docker compose up -d mysql
@@ -254,6 +254,13 @@ On Windows, use `./start-dev.ps1 -Legacy` or `start-dev.cmd -Legacy`. Logs go to
 > When switching back to standalone `platform-api` or `rental-api`, unset `RENTAL_PRISMA_LEGACY` and point `RENTAL_PRISMA_CLIENT` to that host's `generated/client/index.d.ts` (see [Client Selection Script](scripts/build-selected-prisma.cjs)).
 
 The existing single-repository CI, updater, and OPS builder select the legacy stack through `build:legacy`. The `api` and `web` image targets use their isolated legacy Client and outputs built from the same commit. [Legacy Dockerfile](scripts/ops/deployment/Dockerfile) · [Existing Deployment](scripts/ops/deployment/README.md)
+
+These offline checks use fixed commits without the old Rental paths, root test directory, or a database. For a historical single-repository distribution check, use `--legacy-single-repo --commit <recorded commit>` with the distribution verifier. For a published archive, prefer the original asset and its recorded SHA-256.
+
+```sh
+node scripts/check-rental-package-build.cjs --platform-only --commit <Zelo-full-SHA>
+node scripts/verify-rental-distribution.cjs --commit <Zelo-full-SHA> --core-repo <Rental-repository> --core-commit <Rental-full-SHA>
+```
 
 ---
 

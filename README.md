@@ -223,8 +223,8 @@ npm run dev
 
 ### 4. 方式 B：运行含业务 Core 的宿主或完整组合开发入口
 
-- **按标准包独立运行单 Core / 多 Core**：参考 [单工单五步](apps/example-tickets-api/README.md#单工单的五步)、[Rental 独立宿主](apps/rental-api/README.md) 或 [双 Core 后台](apps/example-multi-core-admin/README.md)。
-- **运行原完整组合开发入口（底座 + 内置 Rental Core + AI）**：在配置好 `.env`（含 `SEED_PLATFORM_PASSWORD` 与 `SEED_DEMO_PASSWORD`）的独立开发库中执行：
+- **按标准包运行宿主**：参考 [单工单五步](apps/example-tickets-api/README.md#单工单的五步)或[独立 Rental 宿主](https://github.com/JinPen-G/Zelo-rental-core/blob/main/workspace/apps/rental-api/README.md)。标准 Rental 组合使用独立仓的 API、后台、四端、Web 会话和领域包；配套构建须指定两仓完整提交。
+- **复查原完整组合（底座 + Rental + AI）**：使用原发布的 API/Web 镜像，或从该版本记录的原 Git 提交重建 `build:legacy`；保留它自己的配置、迁移和数据库账。以下原开发命令应在仍含完整旧组合的固定检出及专用开发库运行：
 
 ```bash
 docker compose up -d mysql
@@ -254,6 +254,13 @@ Windows 使用 `./start-dev.ps1 -Legacy` 或 `start-dev.cmd -Legacy`，日志在
 > 使用独立公共宿主或独立 Rental 宿主时，请清除 `RENTAL_PRISMA_LEGACY` 并指向各自宿主的 `generated/client/index.d.ts`（详参 [Client 选择规则](scripts/build-selected-prisma.cjs)）。
 
 原单仓 CI、更新器和 OPS 构建继续经 `build:legacy` 固定旧组合。镜像使用隔离生成的原 Client 和同提交产物，供既有 `api` / `web` 目标消费。[旧组合 Dockerfile](scripts/ops/deployment/Dockerfile) · [原部署入口](scripts/ops/deployment/README.md)
+
+固定提交的离线构建可用以下命令核验，不需要旧 Rental 路径、根测试目录或数据库。要核旧单仓分发，在同一分发命令上改用 `--legacy-single-repo --commit <原固定提交>`。已发行旧包应优先从原资产按记录的 SHA-256 核对。
+
+```sh
+node scripts/check-rental-package-build.cjs --platform-only --commit <Zelo完整SHA>
+node scripts/verify-rental-distribution.cjs --commit <Zelo完整SHA> --core-repo <独立Rental仓> --core-commit <Rental完整SHA>
+```
 
 ---
 
