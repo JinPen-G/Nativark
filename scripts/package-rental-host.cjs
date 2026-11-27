@@ -872,6 +872,7 @@ function createRentalHostContext(input) {
   const receipt = { format: 'rental-host-context-1', host, aiMode, imageBuild: 'not-run', deployment: 'pending',
     ...(development ? { sourceMode: 'development', releaseApproved: false, serverUpdateEligible: false } :
       fixed?.releaseArtifacts ? { sourceMode: 'release', sourceArtifacts: fixed.releaseArtifacts, releaseApproved: false, serverUpdateEligible: false } : {}),
+    ...(fixed?.portableCoreBuild ? { portableCoreBuild: fixed.portableCoreBuild } : {}),
     ...(phased ? { installation: 'fresh-ai', ledgerVersion: 2 } : {}),
     ...(publicRetention ? { publicRetention: { ...publicRetention.receipt,
       installedFiles: [...publicRetention.files].map(([file, bytes]) => ({ file, sha256: hash(bytes) })) } } : {}),
@@ -910,6 +911,7 @@ function requireReleasePreparation(prepared) {
     || materialIdentity(prepared.workspace.platform.files) !== original.platformSource
     || materialIdentity(prepared.platformFiles) !== original.platform
     || materialIdentity(prepared.rentalFiles) !== original.rental
+    || !isDeepStrictEqual(prepared.portableCoreSource, original.portableCoreSource)
     || (prepared.publicAi ? materialIdentity(prepared.publicAi.files) : null) !== original.publicAi
     || (prepared.publicAi ? hash(json(prepared.publicAi.release)) : null) !== original.publicAiRelease
     || sdkIdentity(prepared.workspace.publicAiDataSdk) !== original.reader
@@ -919,6 +921,8 @@ function requireReleasePreparation(prepared) {
 }
 
 /** Stage one resolves the final workspace before dependency installation.
+ * portableCoreSource identifies the original Core build inputs to acquire in
+ * the caller's online preparation; stage two never fetches Git objects or tags.
  * Real version tags and both original archives are mandatory; no development receipt is promoted. */
 async function prepareRentalReleaseWorkspace(input) {
   const { repo, repository, commit, coreRepo, coreCommit, deps } = input;
@@ -971,15 +975,83 @@ async function prepareRentalReleaseWorkspace(input) {
     }
   }
   const prepared = { workspace, platformFiles, rentalFiles, publicAi, publicRetention: selectedRetention,
+    portableCoreSource: readPortableSourceIdentity(repo, readPortableRentalSource(workspace, rentalFiles)),
     artifacts: { platformSha256: input.platformSha256, rentalSha256: input.rentalSha256,
       ...(freshAi ? { aiDataSha256: input.aiDataSha256 } : {}) } };
   releasePreparations.set(prepared, { workspace: materialIdentity(workspace.files), source: workspaceIdentity(workspace),
     platformSource: materialIdentity(workspace.platform.files), platform: materialIdentity(platformFiles),
-    rental: materialIdentity(rentalFiles), publicAi: publicAi ? materialIdentity(publicAi.files) : null,
+    rental: materialIdentity(rentalFiles), portableCoreSource: structuredClone(prepared.portableCoreSource),
+    publicAi: publicAi ? materialIdentity(publicAi.files) : null,
     publicAiRelease: publicAi ? hash(json(publicAi.release)) : null,
     reader: sdkIdentity(workspace.publicAiDataSdk), retention: sdkIdentity(selectedRetention),
     artifacts: structuredClone(prepared.artifacts), options: { repo, repository, commit, coreRepo, coreCommit, freshAi, mcp, publicRetention } });
   return prepared;
+}
+
+/** The archive is already pinned; its guide nominates an official build source,
+ * which is still unproven until the full portable rebuild matches the pin. */
+function readPortableRentalSource(workspace, rentalFiles) {
+  const guide = text(rentalFiles, 'CORE_GUIDE.md');
+  const origins = [...guide.matchAll(/^本指南来自\[固定底座接入手册\]\((https:\/\/github\.com\/[^/\s]+\/[^/\s]+)\/blob\/([a-f0-9]{40})\/packages\/core-contracts\/README\.md\)和同版本正式契约。Core来源为\[固定提交\]\((https:\/\/github\.com\/[^/\s]+\/[^/\s]+)\/commit\/([a-f0-9]{40})\)。$/gmu)];
+  if (origins.length !== 1 || origins[0][1] !== workspace.platform.source.repository
+    || origins[0][3] !== workspace.rental.source.repository || origins[0][4] !== workspace.rental.source.commit)
+    throw Error('正式 Rental 包缺少可核定的原 portable 构建/文档来源');
+  return { repository: origins[0][1], commit: origins[0][2] };
+}
+
+/** Resolve the original portable build tag while the preparation checkout is
+ * online/complete. Stage two receives this identity from the prepared record;
+ * it never fetches Git objects or follows a moving tag. */
+function readPortableSourceIdentity(repo, source) {
+  const { execFileSync } = require('node:child_process');
+  try {
+    const read = file => execFileSync('git', ['--no-replace-objects', '--no-lazy-fetch', 'show', source.commit + ':' + file],
+      { cwd: repo, windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
+    const version = JSON.parse(read('package.json')).version;
+    const tag = execFileSync('git', ['--no-replace-objects', '--no-lazy-fetch', 'rev-parse', '--verify',
+      'refs/tags/v' + version + '^{commit}'], { cwd: repo, encoding: 'utf8', windowsHide: true }).trim();
+    if (tag !== source.commit) throw Error('tag mismatch');
+    return { ...source, tag: 'v' + version, version, acquisition: 'online-preparation', offlineAfterPreparation: true };
+  } catch {
+    throw Error('正式 portable 原来源未在准备 checkout 中取得固定提交和对应版本 Tag；请先在联网准备阶段获取，第二阶段保持离线');
+  }
+}
+
+/** A published portable Core keeps its own build/documentation basis when only
+ * the host advances. Its original Git objects and version tag must already be
+ * present; missing offline inputs are not replaced with the current host. */
+async function rebuildPortableRentalRelease({ repo, deps, workspace, rentalFiles, expectedSha256, expectedSource, api }) {
+  const sourceInfo = readPortableSourceIdentity(repo, readPortableRentalSource(workspace, rentalFiles));
+  if (expectedSource && !isDeepStrictEqual(sourceInfo, expectedSource))
+    throw Error('正式两阶段的原 portable 来源身份与准备阶段不同');
+  const source = { repository: sourceInfo.repository, commit: sourceInfo.commit };
+  const { execFileSync } = require('node:child_process');
+  const read = file => execFileSync('git', ['--no-replace-objects', '--no-lazy-fetch', 'show', source.commit + ':' + file],
+    { cwd: repo, windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
+  const version = sourceInfo.version;
+  const { createBuild, verifyContracts } = require('./check-rental-package-build.cjs');
+  const { readDistributionWorkspace, verifyServer, verifyNative, rentalPackageInputs } = require('./verify-rental-distribution.cjs');
+  const { snapshot } = await readDistributionWorkspace(source, repo, deps, workspace.rental, 'host', { preserveCore: true });
+  const portable = createBuild(deps, { snapshot, quiet: true });
+  const absolute = file => path.resolve(root, file).split(path.sep).join('/');
+  const originalLock = JSON.parse(portable.sourceRead(absolute('package-lock.json')));
+  if (originalLock.packages['node_modules/typescript']?.version !== portable.ts.version)
+    throw Error('Rental 原 portable 构建需要其锁定的 TypeScript');
+  verifyContracts(portable);
+  const schemas = verifyServer(portable);
+  verifyNative(portable);
+  for (const directory of ['apps/platform-api', 'packages/ai-native-data', 'apps/rental-api']) portable.compile(directory + '/tsconfig.json');
+  const contract = portable.load(portable.exported('@rental-os/core-contracts', true));
+  const packed = portable.load(portable.exported('@rental-os/rental-api/package', true)).createRentalHostPackage({
+    files: rentalPackageInputs(portable), source: workspace.rental.source, sourceDirectory: 'packages/rental-core',
+    documentationSource: source, platformSource: source, platformGuide: read('packages/core-contracts/README.md').toString('utf8'),
+    host: { platform: version, contract: contract.CORE_CONTRACT_VERSION, node: targetNodeVersion, capabilities: {} } }, 'portable');
+  const files = api.readCoreArchive(packed.bytes, packed.sha256).files;
+  if (!api.matchesInstalledCoreArchive(files, expectedSha256))
+    throw Error('正式 Rental 归档与原 portable 来源实际重编译不同');
+  return { packed, evidence: { format: 'rental-portable-rebuild-1', source: workspace.rental.source,
+    buildSource: sourceInfo, documentationSource: sourceInfo, platformSource: sourceInfo, sha256: expectedSha256,
+    rebuiltSha256: packed.sha256, files: files.size, schemaSha256: hash(Buffer.from(schemas.schema)), stages: portable.stages } };
 }
 
 /** Stage two compiles with dependencies installed from stage one's exact lock.
@@ -1062,12 +1134,13 @@ async function buildRentalHostCandidate({ repo, repository, commit, coreRepo, co
     node: targetNodeVersion, capabilities: {} }, source: workspace.platform.source,
   sha256: releaseInput?.artifacts.platformSha256 ?? platformApi.createCoreArchive(workspace.platform.files).sha256, data: platform.data };
   const sourceDirectory = 'packages/rental-core';
-  const packed = load('rental-api/package').createRentalHostPackage({ files: rentalPackageInputs(build),
+  const portable = releaseInput ? await rebuildPortableRentalRelease({ repo, deps, workspace,
+    rentalFiles: releasePreparation.rentalFiles, expectedSha256: releaseInput.artifacts.rentalSha256,
+    expectedSource: releasePreparation.portableCoreSource, api: platformApi }) : undefined;
+  const packed = portable?.packed ?? load('rental-api/package').createRentalHostPackage({ files: rentalPackageInputs(build),
     source: workspace.rental.source, sourceDirectory, platformSource: workspace.platform.source, host: release.versions,
     platformGuide: text(workspace.platform.files, 'packages/core-contracts/README.md') });
   const rebuiltRental = platformApi.readCoreArchive(packed.bytes, packed.sha256).files;
-  if (releaseInput && !platformApi.matchesInstalledCoreArchive(rebuiltRental, releaseInput.artifacts.rentalSha256))
-    throw Error('正式 Rental 归档与固定源码实际重编译不同');
   const rentalFiles = releasePreparation?.rentalFiles ?? rebuiltRental;
   const deploymentInput = {
     release, pin: { manifest: packed.manifest, sha256: releaseInput?.artifacts.rentalSha256 ?? packed.sha256 }, coreFiles: rentalFiles,
@@ -1106,7 +1179,7 @@ async function buildRentalHostCandidate({ repo, repository, commit, coreRepo, co
   const compiled = bindFixedRuntime(build, workspace, sourceBytes, deployment.files, selections, platformBuild, releaseInput ? 'release' : 'development');
   const fixedBuild = trustedBuilds.get(compiled.sourceFiles);
   if (freshAi) fixedBuild.createFreshDeployment = createFreshDeployment;
-  if (releaseInput) fixedBuild.releaseArtifacts = releaseInput.artifacts;
+  if (releaseInput) { fixedBuild.releaseArtifacts = releaseInput.artifacts; fixedBuild.portableCoreBuild = portable.evidence; }
   if (selectedRetention) fixedBuild.publicRetention = selectedRetention;
   if (workspace.publicAiDataSdk) fixedBuild.publicAiDataSdk = workspace.publicAiDataSdk;
   const context = createRentalHostContext({ ...compiled, aiMode: freshAi ? 'enabled' : 'disabled', platformFiles: workspace.platform.files,

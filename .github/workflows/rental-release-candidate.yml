@@ -139,6 +139,56 @@ jobs:
           curl -fsSL --proto '=https' --proto-redir '=https' --max-time 120 --max-filesize 134217728 \
             "https://github.com/JinPen-G/nativark-rental-core/releases/download/$RENTAL_TAG/rental-${RENTAL_TAG#v}.tgz" -o "$task/pair/rental.tgz"
           (cd "$task/pair"; printf '%s  platform.tgz\n%s  rental.tgz\n' "$PLATFORM_DIGEST" "$RENTAL_DIGEST" | sha256sum --check --status)
+      - name: 取得标准包原固定底座来源
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const { readFileSync } = require('node:fs');
+          const { createHash } = require('node:crypto');
+          const { execFileSync } = require('node:child_process');
+          const { resolve } = require('node:path');
+          const env = process.env;
+          const asset = (name, digest) => {
+            const file = resolve(env.TASK_DIR, 'pair', name);
+            assert.match(digest, /^[a-f0-9]{64}$/u);
+            assert.equal(createHash('sha256').update(readFileSync(file)).digest('hex'), digest);
+            return file;
+          };
+          const platform = asset('platform.tgz', env.PLATFORM_DIGEST);
+          const rental = asset('rental.tgz', env.RENTAL_DIGEST);
+          const entry = (archive, file) => execFileSync('tar', ['-xOzf', archive, '--', file],
+            { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 });
+          const platformSource = JSON.parse(entry(platform, 'platform.source.json')).source;
+          const rentalSource = JSON.parse(entry(rental, 'core.manifest.json')).source;
+          assert.ok(['https://github.com/JinPen-G/Nativark', 'https://github.com/JinPen-G/Zelo'].includes(platformSource.repository));
+          assert.ok(['https://github.com/JinPen-G/nativark-rental-core', 'https://github.com/JinPen-G/Zelo-rental-core'].includes(rentalSource.repository));
+          assert.equal(platformSource.commit, env.ZELO_COMMIT);
+          assert.equal(rentalSource.commit, env.RENTAL_COMMIT);
+          // CORE_GUIDE only selects a candidate; the packager still verifies every rebuilt archive byte.
+          const origins = [...entry(rental, 'CORE_GUIDE.md').matchAll(/^本指南来自\[固定底座接入手册\]\((https:\/\/github\.com\/[^/\s]+\/[^/\s]+)\/blob\/([a-f0-9]{40})\/packages\/core-contracts\/README\.md\)和同版本正式契约。Core来源为\[固定提交\]\((https:\/\/github\.com\/[^/\s]+\/[^/\s]+)\/commit\/([a-f0-9]{40})\)。$/gmu)];
+          assert.equal(origins.length, 1, '标准包须声明唯一的固定构建来源');
+          const [, repository, commit, coreRepository, coreCommit] = origins[0];
+          assert.equal(repository, platformSource.repository);
+          assert.equal(coreRepository, rentalSource.repository);
+          assert.equal(coreCommit, rentalSource.commit);
+          const git = (args, input) => execFileSync('git', ['--no-replace-objects', '--no-lazy-fetch', ...args],
+            { input, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024, timeout: 120000 }).trim();
+          assert.match(git(['remote', 'get-url', '--all', 'origin']), /^https:\/\/github\.com\/JinPen-G\/Zelo(?:\.git)?$/u);
+          git(['fetch', '--no-tags', '--depth=1', 'origin', commit]);
+          assert.equal(git(['rev-parse', '--verify', 'FETCH_HEAD^{commit}']), commit);
+          const version = JSON.parse(git(['show', `${commit}:package.json`])).version;
+          assert.match(version, /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u);
+          const tag = `v${version}`;
+          git(['fetch', '--no-tags', '--depth=1', 'origin', `refs/tags/${tag}:refs/tags/${tag}`]);
+          assert.equal(git(['rev-parse', '--verify', `refs/tags/${tag}^{commit}`]), commit);
+          const objects = [...new Set(git(['ls-tree', '-r', '--format=%(objectname)', commit]).split('\n'))];
+          const available = git(['cat-file', '--batch-check'], objects.join('\n') + '\n').split('\n');
+          assert.equal(available.length, objects.length);
+          assert.ok(available.every(line => /^[a-f0-9]{40} blob [0-9]+$/u.test(line)), '原固定源码须已完整取得');
+          console.log(JSON.stringify({ portablePlatformCommit: commit, portablePlatformTag: tag, sourceObjects: objects.length }));
+          NODE
       - name: 按原锁安装编译依赖
         shell: bash
         run: npm ci --include=dev --ignore-scripts --no-audit --no-fund --cache "$GITHUB_WORKSPACE/$TASK_DIR/npm-cache"
