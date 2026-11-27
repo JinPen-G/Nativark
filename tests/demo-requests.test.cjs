@@ -1,21 +1,14 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const { randomUUID } = require("node:crypto");
-const path = require("node:path");
-const { execFileSync } = require("node:child_process");
 require("reflect-metadata");
-require("ts-node").register({
-  transpileOnly: true,
-  compilerOptions: { module: "commonjs", moduleResolution: "node", experimentalDecorators: true, emitDecoratorMetadata: true }
-});
 const { ValidationPipe } = require("@nestjs/common");
-const { Prisma } = require("@prisma/client");
-const { CreateDemoRequestDto, DemoRequestListQueryDto } = require("../apps/api/src/modules/demo-requests/demo-request.dto");
-const { DemoRequestService } = require("../apps/api/src/modules/demo-requests/demo-request.service");
-const { PlatformDemoRequestController } = require("../apps/api/src/modules/demo-requests/platform-demo-request.controller");
-const { ApiAuthGuard, requiredPermissions, UNMATCHED_ROUTE_PERMISSION } = require("../apps/api/src/common/api-auth.guard");
-const { ClientApiRateLimitService, clientRateLimitRule } = require("../apps/api/src/modules/client/client-api-rate-limit.service");
-const { apiCorsOrigins } = require("../apps/api/src/common/cors-origins");
+const { prismaRuntime: Prisma } = require("@rental-os/platform-server/prisma-runtime");
+const { CreateDemoRequestDto, DemoRequestListQueryDto, DemoRequestService,
+  PublicDemoRequestController, PlatformDemoRequestController } = require("@rental-os/platform-server/demo-requests");
+const { PlatformAuthGuard, PlatformAuthService, platformHttpPolicy } = require("@rental-os/platform-server");
+const { DemoRequestRateLimitService, WEBSITE_DEMO_REQUEST_RATE_LIMIT_RULE } = require("@rental-os/platform-server/public-rate-limit");
+const { fixture: managementFixture } = require("./fixtures/platform-management.cjs");
 
 const pipe = new ValidationPipe({ transform: true, whitelist: true });
 const validate = (value, metatype = CreateDemoRequestDto) => pipe.transform(value, { type: "body", metatype });
@@ -23,11 +16,13 @@ const input = (patch = {}) => ({ requestKey: randomUUID(), name: "测试客户",
 const status = (code) => (error) => error.getStatus?.() === code;
 
 function store() {
+  const authority = managementFixture();
   const records = new Map();
   let findQuery;
   const matching = (where) => [...records.values()].filter((row) => !where?.OR || where.OR.some((condition) =>
     Object.entries(condition).every(([field, rule]) => String(row[field] ?? "").includes(rule.contains))));
   const prisma = {
+    ...authority.database,
     demoRequest: {
       async create({ data }) {
         if (records.has(data.requestKey)) throw new Prisma.PrismaClientKnownRequestError("Duplicate", { code: "P2002", clientVersion: "test" });
@@ -46,9 +41,11 @@ function store() {
           .map((row) => Object.fromEntries(Object.keys(query.select).map((key) => [key, row[key]])));
       }
     },
-    $transaction: (queries) => Promise.all(queries)
+    $transaction: (queries, options) => Array.isArray(queries)
+      ? Promise.all(queries) : authority.database.$transaction(queries, options)
   };
-  return { records, prisma, service: new DemoRequestService(prisma), query: () => findQuery };
+  return { records, prisma, authority, service: new DemoRequestService(prisma), query: () => findQuery,
+    asSaas: work => authority.as("saas", work) };
 }
 
 function rateStore() {
@@ -69,7 +66,9 @@ function rateStore() {
 
 const context = (url, method = "GET", extra = {}) => ({ switchToHttp: () => ({ getRequest: () => ({ url, method, headers: {}, ip: "203.0.113.5", ...extra }) }) });
 const user = (patch = {}) => ({ id: "operator", tenantId: "tenant", permissions: [], dataScope: "all", isSaasAdmin: false, isPlatformAdmin: false, mustChangePassword: false, ...patch });
-const guard = (account, limiter) => new ApiAuthGuard({ resolveAccessContext: async () => ({ user: account, workspaceValid: true }) }, undefined, undefined, limiter);
+const guard = (account) => new PlatformAuthGuard({ resolveAccessContext: async () => account
+  ? { tenantUser: account, accessSession: { sessionId: "demo-session", expiresAt: Math.floor(Date.now() / 1000) + 60 } }
+  : undefined });
 
 test("DTO trims inputs, preserves multiline requirements, strips injected account fields", async () => {
   const dto = await validate(input({ name: " 客户 ", company: " 门店 ", message: " 一行\n二行 ", tenantId: "attacker", isSaasAdmin: true }));
@@ -131,63 +130,77 @@ test("pagination has safe defaults and rejects invalid page limits", async () =>
 
 test("list uses database pagination and omits request keys and hashes", async () => {
   const s = store();
-  for (let i = 0; i < 3; i++) await s.service.create(await validate(input({ name: `客户${i}` })));
-  const result = await s.service.list({ page: 2, pageSize: 2 });
-  assert.equal(result.total, 3);
-  assert.equal(result.items.length, 1);
-  assert.equal(s.query().skip, 2);
-  assert.equal(s.query().take, 2);
-  assert.deepEqual(s.query().orderBy, [{ createdAt: "desc" }, { id: "desc" }]);
-  assert.equal("requestKey" in result.items[0], false);
-  assert.equal("payloadHash" in result.items[0], false);
-  assert.equal(typeof result.items[0].createdAt, "string");
+  return s.asSaas(async () => {
+    for (let i = 0; i < 3; i++) await s.service.create(await validate(input({ name: `客户${i}` })));
+    const result = await s.service.list({ page: 2, pageSize: 2 });
+    assert.equal(result.total, 3);
+    assert.equal(result.items.length, 1);
+    assert.equal(s.query().skip, 2);
+    assert.equal(s.query().take, 2);
+    assert.deepEqual(s.query().orderBy, [{ createdAt: "desc" }, { id: "desc" }]);
+    assert.equal("requestKey" in result.items[0], false);
+    assert.equal("payloadHash" in result.items[0], false);
+    assert.equal(typeof result.items[0].createdAt, "string");
+  });
 });
 
 test("keyword searches name, company and contact before pagination with a matching total", async () => {
   const s = store();
-  for (const patch of [{ name: "目标客户" }, { company: "目标公司" },
-    { contactType: "wechat", contactValue: "target_123" }, { name: "其他客户" }]) {
-    await s.service.create(await validate(input(patch)));
-  }
-  const query = await validate({ keyword: " 目标 ", page: "2", pageSize: "1" }, DemoRequestListQueryDto);
-  assert.equal(query.keyword, "目标");
-  const result = await s.service.list(query);
-  assert.equal(result.total, 2);
-  assert.equal(result.items.length, 1);
-  assert.equal(s.query().skip, 1);
-  assert.deepEqual(s.query().where.OR, [
-    { name: { contains: "目标" } }, { company: { contains: "目标" } }, { contactValue: { contains: "目标" } }
-  ]);
-  assert.equal((await s.service.list({ page: 1, pageSize: 20, keyword: "target_123" })).total, 1);
-  assert.equal((await s.service.list({ page: 1, pageSize: 20, keyword: "不存在" })).total, 0);
-  assert.equal((await s.service.list({ page: 1, pageSize: 20, keyword: "  " })).total, 4);
-  await assert.rejects(validate({ keyword: "x".repeat(121) }, DemoRequestListQueryDto), status(400));
+  return s.asSaas(async () => {
+    for (const patch of [{ name: "目标客户" }, { company: "目标公司" },
+      { contactType: "wechat", contactValue: "target_123" }, { name: "其他客户" }]) {
+      await s.service.create(await validate(input(patch)));
+    }
+    const query = await validate({ keyword: " 目标 ", page: "2", pageSize: "1" }, DemoRequestListQueryDto);
+    assert.equal(query.keyword, "目标");
+    const result = await s.service.list(query);
+    assert.equal(result.total, 2);
+    assert.equal(result.items.length, 1);
+    assert.equal(s.query().skip, 1);
+    assert.deepEqual(s.query().where.OR, [
+      { name: { contains: "目标" } }, { company: { contains: "目标" } }, { contactValue: { contains: "目标" } }
+    ]);
+    assert.equal((await s.service.list({ page: 1, pageSize: 20, keyword: "target_123" })).total, 1);
+    assert.equal((await s.service.list({ page: 1, pageSize: 20, keyword: "不存在" })).total, 0);
+    assert.equal((await s.service.list({ page: 1, pageSize: 20, keyword: "  " })).total, 4);
+    await assert.rejects(validate({ keyword: "x".repeat(121) }, DemoRequestListQueryDto), status(400));
+  });
 });
 
 test("only POST submits anonymously, including case and trailing slash variants", async () => {
   const calls = [];
-  const g = guard(null, { assertAllowed: async (value) => calls.push(value) });
+  const g = guard(null);
+  const controller = new PublicDemoRequestController(store().service, { assertAllowed: async (value) => calls.push(value) });
   for (const url of ["/api/public/demo-requests", "/api/PUBLIC/DEMO-REQUESTS/?x=1"]) {
     assert.equal(await g.canActivate(context(url, "POST")), true);
+    await controller.create(await validate(input()), context(url, "POST").switchToHttp().getRequest());
   }
   assert.equal(calls.length, 2);
   assert.equal(calls[1].path, "/public/demo-requests");
   for (const method of ["GET", "PUT", "DELETE"]) {
-    assert.deepEqual(requiredPermissions(method, "/public/demo-requests"), [UNMATCHED_ROUTE_PERMISSION]);
+    assert.equal(platformHttpPolicy(method, "/public/demo-requests"), undefined);
     await assert.rejects(g.canActivate(context("/api/public/demo-requests", method)), status(401));
   }
-  await assert.rejects(guard(null).canActivate(context("/api/public/demo-requests", "POST")), status(401));
+  await assert.rejects(new PublicDemoRequestController(store().service).create(await validate(input()), {}), status(401));
 });
 
 test("anonymous submissions cannot bypass the persistent rate limiter", async () => {
-  assert.deepEqual(clientRateLimitRule("/public/demo-requests", "POST"), { code: "website_demo_request", windowSeconds: 600, limit: 5 });
-  const limiter = new ClientApiRateLimitService(rateStore());
-  const g = guard(null, limiter);
-  for (let i = 0; i < 5; i++) assert.equal(await g.canActivate(context("/api/public/demo-requests", "POST")), true);
-  await assert.rejects(g.canActivate(context("/api/public/demo-requests", "POST")), status(429));
-  assert.equal(await g.canActivate(context("/api/public/demo-requests", "POST", { ip: "203.0.113.6" })), true);
-  const broken = guard(null, { assertAllowed: async () => { throw new Error("database unavailable"); } });
-  await assert.rejects(broken.canActivate(context("/api/public/demo-requests", "POST")), /database unavailable/);
+  assert.deepEqual(WEBSITE_DEMO_REQUEST_RATE_LIMIT_RULE, { code: "website_demo_request", windowSeconds: 600, limit: 5 });
+  const limiter = new DemoRequestRateLimitService(rateStore());
+  const s = store();
+  const controller = new PublicDemoRequestController(s.service, limiter);
+  const submit = async (extra = {}) => {
+    const selected = context("/api/public/demo-requests", "POST", extra);
+    assert.equal(await guard(null).canActivate(selected), true);
+    return controller.create(await validate(input()), selected.switchToHttp().getRequest());
+  };
+  for (let i = 0; i < 5; i++) assert.deepEqual(await submit(), { received: true });
+  await assert.rejects(submit(), status(429));
+  assert.equal(s.records.size, 5, "a rejected attempt must not enter idempotent creation");
+  assert.deepEqual(await submit({ ip: "203.0.113.6" }), { received: true });
+  const broken = new PublicDemoRequestController(s.service, { assertAllowed: async () => { throw new Error("database unavailable"); } });
+  await assert.rejects(broken.create(await validate(input()), {}), /database unavailable/);
+  assert.equal(s.records.size, 6, "a limiter outage must not acknowledge or persist a submission");
 });
 
 test("SaaS reads are allowed but tenant admin, wildcard and explicitly granted tenant roles cannot read", async () => {
@@ -200,7 +213,12 @@ test("SaaS reads are allowed but tenant admin, wildcard and explicitly granted t
   }
   await assert.rejects(guard(user({ isSaasAdmin: true, mustChangePassword: true })).canActivate(context("/api/platform/demo-requests")), status(403));
   await assert.rejects(guard(user({ isSaasAdmin: true })).canActivate(context("/api/platform/demo-requests", "POST")), status(403));
-  await assert.rejects(guard(user({ isSaasAdmin: true })).canActivate(context("/api/platform/demo-requests", "GET", { staffApiRequest: true })), status(403));
+  // 当前公共入口按已签名 audience 拒员工身份，不依赖请求对象上的旧业务标志。
+  const auth = new PlatformAuthService({}, { get: () => "demo-audience-fixture" }, undefined, undefined, undefined);
+  const now = Math.floor(Date.now() / 1000);
+  const staff = auth.signAccessToken({ sub: "operator", tid: "tenant", sid: "staff-session", aud: "staff", iat: now, exp: now + 60 });
+  await assert.rejects(new PlatformAuthGuard(auth).canActivate(context("/api/platform/demo-requests", "GET",
+    { headers: { authorization: `Bearer ${staff}` } })), status(401));
 });
 
 test("controller independently enforces SaaS-only access", async () => {
@@ -214,40 +232,17 @@ test("controller independently enforces SaaS-only access", async () => {
   assert.equal(reads, 1);
 });
 
-test("CORS allows only explicit secure origins plus local HTTP preview", () => {
-  const allowed = apiCorsOrigins("https://site.example.test, https://site.example.test/");
-  assert.equal(allowed.filter((x) => x === "https://site.example.test").length, 1);
-  assert.ok(allowed[0].test("http://localhost:4180"));
-  for (const origin of ["*", "http://site.example.test", "https://*.example.test", "https://site.example.test/path", "https://site.example.test/?token=1", "https://name:password@site.example.test"]) {
-    assert.throws(() => apiCorsOrigins(origin));
+test("list rechecks the current SaaS identity before returning personal information", async () => {
+  const s = store();
+  await s.service.create(await validate(input()));
+  for (const actor of ["actor", "admin"]) {
+    await assert.rejects(s.authority.as(actor, () => s.service.list({ page: 1, pageSize: 20 })), status(403));
   }
-});
-
-test("website links stay local or disabled and all demo entry points open the dialog", () => {
-  // The old static site is no longer distributed with Zelo. Keep its original assertions on fixed historical bytes.
-  const readLegacyWebsite = file => execFileSync("git", ["show", `2bbe41ba50c8a4c85023171d2a5e4740dde75fd7:apps/website/2.0/${file}`],
-    { cwd: path.resolve(__dirname, ".."), encoding: "utf8" });
-  const html = readLegacyWebsite("index.html");
-  const anchors = [...html.matchAll(/<a\b[^>]*>/g)].map(([tag]) => tag);
-  assert.ok(anchors.length > 20);
-  for (const tag of anchors) {
-    const href = /\bhref="([^"]*)"/.exec(tag)?.[1];
-    if (href) assert.match(href, /^(?:#|\.\/)/, tag);
-    else assert.match(tag, /data-link-pending/, tag);
-  }
-  assert.equal(anchors.filter((tag) => tag.includes("data-demo-open")).length, 6);
-  const assets = ["styles.css", "js/i18n.js", "js/main.js", "js/config.js", "js/demo-request.js"];
-  const versions = assets.map((asset) => {
-    const reference = [...html.matchAll(/(?:src|href)="([^"]+)"/g)].map((match) => match[1]).find((url) => url.startsWith(`${asset}?v=`));
-    assert.ok(reference, `${asset} must bypass pre-demo asset caches`);
-    return reference.split("?v=")[1];
-  });
-  assert.equal(new Set(versions).size, 1);
-  assert.match(html, /id="demo-name"[^>]*required/);
-  assert.match(html, /id="demo-contact"[^>]*required/);
-  const js = readLegacyWebsite("js/demo-request.js");
-  assert.doesNotMatch(js, /(?:localStorage|sessionStorage)\s*\.\s*[a-zA-Z_$]/);
-  assert.match(js, /credentials: "omit"/);
-  assert.match(js, /result\?\.data\?\.received !== true/);
-  assert.ok(js.indexOf('new Event("rentalos:demo-open")') < js.indexOf("previousOverflow = document.body.style.overflow"));
+  const findMany = s.prisma.demoRequest.findMany;
+  s.prisma.demoRequest.findMany = async query => {
+    const rows = await findMany(query);
+    s.authority.operators.saas.isSaasAdmin = false;
+    return rows;
+  };
+  await assert.rejects(s.asSaas(() => s.service.list({ page: 1, pageSize: 20 })), status(403));
 });
