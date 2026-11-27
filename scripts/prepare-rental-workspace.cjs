@@ -21,12 +21,17 @@ const rentalApps = ['apps/rental-api', 'apps/rental-admin', 'apps/tenant-website
 const layoutFile = 'rental.source.json';
 const publicAiAdapters = 'packages/rental-ai-adapters';
 const publicAiRuntime = 'public-ai-sdk';
+// These are the complete legacy Rental dependencies, not the public AI SDKs.
+// A declared snapshot belongs to Rental; it must never be filled from Zelo.
+const compatibilityPackages = ['packages/shared', 'packages/ai-native-server',
+  'packages/ai-native-admin', 'packages/ai-native-data'];
 const historicalRepository = 'https://github.com/JinPen-G/nativark-rental-core';
 const renamedRepository = 'https://github.com/JinPen-G/Zelo-rental-core';
 const rootLayout = { format: 'rental-source-layout-1', paths: [{ source: '.', target: coreDirectory,
   roles: ['domain'],
   required: ['package.json', 'LICENSE', 'tsconfig.json', 'tsconfig.contracts.json', 'src/index.ts', 'src/server.ts', 'prisma/schema.prisma'] }] };
 const rentalOwned = file => /^packages\/(?:rental-[^/]+|web-client)(?:\/|$)/u.test(file)
+  || compatibilityPackages.some(directory => file === directory || file.startsWith(directory + '/'))
   || rentalApps.some(directory => file === directory || file.startsWith(directory + '/'));
 const supportScripts = [
   'scripts/prepare-selected-prisma-schema.cjs', 'scripts/miniprogram-shared-types.cjs',
@@ -56,6 +61,29 @@ function repositoryUrl(value) {
   return canonical;
 }
 
+function compatibilitySnapshot(raw, entry) {
+  const declared = entry.compatibility;
+  if (!compatibilityPackages.includes(entry.target)) {
+    if (declared !== undefined || entry.roles.includes('compatibility')) throw Error('兼容快照只能承接已登记的旧包');
+    return undefined;
+  }
+  if (entry.source !== 'workspace/' + entry.target || entry.roles.length !== 1 || entry.roles[0] !== 'compatibility'
+    || declared?.format !== 'rental-legacy-source-1' || declared.path !== entry.target
+    || !['https://github.com/JinPen-G/Zelo', 'https://github.com/JinPen-G/Nativark'].includes(declared.repository)
+    || !/^[a-f0-9]{40}$/u.test(declared.commit ?? '') || !/^[a-f0-9]{64}$/u.test(declared.sha256 ?? '')
+    || !Number.isSafeInteger(declared.files) || declared.files < 1)
+    throw Error('旧兼容包须声明完整固定来源：' + entry.target);
+  const prefix = entry.source + '/';
+  const records = [...raw].filter(([file]) => file.startsWith(prefix)).map(([file, bytes]) => {
+    const relative = file.slice(prefix.length);
+    if (!isSource(relative) && !/^(?:test|tests)\//u.test(relative)) throw Error('兼容快照含生成目录：' + file);
+    return [relative, sha256(bytes)];
+  }).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+  if (records.length !== declared.files || sha256(JSON.stringify(records)) !== declared.sha256)
+    throw Error('旧兼容包文件集与固定快照不一致：' + entry.target);
+  return declared;
+}
+
 /** 声明决定源码归属，不执行其中代码；每个目标只允许来自独立仓一次。 */
 function mapRentalSource(raw, layout, source) {
   if (layout?.format !== 'rental-source-layout-1' || !Array.isArray(layout.paths) || !layout.paths.length)
@@ -69,8 +97,9 @@ function mapRentalSource(raw, layout, source) {
       || targets.has(entry.target) || sourceRoots.has(entry.source)) throw Error('Rental 源码映射越权或重复：' + entry.target);
     if (!Array.isArray(entry.required) || !entry.required.includes('package.json') || !entry.required.length)
       throw Error('每个源码工作区须声明必需文件');
-    if (!Array.isArray(entry.roles) || !entry.roles.length || entry.roles.some(role => !['domain', 'ai', 'mcp', 'host', 'client', 'multi-core'].includes(role)))
+    if (!Array.isArray(entry.roles) || !entry.roles.length || entry.roles.some(role => !['domain', 'ai', 'mcp', 'host', 'client', 'multi-core', 'compatibility'].includes(role)))
       throw Error('源码清单须声明实际领域/适配/宿主角色');
+    const compatibility = compatibilitySnapshot(raw, entry);
     if (multiCoreApps.includes(entry.target) !== entry.roles.includes('multi-core')
       || (entry.roles.includes('multi-core') && entry.roles.length !== 1))
       throw Error('Rental 与工单示例宿主仅属于显式 multi-core 组合');
@@ -137,7 +166,8 @@ function mapRentalSource(raw, layout, source) {
       const target = slash(path.join(root, entry.target, relative));
       if (files.has(target)) throw Error('Rental 源码目标重复：' + target);
       files.set(target, bytes);
-      origins.set(target, { ...source, path: name, sha256: sha256(bytes) });
+      origins.set(target, { ...source, path: name, sha256: sha256(bytes),
+        ...(compatibility ? { compatibility } : {}) });
     }
   }
   if (!targets.has(coreDirectory)) throw Error('Rental 源码清单缺少领域包');
@@ -206,6 +236,8 @@ function composeRentalBuildSnapshot(support, rental, options = {}) {
   const independentWeb = rental.layout.paths.some(entry => entry.target === 'packages/web-client');
   const files = new Map([...support.files].filter(([file]) => {
     const relative = path.relative(root, file).split(path.sep).join('/');
+    if (compatibilityPackages.some(directory => relative.startsWith(directory + '/')
+      && !rental.layout.paths.some(entry => entry.target === directory))) return true;
     return !rentalOwned(relative) || (!independentWeb && relative.startsWith('packages/web-client/'))
       || options.legacySupport && !relative.startsWith(coreDirectory + '/');
   }));
@@ -332,11 +364,19 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
   });
   // Shared still forwards Rental contracts; it is compatibility support for
   // this composition, never part of the zero-Core platform profile.
-  const extras = ['packages/shared', ...(historicalWeb ? ['packages/web-client'] : []), 'packages/ai-native-admin',
+  const compatibility = ['packages/shared', 'packages/ai-native-admin',
+    ...(options.ai || needsAiData ? ['packages/ai-native-data'] : []),
+    ...(options.ai ? ['packages/ai-native-server'] : [])];
+  for (const directory of compatibility) {
+    const entry = rental.layout.paths.find(item => item.target === directory);
+    if (entry) selected.push(entry);
+  }
+  const supportWorkspaces = ['packages/shared', ...(historicalWeb ? ['packages/web-client'] : []), 'packages/ai-native-admin',
     ...(multi ? ['packages/example-tickets-core'] : []),
     ...(options.ai || needsAiData ? ['packages/ai-native-data'] : []),
     ...(options.ai ? ['packages/ai-native-server'] : []),
     ...(options.mcp ? ['packages/mcp-server'] : [])];
+  const extras = supportWorkspaces.filter(directory => !selected.some(entry => entry.target === directory));
   const support = readBuildSnapshot(options.commit, options.repo, [...extras, ...supportScripts]);
   const files = new Map(platform.files);
   for (const [absolute, bytes] of support.files) {
@@ -354,7 +394,7 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
   if (adapterSources) for (const [file, bytes] of adapterSources.files)
     files.set(adapterSources.directory + '/' + file, bytes);
   const workspaces = new Map();
-  for (const directory of [...api.PLATFORM_SOURCE_WORKSPACES, ...extras, ...selected.map(entry => entry.target)]) {
+  for (const directory of new Set([...api.PLATFORM_SOURCE_WORKSPACES, ...supportWorkspaces, ...selected.map(entry => entry.target)])) {
     const packageFile = directory + '/package.json';
     if (!files.has(packageFile)) throw Error('开发组合缺少源码工作区：' + directory);
     const metadata = JSON.parse(Buffer.from(files.get(packageFile)).toString('utf8'));

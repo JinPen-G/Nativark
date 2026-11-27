@@ -580,15 +580,41 @@ function prepareFreshMcpData(build, workspace, absolute) {
   return { files: originals, release };
 }
 
-/** The public SDK uses the same source/data pin and no mixed AI sources or outputs. */
-function compilePublicRetentionSdk(build, workspace, publicAi, archiveApi) {
+/** Fresh public data follows the platform pin. The independent legacy data
+ * snapshot supplies old readers only; it cannot issue a new platform release. */
+function compilePublicAiData(build, workspace, repo) {
   const { createBuild } = require('./check-rental-package-build.cjs');
-  const { snapshotFromFiles } = require('./rental-build-snapshot.cjs');
+  const { readBuildSnapshot, snapshotFromFiles } = require('./rental-build-snapshot.cjs');
+  const absolute = file => path.resolve(root, file).split(path.sep).join('/');
+  const directory = 'packages/ai-native-data';
+  const fixed = readBuildSnapshot(workspace.platform.source.commit, repo, [directory]);
+  const seed = new Map([...workspace.platform.files].map(([file, bytes]) => [absolute(file), bytes]));
+  for (const [file, bytes] of fixed.files) seed.set(file, bytes);
+  seed.set(absolute('package-lock.json'), workspace.files.get('package-lock.json'));
+  const selected = createBuild(build.deps, { snapshot: snapshotFromFiles(workspace.platform.source.commit, seed), quiet: true });
+  for (const [file, bytes] of build.outputs) if (publicDirectories.some(item => file.startsWith(absolute(item) + '/')))
+    selected.outputs.set(file, bytes);
+  selected.compile(directory + '/tsconfig.public.json');
+  const output = name => absolute(directory + '/dist-public/' + name + '.js');
+  const data = selected.load(output('public-data'));
+  const files = new Map([...data.PUBLIC_AI_DATA_FILES.map(({ file }) => file), 'LICENSE', 'README.public.md']
+    .map(file => [file, fixed.files.get(absolute(directory + '/' + file))]));
+  for (const name of ['public-data', 'public-data-package', 'public-mysql-data']) for (const suffix of ['js', 'd.ts'])
+    files.set(`dist/${name}.${suffix}`, Buffer.from(selected.outputs.get(absolute(`${directory}/dist-public/${name}.${suffix}`))));
+  const release = selected.load(output('public-data-package')).createPublicAiDataRelease({ files, source: workspace.platform.source });
+  build.stages.push(...selected.stages);
+  return { ...release, data };
+}
+
+/** The public SDK uses the fixed Zelo source/data pin, never Rental's legacy snapshot. */
+function compilePublicRetentionSdk(build, workspace, publicAi, archiveApi, repo) {
+  const { createBuild } = require('./check-rental-package-build.cjs');
+  const { readBuildSnapshot, snapshotFromFiles } = require('./rental-build-snapshot.cjs');
   const { generatePrismaDeclarations } = require('./verify-rental-distribution.cjs');
   const absolute = file => path.resolve(root, file).split(path.sep).join('/');
   const prefix = retentionSdk.legacyDirectory + '/';
-  const sources = new Map([...workspace.files].filter(([file]) => file.startsWith(prefix))
-    .map(([file, bytes]) => [file.slice(prefix.length), bytes]));
+  const fixed = readBuildSnapshot(workspace.platform.source.commit, repo, [retentionSdk.legacyDirectory]);
+  const sources = new Map([...fixed.files].map(([file, bytes]) => [file.slice(absolute(prefix).length + 1), bytes]));
   const factory = { exports: {} }, sourceFile = absolute(prefix + 'public-package.cjs');
   require('node:vm').compileFunction(text(sources, 'public-package.cjs'), ['module', 'require'], { filename: sourceFile })
     (factory, createRequire(sourceFile));
@@ -601,7 +627,7 @@ function compilePublicRetentionSdk(build, workspace, publicAi, archiveApi) {
   const sharedDirectories = publicDirectories.map(directory => absolute(directory) + '/');
   for (const [file, bytes] of build.outputs) if (sharedDirectories.some(directory => file.startsWith(directory)))
     publicBuild.outputs.set(file, bytes);
-  const data = build.load(build.exported('@rental-os/ai-native-data/public-data', true));
+  const data = publicAi.data;
   const schema = data.composePublicAiPrismaSchema(text(workspace.platform.files, 'apps/platform-api/prisma/schema.prisma'),
     data.createPublicAiDataContribution(publicAi.files));
   generatePrismaDeclarations(publicBuild, [['public', schema]]);
@@ -864,8 +890,8 @@ async function prepareRentalDevelopmentHost({ repo, repository, commit, coreRepo
   let publicAi, extension, mcpData;
   if (freshAi) {
     for (const name of ['platform-server', 'core-host', 'platform-core-host', 'ai-native-data']) build.compile(`packages/${name}/tsconfig.json`);
-    const load = name => build.load(build.exported(`@rental-os/${name}`, true));
-    const data = load('ai-native-data/public-data');
+    publicAi = compilePublicAiData(build, workspace, repo);
+    const data = publicAi.data;
     const runtime = build.ts.transpileModule(build.sourceRead(absolute('apps/rental-api/src/ai-data-extension.ts')),
       { compilerOptions: { target: build.ts.ScriptTarget.ES2022, module: build.ts.ModuleKind.CommonJS } }).outputText;
     // The extension also imports the Rental relation contribution. Emit its
@@ -876,13 +902,6 @@ async function prepareRentalDevelopmentHost({ repo, repository, commit, coreRepo
     const adapter = build.load(extensionRuntime);
     build.outputs.delete(extensionRuntime);
     const bytes = file => workspace.files.get(file);
-    const publicFiles = new Map(data.PUBLIC_AI_DATA_FILES.map(({ file }) => [file, bytes('packages/ai-native-data/' + file)]));
-    for (const file of ['LICENSE', 'README.public.md']) publicFiles.set(file, bytes('packages/ai-native-data/' + file));
-    for (const name of ['public-data', 'public-data-package', 'public-mysql-data']) for (const suffix of ['js', 'd.ts']) {
-      const file = `dist/${name}.${suffix}`;
-      publicFiles.set(file, Buffer.from(build.outputs.get(absolute('packages/ai-native-data/' + file))));
-    }
-    publicAi = load('ai-native-data/public-data-package').createPublicAiDataRelease({ files: publicFiles, source: workspace.platform.source });
     extension = { source: workspace.rental.source, files: new Map(adapter.RENTAL_AI_EXTENSION_FILES.map(({ file }) =>
       [file, bytes('apps/rental-api/' + file)])) };
     schemas.schema = adapter.composeRentalPublicAiPrismaSchema(schemas.publicSchema, data.createPublicAiDataContribution(publicAi.files),
@@ -939,7 +958,7 @@ async function prepareRentalDevelopmentHost({ repo, repository, commit, coreRepo
     build.outputs.set(absolute(file), Buffer.from(bytes).toString('utf8'));
   let selectedRetention;
   if (publicRetention) {
-    selectedRetention = compilePublicRetentionSdk(build, workspace, publicAi, platformApi);
+    selectedRetention = compilePublicRetentionSdk(build, workspace, publicAi, platformApi, repo);
     workspace = projectRentalDevelopmentWorkspace({ ...options, publicRetention: selectedRetention },
       workspace.platform, workspace.rental, platformApi);
     const selected = createBuild(deps, { publicRetention: selectedRetention, quiet: true, snapshot: snapshotFromFiles(commit,
