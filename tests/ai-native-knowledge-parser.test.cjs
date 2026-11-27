@@ -1,10 +1,13 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-const h = require('./fixtures/ai-native/knowledge-service.cjs');
-const { KnowledgeTextParser } = h.load('knowledge-text-parser');
-const parser = new KnowledgeTextParser();
-const doc = { draftVersion: h.shared.AI_KNOWLEDGE_DRAFT_VERSION, ...h.draft(), owner: { actorKind: 'user', actorId: 'user-1' }, scope: h.scope, aclRevision: 1, publication: 'draft', parsing: 'pending', indexing: 'not_indexed' };
+const h = require('./fixtures/ai-native/knowledge-public.cjs');
+const parser = h.harness().documents.ports.parser;
+const doc = { draftVersion: h.contracts.AI_KNOWLEDGE_DRAFT_VERSION, ...h.draft(), owner: { actorKind: 'user', actorId: 'user-1' }, scope: h.scope, aclRevision: 1, publication: 'draft', parsing: 'pending', indexing: 'not_indexed' };
 const parse = (text, mediaType = 'text/markdown') => parser.parse(doc, { mediaType, bytes: Buffer.from(text) });
+async function parsed(f) {
+  await f.documents.create(h.context(), h.draft());
+  return f.documents.parseDocument(h.context(), { documentId: 'doc-1', expectedRevision: 1, operationId: 'parse-1' });
+}
 test.after(() => assert.deepEqual(h.attempts, []));
 test('plain text and markdown preserve stable version, paragraphs and untrusted text', () => {
   const text = '# Section\n\nFirst paragraph.\n\n第二段';
@@ -37,8 +40,8 @@ test('embedded instructions, HTML, links and includes stay literal data with no 
   assert.equal(parse(text)[0].text, text); assert.deepEqual(h.attempts, []);
 });
 test('document service invokes real parser and persists structured failures', async () => {
-  const f = h.harness(); f.ports.parser = parser;
-  const good = await h.parsed(f); assert.equal(good.document.parsing, 'parsed');
-  const bad = h.harness(); bad.ports.parser = parser; bad.files.read = async () => ({ mediaType: 'application/pdf', bytes: Buffer.from('fake pdf') });
-  const r = await h.parsed(bad); assert.equal(r.document.parsing, 'rejected'); assert.equal(r.failure, 'unsupported'); assert.equal(bad.repo.chunks.size, 0);
+  const f = h.harness();
+  const good = await parsed(f); assert.equal(good.document.parsing, 'parsed');
+  const bad = h.harness(); bad.files.read = async () => ({ mediaType: 'application/pdf', bytes: Buffer.from('fake pdf') });
+  const r = await parsed(bad); assert.equal(r.document.parsing, 'rejected'); assert.equal(r.failure, 'unsupported'); assert.equal(bad.repo.chunks.size, 0);
 });

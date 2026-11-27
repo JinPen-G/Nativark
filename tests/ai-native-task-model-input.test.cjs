@@ -1,13 +1,18 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'es2022', experimentalDecorators: true, emitDecoratorMetadata: true } });
+require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
+const { load, prepare } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
-const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
-const { composePersistedTaskModelInput } = require('../apps/api/src/modules/ai-native/model-input/persisted-task-model-input.composition');
-const { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL } = require('../apps/api/src/modules/ai-native/model-input/task-model-input');
-const { prepareGatewayTextIntent } = require('../apps/api/src/modules/ai-native/gateway-intent');
-const { PrismaGatewayInvocationBindings } = require('../apps/api/src/modules/ai-native/budget/prisma-gateway-invocation-bindings');
+let ApiAuthGuard, composePersistedTaskModelInput, TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, prepareGatewayTextIntent, PrismaGatewayInvocationBindings;
+test.before(async () => {
+  await prepare();
+  ({ ApiAuthGuard } = load('@rental-os/ai-native-server/runtime/rental-adapters/api-auth.guard'));
+  ({ composePersistedTaskModelInput } = load('@rental-os/ai-native-server/runtime/model-input/persisted-task-model-input.composition'));
+  ({ TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL } = load('@rental-os/ai-native-server/runtime/model-input/task-model-input'));
+  ({ prepareGatewayTextIntent } = load('@rental-os/ai-native-server/runtime/gateway-intent'));
+  ({ PrismaGatewayInvocationBindings } = load('@rental-os/ai-native-server/runtime/budget/prisma-gateway-invocation-bindings'));
+});
 const { AI_TOOL_DRAFT_VERSION, AI_TOOL_CODES, AI_TASK_STEP_CODES } = require('./fixtures/ai-native/local-shared.cjs');
 
 test('image input persists its original digest and uses one bound invocation; revoked media cannot register', async () => {
@@ -44,7 +49,7 @@ async function setup(kind) {
   h.db.$transaction = callback => transaction(tx => callback({ ...tx, aiGatewayInvocation: { ...tx.aiGatewayInvocation,
     create: args => tx.aiGatewayInvocation.create({ ...args, data: { id: randomUUID(), ...args.data } }) } }));
   let root;
-  const control = { verified: true, beforeRoute: null, result: { text: 'Synthetic authorized summary', usage: { inputTokens: 1, outputTokens: 2 } }, sent: [], events: [], claimed: new Set() };
+  const control = { verified: true, beforeRoute: null, result: { text: 'Synthetic authorized summary', usage: { inputTokens: 1, outputTokens: 2 } }, sent: [], events: [], usage: [], claimed: new Set() };
   const ports = {
     routing: { resolve: async (_caller, required) => {
       if (control.beforeRoute) await control.beforeRoute();
@@ -62,14 +67,21 @@ async function setup(kind) {
     budget: { reserve: async call => {
       await new PrismaGatewayInvocationBindings(h.db, root.authorization.scopes, () => new Date(h.control.now)).resolveForReserve(call.context, call.request);
       control.events.push('reserve'); return { id: 'synthetic-budget' };
-    }, dispatch: async () => { control.events.push('budget-dispatch'); }, settle: async () => { control.events.push('settle'); },
+    }, dispatch: async () => { control.events.push('budget-dispatch'); },
+    // Finite accounting port for this input-binding test; durable ledger writes
+    // are exercised by the original financial composition tests.
+    recordUsage: async (call, reservationId, usage) => {
+      assert.equal(call.request.callId, h.state.aiGatewayInvocation[0].callId);
+      assert.equal(reservationId, 'synthetic-budget');
+      control.usage.push(structuredClone(usage));
+    }, settle: async () => { control.events.push('settle'); },
     abandon: async (_call, _id, reason) => { control.events.push(`unknown:${reason}`); } },
     audit: { append: async () => {} },
     transport: { invoke: async (_context, request, _route, signal) => { assert.equal(signal.aborted, false);
       control.sent.push(structuredClone(request)); return structuredClone(control.result); }, stream: async function* () { throw Error('invoke-only test'); } }
   };
   if (kind === 'image') {
-    const { AuthorizedGatewayMediaAttachmentResolver } = require('../apps/api/src/modules/ai-native/gateway-media-attachment.resolver');
+    const { AuthorizedGatewayMediaAttachmentResolver } = load('@rental-os/ai-native-server/runtime/gateway-media-attachment.resolver');
     const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a4aQAAAAASUVORK5CYII=', 'base64');
     const digest = require('node:crypto').createHash('sha256').update(bytes).digest('hex');
     control.mediaActive = true;
@@ -111,7 +123,7 @@ for (const terminal of ['unknown', 'succeeded', 'missing_usage']) test(`formal m
   const expectedStatus = terminal === 'succeeded' ? 'succeeded' : 'unknown';
   const h = await setup(); await h.root.publish(h.command());
   const r = await h.register(false);
-  const { AiStepTransitionRepository } = require('../apps/api/src/modules/ai-native/ai-step-transition.repository');
+  const { AiStepTransitionRepository } = load('@rental-os/ai-native-server/runtime/ai-step-transition.repository');
   assert.throws(() => h.root.createTransitionAuthority(undefined));
   let financial;
   const authority = h.root.createTransitionAuthority({ readDispatch: async () => {
@@ -120,7 +132,7 @@ for (const terminal of ['unknown', 'succeeded', 'missing_usage']) test(`formal m
   const transitions = new AiStepTransitionRepository(h.db, authority, h.config.clock);
   const startCommand = h.root.commands.transition('start', r.ref, r.lease, null);
   const grant = await authority.resolve(startCommand);
-  const validation = require('../apps/api/src/modules/ai-native/task-contract-validation');
+  const validation = load('@rental-os/ai-native-server/runtime/task-contract-validation');
   assert.equal(validation.isAiStepState(grant.next), true);
   const started = await transitions.transition(startCommand);
   assert.equal(h.state.aiStep[0].status, 'RUNNING'); assert.equal(h.state.aiStep[0].effect, 'POSSIBLE');
@@ -130,7 +142,7 @@ for (const terminal of ['unknown', 'succeeded', 'missing_usage']) test(`formal m
   // Explicit persisted crash fixture, not a replacement transition authority.
   const artifact = { ...step, id: randomUUID(), stepId: step.id, stepFingerprint: step.requestFingerprint,
     leaseOwnerId: r.lease.holderId, fencingToken: h.state.aiRun[0].fencingToken,
-    outcome: 'RUNNING', payload: {}, contentHash: require('../apps/api/src/modules/rental-core/rental-idempotency.repository').requestFingerprint({}),
+    outcome: 'RUNNING', payload: {}, contentHash: load('@rental-os/platform-contracts/request-fingerprint').requestFingerprint({}),
     outputBytes: 0n, activeMs: 0n, completeMeasurement: false, errorCode: null };
   h.state.aiTaskResultArtifact.push(artifact);
   for (const resource of ['STEPS', 'CALLS', 'ACTIVE_MS', 'OUTPUT_BYTES']) h.state.aiTaskExecutionCharge.push({
@@ -141,15 +153,15 @@ for (const terminal of ['unknown', 'succeeded', 'missing_usage']) test(`formal m
     const result = await executor.execute({ ...r.binding, lease: r.lease }, new AbortController().signal);
     assert.equal(result.kind, 'succeeded');
     Object.assign(artifact, { payload: result.payload, completeMeasurement: true, outcome: 'SUCCEEDED',
-      contentHash: require('../apps/api/src/modules/rental-core/rental-idempotency.repository').requestFingerprint(result.payload),
+      contentHash: load('@rental-os/platform-contracts/request-fingerprint').requestFingerprint(result.payload),
       outputBytes: BigInt(Buffer.byteLength(JSON.stringify(result.payload))) });
     h.state.aiTaskResultArtifact[0] = artifact;
     const invocation = h.state.aiGatewayInvocation[0], config = h.state.aiTaskActionInput[0].payload.configuration;
-    const receipt = { scopeId: step.scopeId, taskId: step.taskId, invocationId: invocation.id,
+    const receipt = { scopeKind: 'WORKSPACE', scopeId: step.scopeId, taskId: step.taskId, invocationId: invocation.id,
       tenantId: 'tenant-a', workspaceId: 'workspace-a', admissionId: randomUUID(), reservationId: randomUUID(),
       dispatchToken: 'synthetic-dispatch', requestHash: 'a'.repeat(64), state: 'dispatched' };
     h.state.aiGatewayAccountingReceipt.push(receipt);
-    h.state.aiInvocationAdmission.push({ id: receipt.admissionId, tenantId: receipt.tenantId, workspaceId: receipt.workspaceId,
+    h.state.aiInvocationAdmission.push({ id: receipt.admissionId, scopeKind: 'WORKSPACE', tenantId: receipt.tenantId, workspaceId: receipt.workspaceId,
       actorId: invocation.actorId, callId: invocation.callId, profileId: config.configId, requestHash: receipt.requestHash,
       dispatchId: receipt.dispatchToken, revokedAt: null, status: 'completed' });
     financial = { state: 'dispatched', dispatchToken: receipt.dispatchToken, reservationId: receipt.reservationId,
@@ -164,7 +176,7 @@ for (const terminal of ['unknown', 'succeeded', 'missing_usage']) test(`formal m
     assert.equal(result.kind, 'unknown'); assert.equal(result.payload.status, 'completed');
     assert.equal(result.payload.usage.kind, 'unknown'); assert.equal(h.control.events.includes('settle'), false);
     Object.assign(artifact, { payload: result.payload, outcome: 'UNKNOWN',
-      contentHash: require('../apps/api/src/modules/rental-core/rental-idempotency.repository').requestFingerprint(result.payload),
+      contentHash: load('@rental-os/platform-contracts/request-fingerprint').requestFingerprint(result.payload),
       outputBytes: BigInt(Buffer.byteLength(JSON.stringify(result.payload))) });
     h.state.aiTaskResultArtifact[0] = artifact;
     for (const charge of h.state.aiTaskExecutionCharge) charge.status = 'UNKNOWN';
@@ -178,9 +190,9 @@ for (const terminal of ['unknown', 'succeeded', 'missing_usage']) test(`formal m
   if (terminal === 'missing_usage') {
     const observed = { ...h.state.aiTaskResultArtifact[0] };
     const reported = { ...observed.payload, usage: { kind: 'reported', inputTokens: 1, outputTokens: 2 } };
-    assert.equal(require('../apps/api/src/modules/ai-native/gateway-contract-validation').isGatewayResult(reported), true);
+    assert.equal(load('@rental-os/ai-native-server/runtime/gateway-contract-validation').isGatewayResult(reported), true);
     Object.assign(h.state.aiTaskResultArtifact[0], { payload: reported,
-      contentHash: require('../apps/api/src/modules/rental-core/rental-idempotency.repository').requestFingerprint(reported),
+      contentHash: load('@rental-os/platform-contracts/request-fingerprint').requestFingerprint(reported),
       outputBytes: BigInt(Buffer.byteLength(JSON.stringify(reported))) });
     await assert.rejects(authority.resolve(command));
     h.state.aiTaskResultArtifact[0] = observed;
@@ -222,6 +234,7 @@ test('current-authorized frozen input produces the original plan, step, invocati
   assert.equal(h.control.sent[0].callId, row.payload.intent.requestId);
   assert.equal(h.control.sent[0].messages[0].content, h.material.messages[0].content[0].text);
   assert.equal(h.control.events.filter(e => e === 'reserve').length, 1); assert.ok(h.control.events.includes('settle'));
+  assert.deepEqual(h.control.usage, [{ inputTokens: 1, outputTokens: 2 }]);
   assert.equal(await h.root.executors.resolve('caller.tool', AI_TOOL_DRAFT_VERSION), null);
 });
 
@@ -268,5 +281,6 @@ test('missing usage is unknown without settlement, and aborted execution never s
   h.control.result = { text: 'Summary without provider usage' };
   const result = await executor.execute(registered.binding, new AbortController().signal);
   assert.equal(result.kind, 'unknown'); assert.equal(result.payload.usage.kind, 'unknown');
+  assert.deepEqual(h.control.usage, []);
   assert.equal(h.control.events.includes('settle'), false); assert.equal(h.control.sent.length, 1);
 });

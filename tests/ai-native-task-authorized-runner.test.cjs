@@ -1,9 +1,11 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'es2022', experimentalDecorators: true, emitDecoratorMetadata: true } });
+require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
+const { load, prepare } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+test.before(() => prepare());
 const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
-const { AI_TOOL_DRAFT_VERSION } = require('@rental-os/shared');
-const compose = input => require('../apps/api/src/modules/ai-native/runner/authorized-persistent-task-input.composition').composeAuthorizedPersistentTaskInputRunner(input);
+const { AI_TOOL_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
+const compose = input => load('@rental-os/ai-native-server/runtime/runner/authorized-persistent-task-input.composition').composeAuthorizedPersistentTaskInputRunner(input);
 
 test('formal persisted authorization composes with actual runner, evidence, accounting and input repositories', async () => {
   const h = await authorizedRunnerHarness(), root = h.compose();
@@ -36,7 +38,7 @@ test('original non-effect charge validation batches current run reads without we
   let individualLookups = 0;
   h.db.aiTaskExecutionCharge.findUnique = async query => { individualLookups++; return findUnique(query); };
   h.db.aiTaskExecutionCharge.findMany = async query => { queries.push(h.clone(query)); return findMany(query); };
-  const { taskPreparationNonEffectChargeIds } = require('../apps/api/src/modules/ai-native/runner/prisma-task-run-preparation');
+  const { taskPreparationNonEffectChargeIds } = load('@rental-os/ai-native-server/runtime/runner/prisma-task-run-preparation');
   const ids = await taskPreparationNonEffectChargeIds(h.db, key, originalLease);
   assert.equal(individualLookups, 0, 'validated run charges must not incur one database round trip per interval');
   assert.equal(queries.length, 2, 'one bounded charge read per original evidence category');
@@ -78,7 +80,7 @@ test('preparation admission reply uses its declared window and the unchanged cum
     return value;
   };
   const root = compose(configuration);
-  const prepare = require('../apps/api/src/modules/ai-native/runner/ai-task-runner.service').withAiTaskHeldPreparationWindow(
+  const prepare = load('@rental-os/ai-native-server/runtime/runner/ai-task-runner.service').withAiTaskHeldPreparationWindow(
     async () => { h.control.tick += 11; }, 5000);
   const outcome = await root.runner.runPrepared(h.claim(), prepare);
   assert.equal(delayed, true); assert.equal(outcome.status, 'succeeded');
@@ -136,7 +138,7 @@ test('settled input supervision failure preserves original time and explicit con
     return { h, root: compose(configuration) };
   };
   const { h, root } = await configure();
-  const { AiTaskRepositoryError } = require('../apps/api/src/modules/ai-native/ai-task.repository');
+  const { AiTaskRepositoryError } = load('@rental-os/ai-native-server/runtime/ai-task.repository');
   const originalSource = h.source.resolve;
   h.source.resolve = async () => { h.control.tick += 7; throw new AiTaskRepositoryError('AI_ACCESS_DENIED'); };
   const release = root.runner.deps.leases.releaseRun;
@@ -813,7 +815,7 @@ test('lost PENDING step admission recovers the same Run to manual observation wi
 });
 
 test('explicit original PENDING start separates retained time debt from a first action without replay or false task success', async () => {
-  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  const { requestFingerprint } = load('@rental-os/platform-contracts/request-fingerprint');
   const prepare = async (amount = 100) => {
     const h = await authorizedRunnerHarness({ aiTaskActionInput: [], aiTaskExecutionPhaseStart: [] });
     const configuration = h.configuration();
@@ -840,7 +842,7 @@ test('explicit original PENDING start separates retained time debt from a first 
   // The refused worker still owns its original live lease. Advance only the
   // explicit wall-clock double; expiry itself is NOT our no-execution proof.
   h.control.now = new Date(h.control.now.getTime() + 100001);
-  const application = new (require('../apps/api/src/modules/ai-native/runner/prisma-task-application').PrismaTaskApplication)({
+  const application = new (load('@rental-os/ai-native-server/runtime/runner/prisma-task-application').PrismaTaskApplication)({
     db: h.db, tasks: root.authorization.tasks, runner: root.runner, inputs: root.inputs,
     // Not exercised by start: explicit discovery-only fixture boundaries.
     recovery: { read: async () => { throw Error('unused discovery'); } }, events: { readPage: async () => { throw Error('unused events'); } },
@@ -942,7 +944,7 @@ test('authorized cumulative resource stop keeps its completed prefix and closes 
     else {
       // Set this synthetic trusted plan before execution/budget initialization;
       // do not change an existing task's policy or counters to manufacture a stop.
-      const fingerprint = require('../apps/api/src/modules/rental-core/rental-idempotency.repository').requestFingerprint;
+      const fingerprint = load('@rental-os/platform-contracts/request-fingerprint').requestFingerprint;
       // Keep the old exact 1000ms boundary: the new pre-tool interval cannot
       // borrow the whole next-step reservation. It must stop before any effect.
       const exact = await authorizedRunnerHarness();
@@ -1015,8 +1017,8 @@ test('authorized cumulative resource stop keeps its completed prefix and closes 
 });
 
 test('resource preflight checks all original counters before reservation and never reclassifies a later reservation error', async () => {
-  const { AiTaskRunnerError } = require('../apps/api/src/modules/ai-native/runner/ai-task-runner.service');
-  const { AiTaskExecutionBudgetError } = require('../apps/api/src/modules/ai-native/task-execution-budget.ports');
+  const { AiTaskRunnerError } = load('@rental-os/ai-native-server/runtime/runner/ai-task-runner.service');
+  const { AiTaskExecutionBudgetError } = load('@rental-os/ai-native-server/runtime/task-execution-budget.ports');
   const h = await authorizedRunnerHarness(), root = h.compose(), deps = root.runner.deps;
   let lease = await root.authorization.tasks.claimRun(h.claim());
   await deps.resources.open(lease, false);

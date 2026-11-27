@@ -1,16 +1,14 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const h = require('./fixtures/ai-native/knowledge-service.cjs');
-const { KnowledgeCommitUnknownError } = h.load('knowledge-errors');
+const h = require('./fixtures/ai-native/knowledge-public.cjs');
+const { publicDocumentHarness } = require('./fixtures/ai-native/knowledge-persistent-content.cjs');
+const { createControllerSourceLoader } = require('../scripts/controller-sources.cjs');
+const loader = createControllerSourceLoader(require('node:path').resolve(__dirname, '..'));
+const { KnowledgeCommitUnknownError } = loader.load(loader.resolveSource(__filename, '@rental-os/ai-native-server/knowledge-persistence', true));
 test.after(() => assert.deepEqual(h.attempts, []));
 test('parse pending receipt after COMMIT reply loss is unknown, not a completed replay', async () => {
-  const f = h.harness(), ctx = h.context();
-  const { PrismaKnowledgeRepository } = h.load('prisma-knowledge.repository');
-  const { KnowledgeDocumentService } = h.load('knowledge-document.service');
-  const { dbFactory } = require('./fixtures/ai-native/knowledge-persistent-content.cjs');
-  f.repo = new PrismaKnowledgeRepository(dbFactory(), () => new Date(h.now));
-  f.documents = new KnowledgeDocumentService({ ...f.ports, repository: f.repo });
+  const f = publicDocumentHarness(), ctx = h.context();
   await f.documents.create(ctx, h.draft());
   const commit = f.repo.commit.bind(f.repo);
   let loseReply = true, writes = 0;

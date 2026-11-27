@@ -1,16 +1,15 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-const h = require('./fixtures/ai-native/knowledge-service.cjs');
-const { dbFactory } = require('./fixtures/ai-native/knowledge-persistent-content.cjs');
-const { KnowledgeDocumentService } = h.load('knowledge-document.service');
-const { PrismaKnowledgeRepository } = h.load('prisma-knowledge.repository');
-const { KnowledgeCommitUnknownError } = h.load('knowledge-errors');
+const h = require('./fixtures/ai-native/knowledge-public.cjs');
+const { publicDocumentHarness } = require('./fixtures/ai-native/knowledge-persistent-content.cjs');
+const { createControllerSourceLoader } = require('../scripts/controller-sources.cjs');
+const loader = createControllerSourceLoader(require('node:path').resolve(__dirname, '..'));
+const { KnowledgeCommitUnknownError } = loader.load(loader.resolveSource(__filename, '@rental-os/ai-native-server/knowledge-persistence', true));
 test.after(() => assert.deepEqual(h.attempts, []));
 
 test('reconcile reads the same durable parse result after lost response without another parse or write', async () => {
-  const f = h.harness(), db = dbFactory(), ctx = h.context();
-  const repository = new PrismaKnowledgeRepository(db, () => new Date(h.now));
-  const documents = new KnowledgeDocumentService({ ...f.ports, repository });
+  const f = publicDocumentHarness(), ctx = h.context();
+  const { repo: repository, documents } = f;
   await documents.create(ctx, h.draft());
   const commit = repository.commit.bind(repository);
   let writes = 0;

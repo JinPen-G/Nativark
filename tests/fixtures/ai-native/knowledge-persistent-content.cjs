@@ -78,3 +78,36 @@ exports.dbFactory = function dbFactory() {
   };
   return db;
 };
+
+// Public document consumers retain the original finite SQL store and ACL/file
+// fixture. Deletion, memory and Gateway effects are unavailable in this fixture.
+exports.publicDocumentHarness = function publicDocumentHarness() {
+  const assert = require('node:assert/strict');
+  const path = require('node:path');
+  const h = require('./knowledge-public.cjs'), f = h.harness();
+  const { createControllerSourceLoader } = require('../../../scripts/controller-sources.cjs');
+  const loader = createControllerSourceLoader(path.resolve(__dirname, '../../..'));
+  const { createPersistedKnowledgePorts, composeKnowledgeServices } = loader.load(
+    loader.resolveSource(__filename, '@rental-os/ai-native-server/knowledge-persistence', true));
+  const unavailable = () => { throw Error('This document fixture does not authorize retrieval, indexing, deletion or model calls'); };
+  const db = exports.dbFactory();
+  const ports = createPersistedKnowledgePorts({
+    db, authorization: f.authorization, memoryAuthorization: f.authorization, clock: f.clock,
+    files: {
+      read: (...args) => f.files.read(...args),
+      assertBound: async (context, binding) => {
+        assert.deepEqual(context.scope, h.scope);
+        assert.equal(context.scope.tenantId, h.scope.tenantId);
+        assert.equal(binding.workspaceId, h.scope.workspaceId);
+        assert.equal(binding.documentId, 'doc-1');
+        assert.equal(binding.attachmentId, h.draft().attachmentId);
+      },
+    },
+    retention: { lockSource: unavailable, inspectSource: unavailable, eraseCopies: unavailable },
+    selection: { select: unavailable }, index: { apply: unavailable },
+    gateway: { invoke: unavailable, stream: unavailable },
+    cache: { maxEntries: 4, maxBytes: 10000, ttlMs: 1000 },
+    policy: { sceneCode: 'knowledge_document_fixture', maxOutputTokens: 100 },
+  });
+  return Object.assign(f, composeKnowledgeServices(ports), { db, repo: ports.documents.repository });
+};
