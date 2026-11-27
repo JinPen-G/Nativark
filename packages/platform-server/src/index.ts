@@ -11,6 +11,7 @@ export * from "./modules/platform/platform-auth-data-store";
 export * from "./modules/platform/platform-appearance-data-store";
 export * from "./modules/platform/platform-identity.repository";
 export * from "./modules/platform/platform-principal.authority";
+export * from "./modules/platform/platform-saas-management.authority";
 export * from "./modules/platform/platform-management.store";
 export * from "./modules/platform/platform-management.repository";
 export * from "./modules/platform/platform-management.service";

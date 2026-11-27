@@ -55,6 +55,10 @@
       "types": "./dist/modules/platform/platform-principal.authority.d.ts",
       "default": "./dist/modules/platform/platform-principal.authority.js"
     },
+    "./saas-management-authority": {
+      "types": "./dist/modules/platform/platform-saas-management.authority.d.ts",
+      "default": "./dist/modules/platform/platform-saas-management.authority.js"
+    },
     "./management-dto": {
       "types": "./dist/modules/platform/platform-management.dto.d.ts",
       "default": "./dist/modules/platform/platform-management.dto.js"
@@ -399,6 +403,9 @@
       ],
       "principal": [
         "dist/modules/platform/platform-principal.authority.d.ts"
+      ],
+      "saas-management-authority": [
+        "dist/modules/platform/platform-saas-management.authority.d.ts"
       ],
       "management-dto": [
         "dist/modules/platform/platform-management.dto.d.ts"
