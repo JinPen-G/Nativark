@@ -1,40 +1,10 @@
-# 固定源码更新脚本
+# Rental 组合留存与发布复核
 
-[hourly-update.py](hourly-update.py) 为现有 `nativark-demo` API、Web 更新流程固定 Git 提交，核对 CI、数据库文件差异、现有镜像与回退收据，并按 [Dockerfile](Dockerfile) 构建指定版本。
+存量 `nativark-demo` 使用已部署的 API 和 Web 镜像。[小时更新器](hourly-update.py) 保留原 cron 和排他锁。正常运行核对两个服务和现有健康地址，并保留原 `pending-migration.json`、`active.json` 和镜像。`--check` 遇到回退日志时报告 `recovery-needed`。`--apply` 仅在已有 `rollback.json` 时恢复其中的旧镜像。恢复前先核本机镜像 ID，两个服务启动及健康通过后才清掉回退日志。MySQL 和卷不参与回退。
 
-存量 `nativark-demo` 目前仍运行旧组合。[历史复建 CI](../../../.github/workflows/nativark-release.yml) 仅允许手动检出完整固定版本 `46db0945dee92ac916f7265e95948943fc8b641d`，使用该版本自己的 Dockerfile、锁和迁移材料。公共主线的 push 只走公共构建及显式的双仓流程。历史复建不会提供旧更新器所需的 `main` push 放行证据，已安装的旧应用可继续运行。
+[历史复建 CI](../../../.github/workflows/nativark-release.yml) 按固定历史 Git 提交使用该版本自己的 Dockerfile、锁及迁移材料。新发布使用下文同一次正式双仓 CI 的配对证据。服务器上已经安装的旧脚本仍须在维护窗口按来源及 SHA-256 核准同步，公共主线提交不会自动替换它。
 
-源码归档由 `git_source_archive` 的精确白名单生成。构建需要的两份脚本为 [build-selected-prisma.cjs](../../build-selected-prisma.cjs) 和 [miniprogram-shared-types.cjs](../../miniprogram-shared-types.cjs)，它们与 `scripts/ops/deployment` 一并进入归档。
-
-`git_snapshot` 先以 `--depth=1 --no-tags --filter=blob:none` 取得运行版本和候选版本的两个固定提交及树。迁移比较仍沿原路径和 blob 身份进行。CI 与迁移检查通过后，`fetch_source_blobs` 从候选树列出 `SOURCE_PATHS` 中的 blob，通过 stdin 一批取得这些固定对象，再沿原 Git archive 生成构建上下文。元数据拉取限时 180 秒，构建文件批量拉取限时 300 秒，失败继续中止本次发布。
-
-批量取得对象后会移除该次专用临时 Git 库的 promisor 配置。服务器 Git 2.34 的 archive 会对部分克隆隐式预取整棵树，因此归档阶段关闭这种下载，缺少所需对象时直接报错。
-
-源码解包沿用 Python `data_filter` 的路径、链接和特殊文件限制，并将源码目录设为 0755。部署进程使用 umask 077 保护私有文件，`data_filter` 默认清空目录 mode，直接使用会让嵌套迁移目录以 0700 进入镜像，导致默认 `node` 用户无法遍历。该权限处理仅适用于固定源码归档。
-
-运行镜像同时明确设置 API 与 Rental Core 的迁移源码目录为 0755，以兼容已有构建缓存。CI 使用默认非 root 用户读取各份迁移 SQL，并加载环境模块、Prisma Client 和 AppModule。
-
-应用范围包括 API、admin 的完整目录，以及 Dockerfile 所需的其他应用 package.json。packages、config、原部署脚本与 Git 归档所需的 `.gitattributes` 沿白名单进入归档。应用内的定稿图标随源码构建，根目录的设计原稿不进入归档。该清单同时供内容拉取和归档使用，自测检查全部 Docker COPY 来源，并拒绝无关应用源码进入上下文。初次浅拉取没有分支通配或完整历史下载，过滤后的检查阶段也无需下载两份快照的文件内容。
-
-已安装的旧更新器若仍将根 `assets` 或独立官网的 `apps/website-next/package.json` 列入 `SOURCE_PATHS`，会在归档新版时因路径不存在而停止。服务器须先同步新版脚本再发布，数据库迁移和镜像回退仍沿原门槛。
-
-在 Git 检出中运行离线自测，需要 Python 3.12 或更新版本及 Git。
-
-```sh
-python -B scripts/ops/deployment/hourly-update.py --self-test
-```
-
-自测保留 CI 门禁断言，并在开始归档前解析一次完整 `HEAD`。它使用当前脚本白名单读取该固定 Git 对象的真实 tar 流，在内存中核对归档内 Dockerfile 的全部本地 `COPY` 字面路径，涵盖多源、续行、JSON 形式和选项。`COPY --from=...` 的来源归前序构建层或镜像，交由 Docker 构建验证。
-
-两份构建脚本逐一缺失的反例必须被拒绝，脚本目录的归档范围同时受到断言约束。输出包含固定提交、归档文件数、本地 `COPY` 来源数与缺文件反例数。归档内容始终来自固定提交，运行中的脚本白名单用于验证待提交修复。
-
-`--self-test` 的副作用限于读取本地 Git 对象与输出结果，归档和检查材料均在内存消费。镜像构建、服务器安装、服务切换、数据库及运行验收属于另行授权的执行范围。`--check` 会读取现有服务器与远端状态，`--apply` 会执行更新及必要回退。
-
-## Zelo 仓库更名兼容
-
-主仓库为 `JinPen-G/Zelo`，服务器部署根为 `/home/ritiadm/zelo`。仅更新 GitHub 链接或源码不会替换服务器上的脚本。旧更新器仍要求固定提交的 `nativark-release.yml` 主线推送及成功记录；更名后的历史手动复建不满足它。存量实例先回读当前版本与旧迁移账，后续切换走双仓同一配对和既有审批。
-
-已有 `nativark-demo` Compose 项目、镜像标签、数据库、回退收据及 `# Nativark hourly update managed images` 识别标记保持兼容。目录移动只按实际服务器维护授权执行；仓库更名不授权数据库迁移或改写历史发布包来源。
+主仓库为 `JinPen-G/Zelo`，部署根为 `/home/ritiadm/zelo`。安装时保留 `nativark-demo` 项目、原镜像标签和 `# Nativark hourly update managed images` override 识别标记。已有 Compose 文件、证书、上传数据和私有媒体继续由现场维护。
 
 ## 独立 Rental 发布材料离线校验
 
@@ -68,7 +38,7 @@ node scripts/ops/release-verify.cjs mcp <本地ZeloGit目录> <基线完整SHA> 
 
 选择 MCP 的 prepared 材料需同时提供正式宿主入口、部署锁中的 `mcp` `0.1.0` 能力、固定包文件及五项按正式 ID 排列的 SQL 和原账标识。原账名按 `platform-capability.mcp.*` 核对，既有库的历史映射仍由原宿主取得执行证据。`mcp` 模式使用支持 `--no-lazy-fetch` 的 Git 从本地固定对象读取公开贡献清单和原 SQL，仅核顺序、前置和摘要。现有宿主打包入口还需接入 MCP 能力和原账观察。
 
-退出 `0` 表示材料核对通过，比较模式还表示材料无数据差异。`2` 表示有数据差异，`1` 表示输入验证失败或缺少必要材料。所有模式的 JSON 都标明 `releaseApproved: false` 和 `databaseChecked: false`。`domain`、旧单 SHA 证明和缺正式 AI 数据包的候选均被拒绝。旧组合基线可用 `prepared legacy-combined` 明确识别，校验会在读取现场材料前要求正式旧库桥接。原单仓更新器、原迁移门禁和回退继续沿上文入口。
+退出 `0` 表示材料核对通过，比较模式还表示材料无数据差异。`2` 表示有数据差异，`1` 表示输入验证失败或缺少必要材料。所有模式的 JSON 都标明 `releaseApproved: false` 和 `databaseChecked: false`。`domain`、旧单 SHA 证明和缺正式 AI 数据包的候选均被拒绝。旧组合基线可用 `prepared legacy-combined` 明确识别，校验会在读取现场材料前要求正式旧库桥接。原迁移门禁和回退继续沿上文入口。
 
 ### 双仓构建证据
 
@@ -137,14 +107,17 @@ node scripts/ops/release-prepare-pair.cjs release "$ZELO_REPO" "$ZELO_COMMIT" "$
 
 当全部镜像材料可公开时，派发参数 `retain_images` 可保留同次 `rental-images.tar.gz` 和 `SHA256SUMS`，Actions 留存七天。归档前逐一对照 API/Web 镜像 ID，双镜像放入同一个归档。同次记录、归档和摘要作为一组核收。长期留存使用受限存储并记录原 Actions 产物和 SHA-256。TLS、环境配置、业务数据与私有媒体继续单独管理。
 
-在独占 Docker 环境下载原配对产物，先对照可信 CI 的 `image-pair.json` 摘要，再执行 `sha256sum -c SHA256SUMS`。加载同组镜像后，对照记录中的 API/Web ID、角色、部署锁和相同的 CI 运行标签。候选和回退各保全一组完整记录及镜像。更换前以已核原账判断旧程序是否仍能读取当前数据。隔离切换演练应对两个角色同时比对 ID 和健康结果，失败时以原两镜像恢复并重查。数据库恢复仍使用单独批准的原账与备份。
+在独占 Docker 环境下载原配对产物，先对照可信来源独立核定的 Actions ZIP、`image-pair.json` 和压缩镜像摘要，再执行 `sha256sum -c SHA256SUMS`。加载同组镜像后，使用下文 `--local-images` 核对配置摘要、角色、部署锁和相同的 CI 运行标签。候选和回退各保全一组完整记录及镜像。更换前以已核原账判断旧程序是否仍能读取当前数据。隔离切换演练应对两个角色同时比对 ID 和健康结果，失败时以原两镜像恢复并重查。数据库恢复仍使用单独批准的原账与备份。
 
 ### 更新前只读复核
 
-独立核收的 `policy.json` 记批准核验的 CI 来源及其外部锚点，包括 `origin`、`repositoryId`、`workflowId`、`workflowPath`、`headSource`、`runId`、`runAttempt`、`buildRecordSha256`。`workflowPath` 取 GitHub 实际调用工作流路径。证据目录另含真实 GitHub `run.json`、该次产物 `image-pair.json` 和独立镜像观察 `images.json`，其中 `images.json` 使用 `api`、`web` 两个实际 `sha256:` 镜像 ID。
+独立核收的 `policy.json` 记来源和外部锚点，包括 `origin`、`repositoryId`、`workflowId`、`workflowPath`、`headSource`、`runId`、`runAttempt`、`buildRecordSha256`。`workflowPath` 取实际调用工作流路径。证据目录另含真实 GitHub `run.json` 和该次原字节 `image-pair.json`。将同次交接的 API 宿主目录和 `input.json` 中已独立核收的 `contextSha256` 交给复核入口。
 
 ```sh
-node scripts/ops/release-verify.cjs paired-review <候选目录> <候选收据SHA256> <基线目录或legacy-combined> <基线收据SHA256或-> <证据目录>
+node scripts/ops/release-verify.cjs paired-review "$CANDIDATE_DIR" "$CONTEXT_SHA256" \
+  legacy-combined - "$EVIDENCE_DIR" --local-images
 ```
 
-证据不匹配时退出 `1`。已核镜像组合如果涉及旧库或新旧 AI 数据切换，返回 `awaiting-migration-bridge`。已有 prepared 基线的迁移材料有差异时返回 `awaiting-migration-approval`，一致时等待 `awaiting-release-approval`。三种待处理状态均退出 `2`，保留正式审批入口。首切须另核原账、数据库前置、实际 TLS／私有媒体和应用健康。旧服务继续使用原镜像和回退记录；这份核验不替换服务器上的定时更新器。
+`--local-images` 需要 Python 3 和本机 Docker。先核双仓、宿主、迁移材料与 CI，再观察已经加载的两个镜像。返回中的 `imageIds` 为 CI 记录的配置摘要，`runtimeImageIds` 为本机镜像 ID。OCI 镜像存储使用 manifest ID 时，从该固定 ID 流式导出并复算 manifest 原字节，再对照其中的 config digest。供已独立核收的历史观察材料复核时，可省略 `--local-images` 并由证据目录提供 `images.json`，其中 `api`、`web` 是独立核收的配置摘要。
+
+证据不匹配时退出 `1`。旧组合或新旧 AI 数据切换返回 `awaiting-migration-bridge`。已有正式基线且迁移材料有差异时返回 `awaiting-migration-approval`，材料一致时返回 `awaiting-release-approval`。三种状态均退出 `2`，由后续现场审批处理。旧组合新增 SQL、备份和首次旧库桥接分别按原账与物理结构核准，镜像恢复不执行逆向 DDL。
