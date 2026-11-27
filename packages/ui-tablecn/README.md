@@ -1,8 +1,8 @@
 # Tablecn shared admin-table integration
 
-The authoritative platform reuse contract is [Admin UI spec, section 7](../../docs/公共技术资料/界面规范/管理后台-界面规范.md#7-表格与业务数据边界).
-Read its source/composition map, final presentation decisions, shared APIs and new-page
-checklist before integrating another business list. This README preserves technical provenance.
+Use the public [Core page guide](../platform-admin/src/core/README.md) and
+[shared table components](../platform-admin/src/components/ui/data-table/) when integrating
+a business list. This README preserves the shared presentation contract and technical provenance.
 
 Current shared presentation:
 Compatible Table/AnimatedTable consumers share DataTable, list tools and pagination.
@@ -16,7 +16,7 @@ adds existing action glyphs, without changing callbacks or permissions.
 `compactHeader` uses the shared 36px height and neutral `surface-muted` background,
 including pinned headers. The shared Table bridge enables it; raw DataTable retains
 its 40px non-compact default. Source files and Motiq/portal motion remain unchanged.
-The linked platform spec defines the current contract; older source details below are provenance.
+The public guide and components provide the current integration entrypoints; older source details below are provenance.
 
 Money hierarchy is opt-in: `DataTableMoney` splits only the canonical business
 formatted string, retaining exact currency, sign order, grouping and cents. Numeric
@@ -49,7 +49,7 @@ permissions, monetary formatting, selection and all vendor motion remain intact.
 - Pinned source: `ab52bf307da4d6ed006e686ebaf5db3be9391033`, the final parent of upstream's TanStack v9 migration. This integration deliberately uses its compatible TanStack v8.21.3 contract, not a mixture of v8 and v9 files.
 - License: MIT, copyright 2024 Sadman Sakib; full notice in [LICENSE.md](LICENSE.md).
 - `vendor/` reserves original Tablecn files with LF line endings and a final newline. They are reference/source provenance, not a second admin application or an unreviewed catalog bundle.
-- Actual consumers: `apps/admin/src/components/ui/data-table/` through the shared `@/components/ui` entry. As authorized on 2026-10-24, the legacy `Table`/`AnimatedTable` entry bridges business columns into the same renderer as `RentalOrdersPage`, including tenant/platform lists, drawers and previews. `DataTableToolbar` owns refresh/sort/view controls, and all paged consumers use the existing shared `Pagination`; geometry/colors remain shared admin tokens, not per-page copies. Original field renderers, row IDs, callbacks and read/write boundaries remain page-owned.
+- Actual consumers: `packages/platform-admin/src/components/ui/data-table/` through the shared `@/components/ui` entry. As authorized on 2026-10-24, the legacy `Table`/`AnimatedTable` entry bridges business columns into the same renderer as `RentalOrdersPage`, including tenant/platform lists, drawers and previews. `DataTableToolbar` owns refresh/sort/view controls, and all paged consumers use the existing shared `Pagination`; geometry/colors remain shared admin tokens, not per-page copies. Original field renderers, row IDs, callbacks and read/write boundaries remain page-owned.
 - Refresh is supplied by the owning query or `TableRefreshProvider`; purely local snapshots/forms explicitly disable it. Complete datasets sort before local pagination; remote pages retain server order unless an actual sorter callback is provided and are never sliced twice. Unsupported selection/filter/tree/custom-renderer contracts still have an explicit Ant compatibility fallback. This is source integration, not a claim of live acceptance on every route.
 - List layout uses the shared frameless `ListSection`, not an enclosing Card. Keep section titles/actions; send per-table filters through `ListSection.controls` or `Table.toolbar` so the shared `DataTableToolbar` aligns them with refresh/sort/columns at the same filter-height token. Notes use `toolbarNote`, nested expanded tables do not inherit the parent filters, and narrow layouts wrap naturally. The table's own border remains; actual form cards remain intact. See UI spec v2.36.
 - UI spec v2.37 refines that rule: keep titles only when they distinguish real sections, not when they repeat a single list's page name or pagination count. Page descriptions are optional. Do not add persistent implementation/tutorial banners; necessary operational scope, warnings and unavailable-feature notices remain. A remote-order explanation belongs on the disabled sort control, not an extra text row on every list.

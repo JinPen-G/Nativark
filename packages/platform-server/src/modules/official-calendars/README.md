@@ -30,4 +30,4 @@
 
 独立公共迁移沿原注册表、快照/序号和 RESTRICT 三阶段的最终结构创建两表。原组合库的历史迁移及其回填依据留在原位，数据搬迁、真实迁移和历史行核验由实际部署流程办理。
 
-原[日历范围冒烟](../../../../../tests/rental-calendar-range.test.cjs)和[MySQL E2E 官方来源阶段](../../../../../tests/mysql-e2e.test.cjs)保留。执行环境、数据库与外部连接按[项目规则](../../../../../AGENTS.md#修改验证与交付)核定，离线字段/存储/Controller 证据与真实宿主分开记录。
+原[日历范围冒烟](https://github.com/JinPen-G/Zelo-rental-core/blob/f4d27fce7d53fa21b1d3fc94ade7d5eab44f1445/workspace/tests/rental-calendar-range.test.cjs)和[MySQL E2E 官方来源阶段](../../../../../tests/mysql-e2e.test.cjs)保留。执行环境、数据库与外部连接按[项目规则](../../../../../AGENTS.md#修改验证与交付)核定，离线字段/存储/Controller 证据与真实宿主分开记录。

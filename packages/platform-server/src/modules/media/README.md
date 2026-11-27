@@ -13,4 +13,4 @@ const media = await readBoundedMedia(stream, registeredSize, signal);
 
 旧业务需要保留错误类型时，用 `createBoundedMediaReader(code => new OriginalError(code))` 装配同一读取实现。原检查入口保留 `InspectionAssistError` 和 `INSPECTION_OBJECT_READER` 的身份，普通 Core 无须加载检查服务或 AI 表。[原兼容入口](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/ai-native/inspection-assist/inspection-media.reader.ts) · [Rental 文件参加者](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/file-application-rental-evidence.ts)
 
-原有界读取冒烟位于 [检查媒体用例](../../../../../tests/ai-native-inspection-media-submission.test.cjs)，验证前核对范围及离线约束；它的其他场景还需要真实业务参加者。[公共服务导读](../../../README.md)
+原有界读取冒烟位于 [检查媒体用例](https://github.com/JinPen-G/Zelo-rental-core/blob/f4d27fce7d53fa21b1d3fc94ade7d5eab44f1445/workspace/tests/ai-native-inspection-media-submission.test.cjs)，验证前核对范围及离线约束；它的其他场景还需要真实业务参加者。[公共服务导读](../../../README.md)

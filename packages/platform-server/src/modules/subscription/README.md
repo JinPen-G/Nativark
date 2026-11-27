@@ -29,4 +29,4 @@
 
 构建后的 `npm run api:document:platform` 输出同源 OpenAPI，宿主的 `/api/openapi.json` 提供同版本声明。原 API 保留原 operationId，并消费相同公共订阅 schema。
 
-定向验证复用 [服务与事务](../../../../../tests/saas-subscription-service.test.cjs)、[日历与时区](../../../../../tests/saas-subscription-calendar.test.cjs)、[表单与提醒](../../../../../tests/saas-subscription-admin.test.cjs)、[原路由与权限](../../../../../tests/saas-subscription-framework.test.cjs) 和 [Rental 品类参加者](../../../../../tests/category-subscription-identity.test.cjs)。执行方式与环境边界先核 [项目验证规则](../../../../../AGENTS.md#修改验证与交付)。
+定向验证复用 [服务与事务](../../../../../tests/saas-subscription-service.test.cjs)、[日历与时区](../../../../../tests/saas-subscription-calendar.test.cjs)、[表单与提醒](../../../../../tests/saas-subscription-admin.test.cjs)、[原路由与权限](../../../../../tests/saas-subscription-framework.test.cjs) 和 [Rental 品类参加者](https://github.com/JinPen-G/Zelo-rental-core/blob/f4d27fce7d53fa21b1d3fc94ade7d5eab44f1445/workspace/tests/category-subscription-identity.test.cjs)。公共三份测试使用 `npm run test:saas-subscription:public`，混合权限与品类参加者仍按所选 Rental 组合核验。执行方式与环境边界先核 [项目验证规则](../../../../../AGENTS.md#修改验证与交付)。
