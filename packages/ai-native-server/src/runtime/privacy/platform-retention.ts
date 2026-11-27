@@ -47,7 +47,7 @@ export interface PlatformRetentionIdentity {
   resolve(): Promise<AiExecutionContext>;
 }
 export interface PlatformRetentionHost {
-  assertSelectedIdentity(context: AiExecutionContext): void;
+  assertSelectedIdentity(context: AiExecutionContext, writing: boolean): void;
   begin(tx: Prisma.TransactionClient, actorId: string): Promise<{ revalidate(): Promise<void>; close(): void;
     currentUser?(): Promise<SystemUserRow> } | undefined>;
   eraseTaskBodies: ReturnType<typeof createAiTaskBodyErasure>['erasePlatformTaskBodies'];
@@ -63,12 +63,14 @@ export class PlatformRetentionOperations {
       || context.audience !== 'operator' || !('permissions' in context) || !Array.isArray(context.permissions)
       || !hasEffectivePermission(context.permissions, writing ? PLATFORM_AI_MODEL_MANAGE : PLATFORM_AI_MODEL_VIEW)
       || Date.parse(context.authorizedAt) > this.now().getTime()) throw denied();
-    this.host.assertSelectedIdentity(context);
-    return this.observe(this.db, context);
+    this.host.assertSelectedIdentity(context, writing);
+    const session = await this.observe(this.db, context);
+    this.host.assertSelectedIdentity(context, writing);
+    return session;
   }
   private async observe(db: Pick<Prisma.TransactionClient, 'user' | 'aiScope'>,
     context: Extract<AiExecutionContext, { permissions: string[] }>, currentUser?: () => Promise<SystemUserRow>): Promise<Session> {
-    const user = currentUser ? await currentUser() : await db.user.findUnique({ where: { id: context.actor.userId },
+    const user = currentUser ? await currentUser().catch(() => { throw denied(); }) : await db.user.findUnique({ where: { id: context.actor.userId },
       select: { id: true, tenantId: true, isActive: true, isSaasAdmin: true } });
     if (currentUser && (!user || !('permissions' in user)
       || fingerprint([...user.permissions].sort()) !== fingerprint([...context.permissions].sort()))) throw denied();
@@ -87,6 +89,7 @@ export class PlatformRetentionOperations {
     const check = async () => {
       if (!currentUser) return this.check(before, true);
       if (!('permissions' in before.context) || (await this.observe(tx, before.context, currentUser)).hash !== before.hash) throw denied();
+      this.host.assertSelectedIdentity(before.context, true);
     };
     try {
       await check();
@@ -266,7 +269,8 @@ export class PlatformRetentionOperations {
       ]).optional() }).strict().parse(structuredClone(value));
     const before = await this.current(true);
     return protectAiBodyStorageRows(this.db, { ...command, after: command.after as AiBodyStorageCursor | undefined,
-      scopeId: before.scopeId, tenantId: null, workspaceId: null, check: () => this.check(before, true) });
+      scopeId: before.scopeId, tenantId: null, workspaceId: null, check: () => this.check(before, true),
+      withAuthority: (tx, protect) => this.inTransaction(tx, before, protect) });
   }
   async exportRestoreManifest(snapshot: { id: string; sha256: string; createdAt: string }, privateKey: KeyObject) {
     const before = await this.current(true);

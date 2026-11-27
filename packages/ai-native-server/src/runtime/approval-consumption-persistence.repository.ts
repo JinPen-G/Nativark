@@ -122,8 +122,9 @@ export class ApprovalConsumptionPersistenceRepository implements AiApprovalConsu
       if (live.count !== 1) throw new AiApprovalConsumptionRepositoryError('CONFLICT');
     };
     const underBusinessLock = <T>(native: Tx, work: (tx: Tx) => Promise<T>) => {
-      const tx = bindAiBodyStorageTransaction(this.db, native);
-      return transactions ? transactions.withHeldAiTaskTransaction(tx, { kind: 'task', taskId: input.taskId }, () => work(tx)) : work(tx);
+      // The held lease belongs to Native. Use the protected view only inside it.
+      const consume = () => work(bindAiBodyStorageTransaction(this.db, native));
+      return transactions ? transactions.withHeldAiTaskTransaction(native, { kind: 'task', taskId: input.taskId }, consume) : consume();
     };
     return {
       authorize: async (binding: Readonly<Binding>) => { await current(binding, 'execute'); },

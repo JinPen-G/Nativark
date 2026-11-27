@@ -58,7 +58,10 @@ export function createPublicPlatformRetention(input: {
         async assertDataAvailable(tx) { assertActive(); await input.assertDataAvailable(tx); assertActive(); },
         assertCurrentUser(user) { if (permissionKey(user) !== key) throw denied(); } });
       return await work(new PlatformRetentionOperations(db, identity, {
-        assertSelectedIdentity() { assertActive(); },
+        assertSelectedIdentity(_context, writing) {
+          assertActive();
+          if (writing && action !== 'maintain') throw denied();
+        },
         async begin(tx, actorId) {
           if (action !== 'maintain') throw denied();
           const lease = await beginPlatformAiManagementTransaction(tx, actorId, transactions);

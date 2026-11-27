@@ -2,7 +2,7 @@
  * 原业务数据库与PrismaService不变；当前授权、CAS、hash、账和原收据
  * 仍由原服务负责。只支持原回调事务，不拦截raw SQL，SQL正文由原仓储显式处理。 */
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
-import type { PrismaClient } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import { AiTaskRepositoryError } from '../../task-errors';
 import { AI_BODY_STORAGE, AI_BODY_TITLE_PLACEHOLDER, AiBodyStorageCodec, isAiBodyRecord,
   type AiBodyCipher } from './ai-body-storage.codec';
@@ -322,6 +322,8 @@ export type AiBodyStorageCursor = { id: string } | { taskId: string; cursor: str
 export async function protectAiBodyStorageRows(db: PrismaClient, input: {
   model: AiBodyStorageKind; scopeId: string; tenantId: string | null; workspaceId: string | null;
   limit: number; after?: AiBodyStorageCursor; check(): Promise<void>;
+  /** Bind current authority on this Native before taking the storage Scope lock. */
+  withAuthority?<T>(tx: Prisma.TransactionClient, protect: (check: () => Promise<void>) => Promise<T>): Promise<T>;
 }) {
   const stored = nativeClients.get(db), definition = definitions[input.model];
   if (!stored || !definition || !Number.isInteger(input.limit) || input.limit < 1 || input.limit > 10) throw unavailable();
@@ -342,48 +344,53 @@ export async function protectAiBodyStorageRows(db: PrismaClient, input: {
       { recordId: input.after.recordId, revision: { gt: input.after.revision } }] }
     : { OR: [{ taskId: { gt: input.after.taskId } }, { taskId: input.after.taskId, cursor: { gt: BigInt(input.after.cursor) } }] } : {};
   let wrote = false, completed = false;
+  const protect = async (tx: Prisma.TransactionClient, check: () => Promise<void>) => {
+    await check();
+    const ownerWhere = { id: input.scopeId, kind: platform ? 'PLATFORM' as const : 'WORKSPACE' as const,
+      tenantId: input.tenantId, workspaceId: input.workspaceId, ...(platform ? { scopeKey: 'platform' } : {}) };
+    const owner = await tx.aiScope.findFirst({ where: ownerWhere });
+    if (!owner || (await tx.aiScope.updateMany({ where: ownerWhere, data: { id: owner.id } })).count !== 1) throw unavailable();
+    const delegate = Reflect.get(tx, input.model) as {
+      findMany(value: unknown): Promise<Value[]>; updateMany(value: unknown): Promise<{ count: number }>;
+    };
+    const rows = await delegate.findMany({ where: { ...scope, ...after }, take: input.limit + 1,
+      orderBy: event ? [{ taskId: 'asc' }, { cursor: 'asc' }] : snapshot
+        ? [{ recordId: 'asc' }, { revision: 'asc' }] : { id: 'asc' } });
+    if (!Array.isArray(rows) || rows.length > input.limit + 1) throw unavailable();
+    let protectedRows = 0;
+    for (const row of rows.slice(0, input.limit)) {
+      await check();
+      if (!isAiBodyRecord(row)) throw unavailable();
+      const encoded = encodeData(stored.relations, stored.codec, input.model, row, undefined, {}, true) as Value;
+      const columns = [...bodyColumns(input.model), ...(input.model === 'aiKnowledgeDocument' ? ['title'] : [])];
+      const changed = columns.filter(column => JSON.stringify(row[column]) !== JSON.stringify(encoded[column]));
+      if (!changed.length) continue;
+      const where: Value = { ...scope, ...Object.fromEntries(definition.keys.map(key => [key, row[key]])) };
+      for (const column of changed) where[column] = ['text', 'title'].includes(column)
+        ? row[column] : { equals: row[column] };
+      // Prisma's automatic updatedAt must not change the original content's
+      // retention age or current observation fingerprint during encryption.
+      if (row.updatedAt instanceof Date) where.updatedAt = row.updatedAt;
+      const data = { ...Object.fromEntries(changed.map(column => [column, encoded[column]])),
+        ...(row.updatedAt instanceof Date ? { updatedAt: row.updatedAt } : {}) };
+      await check(); wrote = true;
+      if ((await delegate.updateMany({ where, data })).count !== 1) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      protectedRows++;
+    }
+    await check();
+    const last = rows[Math.min(rows.length, input.limit) - 1];
+    return { model: input.model, scanned: Math.min(rows.length, input.limit), protectedRows,
+      nextAfter: rows.length > input.limit && last ? event
+        ? { taskId: String(last.taskId), cursor: String(last.cursor) } : snapshot
+          ? { recordId: String(last.recordId), revision: Number(last.revision) } : { id: String(last.id) } : null,
+      coverage: 'bounded_original_storage_page' as const, businessHashes: 'preserved' as const,
+      businessExecution: 'not_authorized' as const };
+  };
   try {
     const result = await native.$transaction(async tx => {
-      await input.check();
-      const ownerWhere = { id: input.scopeId, kind: platform ? 'PLATFORM' as const : 'WORKSPACE' as const,
-        tenantId: input.tenantId, workspaceId: input.workspaceId, ...(platform ? { scopeKey: 'platform' } : {}) };
-      const owner = await tx.aiScope.findFirst({ where: ownerWhere });
-      if (!owner || (await tx.aiScope.updateMany({ where: ownerWhere, data: { id: owner.id } })).count !== 1) throw unavailable();
-      const delegate = Reflect.get(tx, input.model) as {
-        findMany(value: unknown): Promise<Value[]>; updateMany(value: unknown): Promise<{ count: number }>;
-      };
-      const rows = await delegate.findMany({ where: { ...scope, ...after }, take: input.limit + 1,
-        orderBy: event ? [{ taskId: 'asc' }, { cursor: 'asc' }] : snapshot
-          ? [{ recordId: 'asc' }, { revision: 'asc' }] : { id: 'asc' } });
-      if (!Array.isArray(rows) || rows.length > input.limit + 1) throw unavailable();
-      let protectedRows = 0;
-      for (const row of rows.slice(0, input.limit)) {
-        await input.check();
-        if (!isAiBodyRecord(row)) throw unavailable();
-        const encoded = encodeData(stored.relations, stored.codec, input.model, row, undefined, {}, true) as Value;
-        const columns = [...bodyColumns(input.model), ...(input.model === 'aiKnowledgeDocument' ? ['title'] : [])];
-        const changed = columns.filter(column => JSON.stringify(row[column]) !== JSON.stringify(encoded[column]));
-        if (!changed.length) continue;
-        const where: Value = { ...scope, ...Object.fromEntries(definition.keys.map(key => [key, row[key]])) };
-        for (const column of changed) where[column] = ['text', 'title'].includes(column)
-          ? row[column] : { equals: row[column] };
-        // Prisma's automatic updatedAt must not change the original content's
-        // retention age or current observation fingerprint during encryption.
-        if (row.updatedAt instanceof Date) where.updatedAt = row.updatedAt;
-        const data = { ...Object.fromEntries(changed.map(column => [column, encoded[column]])),
-          ...(row.updatedAt instanceof Date ? { updatedAt: row.updatedAt } : {}) };
-        await input.check(); wrote = true;
-        if ((await delegate.updateMany({ where, data })).count !== 1) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-        protectedRows++;
-      }
-      await input.check(); completed = true;
-      const last = rows[Math.min(rows.length, input.limit) - 1];
-      return { model: input.model, scanned: Math.min(rows.length, input.limit), protectedRows,
-        nextAfter: rows.length > input.limit && last ? event
-          ? { taskId: String(last.taskId), cursor: String(last.cursor) } : snapshot
-            ? { recordId: String(last.recordId), revision: Number(last.revision) } : { id: String(last.id) } : null,
-        coverage: 'bounded_original_storage_page' as const, businessHashes: 'preserved' as const,
-        businessExecution: 'not_authorized' as const };
+      const page = input.withAuthority ? await input.withAuthority(tx, check => protect(tx, check)) : await protect(tx, input.check);
+      completed = true;
+      return page;
     }, { isolationLevel: prismaRuntime.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     await input.check();
     return result;
