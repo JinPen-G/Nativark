@@ -79,7 +79,7 @@ function links(text) {
   return { found, errors };
 }
 
-function checkLinks(file, text, root, io = fs) {
+function checkLinks(file, text, root, io = fs, { privateDocsAbsent = false } = {}) {
   const { found, errors } = links(text);
   for (const { target, line } of found) {
     if (/^(?:https?:|mailto:)/i.test(target) || target.startsWith("#")) continue;
@@ -96,6 +96,9 @@ function checkLinks(file, text, root, io = fs) {
     }
     const absolute = path.resolve(root, path.dirname(file), decoded);
     if (!inside(root, absolute)) { fail("link-outside", `Path leaves this worktree: ${target}`); continue; }
+    // Internal docs are deliberately absent from public checkouts. Keep all
+    // other links strict, and check internal links normally when docs exists.
+    if (privateDocsAbsent && inside(path.join(root, "docs"), absolute)) continue;
     try {
       if (!inside(root, io.realpathSync(absolute))) fail("link-outside", `Link resolves outside this worktree: ${target}`);
     } catch (error) {
@@ -172,14 +175,23 @@ function checkTasks(text) {
 function check(root = ROOT, io = fs) {
   const errors = [], documents = new Map();
   const realRoot = io.realpathSync(root);
-  for (const file of FILES) {
+  let privateDocsAbsent = false;
+  try {
+    if (!inside(realRoot, io.realpathSync(path.join(realRoot, "docs"))))
+      throw new Error("Private documents resolve outside this worktree");
+  } catch (error) {
+    if (error.code === "ENOENT") privateDocsAbsent = true;
+    else errors.push({ file: "docs/", line: 1, rule: "document-read", message: error.message });
+  }
+  const selectedFiles = privateDocsAbsent ? FILES.filter(file => !file.startsWith("docs/")) : FILES;
+  for (const file of selectedFiles) {
     try {
       const absolute = path.resolve(realRoot, file);
       if (!inside(realRoot, io.realpathSync(absolute))) throw new Error("Document resolves outside this worktree");
       const text = io.readFileSync(absolute, "utf8");
       if (!text.trim()) throw new Error("Empty required document");
       documents.set(file, text);
-      errors.push(...checkLinks(file, text, realRoot, io));
+      errors.push(...checkLinks(file, text, realRoot, io, { privateDocsAbsent }));
     } catch (error) {
       errors.push({ file, line: 1, rule: "document-read", message: error.message });
     }
@@ -187,13 +199,13 @@ function check(root = ROOT, io = fs) {
   const claude = prose(documents.get("CLAUDE.md") || "");
   if (!/^@AGENTS\.md\s*$/m.test(claude)) errors.push({ file: "CLAUDE.md", line: 1, rule: "shared-entry", message: "Missing explicit @AGENTS.md entry." });
   if (documents.has(TASKS)) errors.push(...checkTasks(documents.get(TASKS)));
-  return { errors, checked: documents.size, expected: FILES.length };
+  return { errors, checked: documents.size, expected: selectedFiles.length, privateDocsAbsent };
 }
 
 if (require.main === module) {
   const result = check();
   for (const error of result.errors) console.error(`${error.file}:${error.line} [${error.rule}] ${error.message}`);
-  console.log(`docs:check ${result.checked}/${result.expected} documents, ${result.errors.length} errors. File links and table arithmetic only; fragments/external URLs/history/business acceptance not checked.`);
+  console.log(`docs:check ${result.checked}/${result.expected} documents, ${result.errors.length} errors.${result.privateDocsAbsent ? " Public checkout: private docs are absent and excluded." : ""} File links and table arithmetic only; fragments/external URLs/history/business acceptance not checked.`);
   process.exitCode = result.errors.length ? 1 : 0;
 }
 module.exports = { FILES, TASKS, prose, links, checkLinks, checkTasks, check };

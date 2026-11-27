@@ -93,3 +93,36 @@ test("document reader stays on its explicit list and refuses missing entry docum
   assert.ok(check(root, { ...io, realpathSync: target => target.endsWith('README.md') ? path.resolve(root, '..', 'outside.md') : target })
     .errors.some(row => row.rule === 'document-read' && row.file === 'README.md'));
 });
+
+test("public checkout excludes absent private docs but keeps public links and present private docs strict", () => {
+  const publicFiles = FILES.filter(file => !file.startsWith("docs/"));
+  const texts = new Map(publicFiles.map(file => [path.join(root, file), "# Public entry\n"]));
+  texts.set(path.join(root, "CLAUDE.md"), "@AGENTS.md\n");
+  texts.set(path.join(root, "AGENTS.md"), "[Local notes](<docs/private notes.md>)\n[UI rules](packages/platform-admin/AGENTS.md)\n");
+  const missing = () => Object.assign(new Error("Absent file"), { code: "ENOENT" });
+  const reads = [];
+  const io = {
+    realpathSync(target) {
+      if (target === root || texts.has(target)) return target;
+      throw missing();
+    },
+    readFileSync(target) {
+      reads.push(target);
+      if (!texts.has(target)) throw missing();
+      return texts.get(target);
+    },
+  };
+  const result = check(root, io);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.privateDocsAbsent, true);
+  assert.equal(result.expected, publicFiles.length);
+  assert.deepEqual(reads, publicFiles.map(file => path.join(root, file)));
+  texts.set(path.join(root, "README.md"), "[Missing public](packages/missing.md)\n[Escape](docs/../../outside.md)\n");
+  assert.deepEqual(check(root, io).errors.map(error => error.rule), ["link-missing", "link-outside"]);
+  texts.set(path.join(root, "README.md"), "# Public entry\n");
+  const present = { ...io, realpathSync: target => target === path.join(root, "docs") ? target : io.realpathSync(target) };
+  assert.equal(check(root, present).privateDocsAbsent, false);
+  assert.ok(check(root, present).errors.some(error => error.file === TASKS && error.rule === "document-read"));
+  const escaped = { ...io, realpathSync: target => target === path.join(root, "docs") ? path.resolve(root, "..", "external-docs") : io.realpathSync(target) };
+  assert.ok(check(root, escaped).errors.some(error => error.file === "docs/" && error.rule === "document-read"));
+});
