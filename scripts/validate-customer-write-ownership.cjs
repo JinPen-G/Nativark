@@ -7,7 +7,7 @@
  * 要在多处各守一次，漏一处就是静默偏差。现在写入口只有
  * `packages/rental-core/src/mysql-customer-master.ts` 一个；其余文件只能经它的方法写。
  *
- * 本脚本静态扫描 apps/api/src 和 packages/rental-core/src 下所有 .ts，匹配
+ * 本脚本静态扫描显式选择的宿主及 Rental 源码下所有 .ts，匹配
  * `.<model>.(create|update|upsert|delete|createMany|updateMany|deleteMany)(`，
  * 任何出现在仓储之外的写调用都让脚本失败。读取（findFirst、findMany、count 等）不受限。
  */
@@ -15,17 +15,30 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const ROOT = path.resolve(__dirname, "..");
-const SCAN_ROOTS = [path.join(ROOT, "apps", "api", "src"), path.join(ROOT, "packages", "rental-core", "src")];
-const OWNER = path.join(ROOT, "packages", "rental-core", "src", "mysql-customer-master.ts");
+const { checkedPath } = require("./controller-sources.cjs");
+let ROOT = path.resolve(__dirname, ".."), owner;
+const selectedRoots = [], args = process.argv.slice(2);
+for (let i = 0; i < args.length; i++) {
+  if (!args[i + 1]) throw new Error("客户写入检查参数缺少值");
+  if (args[i] === "--source-root") ROOT = path.resolve(args[++i]);
+  else if (args[i] === "--scan-root") selectedRoots.push(args[++i]);
+  else if (args[i] === "--owner") owner = args[++i];
+  else throw new Error("只接受 --source-root / --scan-root / --owner");
+}
+if (!selectedRoots.length || !owner) throw new Error("客户写入检查必须显式选择 --scan-root 和 --owner");
+const SCAN_ROOTS = selectedRoots.map(directory => checkedPath(ROOT, directory, "directory"));
+const OWNER = checkedPath(ROOT, owner);
+if (!SCAN_ROOTS.some(directory => OWNER.startsWith(directory + path.sep))) throw new Error("客户唯一写入口必须在所选扫描范围内");
 
 const MODELS = ["customerProfile", "customerAccount", "customerMembership", "customerMembershipReview", "customerCorporateProfile"];
 const WRITES = ["create", "update", "upsert", "delete", "createMany", "updateMany", "deleteMany"];
 const WRITE_PATTERN = new RegExp(`\\.(${MODELS.join("|")})\\.(${WRITES.join("|")})\\(`, "gu");
 
 function walk(dir, out = []) {
+  checkedPath(ROOT, dir, "directory");
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
+    if (entry.isSymbolicLink()) throw new Error(`客户写入扫描不接受链接：${full}`);
     if (entry.isDirectory()) walk(full, out);
     else if (entry.isFile() && full.endsWith(".ts") && !full.endsWith(".d.ts")) out.push(full);
   }

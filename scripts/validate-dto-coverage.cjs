@@ -18,22 +18,30 @@ const path = require("node:path");
  * 少一个就让门禁失败，把「静默丢字段」变成构建期错误。
  */
 
-require("ts-node").register({
-  transpileOnly: true,
-  compilerOptions: { module: "commonjs", moduleResolution: "node" }
-});
-
 const ts = require("typescript");
 
-const repoRoot = path.resolve(__dirname, "..");
-// 扫描实际DTO所有者；原API再导出不携带装饰器，不能让迁出的类从字段门禁消失。
-const dtoRoots = ["apps/api/src", "packages/platform-server/src", "packages/rental-core/src"]
-  .map((relative) => path.join(repoRoot, relative));
-const sharedEntry = path.join(repoRoot, "packages", "shared", "src", "index.ts");
+const { checkedPath, createControllerSourceLoader } = require("./controller-sources.cjs");
+let repoRoot = path.resolve(__dirname, "..");
+const args = process.argv.slice(2), selectedRoots = [], contracts = [], bodyControllers = [];
+for (let i = 0; i < args.length; i++) {
+  if (!args[i + 1]) throw new Error("DTO 源码选择参数缺少值");
+  if (args[i] === "--source-root") repoRoot = path.resolve(args[++i]);
+  else if (args[i] === "--dto-root") selectedRoots.push(args[++i]);
+  else if (args[i] === "--contracts") contracts.push(args[++i]);
+  else if (args[i] === "--body-controller") bodyControllers.push(args[++i]);
+  else throw new Error("只接受 --source-root / --dto-root / --contracts / --body-controller");
+}
+if (!selectedRoots.length || !contracts.length || !bodyControllers.length)
+  throw new Error("DTO 检查必须显式选择 --dto-root、--contracts 和 --body-controller");
+// 扫描所选 DTO 所有者；不让迁出的类从字段门禁消失。
+const dtoRoots = selectedRoots.map(directory => checkedPath(repoRoot, directory, "directory"));
+const contractEntries = contracts.map(file => checkedPath(repoRoot, file));
 
 function collectFiles(dir, suffix, acc = []) {
+  checkedPath(repoRoot, dir, "directory");
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
+    if (entry.isSymbolicLink()) throw new Error(`DTO 扫描不接受链接：${full}`);
     if (entry.isDirectory()) collectFiles(full, suffix, acc);
     else if (entry.isFile() && entry.name.endsWith(suffix)) acc.push(full);
   }
@@ -42,18 +50,27 @@ function collectFiles(dir, suffix, acc = []) {
 
 const dtoFiles = dtoRoots.flatMap((root) => collectFiles(root, ".dto.ts"));
 if (!dtoFiles.length) {
-  console.log("DTO coverage check skipped: no *.dto.ts files found.");
-  process.exit(0);
+  throw new Error("所选源码没有 DTO，不能以空集合通过字段检查");
 }
 
-const program = ts.createProgram([sharedEntry, ...dtoFiles], {
+const options = {
   target: ts.ScriptTarget.ES2021,
   module: ts.ModuleKind.CommonJS,
   moduleResolution: ts.ModuleResolutionKind.NodeJs,
   strict: true,
   skipLibCheck: true,
   noEmit: true
+};
+const loader = createControllerSourceLoader(repoRoot);
+const host = ts.createCompilerHost(options);
+host.resolveModuleNames = (names, from) => names.map(name => {
+  if (name.startsWith("@rental-os/")) {
+    const resolvedFileName = loader.resolveSource(from, name);
+    return { resolvedFileName, extension: resolvedFileName.endsWith(".tsx") ? ts.Extension.Tsx : ts.Extension.Ts };
+  }
+  return ts.resolveModuleName(name, from, options, host).resolvedModule;
 });
+const program = ts.createProgram([...contractEntries, ...dtoFiles], options, host);
 const checker = program.getTypeChecker();
 
 /** 取接口（含继承链）上的全部属性名。 */
@@ -158,11 +175,8 @@ for (const file of dtoFiles) {
 // 只校验 DTO 自身会产生“假绿”：控制器若继续写 interface、Omit<> 或匿名对象，
 // 这些类型运行时全部被擦除，ValidationPipe 根本不会执行字段校验。
 // Platform/Auth 是本轮会话与空间权限边界，所有 @Body 参数必须显式使用 DTO 类。
-for (const relative of [
-  "apps/api/src/modules/platform/platform.controller.ts",
-  "apps/api/src/modules/auth/auth.controller.ts"
-]) {
-  const file = path.join(repoRoot, relative);
+for (const relative of bodyControllers) {
+  const file = checkedPath(repoRoot, relative);
   const source = ts.createSourceFile(file, fs.readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
   ts.forEachChild(source, function visit(node) {
     if (ts.isParameter(node)) {
@@ -183,6 +197,7 @@ for (const relative of [
   });
 }
 
+if (!checkedClasses || !checkedMembers) failures.push("所选 DTO 未取得可核对的合同字段，不能以空集合通过");
 if (failures.length) {
   console.error("DTO coverage check failed:\n");
   for (const line of failures) console.error(`  - ${line}`);

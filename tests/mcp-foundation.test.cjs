@@ -6,7 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { createRequire, registerHooks, isBuiltin } = require("node:module");
 const { pathToFileURL, fileURLToPath } = require("node:url");
-const root = path.resolve(__dirname, "..");
+const root = path.resolve(process.env.MCP_TEST_SOURCE_ROOT || path.join(__dirname, ".."));
 const toolchainRoot = path.resolve(process.env.MCP_TEST_TOOLCHAIN_ROOT || root);
 const dependencyDirectory = path.join(toolchainRoot, "node_modules");
 const dependencyRequire = createRequire(path.join(dependencyDirectory, "typescript/package.json"));
@@ -82,7 +82,9 @@ process.once("exit", cleanupOutput);
 for (const [name, status] of [["SIGINT", 130], ["SIGTERM", 143]]) process.once(name, () => {
   try { cleanupOutput(); } finally { process.exit(status); }
 });
-const sourceResolver = require("../scripts/controller-sources.cjs").createControllerSourceLoader(root, dependencyDirectory);
+const { createControllerSourceLoader } = require(path.join(root, "scripts/controller-sources.cjs"));
+const sourceResolver = createControllerSourceLoader(root, dependencyDirectory, { controllerRoots: [] });
+const formalSource = specifier => source(sourceResolver.resolveSource(__filename, specifier, true));
 const sourceCache = new Map();
 // The fixed two-repository source projection places these files under
 // packages/rental-mcp-host. A paired development checkout can point at the
@@ -92,7 +94,7 @@ const rentalReadSource = file => path.relative(root, path.join(rentalMcpOwner, "
 const originalReadRuntime = () => source("packages/mcp-server/src/original-read-tool.ts");
 const legacyRead = (module, key) => binding => source(rentalReadSource(module))[key](binding, originalReadRuntime());
 function source(relative) {
-  const file = path.join(root, relative);
+  const file = path.resolve(root, relative);
   if (sourceCache.has(file)) return sourceCache.get(file);
   const javascript = ts.transpileModule(fs.readFileSync(file, "utf8"), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, strict: true },
@@ -115,6 +117,24 @@ function source(relative) {
   } catch (error) { sourceCache.delete(file); throw error; }
 }
 const { createProtectedMcpEndpoint, createIntrospectionVerifier, ResourceAuthorizationError } = source("packages/mcp-server/src/index.ts");
+test("source loader resolves public exports without reading the retired API or selecting a schema", async () => {
+  const originalRead = fs.readFileSync, originalList = fs.readdirSync;
+  const rejectLegacy = file => assert.ok(!["apps/api/src", "apps/api/prisma"].some(directory =>
+    path.resolve(String(file)).startsWith(path.join(root, directory))), "resolve-only loader must not read the retired host source/schema");
+  try {
+    fs.readFileSync = function (file, ...args) { rejectLegacy(file); return originalRead.call(this, file, ...args); };
+    fs.readdirSync = function (file, ...args) { rejectLegacy(file); return originalList.call(this, file, ...args); };
+    const loader = createControllerSourceLoader(root, dependencyDirectory);
+    assert.deepEqual(loader.files, []);
+    assert.ok(loader.resolveSource(__filename, "@rental-os/platform-contracts/ai-work-center", true).endsWith("ai-work-center.ts"));
+    assert.throws(() => loader.resolveSource(__filename, "@rental-os/platform-contracts/src/index", true), /未声明/);
+    assert.throws(() => loader.resolveSource(__filename, "@rental-os/missing-package", true), /缺少正式包/);
+    assert.throws(() => loader.load(path.resolve(root, "../outside.ts")), /越出/);
+    assert.throws(() => createControllerSourceLoader(root, dependencyDirectory, { controllerRoots: ["missing-source"] }), /缺失/);
+    assert.throws(() => createControllerSourceLoader(root, dependencyDirectory, { schemaPath: "../outside.prisma" }), /越出/);
+    await assert.rejects(loader.prepareOfflinePrisma(), /显式选择 schemaPath/);
+  } finally { fs.readFileSync = originalRead; fs.readdirSync = originalList; }
+});
 // Harness discovery has its own source prerequisite, independent of the official SDK.
 function harnessConnection() {
   const connectionSource = "clients/harness-plugin/src/connection.ts";
@@ -160,14 +180,14 @@ async function verifyBusinessCapabilityMapping(t, mapping) {
   assert.deepEqual(mapping.MCP_BUSINESS_CAPABILITIES.map(item => [item.code, item.name, item.operation]), expected);
   assert.equal(mapping.MCP_CAPABILITY_MAPPING_VERSION, "rental-mcp-capability-map-1");
   assert.deepEqual(mapping.MCP_BUSINESS_CAPABILITIES.map(item => item.risk), ["R0", "R0", "R0", "R0", "R1", "R1", "R2"]);
-  const originalBaseline = source("apps/api/src/modules/ai-native/tool-baseline.ts").AI_TOOL_BASELINE;
+  const originalBaseline = formalSource("@rental-os/ai-native-server/runtime/tool-baseline").AI_TOOL_BASELINE;
   for (const item of mapping.MCP_BUSINESS_CAPABILITIES) {
     const original = originalBaseline.find(row => row.code === item.code);
     assert.equal(item.risk, original.risk);
     assert.equal(item.operation === "read", original.sideEffects.length === 0);
   }
   assert.equal(Object.isFrozen(mapping.MCP_BUSINESS_CAPABILITIES), true);
-  const publicCodes = source("packages/shared/src/index.ts").AI_TOOL_CODES;
+  const publicCodes = formalSource("@rental-os/shared").AI_TOOL_CODES;
   for (const item of mapping.MCP_BUSINESS_CAPABILITIES) {
     assert.ok(publicCodes.includes(item.code));
     assert.equal(item.mappingVersion, mapping.MCP_CAPABILITY_MAPPING_VERSION);
@@ -1162,7 +1182,7 @@ async function verifyConversationRead(t, createRead) {
   let afterRead;
   const order = [];
   let hold;
-  const originals = source("apps/api/src/contracts/ai-native-schemas.ts").AI_NATIVE_COMPONENT_SCHEMAS;
+  const originals = formalSource("@rental-os/ai-native-server/runtime/contracts/ai-native-schemas").AI_NATIVE_COMPONENT_SCHEMAS;
   const originalSchemas = { AiOrderExplainRequestDraft: originals.AiOrderExplainRequestDraft, AiOrderExplainInput: originals.AiOrderExplainInput };
   const outputSchema = { type: "object", properties: { observation: {} }, required: ["observation"], additionalProperties: false };
   assert.throws(() => createRead({ name: "missing_schema", description: "No publication.", originalSchemas: {}, outputSchema, read: async () => current }), /schema reference unavailable/);
@@ -1892,7 +1912,7 @@ async function verifyOriginalSelectedOrderComposition(t, createRead, createSelec
   // Original request-bound APIs and Core/approval readers run here. Identity,
   // database and external release are fixtures, not a production MCP adapter.
   const { selectedOrderHarness } = require("./fixtures/ai-native/lane-a-selected-order.cjs");
-  const { composeRequestBoundSelectedQuoteTask, composeRequestBoundHumanQuoteOrder, composeRequestBoundQuoteSelections } = require("../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application.ts");
+  const { composeRequestBoundSelectedQuoteTask, composeRequestBoundHumanQuoteOrder, composeRequestBoundQuoteSelections } = require(sourceResolver.resolveSource(__filename, "@rental-os/ai-native-server/runtime/scenes/request-bound-scenes.application", true));
   const { clone } = require("./fixtures/ai-native/task-input-store.cjs");
   const h = await selectedOrderHarness({ initializeOnly: true });
   const { credentials, originals: _originals, ...dependencies } = h.sceneDependencies;
@@ -2067,9 +2087,9 @@ async function verifyOriginalConversationComposition(t, createRead, createRecove
     runtime = installed("ts-node").register({ transpileOnly: true, compiler: installed.resolve("typescript"),
       compilerOptions: { module: "Node16", moduleResolution: "Node16", target: "ES2022", experimentalDecorators: true, emitDecoratorMetadata: true, esModuleInterop: true } });
     const { setup } = require("./fixtures/ai-native/lane-a-original-request.cjs");
-    const { composeAiConversationRequests } = require("../apps/api/src/modules/ai-native/conversation.application.ts");
-    const { composeRequestBoundOriginalTaskRecoveryReaders, composeRequestBoundOriginalScenes } = require("../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application.ts");
-    const { requestFingerprint } = require("../apps/api/src/modules/rental-core/rental-idempotency.repository.ts");
+    const { composeAiConversationRequests } = require(sourceResolver.resolveSource(__filename, "@rental-os/ai-native-server/runtime/conversation.application", true));
+    const { composeRequestBoundOriginalTaskRecoveryReaders, composeRequestBoundOriginalScenes } = require(sourceResolver.resolveSource(__filename, "@rental-os/ai-native-server/runtime/scenes/request-bound-scenes.application", true));
+    const { requestFingerprint } = require(sourceResolver.resolveSource(__filename, "@rental-os/rental-core/mysql-idempotency", true));
     const shared = require(sharedFile);
     const h = await setup({ aiConversation: [], aiConversationTurn: [], aiConversationOperation: [], aiTaskResultArtifact: [] });
     const { credentials, ...dependencies } = h.dependencies;
@@ -2103,7 +2123,7 @@ async function verifyOriginalConversationComposition(t, createRead, createRecove
       errorCode: null, payload, contentHash: requestFingerprint(payload), outputBytes: BigInt(Buffer.byteLength(JSON.stringify(payload))),
       activeMs: 0n, completeMeasurement: false, createdAt: h.dependencies.clock() });
     const command = { ...reference, admissionKey: admitted.admissionKey, resultId: "original-result-candidate" };
-    const originals = source("apps/api/src/contracts/ai-native-schemas.ts").AI_NATIVE_COMPONENT_SCHEMAS;
+    const originals = formalSource("@rental-os/ai-native-server/runtime/contracts/ai-native-schemas").AI_NATIVE_COMPONENT_SCHEMAS;
     const read = createRead({ name: "original_conversation_fixture", description: "Read the existing original conversation result.",
       originalSchemas: { AiOrderExplainRequestDraft: originals.AiOrderExplainRequestDraft, AiOrderExplainInput: originals.AiOrderExplainInput },
       outputSchema: { type: "object", properties: { observation: {} }, required: ["observation"], additionalProperties: false },

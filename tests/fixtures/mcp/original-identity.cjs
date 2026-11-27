@@ -5,7 +5,14 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs"), path = require("node:path");
 const { createRequire, registerHooks, isBuiltin } = require("node:module");
 const { pathToFileURL } = require("node:url");
-const root = path.resolve(__dirname, "../../..");
+const root = path.resolve(process.env.MCP_TEST_SOURCE_ROOT || path.join(__dirname, "../../.."));
+const { createControllerSourceLoader, checkedPath } = require(path.join(root, "scripts/controller-sources.cjs"));
+// This Rental identity fixture needs the selected host's real enum schema.
+// Reject missing selection before creating output or loading a legacy host.
+assert.ok(process.env.MCP_TEST_SCHEMA, "Rental identity fixture requires explicit MCP_TEST_SCHEMA within MCP_TEST_SOURCE_ROOT");
+const selectedSchema = checkedPath(root, process.env.MCP_TEST_SCHEMA);
+assert.ok(process.env.MCP_TEST_IDENTITY_HOST_SOURCE, "Rental identity fixture requires explicit MCP_TEST_IDENTITY_HOST_SOURCE; missing host adapters cannot fall back to apps/api");
+const identityHostSource = checkedPath(root, process.env.MCP_TEST_IDENTITY_HOST_SOURCE, "directory");
 // An explicit existing toolchain may be read for dependencies; all tested sources stay in root.
 const toolchainRoot = path.resolve(process.env.MCP_TEST_TOOLCHAIN_ROOT || root);
 const dependencyDirectory = path.join(toolchainRoot, "node_modules");
@@ -87,9 +94,9 @@ if (process.env.MCP_TEST_OFFLINE === "1") {
   require("../ai-native/prisma-offline-preload.cjs");
 }
 installed("reflect-metadata");
-const { createBuild, verifyContracts } = require("../../../scripts/check-rental-package-build.cjs");
+const { createBuild, verifyContracts } = require(checkedPath(root, "scripts/check-rental-package-build.cjs"));
 const build = createBuild(dependencyDirectory), ts = build.ts;
-const sourceResolver = require("../../../scripts/controller-sources.cjs").createControllerSourceLoader(root, dependencyDirectory);
+const sourceResolver = createControllerSourceLoader(root, dependencyDirectory, { controllerRoots: [], schemaPath: selectedSchema });
 verifyContracts(build);
 const packageRoot = path.join(root, "packages/shared"), staged = path.join(output, "node_modules/@rental-os/shared");
 const typeRoots = [path.join(dependencyDirectory, "@types")];
@@ -152,10 +159,10 @@ check(ts.createProgram([principalSource], {
   rootDir: path.dirname(principalSource), outDir: path.join(artifacts.get("@rental-os/rental-core"), "dist"), paths: options.paths,
 }));
 options.paths["@rental-os/rental-core/trusted-workspace-principal"] = [artifactExport("@rental-os/rental-core/trusted-workspace-principal")];
-check(ts.createProgram([path.join(root, "apps/api/src/modules/auth/trusted-workspace-principal.ts")], {
+check(ts.createProgram([checkedPath(root, path.join(identityHostSource, "modules/auth/trusted-workspace-principal.ts"))], {
   strict: true, skipLibCheck: true, declaration: true, target: ts.ScriptTarget.ES2022,
   module: ts.ModuleKind.Node16, moduleResolution: ts.ModuleResolutionKind.Node16, types: ["node"], typeRoots,
-  rootDir: path.join(root, "apps/api/src/modules/auth"), outDir: path.join(output, "principal-types"),
+  rootDir: path.join(identityHostSource, "modules/auth"), outDir: path.join(output, "principal-types"),
   paths: { ...options.paths, "@rental-os/shared": [path.join(runtimeShared, "dist/index.d.ts")] },
 }));
 const catalogConsumer = path.join(output, 'catalog-consumer.mts');
@@ -189,11 +196,14 @@ const nest = installed("@nestjs/common");
 const prisma = { Prisma: { TransactionIsolationLevel: { Serializable: "Serializable", RepeatableRead: "RepeatableRead" }, sql: (strings, ...values) => ({ strings, values }), empty: { strings: [''], values: [] }, join: values => ({ values }),
   PrismaClientKnownRequestError: class extends Error { constructor(message, options) { super(message); this.code = options.code; } } },
   PrismaClient: class { constructor() { throw new Error('Offline fixture must not construct a PrismaClient'); } } };
-for (const [, name, body] of fs.readFileSync(path.join(root, "apps/api/prisma/schema.prisma"), "utf8").matchAll(/enum\s+(\w+)\s*\{([^}]+)\}/g)) {
+for (const [, name, body] of fs.readFileSync(selectedSchema, "utf8").matchAll(/enum\s+(\w+)\s*\{([^}]+)\}/g)) {
   prisma[name] = Object.fromEntries(body.split("\n").map(line => /^\s*(\w+)/.exec(line)?.[1]).filter(Boolean).map(value => [value, value]));
 }
 const cache = new Map();
 function source(relative) {
+  // Existing test locators describe the original adapter contract. Only the
+  // explicitly selected host may supply it; absence is never filled from Zelo.
+  if (relative.startsWith("apps/api/src/")) relative = path.join(identityHostSource, relative.slice("apps/api/src/".length));
   const file = path.resolve(root, relative); if (cache.has(file)) return cache.get(file).exports;
   const module = { exports: {} }; cache.set(file, module);
   const compiled = ts.transpileModule(fs.readFileSync(file, "utf8"), { fileName: file, reportDiagnostics: true,
@@ -384,11 +394,13 @@ function checkNativeConsumerTypes() {
   if (nativeConsumerTypesChecked) return;
   if (nativeConsumerTypeFailure) throw nativeConsumerTypeFailure;
   try {
+    assert.ok(process.env.MCP_TEST_IDENTITY_HOST_CONFIG, "Native type checks require explicit MCP_TEST_IDENTITY_HOST_CONFIG");
+    const hostConfig = checkedPath(root, process.env.MCP_TEST_IDENTITY_HOST_CONFIG);
     const directory = path.join(output, 'native-consumer-types');
     fs.mkdirSync(directory);
     const entries = nativeTypeConsumers.map(({ name, lines }) => {
       const file = path.join(directory, name);
-      const originalApi = path.relative(directory, path.join(root, 'apps/api/src')).split(path.sep).join('/');
+      const originalApi = path.relative(directory, identityHostSource).split(path.sep).join('/');
       // Only transport the existing relative imports to the original API entry.
       // Package imports still resolve through the owning package's formal exports.
       fs.writeFileSync(file, lines.join('\n').replace(/(from\s+["'])\.\//g, (_, prefix) => prefix + originalApi + '/'));
@@ -397,7 +409,7 @@ function checkNativeConsumerTypes() {
     const result = require('node:child_process').spawnSync(process.execPath, [
       '--no-compilation-cache', '--require', path.join(root, 'tests/fixtures/ai-native/prisma-offline-preload.cjs'),
       path.join(root, 'scripts/check-selected-prisma-types.cjs'), '--deps', dependencyDirectory,
-      '--mode', 'rental-ai', '--config', 'apps/api/tsconfig.json', ...entries,
+      '--mode', 'rental-ai', '--config', hostConfig, ...entries,
     ], { cwd: root, encoding: 'utf8', timeout: 120000, maxBuffer: 8 * 1024 * 1024,
       env: { ...process.env, DATABASE_URL: 'mysql://offline:offline@127.0.0.1:1/rental_os_offline',
         AI_OFFLINE_AUDIT: path.join(output, 'native-types-offline-audit.log'), AI_OFFLINE_WRITE_ROOT: output,

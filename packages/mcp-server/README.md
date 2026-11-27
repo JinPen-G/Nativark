@@ -268,6 +268,10 @@ Resources 的额度 signal 与 endpoint / 协议信号相交，迟到读取停�
 
 官方 client 用例另需 `@modelcontextprotocol/client`；原 Harness 发现用例另需本仓 `clients/harness-plugin/src/connection.ts`，完整 Harness 组合使用明确的 `HARNESS_ROOT`。这些依赖只在对应原用例加载，缺失不能被当作已通过。已有工具链可先执行 server/SQL 定向段，原命令例如：
 
+[源码加载器](../../scripts/controller-sources.cjs) 默认只解析所选工作区的正式包出口，不扫描宿主控制器或准备 Prisma。控制器消费者必须传 `controllerRoots`，内存 Prisma 必须传工作区内的 `schemaPath`；缺件、未声明出口、越界与空控制器集合拒绝。MCP 测试可用 `MCP_TEST_SOURCE_ROOT` 指定已准备的固定组合；使用原身份夹具时另需显式 `MCP_TEST_SCHEMA` 和 `MCP_TEST_IDENTITY_HOST_SOURCE`，缺选择在创建产物前拒绝。其原 Native 类型消费者另选 `MCP_TEST_IDENTITY_HOST_CONFIG`。该夹具仍需要原 Rental 身份适配，单独提供公共 schema 不代表完整身份测试已就绪；未选宿主不回退旧 API。公共源码解析回归可运行 `node --test --test-name-pattern="source loader resolves" tests/mcp-foundation.test.cjs`。
+
+[路由权限检查](../../scripts/validate-route-permissions.cjs) 必须选择 `--authority platform|rental` 和 `--permissions <同版目录源码>`。公共模式另选 `--permission-export PLATFORM_PERMISSIONS`，只加载正式公共政策；Rental 模式沿原 http-auth 与 Shared 装配。`--app-module <宿主源码> --module-export <模块类>` 核真实 Nest 挂载，可加 `--controllers <源码根>` 限定该权威负责的控制器；未选宿主时沿原目录静态扫描。缺目录、空集合、未匹配或缺权限仍失败，不以匿名或本人政策通配放行。[API 合同检查](../../scripts/validate-api-contracts.cjs) 可选择正式包的 `--document-factory` 与按宿主顺序重复的 `--document-transform <包>#<工厂>`；旧双常量模式仍保留三方比对。`--offline-prisma --schema <同版schema>` 的自定义 Client 输出只映射官方内存产物，不创建实例、读取旧 Client 或连接数据库。[DTO 检查](../../scripts/validate-dto-coverage.cjs) 通过正式 exports 核对所选源码的合同，不借安装目录内的旧声明产物。
+
 ```powershell
 $env:MCP_TEST_TOOLCHAIN_ROOT = '包含既有node_modules的仓库根绝对路径'
 node --test --test-name-pattern="^Prisma OAuth SQL store compiles" tests/mcp-mysql-store.test.cjs

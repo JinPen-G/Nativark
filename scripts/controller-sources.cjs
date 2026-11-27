@@ -1,13 +1,36 @@
-/** 现有 API 检查的源码发现接点。沿正式出口读取同树实现，不借用旧 dist。
+/** 所选工作区的源码发现接点。沿正式出口读取同树实现，不借用旧 dist。
  * controllerSources 只读文本；createControllerSourceLoader 仅供离线元数据检查，
  * 执行原模块声明和装饰器，不实例化 Controller、DI、Client 或启动宿主。
+ * 默认只解析源码；扫描目录与 Prisma schema 必须由消费者显式选择。
  */
 const fs = require("node:fs");
 const path = require("node:path");
 const { createRequire } = require("node:module");
 
-function createControllerSourceLoader(repoRoot, dependencyDirectory) {
-  repoRoot = path.resolve(repoRoot);
+function checkedPath(root, target, kind = "file") {
+  const file = path.resolve(root, target);
+  const within = value => {
+    const relative = path.relative(root, value);
+    return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+  };
+  if (!within(file)) throw new Error(`所选源码路径越出本工作树：${file}`);
+  if (!fs.existsSync(file)) throw new Error(`所选源码材料缺失：${file}`);
+  if (!within(fs.realpathSync(file))) throw new Error(`所选源码链接越出本工作树：${file}`);
+  const stat = fs.statSync(file);
+  if (kind === "directory" ? !stat.isDirectory() : !stat.isFile()) throw new Error(`所选源码材料类型错误：${file}`);
+  return file;
+}
+
+function createControllerSourceLoader(repoRoot, dependencyDirectory, selection = {}) {
+  repoRoot = fs.realpathSync(path.resolve(repoRoot));
+  if (!selection || typeof selection !== "object" || Array.isArray(selection)
+    || Object.keys(selection).some(key => !["controllerRoots", "schemaPath"].includes(key)))
+    throw new Error("源码加载器只接受 controllerRoots / schemaPath 显式选择");
+  const controllerRoots = selection.controllerRoots ?? [];
+  if (!Array.isArray(controllerRoots) || controllerRoots.some(root => typeof root !== "string" || !root))
+    throw new Error("controllerRoots 必须是显式源码目录数组");
+  const roots = controllerRoots.map(directory => checkedPath(repoRoot, directory, "directory"));
+  const schemaPath = selection.schemaPath === undefined ? undefined : checkedPath(repoRoot, selection.schemaPath);
   const installed = createRequire(dependencyDirectory
     ? path.join(path.resolve(dependencyDirectory), "typescript/package.json") : path.join(repoRoot, "package.json"));
   const ts = installed("typescript");
@@ -15,28 +38,37 @@ function createControllerSourceLoader(repoRoot, dependencyDirectory) {
   const requireDependency = specifier => runtimeDependencies.has(specifier) ? runtimeDependencies.get(specifier) : installed(specifier);
   const workspacePackages = new Map();
   const workspaces = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")).workspaces;
-  for (const pattern of workspaces) {
+  if (!Array.isArray(workspaces)) throw new Error("所选源码根缺少 workspaces 清单");
+  const excluded = workspaces.filter(pattern => pattern.startsWith("!")).map(pattern => pattern.slice(1));
+  for (const pattern of workspaces.filter(pattern => !pattern.startsWith("!"))) {
     const directories = pattern.endsWith("/*")
-      ? fs.readdirSync(path.join(repoRoot, pattern.slice(0, -2)), { withFileTypes: true })
+      ? fs.readdirSync(checkedPath(repoRoot, pattern.slice(0, -2), "directory"), { withFileTypes: true })
         .filter(entry => entry.isDirectory()).map(entry => path.join(repoRoot, pattern.slice(0, -2), entry.name))
       : [path.join(repoRoot, pattern)];
     for (const directory of directories) {
+      const relative = path.relative(repoRoot, directory).split(path.sep).join("/");
+      if (excluded.some(pattern => pattern.endsWith("/*") ? relative.startsWith(pattern.slice(0, -1)) : relative === pattern)) continue;
       const manifestFile = path.join(directory, "package.json");
       if (fs.existsSync(manifestFile)) {
+        checkedPath(repoRoot, manifestFile);
         const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+        if (workspacePackages.has(manifest.name)) throw new Error(`所选工作区存在重复包：${manifest.name}`);
         workspacePackages.set(manifest.name, { directory, manifest });
       }
     }
   }
 
+  const generatedSources = new Map();
   function sourceFile(target) {
+    target = path.resolve(repoRoot, target);
+    const relativeTarget = path.relative(repoRoot, target);
+    if (relativeTarget === ".." || relativeTarget.startsWith(`..${path.sep}`) || path.isAbsolute(relativeTarget))
+      throw new Error(`控制器源码越出本工作树：${target}`);
+    if (generatedSources.has(target)) return target;
     if (target.endsWith(".js")) target = target.slice(0, -3) + ".ts";
     const file = [target, `${target}.ts`, path.join(target, "index.ts")].find(value => fs.existsSync(value) && fs.statSync(value).isFile());
     if (!file) throw new Error(`控制器转接未找到实际源码：${path.relative(repoRoot, target)}`);
-    const relative = path.relative(repoRoot, fs.realpathSync(file));
-    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
-      throw new Error(`控制器源码越出本工作树：${file}`);
-    return file;
+    return checkedPath(repoRoot, file);
   }
 
   function resolveSource(from, specifier, runtime = false) {
@@ -77,11 +109,11 @@ function createControllerSourceLoader(repoRoot, dependencyDirectory) {
     if (!exported.startsWith("./") || /[\\%*]/u.test(exported)
       || exported.slice(2).split("/").some(part => !part || part === "." || part === ".." || part === "node_modules"))
       throw new Error(`控制器正式出口目标越界：${specifier}`);
-    if (exported.endsWith(".ts") && !exported.endsWith(".d.ts")) {
-      return sourceFile(path.resolve(workspace.directory, exported));
+    if (/\.tsx?$/u.test(exported) && !exported.endsWith(".d.ts")) {
+      return sourceFile(checkedPath(workspace.directory, exported));
     }
     if (!workspace.options) {
-      const configFile = path.join(workspace.directory, "tsconfig.json");
+      const configFile = checkedPath(workspace.directory, "tsconfig.json");
       const config = ts.readConfigFile(configFile, ts.sys.readFile);
       if (config.error) throw new Error(ts.flattenDiagnosticMessageText(config.error.messageText, "\n"));
       const { options, errors } = ts.parseJsonConfigFileContent(config.config, ts.sys, workspace.directory);
@@ -98,21 +130,24 @@ function createControllerSourceLoader(repoRoot, dependencyDirectory) {
     const relative = path.relative(options.outDir, path.resolve(workspace.directory, exported));
     if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
       throw new Error(`控制器正式出口不属于该包构建目录：${specifier}`);
-    return sourceFile(path.resolve(options.rootDir, relative.replace(/\.(?:d\.ts|js)$/, ".ts")));
+    return sourceFile(checkedPath(workspace.directory, path.resolve(options.rootDir, relative.replace(/\.(?:d\.ts|js)$/, ".ts"))));
   }
 
   const files = [];
   function walk(directory) {
+    checkedPath(repoRoot, directory, "directory");
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const file = path.join(directory, entry.name);
+      if (entry.isSymbolicLink()) throw new Error(`控制器扫描不接受链接：${file}`);
       if (entry.isDirectory()) walk(file);
-      else if (entry.isFile() && entry.name.endsWith(".controller.ts")) files.push(file);
+      else if (entry.isFile() && entry.name.endsWith(".controller.ts")) files.push(checkedPath(repoRoot, file));
     }
   }
-  walk(path.join(repoRoot, "apps/api/src/modules"));
+  for (const directory of roots) walk(directory);
   const modules = new Map(), declarations = new Map();
   function load(target) {
     const file = sourceFile(target);
+    if (generatedSources.has(file)) return generatedSources.get(file);
     if (modules.has(file)) return modules.get(file).exports;
     const module = { exports: {} };
     modules.set(file, module);
@@ -143,6 +178,8 @@ function createControllerSourceLoader(repoRoot, dependencyDirectory) {
     }
   }
   async function prepareOfflinePrisma() {
+    if (!schemaPath) throw new Error("离线 Prisma 检查必须显式选择 schemaPath");
+    checkedPath(repoRoot, schemaPath);
     // 复用所选类型/发行核验中的官方 5.22 WASM 与生成器入口。原宿主依赖原 schema，
     // 不借其他树的生成 Client，也不以假枚举/空 Client 令元数据检查通过。
     for (const name of ["prisma", "@prisma/client"])
@@ -160,7 +197,7 @@ function createControllerSourceLoader(repoRoot, dependencyDirectory) {
     const buildClient = new Function("require", "module", "exports", "__filename", "__dirname",
       fs.readFileSync(generatorFile, "utf8") + "\nreturn buildClient;")(
       createRequire(generatorFile), generatedModule, generatedModule.exports, generatorFile, path.dirname(generatorFile));
-    const schemaPath = path.join(repoRoot, "apps/api/prisma/schema.prisma"), schema = fs.readFileSync(schemaPath, "utf8");
+    const schema = fs.readFileSync(schemaPath, "utf8");
     const dmmf = JSON.parse(wasm.get_dmmf(JSON.stringify({ prismaSchema: schema, noColor: true })));
     const configuration = JSON.parse(wasm.get_config(JSON.stringify({ prismaSchema: schema, ignoreEnvVarErrors: true })));
     if (configuration.errors.length) throw new Error("原宿主 Prisma schema 配置无效");
@@ -180,14 +217,31 @@ function createControllerSourceLoader(repoRoot, dependencyDirectory) {
         module, module.exports, path.join(directory, file), directory);
       return module.exports;
     }
-    runtimeDependencies.set("@prisma/client", client("index.js"));
+    const runtime = client("index.js");
+    runtimeDependencies.set("@prisma/client", runtime);
+    // 自定义 output 的宿主使用相对导入；仅映射本次所选 schema 的官方内存产物。
+    // 不读取已有生成目录，也不构造 Client。最近的现存祖先仍须通过同树链接校验。
+    const output = configuration.config.generators[0]?.output?.value;
+    if (output) {
+      const target = path.resolve(path.dirname(schemaPath), output);
+      const relative = path.relative(repoRoot, target);
+      if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
+        throw new Error("所选 Prisma output 越出本工作树");
+      let ancestor = target;
+      while (!fs.existsSync(ancestor)) ancestor = path.dirname(ancestor);
+      checkedPath(repoRoot, ancestor, "directory");
+      for (const entry of [target, path.join(target, "index"), path.join(target, "index.js"), path.join(target, "index.ts")])
+        generatedSources.set(entry, runtime);
+    }
     return { prisma: "5.22.0", models: dmmf.datamodel.models.length, clientInstantiated: false, diskOutputs: 0 };
   }
-  return { files, resolveSource, load, requireDependency, declarations, prepareOfflinePrisma };
+  return { repoRoot, files, resolveSource, load, requireDependency, declarations, prepareOfflinePrisma };
 }
 
-function controllerSources(repoRoot) {
-  const { files, resolveSource, requireDependency } = createControllerSourceLoader(repoRoot);
+function controllerSources(repoRoot, dependencyDirectory, selection) {
+  if (!selection?.controllerRoots?.length) throw new Error("控制器检查必须显式选择非空 controllerRoots");
+  const { files, resolveSource, requireDependency } = createControllerSourceLoader(repoRoot, dependencyDirectory, selection);
+  if (!files.length) throw new Error("所选源码根未发现控制器，不能以空集合通过检查");
   const ts = requireDependency("typescript");
   const sources = new Map();
   function visit(file) {
@@ -229,4 +283,4 @@ function controllerSources(repoRoot) {
   return sources;
 }
 
-module.exports = { controllerSources, createControllerSourceLoader };
+module.exports = { controllerSources, createControllerSourceLoader, checkedPath };
