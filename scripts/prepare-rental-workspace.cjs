@@ -17,6 +17,8 @@ const coreDirectory = 'packages/rental-core';
 const rentalApps = ['apps/rental-api', 'apps/rental-admin', 'apps/tenant-website', 'apps/enterprise-portal',
   'apps/miniprogram', 'apps/staff-miniprogram', 'apps/example-multi-core-api', 'apps/example-multi-core-admin'];
 const layoutFile = 'rental.source.json';
+const publicAiAdapters = 'packages/rental-ai-adapters';
+const publicAiRuntime = 'public-ai-sdk';
 const historicalRepository = 'https://github.com/JinPen-G/nativark-rental-core';
 const renamedRepository = 'https://github.com/JinPen-G/Zelo-rental-core';
 const rootLayout = { format: 'rental-source-layout-1', paths: [{ source: '.', target: coreDirectory,
@@ -74,6 +76,10 @@ function mapRentalSource(raw, layout, source) {
     }
     if (entry.target === 'packages/rental-mcp-host' && (entry.roles.length !== 1 || entry.roles[0] !== 'mcp'))
       throw Error('Rental MCP 参加者只允许显式 mcp 角色');
+    if (entry.target === publicAiAdapters) {
+      if (entry.roles.length !== 1 || entry.roles[0] !== 'ai' || entry.runtime !== publicAiRuntime)
+        throw Error('Rental 公共 AI 适配须明确依赖所选公共 SDK，且只登记 ai 角色');
+    } else if (entry.runtime !== undefined) throw Error('未知的 Rental 源码运行要求：' + entry.target);
     if (entry.aiFiles !== undefined) {
       const files = entry.aiFiles;
       if (entry.target !== 'apps/rental-api' || !entry.roles.includes('host') || entry.roles.includes('ai')
@@ -207,6 +213,24 @@ function isSource(file) {
     && !/\.tsbuildinfo$/u.test(file);
 }
 
+/** These sources need the separately compiled public SDK, not the internal
+ * mixed AI workspace. Register now; only SDK-aware build consumers select it. */
+function selectRentalPublicAiAdapterSource(rental, runtime) {
+  if (runtime !== publicAiRuntime) throw Error('Rental 公共 AI 适配须显式选择固定公共 SDK');
+  const entry = rental.layout.paths.find(path => path.target === publicAiAdapters && path.runtime === runtime);
+  if (!entry) throw Error('固定独立仓未登记 Rental 公共 AI 适配');
+  const tools = new Map(), origins = new Map();
+  const prefix = slash(path.join(root, entry.target)) + '/';
+  for (const file of entry.required) {
+    const projected = prefix + file, bytes = rental.snapshot.files.get(projected), origin = rental.origins.get(projected);
+    if (!bytes || !origin || origin.commit !== rental.source.commit || sha256(bytes) !== origin.sha256)
+      throw Error('Rental 公共 AI 适配缺少固定来源：' + file);
+    tools.set(file, bytes);
+    origins.set(file, origin);
+  }
+  return { directory: entry.target, files: tools, origins };
+}
+
 /** The fixed independent manifest is authoritative for local workspace identity.
  * Registry pins still come from the fixed locks; no installation, resolution or
  * read from a workspace's installed node_modules can construct that identity. */
@@ -264,11 +288,14 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
   const selectedRoles = ['domain', ...(profile === 'domain' ? [] : ['host']), ...(profile === 'full' ? ['client'] : []),
     ...(options.ai ? ['ai'] : []), ...(options.mcp ? ['mcp'] : [])];
   const selected = rental.layout.paths.filter(entry => entry.roles.some(role => selectedRoles.includes(role))
-    && (!entry.roles.includes('ai') || options.ai) && (!entry.roles.includes('mcp') || options.mcp));
+    && entry.runtime === undefined && (!entry.roles.includes('ai') || options.ai) && (!entry.roles.includes('mcp') || options.mcp));
   for (const role of selectedRoles.filter(role => role === 'ai' || role === 'mcp')) {
     if (role === 'ai' && options.freshAi) continue;
-    if (!selected.some(entry => entry.roles.includes(role)))
+    if (!selected.some(entry => entry.roles.includes(role))) {
+      if (role === 'ai' && rental.layout.paths.some(entry => entry.runtime === publicAiRuntime))
+        throw Error('Rental 公共 AI 适配已登记；--ai 尚未装配固定公共 SDK，请沿显式公共 SDK 构建入口');
       throw Error('独立源码尚未交付 ' + role + ' 业务适配角色；公共引擎不能代替业务适配');
+    }
   }
   for (const directory of required) if (!selected.some(entry => entry.target === directory))
     throw Error('独立源码尚未交付所选范围：' + directory + '；禁止从底座旧业务目录补齐');
@@ -500,4 +527,5 @@ async function main(args) {
 
 if (require.main === module) main(process.argv.slice(2)).catch(error => { console.error(error.message); process.exitCode = 1; });
 module.exports = { readIndependentRentalSource, mapRentalSource, composeRentalBuildSnapshot,
-  createRentalDevelopmentWorkspace, projectRentalDevelopmentWorkspace, compileFixedPlatformContracts, argumentsOf, main };
+  selectRentalPublicAiAdapterSource, createRentalDevelopmentWorkspace, projectRentalDevelopmentWorkspace,
+  compileFixedPlatformContracts, argumentsOf, main };
