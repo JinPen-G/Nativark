@@ -1,22 +1,22 @@
 "use strict";
 const test = require("node:test"), assert = require("node:assert/strict");
 const h = require("./fixtures/ai-native/contract-consumer.cjs"); h.blockNetwork(test);
-const fs = require("node:fs"), path = require("node:path"), os = require("node:os"), crypto = require("node:crypto"), { execFileSync, spawnSync } = require("node:child_process");
-const { offlinePrismaSchema } = require("./fixtures/ai-native/prisma-offline.cjs");
-require("ts-node").register({ transpileOnly: false, compilerOptions: { module: "commonjs", moduleResolution: "node", target: "es2022" } });
-const { aiPersistenceScopeColumns: columns, aiPersistenceEventCursor: cursor } = require("../apps/api/src/modules/ai-native/persistence-scope");
+const fs = require("node:fs"), path = require("node:path"), crypto = require("node:crypto"), { execFileSync, spawnSync } = require("node:child_process");
+const { offlinePrismaSchema, publicAiSchemaHistory } = require("./fixtures/ai-native/prisma-offline.cjs");
+const { load } = require("./fixtures/ai-native/rental-compatibility-source.cjs");
+const { aiPersistenceScopeColumns: columns, aiPersistenceEventCursor: cursor } = load("@rental-os/ai-native-server/runtime/persistence-scope");
 const root = path.resolve(__dirname, ".."), baseline = "80a372f";
 // This verifies the immutable first migration, not the schema of every future migration.
 const schema = execFileSync("git", ["show", "de6fd4b:apps/api/prisma/schema.prisma"], { cwd: root, encoding: "utf8" });
 const before = execFileSync("git", ["show", `${baseline}:apps/api/prisma/schema.prisma`], { cwd: root, encoding: "utf8" });
-const migration = fs.readFileSync(path.join(root, "apps/api/prisma/migrations/20261003060000_ai_task_foundation/migration.sql"), "utf8");
+const migration = publicAiSchemaHistory().migration("20261003060000_ai_task_foundation");
 const checks = fs.readFileSync(path.join(__dirname, "fixtures/ai-native/persistence-checks.sql"), "utf8");
 const normalize = text => text.replace(/\r\n/gu, "\n");
 const digest = text => crypto.createHash("sha256").update(normalize(text)).digest("hex");
 const tables = ["ai_scopes", "ai_tasks", "ai_runs", "ai_steps", "ai_proposals", "ai_proposal_versions", "ai_proposal_actions", "ai_approvals", "ai_approval_consumptions", "ai_task_events"];
 
 // Prisma validates actual model relations and produces actual DDL. Neither operation executes SQL.
-test("schema and additive migration reproduce through an isolated, network/env-blocked Prisma CLI", { timeout: 120000 }, () => {
+test("schema and additive migration reproduce through the offline official Prisma validator and Schema Engine", { timeout: 120000 }, () => {
   const result = offlinePrismaSchema(schema, before);
   assert.match(result.validation, /schema.*valid/iu);
   assert.equal(result.violations, "");
@@ -84,16 +84,16 @@ test("database event cursors reject unsigned-bigint overflow without Number roun
 });
 
 test("CLI preload actually refuses env reads and sockets before access", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rental-os-ai-guard-"));
-  try {
-    const audit = path.join(dir, "audit.log"), envFile = path.join(dir, ".env");
-    fs.writeFileSync(audit, ""); fs.writeFileSync(envFile, "SYNTHETIC_ONLY=not-a-real-secret");
-    const preload = path.join(__dirname, "fixtures/ai-native/prisma-offline-preload.cjs");
-    const env = { AI_OFFLINE_AUDIT: audit, SystemRoot: process.env.SystemRoot, PATH: process.env.PATH };
-    const read = spawnSync(process.execPath, ["--require", preload, "-e", "require('node:fs').readFileSync('.env')"], { cwd: dir, env, encoding: "utf8", timeout: 10000 });
-    assert.notEqual(read.status, 0); assert.match(read.stderr, /refused env-file-read/u);
-    const network = spawnSync(process.execPath, ["--require", preload, "-e", "require('node:net').connect(1, '127.0.0.1')"], { cwd: dir, env, encoding: "utf8", timeout: 10000 });
-    assert.notEqual(network.status, 0); assert.match(network.stderr, /refused network/u);
-    assert.equal(fs.readFileSync(audit, "utf8"), "env-file-read\nnetwork\n");
-  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  const preload = path.join(__dirname, "fixtures/ai-native/prisma-offline-preload.cjs");
+  const env = { SystemRoot: process.env.SystemRoot, PATH: process.env.PATH };
+  // Capture only the original guard's audit writes. The rejected file and
+  // socket calls still reach that guard before any filesystem/network access.
+  const probe = code => spawnSync(process.execPath, ["--no-node-snapshot", "--no-compilation-cache", "-e",
+    `require('node:fs').appendFileSync=(_file,value)=>process.stdout.write(value); require(${JSON.stringify(preload)}); ${code}`
+  ], { cwd: root, env, encoding: "utf8", timeout: 10000 });
+  const read = probe("require('node:fs').readFileSync('synthetic-guard-probe/.env')");
+  assert.notEqual(read.status, 0); assert.match(read.stderr, /refused env-file-read/u);
+  const network = probe("require('node:net').connect(1, '127.0.0.1')");
+  assert.notEqual(network.status, 0); assert.match(network.stderr, /refused network/u);
+  assert.equal(read.stdout + network.stdout, "env-file-read\nnetwork\n");
 });

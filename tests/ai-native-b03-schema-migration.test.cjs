@@ -1,7 +1,9 @@
 'use strict';
-const test = require('node:test'), assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path');
-const schema = fs.readFileSync(path.join(__dirname, '../apps/api/prisma/schema.prisma'), 'utf8');
-const migration = fs.readFileSync(path.join(__dirname, '../apps/api/prisma/migrations/20261003160000_ai_provider_profiles/migration.sql'), 'utf8');
+const test = require('node:test'), assert = require('node:assert/strict');
+require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
+const source = require('./fixtures/ai-native/prisma-offline.cjs').publicAiSchemaHistory();
+const schema = source.schema;
+const migration = source.migration('20261003160000_ai_provider_profiles');
 test('B03 schema parses and contains the persisted AI Native model families', () => {
   for (const model of ['AiScope', 'AiProviderProfile', 'AiProviderCapabilityEvidence', 'AiInvocationAdmission', 'AiUsageReservation', 'AiUsageLedgerEntry', 'AiKnowledgeDocument', 'AiKnowledgeVersion', 'AiKnowledgeChunk', 'AiKnowledgeAcl', 'AiKnowledgeIndexGeneration', 'AiStructuredMemory', 'AiHumanConfirmation']) assert.match(schema, new RegExp(`model\\s+${model}\\s+\\{`));
 });
@@ -11,7 +13,7 @@ test('B03 W01 repair: profile table is created before the evidence table that re
   assert.ok(evidenceIndex >= 0 && profileIndex >= 0 && profileIndex < evidenceIndex, 'profile table must be created before the evidence table that references it');
   const evidenceBlock = migration.slice(evidenceIndex);
   assert.match(evidenceBlock, /REFERENCES `ai_provider_profiles`/);
-  const foundation = fs.readFileSync(path.join(__dirname, '../apps/api/prisma/migrations/20261003060000_ai_task_foundation/migration.sql'), 'utf8');
+  const foundation = source.migration('20261003060000_ai_task_foundation');
   assert.doesNotMatch(migration, /CREATE TABLE (?:IF NOT EXISTS )?`ai_scopes`/u,
     'provider persistence must reuse the already-created canonical scope table');
   assert.match(foundation, /ADD CONSTRAINT `ai_scopes_shape` CHECK/u);
@@ -19,10 +21,8 @@ test('B03 W01 repair: profile table is created before the evidence table that re
   assert.match(foundation, /REFERENCES `Tenant`\(`id`\) ON DELETE RESTRICT ON UPDATE RESTRICT/u);
   const creates = [...(foundation + '\n' + migration).matchAll(/CREATE TABLE `([^`]+)`/gu)].map(match => match[1]);
   assert.equal(new Set(creates).size, creates.length, 'foundation and provider migrations must not recreate the same table');
-  const directory = path.join(__dirname, '../apps/api/prisma/migrations');
-  const alignment = fs.readFileSync(path.join(directory, '20261026100000_ai_migration_contract_alignment/migration.sql'), 'utf8');
-  const history = fs.readdirSync(directory).filter(name => name !== '20261026100000_ai_migration_contract_alignment' && fs.existsSync(path.join(directory, name, 'migration.sql')))
-    .map(name => fs.readFileSync(path.join(directory, name, 'migration.sql'), 'utf8')).join('\n');
+  const alignment = source.migration('20261026100000_ai_migration_contract_alignment');
+  const history = source.history({ exclude: '20261026100000_ai_migration_contract_alignment' });
   const replacements = [...alignment.matchAll(/ALTER TABLE `([^`]+)` DROP FOREIGN KEY `([^`]+)`,\s+ADD CONSTRAINT `([^`]+)` FOREIGN KEY \(([^)]+)\) REFERENCES `([^`]+)`\(([^)]+)\) ON DELETE (RESTRICT|CASCADE) ON UPDATE (RESTRICT|CASCADE);/gu)];
   assert.equal(replacements.length, 22, 'every FK replacement must be a single ALTER statement');
   assert.equal([...alignment.matchAll(/DROP FOREIGN KEY/gu)].length, replacements.length);
