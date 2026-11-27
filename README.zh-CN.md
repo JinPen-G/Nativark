@@ -397,12 +397,13 @@ Zelo/
 | **所选 Prisma 组合类型检查** | `node scripts/check-selected-prisma-types.cjs --mode <platform\|rental\|rental-ai>` | 内存核验所选 Prisma 5.22 schema 与宿主类型，不连接数据库（[脚本](scripts/check-selected-prisma-types.cjs)） |
 | **Core 包合规与能力查询** | `node packages/core-contracts/dist/check.js ...`、`node packages/core-contracts/dist/capabilities.js ...` | 校验标准包清单/OpenAPI/兼容版本，及索引当前源码能力 |
 | **独立运行包打包** | [scripts/package-platform-host.cjs](scripts/package-platform-host.cjs)（零 Core / 工单）、`npm run package:rental-host`（Rental） | 生成固定 Linux Docker 运行上下文与编译证据包 |
-| **公共接口与后台约定** | `npm run contract:validate`、`npm run test:admin` | 校验 Controller、OpenAPI、DTO、路由权限及后台组件接入约定 |
+| **公共接口合同** | `npm run contract:validate`、`npm run dto:validate` | 校验所选平台模块、OpenAPI、DTO 及声明的权限策略 |
 | **根公共类型与构建** | `npm run lint`、`npm run build` | 检查并编译公共 API 与后台 |
-| **旧组合类型与构建** | `npm run lint:legacy`、`npm run build:legacy` | 按原依赖顺序检查并编译兼容组合 |
-| **底座与内置 Core 测试** | `npm run test:saas-foundation`、`npm run test:saas-subscription`、`npm run test:rental-core`、`npm run test:pricing-strategy` | 覆盖多租户基础能力、订阅框架及内置 Rental Core 行为；固定发行核验见 [verify-rental-distribution.cjs](scripts/verify-rental-distribution.cjs) |
+| **独立 Rental 回归** | [Rental 开发验证](https://github.com/JinPen-G/Zelo-rental-core/blob/main/README.md#运行原-core-回归) | 从固定双仓准备 `full --with-tests` 工作区，构建同版产物后运行其中的 `npm run test:rental` |
 
-> 涉及真实数据库的集成测试（如 `test:mysql-e2e`、`test:saas-subscription-db`）请在独立测试库中执行，切勿连接生产数据库。
+旧单仓命令和原业务测试别名保留在[固定完整历史源码](https://github.com/JinPen-G/Zelo/tree/46db0945dee92ac916f7265e95948943fc8b641d)。`test:admin` 与 `*:legacy` 入口会说明该检出方式并停止，不作为当前公共后台验证。Rental 测试和助手由独立仓承接，原件保全不表示全部历史入口已适配当前宿主。
+
+> 数据库集成测试只在明确选择的独占测试库中运行。
 
 ---
 

@@ -397,11 +397,13 @@ Choose the verification commands matching the layers and hosts touched by your c
 | **Selected Prisma Mode Type Check** | `node scripts/check-selected-prisma-types.cjs --mode <platform\|rental\|rental-ai>` | In-memory Prisma 5.22 schema & host type check without DB access ([script](scripts/check-selected-prisma-types.cjs)) |
 | **Core Package Compliance & Capabilities** | `node packages/core-contracts/dist/check.js ...`, `node packages/core-contracts/dist/capabilities.js ...` | Validates package manifest/OpenAPI/compatibility and indexes live capabilities |
 | **Standalone Host Packaging** | [scripts/package-platform-host.cjs](scripts/package-platform-host.cjs) (Zero-Core / Tickets), `npm run package:rental-host` (Rental) | Produces pinned Linux Docker runtime contexts and build evidence bundles |
-| **API Contracts & Admin Conventions** | `npm run contract:validate`, `npm run test:admin` | Checks Controllers, OpenAPI, DTOs, route guards, and admin component rules |
-| **Composite Workspace Lint & Build** | `npm run lint`, `npm run build` | Type-checks and builds the composite workspace in dependency order |
-| **Base & Built-in Core Test Suites** | `npm run test:saas-foundation`, `npm run test:saas-subscription`, `npm run test:rental-core`, `npm run test:pricing-strategy` | Covers multi-tenancy, subscriptions, and Rental Core; distribution verification in [verify-rental-distribution.cjs](scripts/verify-rental-distribution.cjs) |
+| **Public API Contracts** | `npm run contract:validate`, `npm run dto:validate` | Checks the selected platform module, OpenAPI, DTOs, and its declared authorization policies |
+| **Public Workspace Lint & Build** | `npm run lint`, `npm run build` | Type-checks and builds the public API and admin |
+| **Independent Rental Regression** | [Rental development verification](https://github.com/JinPen-G/Zelo-rental-core/blob/main/README.en.md#running-the-original-core-regression-tests) | Prepare a fixed two-repository `full --with-tests` workspace; build matching outputs before running its `npm run test:rental` |
 
-> Run real-database integration tests (such as `test:mysql-e2e` and `test:saas-subscription-db`) strictly against isolated test databases—never against production data.
+Legacy single-repository commands and original business test aliases remain available in the complete [fixed historical source](https://github.com/JinPen-G/Zelo/tree/46db0945dee92ac916f7265e95948943fc8b641d). `test:admin` and the `*:legacy` wrappers explain that checkout and stop; they do not validate the current public admin. Rental test sources and helpers belong to its independent repository; preserving them does not mean every historical entry is adapted to the current host.
+
+> Run database integration tests only against an explicitly selected isolated test database.
 
 ---
 
