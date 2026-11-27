@@ -2,9 +2,12 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
+require("./fixtures/ai-native/contract-consumer.cjs").blockNetwork(test);
 const root = path.resolve(__dirname, "..");
-require("ts-node").register({ transpileOnly: false, compilerOptions: { module: "commonjs", moduleResolution: "node", target: "es2022" } });
-const { AiTaskRunner, AiTaskRunnerError } = require(path.join(root, "apps/api/src/modules/ai-native/runner/ai-task-runner.service"));
+const { createControllerSourceLoader } = require("../scripts/controller-sources.cjs");
+const loader = createControllerSourceLoader(root);
+const { AiTaskRunner, AiTaskRunnerError, withAiTaskHeldPreparationWindow } =
+  loader.load(loader.resolveSource(__filename, "@rental-os/platform-server/ai-runtime", true));
 
 const input = { taskId: "task-1", runId: "run-1", holderId: "worker-1", expectedTaskRevision: 3, expectedRunRevision: 4, expectedFencingToken: "8", leaseMs: 1000 };
 const step = (registrationRef, operation = "readonly") => ({ registrationRef, operation, toolCode: "orders.read", toolVersion: "1" });
@@ -94,7 +97,6 @@ test("runner dependencies are explicit and do not provide an allow-all fallback"
 });
 
 test('fixed held preparation window preserves default timeout, lease cap and total task time', async () => {
-  const { withAiTaskHeldPreparationWindow } = require('../apps/api/src/modules/ai-native/runner/ai-task-runner.service');
   for (const mode of ['default', 'fixed_sequence', 'lease_cap', 'task_cap']) {
     let now = 0, effects = 0;
     const timers = new Map(), clock = { now: () => now,

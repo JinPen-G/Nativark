@@ -1,16 +1,20 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { AiTaskRunner, AiTaskRunnerError } = require('../apps/api/src/modules/ai-native/runner/ai-task-runner.service');
+require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
+const { createControllerSourceLoader } = require('../scripts/controller-sources.cjs');
+const loader = createControllerSourceLoader(require('node:path').resolve(__dirname, '..'));
+const { AiTaskRunner, AiTaskRunnerError } =
+  loader.load(loader.resolveSource(__filename, '@rental-os/platform-server/ai-runtime', true));
 
 function harness(taskOutcome) {
-  const events = [], lease = { taskId: 'task-1', runId: 'run-1', holderId: 'worker-1', revision: 1, fencingToken: '2', expiresAt: new Date(Date.now() + 60_000).toISOString() };
+  // The claim acknowledges expectedRunRevision + 1 before any step CAS.
+  const events = [], lease = { taskId: 'task-1', runId: 'run-1', holderId: 'worker-1', revision: 2, fencingToken: '2', expiresAt: new Date(Date.now() + 60_000).toISOString() };
   const deps = {
     leases: {
       readMetadata: async () => ({ taskId: 'task-1', status: 'running', revision: 2, cancelRequestedAt: null }),
       claimRun: async () => lease,
       claimRecoveryRun: async () => ({ ...lease, purpose: 'recovery_only' }),
-      releaseRun: async value => { events.push(['release', value]); return { released: true, revision: value.expectedTaskRevision + 1 }; }
+      releaseRun: async value => { events.push(['release', value]); return { released: true, revision: value.expectedRunRevision + 1 }; }
     },
     steps: {
       register: async plan => ({ stepId: `step-${plan.registrationRef}`, runId: 'run-1', sequence: 1, stepRevision: 1, taskRevision: 3, runRevision: 2, replayed: false, existingStatus: 'pending' }),
@@ -35,19 +39,22 @@ test('runner commits aggregate outcome through an injected port before releasing
 });
 
 test('invalid task outcome fence fails closed instead of reporting success', async () => {
-  const h = harness({ commit: async input => ({ taskRevision: input.taskRevision, lease: input.lease }) });
-  const result = await h.runner.run({ taskId: 'task-1', runId: 'run-1', holderId: 'worker-1', expectedTaskRevision: 2, expectedRunRevision: 1, expectedFencingToken: '1', leaseMs: 1000 });
-  assert.equal(result.status, 'unavailable');
+  let attempts = 0;
+  const h = harness({ commit: async input => { attempts++; return { taskRevision: input.taskRevision, lease: input.lease }; } });
+  // A malformed post-write receipt remains unknown; it cannot authorize release or retry.
+  await assert.rejects(h.runner.run({ taskId: 'task-1', runId: 'run-1', holderId: 'worker-1', expectedTaskRevision: 2, expectedRunRevision: 1, expectedFencingToken: '1', leaseMs: 1000 }),
+    error => error instanceof AiTaskRunnerError && error.code === 'AI_RESULT_UNKNOWN');
+  assert.equal(attempts, 1); assert.deepEqual(h.events, []);
 });
 
 test('cancel request commits cancelled only when the aggregate outcome port is present', async () => {
   let committed;
-  const lease = { taskId: 'task-1', runId: 'run-1', holderId: 'worker-1', revision: 1, fencingToken: '2', expiresAt: new Date(Date.now() + 60_000).toISOString() };
+  const lease = { taskId: 'task-1', runId: 'run-1', holderId: 'worker-1', revision: 2, fencingToken: '2', expiresAt: new Date(Date.now() + 60_000).toISOString() };
   const runner = new AiTaskRunner({
     leases: {
       readMetadata: async () => ({ taskId: 'task-1', status: 'cancel_requested', revision: 2, cancelRequestedAt: new Date().toISOString() }),
       claimRun: async () => lease, claimRecoveryRun: async () => ({ ...lease, purpose: 'recovery_only' }),
-      releaseRun: async () => ({ released: true, revision: 3 })
+      releaseRun: async value => ({ released: true, revision: value.expectedRunRevision + 1 })
     },
     steps: { register: async () => { throw new Error('must not register after cancel'); }, start: async () => { throw new Error('must not start'); }, succeed: async () => { throw new Error('must not succeed'); }, fail: async () => { throw new Error('must not fail'); }, pause: async () => { throw new Error('must not pause'); }, unknown: async () => { throw new Error('must not unknown'); } },
     plan: { resolve: async () => ({ taskId: 'task-1', runId: 'run-1', taskRevision: 2, steps: [], limits: { maxSteps: 1, maxTotalMs: 1000, maxStepMs: 100, maxOutputBytes: 1000, maxConcurrent: 1, maxCalls: 1 } }) },

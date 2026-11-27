@@ -1,8 +1,8 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-const h = require('./fixtures/ai-native/knowledge-service.cjs');
-const unavailable = { draftVersion: h.shared.AI_KNOWLEDGE_DRAFT_VERSION, requestId: 'recall-1', status: 'unavailable', nextAction: 'reauthorize_or_manual' };
-async function fixture() { const f = h.retrieval(h.harness()); await h.published(f); return f; }
+const h = require('./fixtures/ai-native/knowledge-public.cjs');
+const unavailable = { draftVersion: h.contracts.AI_KNOWLEDGE_DRAFT_VERSION, requestId: 'recall-1', status: 'unavailable', nextAction: 'reauthorize_or_manual' };
+async function fixture() { const f = h.harness(); await h.published(f); return f; }
 async function ref(f) { return (await f.retrieval.recall(h.context(), h.query())).matches[0].source; }
 test.after(() => assert.deepEqual(h.attempts, []));
 test('search receives current server scope, principal, audience, version and ACL before any content read', async () => {
@@ -73,7 +73,7 @@ test('business facts preserve snapshot/missing/legacy basis; never search SOP fo
   assert.equal(f.searchCalls.length, 0);
 });
 test('authorized pipeline states differ from denial; no matching authorized text is only no_results', async () => {
-  const f = h.retrieval(h.harness()); await f.documents.create(h.context(), h.draft());
+  const f = h.harness(); await f.documents.create(h.context(), h.draft());
   assert.deepEqual(await f.retrieval.recall(h.context(), h.query()), { draftVersion: unavailable.draftVersion, requestId: 'recall-1', status: 'not_ready', reason: 'parsing' });
   f.parseError = new Error('failed'); await f.documents.parseDocument(h.context(), { documentId: 'doc-1', expectedRevision: 1, operationId: 'parse' });
   assert.equal((await f.retrieval.recall(h.context(), h.query())).status, 'failed');

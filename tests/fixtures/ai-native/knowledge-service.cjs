@@ -1,4 +1,6 @@
 'use strict';
+// Original mixed-host fixtures require an explicitly prepared independent Rental
+// workspace. Public ACL consumers use knowledge-public.cjs and the public factory.
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -9,13 +11,31 @@ const block = (object, key) => { object[key] = () => { attempts.push(key); throw
 block(net.Socket.prototype, 'connect'); block(globalThis, 'fetch');
 for (const object of [dns, require('node:dns/promises')]) for (const key of Object.keys(object)) if (/^(lookup|resolve|reverse)/.test(key) && typeof object[key] === 'function') block(object, key);
 block(require('node:tls'), 'connect'); block(require('node:dgram'), 'createSocket');
-const root = path.resolve(__dirname, '../../..');
-const apiRequire = require('node:module').createRequire(path.join(root, 'apps/api/package.json'));
-assert.ok(fs.realpathSync(apiRequire.resolve('@rental-os/shared')).startsWith(fs.realpathSync(path.join(root, 'packages/shared')) + path.sep));
-require('ts-node').register({ project: path.join(root, 'apps/api/tsconfig.json'), transpileOnly: false });
-const shared = apiRequire('@rental-os/shared');
-const dir = path.join(root, 'apps/api/src/modules/ai-native/knowledge');
-const load = name => require(path.join(dir, name));
+assert.ok(process.env.AI_NATIVE_TEST_SOURCE_ROOT,
+  'Knowledge compatibility tests require AI_NATIVE_TEST_SOURCE_ROOT from prepare:rental-workspace --profile full --fresh-ai --with-tests (or a fixed historical AI workspace)');
+const root = fs.realpathSync(path.resolve(process.env.AI_NATIVE_TEST_SOURCE_ROOT));
+const { createControllerSourceLoader, checkedPath } = require('../../../scripts/controller-sources.cjs');
+const receipt = JSON.parse(fs.readFileSync(checkedPath(root, 'development.workspace.json'), 'utf8'));
+assert.equal(receipt.format, 'nativark-core-development-source-2');
+assert.equal(receipt.profile, 'full'); assert.equal(receipt.mode, 'development');
+assert.equal(receipt.host, 'rental'); assert.equal(receipt.ai, true);
+assert.equal(receipt.verification?.suite, 'rental-original');
+for (const source of [receipt.platform?.source, receipt.core?.source]) {
+  assert.match(source?.commit ?? '', /^[a-f0-9]{40}$/u);
+  assert.ok(source?.repository, 'Prepared test sources need their original repository identity');
+}
+assert.notEqual(receipt.platform.source.repository.toLowerCase(), receipt.core.source.repository.toLowerCase());
+for (const [directory, name] of [['ai-native-server', '@rental-os/ai-native-server'], ['shared', '@rental-os/shared']]) {
+  const manifest = JSON.parse(fs.readFileSync(checkedPath(root, `packages/${directory}/package.json`), 'utf8'));
+  assert.equal(manifest.name, name); assert.equal(manifest.version, '0.1.0', 'Mixed fixtures require the independent compatibility package');
+}
+const dependencyDirectory = path.join(path.resolve(process.env.AI_NATIVE_TEST_TOOLCHAIN_ROOT || root), 'node_modules');
+const loader = createControllerSourceLoader(root, dependencyDirectory);
+const from = path.join(root, 'package.json');
+const shared = loader.load(loader.resolveSource(from, '@rental-os/shared', true));
+const knowledgeEntry = name => loader.resolveSource(from, `@rental-os/ai-native-server/runtime/knowledge/${name}`, true);
+const dir = path.dirname(knowledgeEntry('knowledge.module'));
+const load = name => loader.load(knowledgeEntry(name));
 const clone = value => value === undefined ? undefined : structuredClone(value);
 const key = (...parts) => JSON.stringify(parts);
 const scope = { kind: 'workspace', tenantId: 'tenant-1', workspaceId: 'space-1' };
@@ -69,16 +89,28 @@ async function published(h, ctx = context(), input = draft()) {
   return h.publication.publish(ctx, { documentId: input.documentId, expectedRevision: record.revision, operationId: 'publish-1' });
 }
 function typecheck(emit = false) {
-  const ts = require('typescript');
-  const options = { strict: true, noEmit: !emit, skipLibCheck: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, moduleResolution: ts.ModuleResolutionKind.Node10, esModuleInterop: true, experimentalDecorators: true, outDir: path.join(root, 'apps/api/dist/knowledge-isolated') };
+  const ts = loader.requireDependency('typescript');
+  assert.ok(process.env.AI_NATIVE_TEST_PRISMA_TYPES && process.env.AI_NATIVE_TEST_SCHEMA,
+    'Knowledge type checks require the selected workspace Prisma declaration and schema');
+  const clientTypes = checkedPath(root, process.env.AI_NATIVE_TEST_PRISMA_TYPES);
+  const schema = checkedPath(root, process.env.AI_NATIVE_TEST_SCHEMA);
+  assert.deepEqual(fs.readFileSync(checkedPath(root, path.join(path.dirname(clientTypes), 'schema.prisma'))), fs.readFileSync(schema));
+  const options = { strict: true, noEmit: !emit, skipLibCheck: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, moduleResolution: ts.ModuleResolutionKind.Node10, esModuleInterop: true, experimentalDecorators: true, outDir: path.join(root, 'output/.tmp/knowledge-types'), typeRoots: [path.join(dependencyDirectory, '@types')] };
   const files = fs.readdirSync(dir).filter(f => f.endsWith('.ts')).map(f => path.join(dir, f));
-  // Check this checkout's contracts/client, not linked root dependency artifacts.
-  options.baseUrl = root;
-  options.paths = { '@rental-os/shared': ['packages/shared/src/index.ts'], '@prisma/client': ['apps/api/node_modules/@prisma/client/index.d.ts'] };
-  const program = ts.createProgram(files, options);
+  const host = ts.createCompilerHost(options), outputs = new Map();
+  host.resolveModuleNames = (names, containingFile) => names.map(name => {
+    if (name === '@prisma/client') return { resolvedFileName: clientTypes, extension: ts.Extension.Dts };
+    if (name.startsWith('@rental-os/')) return { resolvedFileName: loader.resolveSource(containingFile, name), extension: ts.Extension.Ts };
+    return ts.resolveModuleName(name, containingFile, options, host).resolvedModule
+      ?? ts.resolveModuleName(name, path.join(dependencyDirectory, '__knowledge_types__.ts'), options, host).resolvedModule;
+  });
+  // Optional emit is collected in memory; no shared dist or generated Client is overwritten.
+  host.writeFile = (file, text) => outputs.set(file, text);
+  const program = ts.createProgram(files, options, host);
   const diagnostics = ts.getPreEmitDiagnostics(program).map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n'));
   assert.deepEqual(diagnostics, []);
   if (emit) assert.equal(program.emit().emitSkipped, false);
+  return outputs;
 }
 if (require.main === module) { typecheck(process.argv.includes('--build')); console.log('knowledge actual TypeScript: zero diagnostics'); }
 function retrieval(f) {
