@@ -5,9 +5,9 @@
   <img src="packages/platform-admin/public/brand/zelo-logo-black.svg" alt="Zelo" width="240">
 </picture>
 
-**面向 AI Native 应用的开源多租户 SaaS 底座。**
+**An open-source, multi-tenant SaaS foundation built for AI-native business applications.**
 
-*An open-source, multi-tenant SaaS foundation built for AI-native business applications.*
+*面向 AI Native 应用的开源多租户 SaaS 底座。*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform Base](https://img.shields.io/badge/Base-0.1.18-0F766E.svg)](https://github.com/JinPen-G/Zelo/releases/tag/v0.1.18)
@@ -17,180 +17,203 @@
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg)](apps/platform-admin/README.md)
 [![Prisma](https://img.shields.io/badge/Prisma-5.22-2D3748.svg)](apps/platform-api/README.md)
 
-**简体中文** | [English](README.en.md)
+**English** | [简体中文](README.zh-CN.md)
 
 ---
 
-**Zelo** 是一个可独立运行的开源多租户 SaaS 底座。它把几乎所有企业级 SaaS 都要重复建设的底层能力——身份认证、多租户与组织权限、SaaS 订阅、公共管理后台、加密外部集成、受控 AI Native / MCP 引擎，以及标准化的 **Core 插件化接入与独立升级机制**——沉淀为纯净的公共平台。
+**Zelo** is a standalone, open-source, multi-tenant SaaS foundation. It distills the infrastructure nearly every B2B SaaS product has to rebuild from scratch—authentication, multi-tenancy and organizational RBAC, SaaS subscriptions, a shared admin console, encrypted external integrations, an optional governed AI Native / MCP runtime, and a standardized **pluggable Core lifecycle with independent upgrades**—into a clean, industry-agnostic base.
 
-业务系统通过独立的 **Core（业务包）** 接入底座，各自维护领域模型、数据迁移、页面贡献与可选 AI 工具。**底座默认零 Core 即可独立启动、打包与源码导出**；仓库随附轻量教学包 **Example Tickets Core** 与首个官方业务包 **[Rental Core](#内置业务-core-示例)**（同步独立开源于 [JinPen-G/Zelo-rental-core](https://github.com/JinPen-G/Zelo-rental-core)），用于开箱演示并作为构建 CRM、TMS、工单或任意垂直业务 Core 的参考实现。
+Domain applications plug into the base as standalone **Cores (business packages)**, each owning its own domain schema, SQL migrations, admin UI contributions, and optional AI tools. **The base starts, builds, and exports cleanly with zero Cores installed.** This repository also includes the lightweight starter **Example Tickets Core** and the first official business Core—**[Rental Core](#built-in-business-core-examples)** (also published independently at [JinPen-G/Zelo-rental-core](https://github.com/JinPen-G/Zelo-rental-core))—as runnable demos and reference implementations for building CRM, TMS, ticketing, or any vertical SaaS Core.
 
-> **快速导航**：[为什么选择 Zelo](#为什么选择-zelo) · [底座核心能力](#底座核心能力) · [架构与 Core 模型](#架构与-core-扩展模型) · [五步接入业务 Core](#五步接入自己的业务-core) · [Core 生态与商业扩展](#共建-core-业务包生态与商业扩展) · [内置 Core 示例](#内置业务-core-示例) · [本地运行](#本地运行) · [项目组成](#项目组成) · [开发导读](#开发导读) · [验证改动](#验证改动) · [参与贡献](#参与贡献)
-
----
-
-## 为什么选择 Zelo
-
-- **零 Core 独立运行与一键导出**：提供独立的 `platform-api` 与 `platform-admin`，开箱即用 41 个公共模型与 14 份基础迁移；运行 `npm run export:platform` 即可导出一份完全不含行业业务的纯净底座源码包。
-- **标准化 Core 契约与独立升级**：所有业务 Core 通过 `@rental-os/core-contracts` 声明清单、权限、页面、OpenAPI 与 SQL 迁移；SaaS 后台内置 **Core 包管理（`/platform/core-packages`）**，支持按 GitHub Topic（`zelo-core`）在线发现、校验 Release 摘要、生成固定部署锁，实现**底座与每个 Core 各自独立升级与安全回退**。
-- **多租户与公共后台**：内置 SaaS / 租户两级身份、组织与角色权限、成员邮箱邀请、安全基线、字典与编号、订阅期限、AES-GCM 凭据加密、邮件/短信/文件/支付基础服务，以及基于 React 19 + UIArc 的现代化公共管理外壳。
-- **按需选装、严格受控的 AI Native 与 MCP**：AI 是可选能力层（不装 AI 亦可完整运行普通业务）。启用后复用统一任务编排与恢复、Model Gateway、预算单账、知识库 ACL、人工审批与原操作收据核对，并支持标准 OAuth 保护的 MCP Server 与 Harness 客户端消费。
-- **为开发者与 AI 编程助手设计**：提供[五步快速接入手册](packages/core-contracts/README.md#五步快速接入)、可直接复制的 [Agent 任务模板](packages/core-contracts/README.md#交给开发agent的任务模板)、标准包静态校验器（`check.js`）以及统一能力索引 CLI（`capabilities.js`），一条命令即可查清底座已有的组件、页面、API 与公共导出。
+> **Quick Navigation**: [Why Zelo](#why-zelo) · [Core Capabilities](#core-capabilities) · [Architecture & Core Model](#architecture--core-extension-model) · [5-Step Core Integration](#integrate-your-business-core-in-5-steps) · [Core Ecosystem & Monetization](#build-the-core-ecosystem--monetize-extensions) · [Built-in Core Examples](#built-in-business-core-examples) · [Quick Start](#quick-start) · [Repository Structure](#repository-structure) · [Developer Guide](#developer-guide) · [Verification](#verification--testing) · [Contributing](#contributing)
 
 ---
 
-## 底座核心能力
+## Interface Preview
 
-Zelo 将“跨行业复用的公共 SaaS 底座”与“按需装配的行业业务 Core”彻底拆分：
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/media/zelo-dashboard-dark.png">
+    <img src=".github/media/zelo-dashboard-light.png" alt="Zelo Admin Console — Shared Shell and Dashboard (auto Light/Dark)" width="100%">
+  </picture>
+</p>
+<p align="center"><em>Shared multi-tenant admin shell with built-in Light/Dark themes, Agent/Admin work mode switcher, and bilingual EN/ZH UI (the hero preview adapts automatically to your GitHub theme).</em></p>
 
-### 1. 零 Core 底座开箱即用能力
+| Platform Base — Encrypted Service Providers | Business Core Example — Assets & Inventory |
+| :---: | :---: |
+| ![Service Providers](.github/media/zelo-service-providers-light.png) | ![Business Core Workspace](.github/media/zelo-core-assets-light.png) |
+| *Out-of-the-box SMTP, Stripe, S3/OSS/COS & SMS connectors with encrypted credentials* | *Vertical Core (`Rental Core`) mounted cleanly into Zelo's shared shell & data-table primitives* |
 
-| 能力域 | 公共底座内置实现 | 源码模块 |
+<details>
+<summary>View Dark Mode screenshot explicitly</summary>
+
+![Zelo Admin Console Dark Mode](.github/media/zelo-dashboard-dark.png)
+
+</details>
+
+---
+## Why Zelo
+
+- **Zero-Core Standalone Runtime & One-Command Source Export**: Ships with standalone `platform-api` and `platform-admin` backed by 41 shared platform models and 14 base migrations. Run `npm run export:platform` to produce a clean base source archive containing zero industry business code.
+- **Standardized Core Contracts & Independent Upgrades**: Every business Core declares its manifest, permissions, UI routes, OpenAPI schema, and raw SQL migrations through `@rental-os/core-contracts`. The built-in **Core Packages Console (`/platform/core-packages`)** discovers public packages by GitHub Topic (`zelo-core`), verifies release SHA-256 digests, and locks deployments so **the base and each Core upgrade or roll back independently**.
+- **Multi-Tenancy & Admin Shell**: Includes two-tier SaaS/tenant identity, organizations and RBAC permission trees, email member invitations, security baselines, dictionaries and numbering rules, subscription windows, AES-GCM credential encryption, email/SMS/file/payment primitives, and a modern React 19 + UIArc admin shell.
+- **Optional, Strictly Governed AI Native & MCP**: AI is an opt-in capability layer—standard business flows run without it. When enabled, it provides unified task orchestration and recovery, a single Model Gateway, financial budget ledgers, knowledge ACLs, human approval linkage, original-receipt reconciliation, and RFC-compliant OAuth-protected MCP transport with a Harness client plugin.
+- **Built for Developers & AI Coding Agents**: Provides a [5-Step Integration Guide](packages/core-contracts/README.md#五步快速接入), a copy-ready [Agent Task Template](packages/core-contracts/README.md#交给开发agent的任务模板), a static Core package verifier (`check.js`), and a unified capability index CLI (`capabilities.js`) to inspect existing base components, pages, APIs, and exports in one command.
+
+---
+
+## Core Capabilities
+
+Zelo enforces a clean separation between the reusable **Platform Base** and pluggable **Business Cores**:
+
+### 1. Zero-Core Base Capabilities
+
+| Capability Domain | Built-in Platform Implementation | Source Modules |
 | --- | --- | --- |
-| **身份、多租户与安全** | SaaS / 租户两级账号、JWT 刷新与撤销、首次改密、租户创建与停启、组织架构、角色权限树、登录限流与安全基线 | [platform-server](packages/platform-server/README.md) · [platform-contracts](packages/platform-contracts/README.md) |
-| **公共管理后台与 UI** | 统一应用外壳、自适应侧栏与空态面板、主题（明/暗/系统）与品牌主色、中英文切换、本人资料、租户/人员/组织/安全/订阅/集成设置页，以及 Core 页面框架（`CorePage` / `useCoreForm` / `CoreList` / `useCoreRequest`） | [platform-admin](packages/platform-admin/README.md) · [UIArc](packages/ui-arc/README.md) |
-| **订阅与平台工具** | 租户订阅目录与期限控制、字典与自动编号规则、筛选预设、官网演示申请与持久限流 | [platform-api](apps/platform-api/README.md) |
-| **消息与基础集成** | 运营成员邮箱邀请与公开接受页、SMTP / IMAP 寄件与客服邮件、AES-GCM 加密凭据保险箱、文件存储依赖核验、通知与异步任务台账、官方日历来源 | [platform-server](packages/platform-server/README.md) |
-| **Core 生命周期与包管理** | 标准 Core 注册与版本兼容检查、SaaS 租户授权、租户成员分配、Core 绑定/停用/移除依赖检查、GitHub Topic 发现、固定 Release 校验与独立升级预检 | [core-contracts](packages/core-contracts/README.md) · [core-host](packages/core-host/README.md) · [platform-core-host](packages/platform-core-host/README.md) |
-| **可选 AI Native 与 MCP** | 任务编排与恢复、统一 Model Gateway、财务预算账本、知识库与记忆权限策略、审批关联与原收据核对；标准 RFC 9728 / 8414 受保护 MCP 传输与 Harness 插件 | [ai-native-server](packages/ai-native-server/README.md) · [ai-native-data](packages/ai-native-data/README.md) · [mcp-server](packages/mcp-server/README.md) · [harness-plugin](clients/harness-plugin/README.md) |
+| **Identity, Multi-Tenancy & Security** | Two-tier SaaS/tenant accounts, JWT refresh & revocation, first-login password change, tenant lifecycle, organizations, RBAC trees, login rate limiting, security baseline | [platform-server](packages/platform-server/README.md) · [platform-contracts](packages/platform-contracts/README.md) |
+| **Shared Admin Shell & UI** | Unified app shell, responsive sidebar & zero-Core empty state, light/dark/system themes & brand accent, Chinese/English UI switching, profile, tenant/staff/org/security/subscription/integration settings, plus Core UI primitives (`CorePage`, `useCoreForm`, `CoreList`, `useCoreRequest`) | [platform-admin](packages/platform-admin/README.md) · [UIArc](packages/ui-arc/README.md) |
+| **Subscriptions & Platform Tools** | Tenant subscription catalog & term enforcement, dictionaries, auto-numbering rules, saved filter presets, website demo requests, persistent rate limiting | [platform-api](apps/platform-api/README.md) |
+| **Messaging & Base Integrations** | Operator email invitations & public acceptance flow, SMTP/IMAP outbound & support inbox, AES-GCM encrypted credential vault, storage readiness checks, notifications & async job ledgers, official calendar sources | [platform-server](packages/platform-server/README.md) |
+| **Core Lifecycle & Package Management** | Standard Core registration & compatibility checks, SaaS tenant grants, tenant member assignments, bind/disable/remove dependency checks, GitHub Topic discovery, pinned release verification & upgrade preflight | [core-contracts](packages/core-contracts/README.md) · [core-host](packages/core-host/README.md) · [platform-core-host](packages/platform-core-host/README.md) |
+| **Optional AI Native & MCP** | Task orchestration & recovery, unified Model Gateway, financial budget ledger, knowledge & memory ACL policies, approval & receipt reconciliation, RFC 9728/8414 OAuth-protected MCP transport & Harness plugin | [ai-native-server](packages/ai-native-server/README.md) · [ai-native-data](packages/ai-native-data/README.md) · [mcp-server](packages/mcp-server/README.md) · [harness-plugin](clients/harness-plugin/README.md) |
 
-### 2. 底座与业务 Core 的职责边界
+### 2. Responsibility Boundary: Base vs. Business Core
 
-| 维度 | Zelo 公共底座负责 | 业务 Core 负责 |
+| Dimension | Owned by Zelo Base | Owned by Business Core |
 | --- | --- | --- |
-| **身份与多租户** | 账号、会话、租户、组织、公共角色及可信请求上下文 | 定义业务角色、业务容器（如空间/项目/门店）与细粒度数据范围 |
-| **授权与订阅** | 部署准入、租户 Core 授权、成员 Core 分配、统一订阅期限与撤销 | 声明业务功能权限码、动作前置条件与权益边界 |
-| **管理后台** | 登录、侧栏/页头/面包屑、主题、语言、公共设置与会话缓存隔离 | 通过正式贡献声明业务路由、页面正文、主操作按钮与深链接 |
-| **数据与升级** | 公共 41 模型与迁移链、部署锁校验、底座与 Core 独立升级预检 | 维护自身业务表与原始 SQL 迁移、历史只读兼容与在途业务收尾 |
-| **AI Native** | Runtime 编排、Model Gateway、预算与用量记账、审批关联与恢复 | 提供可信业务事实、可选 AI 工具、正式业务执行与原操作收据 |
-| **基础服务** | 文件原语、通知/邮件通道、加密集成、审计日志与作业接点 | 裁定业务文件 ACL、字段释放范围、消息正文与业务事件事实 |
+| **Identity & Multi-Tenancy** | Accounts, sessions, tenants, organizations, base roles, and trusted request context | Domain roles, business containers (workspaces/projects/stores), and fine-grained data scope |
+| **Authorization & Subscriptions** | Deployment admission, tenant Core grants, member Core assignments, subscription terms & revocation | Domain permission codes, action preconditions, and entitlement boundaries |
+| **Admin Console** | Login, sidebar/header/breadcrumbs, theme, locale, shared settings, and session cache isolation | Declared routes, page bodies, primary actions, and deep links via official Core contributions |
+| **Data & Upgrades** | 41 base models & migration chain, deployment lock checks, independent upgrade preflight | Domain tables & raw SQL migrations, historical read-only compatibility, and in-flight drain |
+| **AI Native** | Runtime orchestration, Model Gateway, budget & usage accounting, approval linkage & recovery | Trusted domain facts, optional AI tools, authoritative business execution, and original receipts |
+| **Shared Primitives** | File primitives, notification/email channels, encrypted integrations, audit logs & job hooks | Domain file ACLs, field exposure scope, message copy, and domain event facts |
 
 ---
 
-## 架构与 Core 扩展模型
+## Architecture & Core Extension Model
 
 ```mermaid
 flowchart TD
-    UI[公共管理后台 & 多端业务客户端] --> Identity
-    subgraph Base[Zelo 公共 SaaS 底座]
-        Identity[身份认证 / 多租户 / 组织权限] --> CoreHost[Core 宿主与包管理 · core-host / platform-core-host]
-        Console[公共后台外壳 / 订阅 / 工具 / 集成] --> CoreHost
-        AI[可选 AI Native Runtime / Model Gateway / MCP] --> CoreHost
-        Data[公共平台数据层 · 41 模型 / 14 迁移]
+    UI[Shared Admin Console & Multi-Channel Clients] --> Identity
+    subgraph Base[Zelo Open-Source SaaS Base]
+        Identity[Auth / Multi-Tenancy / Org RBAC] --> CoreHost[Core Host & Package Manager · core-host / platform-core-host]
+        Console[Admin Shell / Subscriptions / Tools / Integrations] --> CoreHost
+        AI[Optional AI Native Runtime / Model Gateway / MCP] --> CoreHost
+        Data[Platform Data Layer · 41 Models / 14 Migrations]
     end
-    CoreHost --> Tickets[Example Tickets Core · 轻量教学包]
-    CoreHost --> Rental[Rental Core · 官方业务包]
-    CoreHost --> Custom[你的业务 Core · CRM / TMS / 自定义]
-    Tickets --> TicketsData[独立工单数据与迁移]
-    Rental --> RentalData[独立租赁数据、规则与客户端]
-    Custom --> CustomData[独立业务领域数据与迁移]
+    CoreHost --> Tickets[Example Tickets Core · Starter Package]
+    CoreHost --> Rental[Rental Core · Official Business Core]
+    CoreHost --> Custom[Your Business Core · CRM / TMS / Custom]
+    Tickets --> TicketsData[Isolated Ticket Tables & Migrations]
+    Rental --> RentalData[Isolated Rental Schema, Rules & Clients]
+    Custom --> CustomData[Isolated Domain Data & Migrations]
 ```
 
-### 运行形态与授权隔离
+### Runtime Modes & Authorization Isolation
 
-- **两级授权模型**：先由 SaaS 管理员在“租户 Core 授权”中决定某租户可使用哪些已装配 Core；再由租户管理员在“成员 Core 分配”中为成员分配 Core，并授予该 Core 登记的细粒度业务角色。
-- **固定部署锁与独立升级**：宿主通过 `core.deployment.lock.json` 锁定底座版本、Core 标准包 SHA-256 摘要、合同版本及可选 AI 数据包。底座升级与单 Core 升级彼此独立，先经兼容与迁移预检，再保留既有业务数据、授权与历史操作收据平滑更新或回退。
-- **AI 能力完全可选**：Core 可以不提供任何 AI 工具，普通业务页面与 API 照常运行；开启 AI 时，所有工具调用严格受当前身份、租户授权、成员分配、AI 策略与人工审批约束，结果不明（`unknown`）时只按原操作键读取原收据，绝不自动重发。
+- **Two-Tier Core Authorization**: SaaS administrators first grant installed Cores to a tenant under **Tenant Core Grants**; tenant administrators then assign specific Cores and fine-grained domain roles to individual members under **Member Core Assignments**.
+- **Pinned Deployment Locks & Independent Upgrades**: Hosts pin the base release, Core package SHA-256 digests, contract versions, and optional AI data packages in `core.deployment.lock.json`. Base upgrades and single-Core upgrades run independently after compatibility and migration preflight, preserving existing business data, grants, and historical receipts across upgrades and rollbacks.
+- **Strictly Opt-In AI**: A Core can ship with zero AI tools and run full business UIs and APIs normally. When AI is enabled, every tool call is enforced by current identity, tenant grant, member assignment, AI policy, and human approval; `unknown` outcomes reconcile strictly by original operation key and receipt—never auto-retrying blindly.
 
-| 装配组合 | 实际表现 | 对应示例宿主 |
+| Assembly Mode | Runtime Behavior | Reference Host |
 | --- | --- | --- |
-| **无 Core（纯底座）** | 独立启动登录，完整使用租户/组织/角色/安全/订阅/字典编号/集成/消息/Core 管理，首页显示无 Core 引导空态 | [platform-api](apps/platform-api/README.md) + [platform-admin](apps/platform-admin/README.md) |
-| **单 Core** | 仅加载所选单个 Core 及其数据迁移与页面，不携带其他行业代码 | [example-tickets-api](apps/example-tickets-api/README.md) / [rental-api](apps/rental-api/README.md) |
-| **多 Core 并存** | 同部署、同租户并行运行多个 Core，共享公共会话，各自权限、导航、数据与前端缓存严格隔离 | [独立 Rental 的双 Core 示例](https://github.com/JinPen-G/Zelo-rental-core#rental-与工单双-core-示例) |
-| **停用与重开** | 停用单个 Core 时阻止新业务写入，保留既有数据、配置与历史收据，并允许在途收尾；重开后按当前权限恢复 | 内置标准 Core 生命周期 |
+| **Zero-Core (Base Only)** | Standalone login with full tenant/org/role/security/subscription/dictionary/integration/messaging/Core management; displays a clean zero-Core onboarding state | [platform-api](apps/platform-api/README.md) + [platform-admin](apps/platform-admin/README.md) |
+| **Single Core** | Loads only the chosen Core with its own SQL migrations and UI routes, carrying zero unrelated industry code | [example-tickets-api](apps/example-tickets-api/README.md) / [rental-api](apps/rental-api/README.md) |
+| **Multi-Core Coexistence** | Runs multiple Cores side by side in one deployment and tenant with shared auth and strict permission, route, data, and cache isolation | [Dual-Core example in the Rental repository](https://github.com/JinPen-G/Zelo-rental-core/blob/main/README.en.md#rental-and-tickets-example) |
+| **Disable & Re-enable** | Disabling a Core blocks new writes while preserving existing data, settings, receipts, and in-flight completion; re-enabling restores access under current grants | Built-in Core lifecycle |
 
 ---
 
-## 五步接入自己的业务 Core
+## Integrate Your Business Core in 5 Steps
 
-开发新业务无需改动底座源码，沿 [五步快速接入手册](packages/core-contracts/README.md#五步快速接入) 即可完成接入（亦可直接将 [Agent 任务模板](packages/core-contracts/README.md#交给开发agent的任务模板) 与你的业务需求一起交给 AI 编程助手）：
+You can build and attach a new domain Core without modifying base source code. Follow the [5-Step Integration Guide](packages/core-contracts/README.md#五步快速接入) (or hand the [Agent Task Template](packages/core-contracts/README.md#交给开发agent的任务模板) plus your domain requirements to your coding agent):
 
-1. **定义清单与数据迁移**：参考 [example-tickets-core](packages/example-tickets-core/README.md)，声明 Core ID、版本、兼容范围、权限码、入口及独立 SQL 迁移。
-2. **编写领域服务与同源 HTTP / OpenAPI**：复用底座公共身份、授权与事务范围，由同一 Schema 生成接口校验与 OpenAPI 文档；AI 工具按需省略或提供。
-3. **声明后台页面与主操作**：从 `@rental-os/platform-admin/core` 复用 `CorePage`、`useCoreForm`、`CoreList`、`useCoreRequest`，自动继承侧栏、面包屑、主题、表单校验、未保存提醒与缓存隔离（见 [页面接入指南](packages/platform-admin/src/core/README.md)）。
-4. **构建并校验标准 Core 包**：生成包含 `core.manifest.json`、编译入口、`openapi.json`、`CORE_GUIDE.md`、`README.md`、`LICENSE` 与原始 SQL 迁移的标准 `.tgz` 包，用 `check.js` 核验零违规。
-5. **在宿主装配并逐级授权**：将标准包与部署锁交给宿主，应用迁移、登记 Core 权限，最后由 SaaS 管理员开通租户、租户管理员分配成员即可使用。
+1. **Declare Manifest & Migrations**: Following [example-tickets-core](packages/example-tickets-core/README.md), declare your Core ID, version, compatibility range, permission codes, entrypoints, and standalone SQL migrations.
+2. **Implement Domain Services & Single-Source HTTP / OpenAPI**: Reuse base auth, authorization, and transaction scopes, deriving runtime validation and OpenAPI specs from the same schema. AI tools are entirely optional.
+3. **Contribute Admin Pages & Primary Actions**: Reuse `CorePage`, `useCoreForm`, `CoreList`, and `useCoreRequest` from `@rental-os/platform-admin/core` to inherit sidebar navigation, breadcrumbs, theming, validation, unsaved-change guards, and cache isolation (see [Core Page Guide](packages/platform-admin/src/core/README.md)).
+4. **Build & Verify a Standard Core Package**: Produce a standard `.tgz` package containing `core.manifest.json`, compiled entrypoints, `openapi.json`, `CORE_GUIDE.md`, `README.md`, `LICENSE`, and raw SQL migrations, then validate zero violations with `check.js`.
+5. **Assemble in Host & Grant Access**: Install the verified package and lockfile in a host, apply migrations, register Core permissions, grant the Core to tenants as a SaaS admin, and assign members as a tenant admin.
 
-### 开发者与 Agent 常用 CLI
+### Essential Developer & Agent CLIs
 
 ```bash
 npm run build -w @rental-os/core-contracts
 
-# 1. 统一能力索引：按关键词 / 类型 / 归属查询底座已有的组件、页面、API 与公共导出
+# 1. Unified Capability Index: query existing base components, pages, APIs, and exports
 node packages/core-contracts/dist/capabilities.js --query SaveButton --json
-node packages/core-contracts/dist/capabilities.js --query 工单 --kind page --json
+node packages/core-contracts/dist/capabilities.js --query ticket --kind page --json
 
-# 2. 标准 Core 包校验：核验清单、路径、OpenAPI、许可与宿主版本兼容
-node packages/core-contracts/dist/check.js <已解包Core目录> --host <宿主版本JSON> --json
+# 2. Standard Core Package Verifier: validate manifest, paths, OpenAPI, license & host compatibility
+node packages/core-contracts/dist/check.js <unpacked-core-dir> --host <host-version-json> --json
 
-# 3. 一键导出纯净零 Core 底座源码包（不含任何业务 Core，附独立锁文件与打包脚本）
-npm run export:platform -- --repo . --repository https://github.com/JinPen-G/Nativark --commit <完整SHA> --out zelo-platform.tgz
+# 3. Export a clean zero-Core base source tarball (no business Cores; includes standalone lockfile & pack scripts)
+npm run export:platform -- --repo . --repository https://github.com/JinPen-G/Nativark --commit <full-sha> --out zelo-platform.tgz
 ```
 
-> **公开 Core 在线发现与分发**：将你的独立业务 Core 仓库在 GitHub 设为公开并添加 Topic **`zelo-core`**，在 Release 中附上标准 `.tgz` 资产后，任何 Zelo 底座均可在 SaaS 后台 **Core 包管理（`/platform/core-packages`）** 中在线发现、核对兼容与 SHA-256 摘要并准备安装。[包管理接入说明](packages/platform-core-host/README.md#core-包管理接入) · [后台操作说明](packages/platform-admin/src/features/core-packages/README.md)
+> **Online Core Discovery & Distribution**: Make your standalone Core repository public on GitHub, add the topic **`zelo-core`**, and attach your standard `.tgz` artifact to a GitHub Release. Any Zelo base can then discover it online in **Core Packages (`/platform/core-packages`)**, verify compatibility and SHA-256 digests, and stage installation. See [Core Package Host Integration](packages/platform-core-host/README.md#core-包管理接入) · [Admin Package Console](packages/platform-admin/src/features/core-packages/README.md).
 
 ---
 
-## 共建 Core 业务包生态与商业扩展
+## Build the Core Ecosystem & Monetize Extensions
 
-Zelo 开源公共底座的核心愿景，是不再让不同行业的研发团队反复重造身份认证、多租户、组织权限、订阅计费与公共管理后台。**我们诚挚欢迎来自各个垂直行业的开发者、独立团队与软件服务商加入进来，基于 Zelo 底座一起开发并开源更多行业 Core 业务包**（如 CRM、ERP、WMS、TMS、工单、预约、教培、医疗、设备运维、门店连锁等），共同扩大开源 SaaS 业务生态。
+Zelo exists so engineering teams across industries no longer have to rebuild auth, multi-tenancy, RBAC, subscriptions, and admin consoles from scratch. **We warmly invite vertical developers, indie teams, and ISVs to build and open-source more industry Core packages on Zelo**—from CRM, ERP, WMS, TMS, and ticketing to scheduling, education, healthcare, asset maintenance, and multi-store retail—to grow a thriving open SaaS ecosystem together.
 
-### 为什么适合在 Zelo 上打造自己的业务包
+### Why Build Your Business Core on Zelo
 
-- **架构零耦合，自主演进**：每个 Core 独立维护自己的代码仓库、数据库迁移、后台页面与发版节奏，不依赖也不受限于 Zelo 底座升级周期。
-- **开箱即获企业级底座**：无需自建多租户、组织权限树、订阅控制、凭据加密、消息集成及可选受控 AI Native / MCP 能力，把精力 100% 投入在行业领域模型与业务闭环。
-- **原生在线发现与分发**：公开业务包仓库只需在 GitHub 添加 **`zelo-core`** Topic 并随 Release 发布标准 `.tgz` 产物，即可直接进入全球 Zelo 底座后台的 Core 在线发现列表。
+- **Zero Coupling, Independent Cadence**: Every Core owns its own repository, SQL migrations, admin UI pages, and release schedule without being tied to Zelo base releases.
+- **Enterprise Readiness Out of the Box**: Inherit multi-tenancy, org RBAC trees, subscription enforcement, encrypted credentials, messaging primitives, and optional governed AI Native / MCP—so you focus 100% on domain logic.
+- **Built-in Discovery & Distribution**: Tag a public GitHub Core repository with **`zelo-core`** and attach a standard `.tgz` release asset to make it discoverable directly inside `/platform/core-packages` on any Zelo deployment.
 
-### 开放的商业化与扩展功能售卖
+### Open-Friendly Commercialization & Paid Extensions
 
-Zelo 公共底座采用宽松的 **[MIT License](LICENSE)**，**开发者对自己构建的业务 Core 拥有完全自主的许可协议与商业模式决定权**。我们鼓励开源共建，同时也完全支持并乐见开发者围绕自己的 Core 实现可持续的商业变现：
+Because the Zelo base is released under the permissive **[MIT License](LICENSE)**, **you keep full ownership over your Core's license and business model**. We welcome open-source collaboration and equally support sustainable developer monetization:
 
-- **开源核心 + 售卖扩展功能（Open Core）**：开源基础版 Core 业务包以降低用户试用门槛、扩大行业影响力，同时自主售卖自有业务包的**高级扩展模块、行业增值插件、专属多端客户端（如小程序/App/门户）、深度第三方连接器（财务/ERP/硬件 IoT）或行业 AI 工作流扩展包**。
-- **独立商业 Core 发行**：直接基于 Zelo 底座构建闭源或商业授权的行业 Core，以按租户授权、SaaS 订阅或企业私有化交付形式对外销售。
-- **配套实施与托管服务**：围绕你维护的开源或商业 Core，面向企业客户提供私有化部署、二开定制、数据迁移与企业级 SLA 运维支持。
+- **Open Core + Paid Extensions**: Open-source your base vertical Core to grow community adoption, while selling **paid extension modules, vertical add-ons, branded client apps (web portals / Mini Programs / mobile), deep ERP/accounting/IoT connectors, or specialized AI workflow packs** on top of your own Core.
+- **Standalone Commercial Cores**: Build and distribute proprietary or commercially licensed vertical Cores through per-tenant licensing, SaaS subscriptions, or private on-prem delivery.
+- **Implementation & Managed Services**: Offer private deployment, custom integration, data migration, and enterprise SLA support around the Cores you maintain.
 
-> 提示：只要遵守 MIT 许可证的版权声明保留要求与 Zelo 标准 Core 隔离规范，你可以自由为自己的 Core 及商业扩展模块设定许可协议、授权校验与定价体系。完成首个开源或 Open-Core 业务包后，欢迎打上 `zelo-core` Topic 并通过 Issue / Discussion 告知社区，让更多用户发现你的作品。
-
----
-
-## 内置业务 Core 示例
-
-本仓库包含公共底座、工单示例和 Rental 兼容源码。Rental 与工单的组合宿主在独立 Rental 仓维护：
-
-### 1. Example Tickets Core（轻量教学示例）
-- **定位**：最小化非租赁业务 Core 样板，仅按租户范围隔离，不引入门店、库存、资金或 AI 依赖。
-- **演示能力**：工单创建 → 分派 → 开始处理 → 关闭，完整展示 3 张独立业务表迁移、幂等与原操作收据、服务端分页搜索、四页后台声明及停用重开边界。
-- **入口**：[Core 源码](packages/example-tickets-core/README.md) · [单工单 API 宿主](apps/example-tickets-api/README.md) · [单工单 Web 宿主](apps/example-tickets-admin/README.md)
-
-### 2. Rental Core（官方业务包）
-- **定位**：Zelo 首个完整行业业务 Core，作为复杂业务接入底座的全景参考实现——**它是装在底座上的一个业务包，而非底座本体**。
-- **演示能力**：覆盖摄影设备、露营装备、车辆载具与工程设备四品类租赁全链路（商品/资产/库存/计价策略/报价/订单/交付/归还/检查/结算/企业授信），支持无 AI 与选装 AI Native 两种组合，并附带租户官网、企业客户门户、客户与员工微信小程序四端消费示例。
-- **独立仓库与发行**：同步开源于 **[JinPen-G/Zelo-rental-core](https://github.com/JinPen-G/Zelo-rental-core)**，标准发行包可从 [GitHub Releases](https://github.com/JinPen-G/Zelo-rental-core/releases) 获取，直接通过底座的 GitHub Topic（`zelo-core`）发现接入。
-- **仓内入口**：[Rental Core 包导读](packages/rental-core/README.md) · [Rental 独立 API 宿主](apps/rental-api/README.md) · [Rental 独立 Web 宿主](apps/rental-admin/README.md)
-
-### 3. Multi-Core 组合宿主（双 Core 并存示范）
-- **定位**：同时装配 **Rental Core** 与 **Example Tickets Core**，在同一套公共身份、数据库与管理后台中演示多 Core 独立授权、独立路由与缓存隔离。
-- **普通开发**：按[独立 Rental 开发说明](https://github.com/JinPen-G/Zelo-rental-core#rental-与工单双-core-示例)固定两仓完整提交，选 `--profile multi-core`。在生成的工作区使用 `build:example-multi-core-api` 与 `build:example-multi-core-admin`，两端共用同一份含 Rental 和工单的固定部署锁。
-- **历史构建、打包和回归**：旧单仓双 Core（含 AI）只在[完整历史检出 `46db0945…`](https://github.com/JinPen-G/Zelo/tree/46db0945dee92ac916f7265e95948943fc8b641d)沿原锁构建。旧打包使用 `npm run package:rental-host -- --host example-multi-core` 及该版要求的材料；`tests/rental-host-package.test.cjs`、`tests/admin-branding.test.cjs` 和 `tests/admin-copilot-style-boundary.test.cjs` 也在该检出运行。现行 `multi-core` 范围提供普通开发源码，其回执不能用于旧双 Core 打包或部署。
+> Note: As long as you retain Zelo's MIT copyright notice and follow standard Core isolation contracts, you are free to define your own license terms, entitlement checks, and pricing for your Cores and commercial extensions. Once you publish an open-source or open-core package, tag it with `zelo-core` and share it via GitHub Issues or Discussions so the community can discover it.
 
 ---
 
-## 本地运行
+## Built-in Business Core Examples
 
-你可以直接运行**纯净零 Core 底座**，也可以按需运行**单工单 / Rental / 多 Core 宿主**或**完整组合开发入口**。
+This repository contains the platform base, the Tickets example, and Rental compatibility sources. The standalone Rental repository maintains the Rental and Tickets composite host:
 
-### 1. 环境要求
+### 1. Example Tickets Core (Lightweight Starter)
+- **Purpose**: Minimal non-rental business Core template scoped strictly by tenant—no stores, inventory, payments, or AI dependencies.
+- **Demonstrates**: Ticket create → assign → start → close across 3 isolated tables, idempotency & original operation receipts, server-side search/pagination, 4 admin pages, and disable/re-enable boundaries.
+- **Entrypoints**: [Core Source](packages/example-tickets-core/README.md) · [Tickets API Host](apps/example-tickets-api/README.md) · [Tickets Admin Host](apps/example-tickets-admin/README.md)
 
-| 工具 | 要求 | 说明 |
+### 2. Rental Core (Official Production Business Core)
+- **Purpose**: Zelo's first full-featured vertical Core, serving as a comprehensive architectural reference for complex domains—**it is a pluggable business package on top of the base, not the base itself**.
+- **Demonstrates**: End-to-end rental workflows across 4 categories (photography gear, camping equipment, vehicles, construction machinery)—catalog, assets, inventory, pricing strategies, quotes, orders, dispatch, return, inspection, settlement, and enterprise credit—supporting both non-AI and optional AI Native assemblies, paired with 4 client apps (tenant storefront, enterprise portal, customer & staff WeChat Mini Programs).
+- **Standalone Repository & Releases**: Also open-sourced at **[JinPen-G/Zelo-rental-core](https://github.com/JinPen-G/Zelo-rental-core)** with standard release packages on [GitHub Releases](https://github.com/JinPen-G/Zelo-rental-core/releases) discoverable directly via the base's GitHub Topic (`zelo-core`) workflow.
+- **In-Repo Entrypoints**: [Rental Core Guide](packages/rental-core/README.md) · [Rental API Host](apps/rental-api/README.md) · [Rental Admin Host](apps/rental-admin/README.md)
+
+### 3. Multi-Core Composite Host (Dual-Core Reference)
+- **Purpose**: Mounts both **Rental Core** and **Example Tickets Core** together on a single shared identity layer, database, and admin shell to demonstrate independent grants, routing, and cache isolation.
+- **Ordinary development**: Follow the [standalone Rental guide](https://github.com/JinPen-G/Zelo-rental-core/blob/main/README.en.md#rental-and-tickets-example), pin both full commit SHAs, and select `--profile multi-core`. In the resulting workspace, use `build:example-multi-core-api` and `build:example-multi-core-admin` with the same deployment lock for Rental and Tickets.
+- **Historical builds, packaging, and tests**: Use the [complete pinned checkout at `46db0945…`](https://github.com/JinPen-G/Zelo/tree/46db0945dee92ac916f7265e95948943fc8b641d) and its lock for the legacy dual-Core host, including AI. Use `npm run package:rental-host -- --host example-multi-core` with that revision's required inputs. Run `tests/rental-host-package.test.cjs`, `tests/admin-branding.test.cjs`, and `tests/admin-copilot-style-boundary.test.cjs` in the same checkout. The current `multi-core` profile provides ordinary development sources; its receipt does not qualify as a legacy package or deployment input.
+
+---
+
+## Quick Start
+
+You can run the **pure zero-Core base**, any **standalone single-Core / multi-Core host**, or the **legacy composite development entry**.
+
+### 1. Prerequisites
+
+| Tool | Requirement | Notes |
 | --- | --- | --- |
-| **Node.js** | 推荐 Node 22 LTS（`>= 22.12`） | 满足当前 Vite 8 与 TypeScript 工具链要求 |
-| **npm** | 支持根 `package-lock.json` v3 | 随 Node 22 LTS 自带 |
-| **MySQL** | MySQL 8.4（或通过 Docker Compose 拉起） | 平台与业务 Core 默认持久化数据库 |
-| **Docker Compose** | 可选 | 用于本地快速启动 MySQL 与 Redis |
+| **Node.js** | Node 22 LTS recommended (`>= 22.12`) | Required by Vite 8 and TypeScript toolchain |
+| **npm** | Lockfile v3 support | Bundled with Node 22 LTS |
+| **MySQL** | MySQL 8.4 (local or via Docker Compose) | Default relational database for base and Cores |
+| **Docker Compose** | Optional | Convenient for local MySQL and Redis startup |
 
-> 仅在二次开发 Rental 微信小程序示例端时，才需要额外安装微信开发者工具。
+> WeChat DevTools is only needed if you develop the Rental WeChat Mini Program examples.
 
-克隆仓库并安装锁定依赖：
+Clone the repository and install locked dependencies:
 
 ```bash
 git clone https://github.com/JinPen-G/Zelo.git
@@ -198,22 +221,22 @@ cd Zelo
 npm ci
 ```
 
-### 2. 配置独立环境
+### 2. Environment Configuration
 
-- **独立底座 / 独立 Core 宿主**（`platform-api`、`example-tickets-api`、`rental-api`）：显式从当前进程环境变量读取配置，不自动隐式读取 `.env`（PowerShell 使用 `$env:VAR = 'value'`，Bash 使用 `export VAR='value'`）。最少需要：
-  - `DATABASE_URL`：独立开发 MySQL 连接串
-  - `AUTH_TOKEN_SECRET`：自行生成的随机认证密钥（生产须至少 32 字节）
-  - `SEED_PLATFORM_PASSWORD`：首次初始化 `platform / admin` 账号的口令（至少 8 位且含字母和数字）
-  - 可选：`API_PORT`（默认 `3000`）、`CORE_PACKAGE_STORAGE_ROOT`（Core 包管理绝对存储根目录）
-- **完整组合开发入口与 Docker Compose**：复制根目录模板并填写自己的本地口令与密钥（PowerShell 使用 `Copy-Item .env.example .env`）：
+- **Standalone Base / Standalone Core Hosts** (`platform-api`, `example-tickets-api`, `rental-api`): Read configuration explicitly from current process environment variables rather than implicitly loading `.env` (use `$env:VAR = 'value'` in PowerShell or `export VAR='value'` in Bash). Minimum required variables:
+  - `DATABASE_URL`: Isolated development MySQL connection string
+  - `AUTH_TOKEN_SECRET`: Self-generated random auth secret (at least 32 bytes in production)
+  - `SEED_PLATFORM_PASSWORD`: Initial password for the `platform / admin` SaaS account (at least 8 characters with letters and digits)
+  - Optional: `API_PORT` (default `3000`), `CORE_PACKAGE_STORAGE_ROOT` (absolute root directory for Core package storage)
+- **Full Composite Dev Entry & Docker Compose**: Copy the root template and fill in your local credentials (use `Copy-Item .env.example .env` in PowerShell):
   ```bash
   cp .env.example .env
   ```
-  统一环境加载器位于 [config/environment.cjs](config/environment.cjs)：进程变量优先级最高，支持通过 `RENTAL_ENV_FILE` 指定外部配置文件（Docker Compose 对应使用 `--env-file`）。[.env.example](.env.example) 默认将 `RENTAL_DEPLOYMENT_PROFILE` 设为 `personal-demo`（保留个人演示辅助项），常规开发可设 `development`，生产部署须同时设置 `NODE_ENV=production` 与 `RENTAL_DEPLOYMENT_PROFILE=production`。Web 端只接收显式声明的公开变量（如管理后台 `VITE_API_BASE_URL=/api`、租户网站同源留空 `VITE_API_BASE`），变动后需重新构建前端。
+  The unified environment loader lives at [config/environment.cjs](config/environment.cjs): process variables take highest precedence, and `RENTAL_ENV_FILE` can point to an external env file (Docker Compose uses `--env-file`). [.env.example](.env.example) sets `RENTAL_DEPLOYMENT_PROFILE=personal-demo` by default (keeping demo helpers); use `development` for regular development, and set both `NODE_ENV=production` and `RENTAL_DEPLOYMENT_PROFILE=production` for production. Web apps consume only explicitly declared public variables (e.g., `VITE_API_BASE_URL=/api` for admin, empty `VITE_API_BASE` for same-origin storefront) and must be rebuilt after changes.
 
-### 3. 方式 A：从仓库根目录启动零 Core 公共底座
+### 3. Option A: Start the Zero-Core Platform from the Repository Root
 
-先在本地 MySQL 准备一个独占空库及有权管理该库的开发账号。当前终端设置 `ZELO_PLATFORM_DATABASE_URL`，格式为 `mysql://<账号>:<口令>@127.0.0.1:<端口>/zelo_platform_<名称>`，并设置 `AUTH_TOKEN_SECRET` 和 `SEED_PLATFORM_PASSWORD`。公共根入口从进程取值，向公共宿主传入 `DATABASE_URL`。库名须匹配 `zelo_platform_*`，连接串可附单一 `connection_limit`。根目录 `.env` 用于方式 B。
+Prepare an empty, dedicated local MySQL database and a development account with access to it. In the current shell, set `ZELO_PLATFORM_DATABASE_URL` to `mysql://<user>:<password>@127.0.0.1:<port>/zelo_platform_<name>`, and set `AUTH_TOKEN_SECRET` and `SEED_PLATFORM_PASSWORD`. The public root commands pass that URL to the platform host as `DATABASE_URL`. The database name must match `zelo_platform_*` and the URL may include one `connection_limit` option. The root `.env` serves Option B.
 
 ```bash
 npm run db:generate
@@ -223,14 +246,14 @@ npm run db:initialize
 npm run dev
 ```
 
-`db:generate` 生成本树的 `apps/platform-api/generated/client`，已有同 schema 的 Client 会复用。`db:migrate:deploy` 仅接受空库或原迁移收据与实际表结构一致的公共库。`db:initialize` 显式创建 `platform / admin` 初始账号。日常运行 `npm run dev`、`start-dev.cmd` 或 `./start-dev.ps1`，使用已迁移的公共库。Windows 启动器检查实际 API、前端模块和代理，日志在 `output/runtime/zelo-platform-dev`。公共库由开发者先准备。显式 `-ApplyMigrations` 在本树公共 API 停止后执行相同的迁移预检。
+`db:generate` prepares `apps/platform-api/generated/client` in the current checkout and reuses a matching Client. `db:migrate:deploy` accepts an empty database or one whose migration receipts and physical tables match the public schema. `db:initialize` explicitly creates the initial `platform / admin` account. For ordinary startup, use `npm run dev`, `start-dev.cmd`, or `./start-dev.ps1` with the migrated database. The Windows launcher checks the API, frontend modules, and proxy. Logs go to `output/runtime/zelo-platform-dev`. Prepare the database separately. With the platform API stopped, `-ApplyMigrations` runs the same guarded migration command.
 
-公共后台默认 `http://127.0.0.1:5176`，公共 API 默认 3091。可分别用 `ZELO_PLATFORM_WEB_PORT`、`ZELO_PLATFORM_API_PORT` 指定端口。登录完成首次改密后，可管理租户、组织、角色、订阅、集成及 `/platform/core-packages`。独立发行和直接 workspace 入口另用各自配置。[独立公共 API](apps/platform-api/README.md#默认零-core-的五步) · [无 Core 公共后台](apps/platform-admin/README.md#本地使用)
+The public admin listens on `http://127.0.0.1:5176` and the API on port 3091 by default. Set `ZELO_PLATFORM_WEB_PORT` and `ZELO_PLATFORM_API_PORT` to override them. After the initial password change, you can manage tenants, organizations, roles, subscriptions, integrations, and `/platform/core-packages`. The standalone release and direct workspace commands have their own settings. [Standalone Platform API](apps/platform-api/README.md#默认零-core-的五步) · [Zero-Core Admin](apps/platform-admin/README.md#本地使用)
 
-### 4. 方式 B：运行含业务 Core 的宿主或完整组合开发入口
+### 4. Option B: Run a Core Host or the Full Composite Dev Entry
 
-- **按标准包运行宿主**：参考 [单工单五步](apps/example-tickets-api/README.md#单工单的五步)或[独立 Rental 宿主](https://github.com/JinPen-G/Zelo-rental-core/blob/main/workspace/apps/rental-api/README.md)。标准 Rental 组合使用独立仓的 API、后台、四端、Web 会话和领域包；配套构建须指定两仓完整提交。
-- **复查原完整组合（底座 + Rental + AI）**：使用原发布的 API/Web 镜像，或从该版本记录的原 Git 提交重建 `build:legacy`；保留它自己的配置、迁移和数据库账。以下原开发命令应在仍含完整旧组合的固定检出及专用开发库运行：
+- **Standalone hosts**: See the [Tickets guide](apps/example-tickets-api/README.md#单工单的五步) or [the independent Rental host](https://github.com/JinPen-G/Zelo-rental-core/blob/main/workspace/apps/rental-api/README.md). The standalone Rental API, admin, four client apps, Web session package, and domain package come from the Rental repository. Pin both repositories by full commit SHA.
+- **Reproduce a legacy composite release**: Use its original API/Web images or rebuild with `build:legacy` at its recorded Git commit, preserving that version's configuration and migration receipts. Run the commands below only in a pinned checkout that still contains the complete legacy stack, against an isolated development database:
 
 ```bash
 docker compose up -d mysql
@@ -240,7 +263,7 @@ npm run db:legacy:migrate:deploy
 npm run db:legacy:seed
 ```
 
-随后在当前终端显式指定原组合生成的 Prisma Client（PowerShell 示例，Bash 用 `export`），再启动 API 与管理后台：
+Then point the current shell explicitly to the composite Prisma Client (PowerShell shown below; use `export` in Bash) and start API + Admin:
 
 ```powershell
 $env:RENTAL_PRISMA_CLIENT = (Resolve-Path 'node_modules/.prisma/client/index.d.ts').Path
@@ -248,174 +271,173 @@ $env:RENTAL_PRISMA_LEGACY = '1'
 npm run dev:legacy
 ```
 
-Windows 使用 `./start-dev.ps1 -Legacy` 或 `start-dev.cmd -Legacy`，日志在 `output/runtime/rental-os-dev`。复用原本地数据库时加 `-SkipDocker`。两种启动模式均复用锁定依赖，默认跳过迁移和初始化。`-SkipDatabaseChecks` 仅跳过启动器的 schema 与端口检查，公共 API 仍核对迁移账。`-ApplyMigrations` 不能与之同用，且须先关闭对应本树 API。
+On Windows, use `./start-dev.ps1 -Legacy` or `start-dev.cmd -Legacy`. Logs go to `output/runtime/rental-os-dev`. Add `-SkipDocker` to use an existing local database. Both profiles reuse locked dependencies and skip migrations and initialization by default. `-SkipDatabaseChecks` skips the launcher's schema and port checks. The public API still checks the migration receipts. Stop the selected API before using `-ApplyMigrations` and leave `-SkipDatabaseChecks` off.
 
-| 入口 | 默认地址 | 说明 |
+| Entrypoint | Default URL | Notes |
 | --- | --- | --- |
-| **零 Core 公共后台**（方式 A） | `http://127.0.0.1:5176` | 纯底座管理后台 |
-| **组合管理后台**（方式 B） | `http://127.0.0.1:5175` | 底座 + 内置 Rental Core 组合后台 |
-| **公共 API 健康检查** | `http://127.0.0.1:3091/api/health` | `nativark-platform-api` |
-| **旧组合 API 健康检查** | `http://127.0.0.1:3000/api/health` | `rental-os-api` |
+| **Zero-Core Admin Console** (Option A) | `http://127.0.0.1:5176` | Pure platform base console |
+| **Composite Admin Console** (Option B) | `http://127.0.0.1:5175` | Base + built-in Rental Core console |
+| **Platform API health** | `http://127.0.0.1:3091/api/health` | `nativark-platform-api` |
+| **Legacy API health** | `http://127.0.0.1:3000/api/health` | `rental-os-api` |
 
-> 使用独立公共宿主或独立 Rental 宿主时，请清除 `RENTAL_PRISMA_LEGACY` 并指向各自宿主的 `generated/client/index.d.ts`（详参 [Client 选择规则](scripts/build-selected-prisma.cjs)）。
+> When switching back to standalone `platform-api` or `rental-api`, unset `RENTAL_PRISMA_LEGACY` and point `RENTAL_PRISMA_CLIENT` to that host's `generated/client/index.d.ts` (see [Client Selection Script](scripts/build-selected-prisma.cjs)).
 
-[历史镜像工作流](.github/workflows/nativark-release.yml)仅手动复建 [完整固定旧版](https://github.com/JinPen-G/Zelo/tree/46db0945dee92ac916f7265e95948943fc8b641d)。复建使用旧版自己的 Client、Dockerfile 和迁移材料；其 CI 不会放行已安装的定时更新器。现有旧库保留原迁移账，后续切换按[原部署入口](scripts/ops/deployment/README.md)核定。
+The [legacy image workflow](.github/workflows/nativark-release.yml) runs manually against the [complete pinned legacy checkout](https://github.com/JinPen-G/Zelo/tree/46db0945dee92ac916f7265e95948943fc8b641d). It uses that version's Client, Dockerfile and migrations. A manual rebuild does not authorize the installed updater. Continue to use the original migration receipts and the [deployment procedure](scripts/ops/deployment/README.md) for existing databases.
 
-固定提交的离线构建可用以下命令核验，不需要旧 Rental 路径、根测试目录或数据库。要核旧单仓分发，在同一分发命令上改用 `--legacy-single-repo --commit <原固定提交>`。已发行旧包应优先从原资产按记录的 SHA-256 核对。
+These offline checks use fixed commits without the old Rental paths, root test directory, or a database. For a historical single-repository distribution check, use `--legacy-single-repo --commit <recorded commit>` with the distribution verifier. For a published archive, prefer the original asset and its recorded SHA-256.
 
 ```sh
-node scripts/check-rental-package-build.cjs --platform-only --commit <Zelo完整SHA>
-node scripts/verify-rental-distribution.cjs --commit <Zelo完整SHA> --core-repo <独立Rental仓> --core-commit <Rental完整SHA>
+node scripts/check-rental-package-build.cjs --platform-only --commit <Zelo-full-SHA>
+node scripts/verify-rental-distribution.cjs --commit <Zelo-full-SHA> --core-repo <Rental-repository> --core-commit <Rental-full-SHA>
 ```
 
 ---
 
-## 项目组成
+## Repository Structure
 
-主工程使用 **npm workspaces**，技术栈为 **TypeScript 5.6、NestJS 10、React 19、Vite 8、Tailwind CSS 4、UIArc、Prisma 5.22、MySQL 8.4**（依赖版本以 [package.json](package.json) 与 [package-lock.json](package-lock.json) 为准）。
+This monorepo uses **npm workspaces** with **TypeScript 5.6, NestJS 10, React 19, Vite 8, Tailwind CSS 4, UIArc, Prisma 5.22, and MySQL 8.4** (authoritative versions in [package.json](package.json) and [package-lock.json](package-lock.json)).
 
 ```text
 Zelo/
 ├── apps/
-│   ├── platform-api/                 # [纯底座] 零 Core 独立公共 API 宿主（41 模型 / 14 迁移）
-│   ├── platform-admin/               # [纯底座] 零 Core 独立公共 Web 后台宿主
-│   ├── example-tickets-api/          # [示例宿主] 底座 + 工单 Core 独立 API
-│   ├── example-tickets-admin/        # [示例宿主] 底座 + 工单 Core 独立后台
-│   ├── rental-api/                   # [官方 Core 宿主] 底座 + Rental 独立 API（可选启用 AI / MCP）
-│   ├── rental-admin/                 # [官方 Core 宿主] 底座 + Rental 独立后台
-│   └── api/ & admin/                 # [兼容组合] 保留原开发入口，底层消费上述拆分单源包
+│   ├── platform-api/                 # [Base] Zero-Core standalone platform API host (41 models / 14 migrations)
+│   ├── platform-admin/               # [Base] Zero-Core standalone platform Web admin host
+│   ├── example-tickets-api/          # [Example] Base + Tickets Core standalone API host
+│   ├── example-tickets-admin/        # [Example] Base + Tickets Core standalone Web host
+│   ├── rental-api/                   # [Official Core] Base + Rental standalone API (optional AI / MCP)
+│   ├── rental-admin/                 # [Official Core] Base + Rental standalone Web host
+│   └── api/ & admin/                 # [Legacy Composite] Composite dev entry consuming split single-source packages
 ├── packages/
-│   ├── core-contracts/               # [底座] Core 清单/兼容/包校验/能力索引 CLI 与底座源码导出
-│   ├── core-host/                    # [底座] Core 注册目录、生命周期与移除预检内核
-│   ├── platform-contracts/           # [底座] 无行业依赖的公共身份、租户、人员与设置契约
-│   ├── platform-server/              # [底座] 公共认证、管理、订阅、工具、消息、集成与文件服务单源
-│   ├── platform-core-host/           # [底座] 公共身份与标准 Core 授权/绑定/包管理宿主适配
-│   ├── platform-admin/               # [底座] 公共后台外壳、设置页与 Core 页面框架（CorePage 等）
-│   ├── ui-arc/ & ui-motiq/ & ui-tablecn/  # [底座 UI] 设计系统、动效与数据表格源库
-│   ├── web-client/                   # [底座前端] 外部 Web 客户端共用会话与请求基础层
-│   ├── ai-native-server/ & ai-native-data/ & ai-native-admin/  # [可选 AI] AI Runtime、数据迁移与控制台
-│   ├── mcp-server/                   # [可选 MCP] 受保护 MCP 传输与 OAuth 授权控制面
-│   ├── example-tickets-core/         # [示例 Core] 轻量工单业务包
-│   ├── rental-core/ & rental-mcp-host/  # [官方 Core] 租赁业务包及显式选装 MCP 适配
-│   └── shared/                       # [兼容出口] 既有各端总出口，转接公共与 Rental 单源契约
+│   ├── core-contracts/               # [Base] Core manifests, compatibility, check CLI, capability CLI & source exporter
+│   ├── core-host/                    # [Base] Core registry, lifecycle & removal preflight engine
+│   ├── platform-contracts/           # [Base] Industry-agnostic identity, tenant, staff & settings contracts
+│   ├── platform-server/              # [Base] Single-source backend for auth, admin, subscriptions, tools, messaging & files
+│   ├── platform-core-host/           # [Base] Host adapter for Core auth, grants, bindings & package management APIs
+│   ├── platform-admin/               # [Base] Admin shell factory, settings/Core pages & Core page primitives (CorePage etc.)
+│   ├── ui-arc/ & ui-motiq/ & ui-tablecn/  # [Base UI] Design system, motion & data-table source libraries
+│   ├── web-client/                   # [Base Frontend] Shared session & HTTP layer for external web clients
+│   ├── ai-native-server/ & ai-native-data/ & ai-native-admin/  # [Optional AI] AI Runtime, migrations & admin UI
+│   ├── mcp-server/                   # [Optional MCP] OAuth-protected MCP transport & consent control plane
+│   ├── example-tickets-core/         # [Example Core] Lightweight ticketing business package
+│   ├── rental-core/ & rental-mcp-host/  # [Official Core] Rental business package & opt-in MCP adapter
+│   └── shared/                       # [Compat Export] Aggregated shared barrel re-exporting platform & Rental contracts
 ├── clients/
-│   └── harness-plugin/               # [可选 MCP 客户端] Harness 标准 MCP 消费插件
-├── config/                           # 统一环境加载与部署校验
-├── scripts/                          # 独立运行包打包、Prisma 选择编译、契约校验与 scripts/ops
-└── tests/                            # 底座、Core 契约、多租户、订阅、MCP 与内置业务回归测试
+│   └── harness-plugin/               # [Optional MCP Client] Standard OAuth MCP consumer plugin for Harness
+├── config/                           # Unified environment loader & deployment checks
+├── scripts/                          # Standalone host packaging, Prisma client build, contract checks & scripts/ops
+└── tests/                            # Regression suites for base, Core contracts, multi-tenancy, subscriptions, MCP & Cores
 ```
 
-### A. 公共底座包与独立宿主
+### A. Platform Base Packages & Standalone Hosts
 
-| 路径 | 职责说明 | 阅读入口 |
+| Path | Responsibility | Guide |
 | --- | --- | --- |
-| `apps/platform-api` | 默认零 Core 的独立公共 API 宿主（初始化、认证、管理、订阅、消息、集成、Core 包管理） | [宿主导读](apps/platform-api/README.md) |
-| `apps/platform-admin` | 默认零 Core 的公共 Web 后台宿主（完整公共外壳、设置与 Core 授权/包管理） | [后台导读](apps/platform-admin/README.md) |
-| `packages/core-contracts` | Core 接入清单、合同、包校验 CLI、能力索引 CLI、底座源码导出与五步接入手册 | [接入手册](packages/core-contracts/README.md) |
-| `packages/core-host` | Core 目录、部署版本、兼容核验与移除依赖汇总内核 | [内核说明](packages/core-host/README.md) |
-| `packages/platform-contracts` | 无行业依赖的公共身份、组织、角色与设置契约 | [契约说明](packages/platform-contracts/README.md) |
-| `packages/platform-server` | 公共认证、管理、订阅、字典编号、集成、文件与消息服务的唯一服务端实现 | [服务端导读](packages/platform-server/README.md) |
-| `packages/platform-core-host` | 公共身份、标准 Core 授权/绑定与 12 个 Core 包管理 HTTP 接口的宿主适配 | [宿主适配](packages/platform-core-host/README.md) |
-| `packages/platform-admin` | 公共后台应用工厂、设置/Core 管理页及面向 Core 开发者的表单/列表/请求框架 | [前端导读](packages/platform-admin/README.md) · [Core 页面开发](packages/platform-admin/src/core/README.md) |
-| `packages/ui-arc` 等 | UIArc、Motiq、Tablecn 组件源码、适配层与原始许可 | [UIArc](packages/ui-arc/README.md) · [Motiq](packages/ui-motiq/README.md) · [Tablecn](packages/ui-tablecn/README.md) |
+| `apps/platform-api` | Zero-Core standalone platform API host (init, auth, admin, subscriptions, messaging, integrations, Core packages) | [Host Guide](apps/platform-api/README.md) |
+| `apps/platform-admin` | Zero-Core platform Web admin host (shared shell, settings, Core grants & package management) | [Admin Guide](apps/platform-admin/README.md) |
+| `packages/core-contracts` | Core manifests, contracts, package check CLI, capability index CLI, source export & 5-step guide | [Integration Guide](packages/core-contracts/README.md) |
+| `packages/core-host` | Core registry, deployment lock compatibility & removal dependency check kernel | [Kernel Guide](packages/core-host/README.md) |
+| `packages/platform-contracts` | Industry-agnostic identity, org, role, and settings contracts | [Contracts Guide](packages/platform-contracts/README.md) |
+| `packages/platform-server` | Single-source server implementation for auth, admin, subscriptions, tools, integrations, files & messaging | [Server Guide](packages/platform-server/README.md) |
+| `packages/platform-core-host` | Host adapter for shared identity, Core grants/bindings, and 12 Core package management endpoints | [Host Adapter](packages/platform-core-host/README.md) |
+| `packages/platform-admin` | Admin app factory, settings/Core pages, and Core page/form/list/request framework | [Frontend Guide](packages/platform-admin/README.md) · [Core Page Dev](packages/platform-admin/src/core/README.md) |
+| `packages/ui-arc` etc. | UIArc, Motiq, and Tablecn component sources, adapters, and upstream licenses | [UIArc](packages/ui-arc/README.md) · [Motiq](packages/ui-motiq/README.md) · [Tablecn](packages/ui-tablecn/README.md) |
 
-### B. 可选 AI Native 与 MCP 扩展包
+### B. Optional AI Native & MCP Extensions
 
-| 路径 | 职责说明 | 阅读入口 |
+| Path | Responsibility | Guide |
 | --- | --- | --- |
-| `packages/ai-native-server` | AI Runtime、任务与恢复、Model Gateway、预算与审批事务的单源实现 | [AI 服务端](packages/ai-native-server/README.md) |
-| `packages/ai-native-data` | 可选 AI 数据模型、迁移字节与物理检查贡献 | [AI 数据包](packages/ai-native-data/README.md) |
-| `packages/ai-native-admin` | AI Native 管理后台页面与控制台组件 | [AI 管理端](packages/ai-native-admin/README.md) |
-| `packages/mcp-server` | 受控 MCP 传输、RFC 9728/8414 元数据与 OAuth 同意控制面 | [MCP Server](packages/mcp-server/README.md) |
-| `clients/harness-plugin` | Harness 宿主通过标准 OAuth 消费受控 MCP 工具的插件 | [Harness 插件](clients/harness-plugin/README.md) |
+| `packages/ai-native-server` | Single-source AI Runtime, task orchestration/recovery, Model Gateway, budget & approval transactions | [AI Server](packages/ai-native-server/README.md) |
+| `packages/ai-native-data` | Optional AI Prisma models, migration bytes & physical check contributions | [AI Data](packages/ai-native-data/README.md) |
+| `packages/ai-native-admin` | AI Native admin console pages and UI components | [AI Admin](packages/ai-native-admin/README.md) |
+| `packages/mcp-server` | Governed MCP transport, RFC 9728/8414 metadata & OAuth consent control plane | [MCP Server](packages/mcp-server/README.md) |
+| `clients/harness-plugin` | Harness client plugin consuming governed MCP tools over standard OAuth | [Harness Plugin](clients/harness-plugin/README.md) |
 
-### C. 内置业务 Core、多端示例与兼容入口
+### C. Built-in Business Cores, Multi-Client Examples & Legacy Entries
 
-| 路径 | 职责说明 | 阅读入口 |
+| Path | Responsibility | Guide |
 | --- | --- | --- |
-| `packages/example-tickets-core` | 轻量工单 Core 示例包（非租赁最小参考） | [工单 Core](packages/example-tickets-core/README.md) · [API](apps/example-tickets-api/README.md) · [Web](apps/example-tickets-admin/README.md) |
-| `packages/rental-core`、`packages/rental-mcp-host` | 官方租赁业务 Core 包及显式选装的 Rental MCP 宿主 | [Rental Core](packages/rental-core/README.md) · [API](apps/rental-api/README.md) · [Web](apps/rental-admin/README.md) · [MCP 宿主](packages/rental-mcp-host/README.md) |
-| 独立 Rental 的 `multi-core` 开发组合 | Rental + 工单双 Core API 和后台 | [独立组合与历史入口](https://github.com/JinPen-G/Zelo-rental-core#rental-与工单双-core-示例) |
-| 独立 Rental 的 `workspace/apps/` | 配套预约网站、企业门户、客户和员工微信小程序；以双仓 `full` 组合构建 | [四端开发与旧验证入口](https://github.com/JinPen-G/Zelo-rental-core/blob/main/README.md#源码开发工作区) |
-| `apps/api`、`apps/admin`、`packages/shared` | 原组合工程兼容入口与共享总出口（底层消费拆分后的单源包） | [API 装配](apps/api/src/app.module.ts) · [Admin 规则](apps/admin/AGENTS.md) · [shared 出口](packages/shared/src/index.ts) |
-| [Zelo-website](https://github.com/JinPen-G/Zelo-website) | 独立维护的 Zelo 官网；底座构建不安装官网依赖 | [官网源码与许可](https://github.com/JinPen-G/Zelo-website) |
+| `packages/example-tickets-core` | Lightweight ticketing Core example (minimal non-rental reference) | [Tickets Core](packages/example-tickets-core/README.md) · [API](apps/example-tickets-api/README.md) · [Web](apps/example-tickets-admin/README.md) |
+| `packages/rental-core`, `packages/rental-mcp-host` | Official rental business Core and opt-in Rental MCP host adapter | [Rental Core](packages/rental-core/README.md) · [API](apps/rental-api/README.md) · [Web](apps/rental-admin/README.md) · [MCP Host](packages/rental-mcp-host/README.md) |
+| Standalone Rental `multi-core` development workspace | Rental and Tickets dual-Core API and admin app | [Setup and historical verification](https://github.com/JinPen-G/Zelo-rental-core/blob/main/README.en.md#rental-and-tickets-example) |
+| `workspace/apps/` in the independent Rental repository | Booking storefront, enterprise portal, and customer/staff WeChat Mini Programs; built in the dual-repository `full` profile | [Client development and historical checks](https://github.com/JinPen-G/Zelo-rental-core/blob/main/README.en.md#preparing-a-standalone-dev-workspace) |
+| `apps/api`, `apps/admin`, `packages/shared` | Legacy composite entrypoints and compatibility barrel consuming the split packages | [API Module](apps/api/src/app.module.ts) · [Admin Rules](apps/admin/AGENTS.md) · [Shared Index](packages/shared/src/index.ts) |
+| [Zelo-website](https://github.com/JinPen-G/Zelo-website) | The separately maintained Zelo website; the base build does not install website dependencies | [Website source and notices](https://github.com/JinPen-G/Zelo-website) |
 
-> **关于兼容命名**：品牌、主仓库与独立配套仓库已统一为 Zelo 命名体系（主仓 `JinPen-G/Zelo`、官方 Rental Core 仓 `JinPen-G/Zelo-rental-core`、官网仓 `JinPen-G/Zelo-website`），GitHub Core 发现标签已切换为 **`zelo-core`**。官方底座的新发行继续用 `https://github.com/JinPen-G/Nativark` 作为稳定的 `source.repository`（clone 与浏览源码使用 Zelo 地址），历史包、部署锁和来源收据保持原值；不得修改旧包或手改锁把来源替换为新名称，具体导出和旧安装更新步骤见[更名后的稳定发行来源](packages/core-contracts/README.md#stable-release-source)。为保障既有迁移、构建及客户端兼容，workspace 包名（`@rental-os/*`）及部分环境键（`RENTAL_*`）仍保留原前缀，不影响零 Core 底座的独立导出与运行。
+> **Compatibility Naming Note**: The brand, main repository, and standalone companion repositories now follow the **Zelo** naming (`JinPen-G/Zelo`, official Rental Core `JinPen-G/Zelo-rental-core`, and marketing site `JinPen-G/Zelo-website`), and the GitHub Core discovery topic is now **`zelo-core`**. Future official base releases retain `https://github.com/JinPen-G/Nativark` as their stable `source.repository` (use the Zelo URL to clone and browse the source), while historical packages, deployment locks, and source receipts remain immutable—do not rewrite old packages or hand-edit locks; see [Stable Release Source After Renaming](packages/core-contracts/README.md#stable-release-source) for export and update steps. Workspace package scopes (`@rental-os/*`) and certain environment prefixes (`RENTAL_*`) remain for migration and client compatibility without affecting zero-Core export or standalone execution.
 
 ---
 
-## 开发导读
+## Developer Guide
 
-| 你的目标 | 推荐起始入口 |
+| Your Goal | Recommended Starting Point |
 | --- | --- |
-| **接入一个全新业务 Core** | 先读 [五步快速接入](packages/core-contracts/README.md#五步快速接入)，用 `capabilities.js` 查现成组件/API，对照 [example-tickets-core](packages/example-tickets-core/README.md) 落地 |
-| **单独导出纯净底座源码** | 阅读 [单独取出底座源码](packages/core-contracts/README.md#单独取出底座源码) 与 [独立公共 API 打包](apps/platform-api/README.md#独立后端运行包) |
-| **扩展身份、多租户、订阅或公共设置** | 阅读 [platform-server](packages/platform-server/README.md) 与 [platform-contracts](packages/platform-contracts/README.md) |
-| **定制公共后台外壳与 Core 页面组件** | 阅读 [platform-admin](packages/platform-admin/README.md)、[Core 页面开发说明](packages/platform-admin/src/core/README.md) 与 [后台规范](apps/admin/AGENTS.md) |
-| **接入或定制 Core 包管理与独立升级** | 阅读 [platform-core-host](packages/platform-core-host/README.md#core-包管理接入) 与 [Core 包管理前端](packages/platform-admin/src/features/core-packages/README.md) |
-| **启用可选 AI Native 或标准 MCP** | 阅读 [ai-native-server](packages/ai-native-server/README.md)、[mcp-server](packages/mcp-server/README.md) 与 [harness-plugin](clients/harness-plugin/README.md) |
-| **参考复杂业务 Core 架构** | 阅读 [Rental Core 导读](packages/rental-core/README.md) 与 [Rental 独立宿主](apps/rental-api/README.md) |
+| **Build & attach a new business Core** | Read the [5-Step Integration Guide](packages/core-contracts/README.md#五步快速接入), explore base capabilities via `capabilities.js`, and model after [example-tickets-core](packages/example-tickets-core/README.md) |
+| **Export a clean zero-Core base archive** | Read [Standalone Base Source Export](packages/core-contracts/README.md#单独取出底座源码) and [Standalone Backend Bundle](apps/platform-api/README.md#独立后端运行包) |
+| **Extend auth, multi-tenancy, subscriptions or settings** | Read [platform-server](packages/platform-server/README.md) and [platform-contracts](packages/platform-contracts/README.md) |
+| **Customize the admin shell or Core UI primitives** | Read [platform-admin](packages/platform-admin/README.md), [Core Page Guide](packages/platform-admin/src/core/README.md), and [Admin Rules](apps/admin/AGENTS.md) |
+| **Customize Core package management & upgrades** | Read [platform-core-host](packages/platform-core-host/README.md#core-包管理接入) and [Core Packages UI](packages/platform-admin/src/features/core-packages/README.md) |
+| **Enable optional AI Native or standard MCP** | Read [ai-native-server](packages/ai-native-server/README.md), [mcp-server](packages/mcp-server/README.md), and [harness-plugin](clients/harness-plugin/README.md) |
+| **Study a complex vertical Core architecture** | Read [Rental Core Guide](packages/rental-core/README.md) and [Rental Standalone Host](apps/rental-api/README.md) |
 
 ---
 
-## 验证改动
+## Verification & Testing
 
-按改动涉及的层与宿主组合选择对应验证命令（完整脚本清单见 [package.json](package.json)）：
+Choose the verification commands matching the layers and hosts touched by your change (full script catalog in [package.json](package.json)):
 
-| 验证范围 | 命令 / 入口 | 说明 |
+| Scope | Commands / Scripts | Description |
 | --- | --- | --- |
-| **零 Core 底座构建与类型** | `npm run build:platform-api`、`npm run lint:platform-api`、`npm run build:platform-admin`、`npm run lint:platform-admin` | 独立验证公共 API 与公共后台，不依赖任何业务 Core |
-| **所选 Prisma 组合类型检查** | `node scripts/check-selected-prisma-types.cjs --mode <platform\|rental\|rental-ai>` | 内存核验所选 Prisma 5.22 schema 与宿主类型，不连接数据库（[脚本](scripts/check-selected-prisma-types.cjs)） |
-| **Core 包合规与能力查询** | `node packages/core-contracts/dist/check.js ...`、`node packages/core-contracts/dist/capabilities.js ...` | 校验标准包清单/OpenAPI/兼容版本，及索引当前源码能力 |
-| **独立运行包打包** | [scripts/package-platform-host.cjs](scripts/package-platform-host.cjs)（零 Core / 工单）、`npm run package:rental-host`（Rental） | 生成固定 Linux Docker 运行上下文与编译证据包 |
-| **公共接口与后台约定** | `npm run contract:validate`、`npm run test:admin` | 校验 Controller、OpenAPI、DTO、路由权限及后台组件接入约定 |
-| **根公共类型与构建** | `npm run lint`、`npm run build` | 检查并编译公共 API 与后台 |
-| **旧组合类型与构建** | `npm run lint:legacy`、`npm run build:legacy` | 按原依赖顺序检查并编译兼容组合 |
-| **底座与内置 Core 测试** | `npm run test:saas-foundation`、`npm run test:saas-subscription`、`npm run test:rental-core`、`npm run test:pricing-strategy` | 覆盖多租户基础能力、订阅框架及内置 Rental Core 行为；固定发行核验见 [verify-rental-distribution.cjs](scripts/verify-rental-distribution.cjs) |
+| **Zero-Core Base Build & Lint** | `npm run build:platform-api`, `npm run lint:platform-api`, `npm run build:platform-admin`, `npm run lint:platform-admin` | Verifies standalone platform API and admin with zero Core dependencies |
+| **Selected Prisma Mode Type Check** | `node scripts/check-selected-prisma-types.cjs --mode <platform\|rental\|rental-ai>` | In-memory Prisma 5.22 schema & host type check without DB access ([script](scripts/check-selected-prisma-types.cjs)) |
+| **Core Package Compliance & Capabilities** | `node packages/core-contracts/dist/check.js ...`, `node packages/core-contracts/dist/capabilities.js ...` | Validates package manifest/OpenAPI/compatibility and indexes live capabilities |
+| **Standalone Host Packaging** | [scripts/package-platform-host.cjs](scripts/package-platform-host.cjs) (Zero-Core / Tickets), `npm run package:rental-host` (Rental) | Produces pinned Linux Docker runtime contexts and build evidence bundles |
+| **API Contracts & Admin Conventions** | `npm run contract:validate`, `npm run test:admin` | Checks Controllers, OpenAPI, DTOs, route guards, and admin component rules |
+| **Composite Workspace Lint & Build** | `npm run lint`, `npm run build` | Type-checks and builds the composite workspace in dependency order |
+| **Base & Built-in Core Test Suites** | `npm run test:saas-foundation`, `npm run test:saas-subscription`, `npm run test:rental-core`, `npm run test:pricing-strategy` | Covers multi-tenancy, subscriptions, and Rental Core; distribution verification in [verify-rental-distribution.cjs](scripts/verify-rental-distribution.cjs) |
 
-> 涉及真实数据库的集成测试（如 `test:mysql-e2e`、`test:saas-subscription-db`）请在独立测试库中执行，切勿连接生产数据库。
-
----
-
-## 生产部署前检查
-
-在生产环境交付所选的底座与业务 Core 组合前，请逐项核对：
-
-- **构建与锁一致**：固定底座源码发行、Core 标准包与 `core.deployment.lock.json` 摘要，核对 Node 版本、合同版本与迁移链一致；首次部署后由 SaaS 管理员显式登记 Core 部署准入。
-- **配置与密钥安全**：使用外部独立环境配置，生产设置 `NODE_ENV=production` 与 `RENTAL_DEPLOYMENT_PROFILE=production`，关闭演示重置开关，使用独立的 32 字节以上随机密钥，并配置明确的 `CORS_ALLOWED_ORIGINS` 与 `TRUST_PROXY_HOPS`。
-- **迁移与灾备演练**：在独立环境完成迁移核验、备份与恢复演练（可使用 [scripts/ops](scripts/ops) 下的预检、备份、恢复与升级演练脚本）。
-- **外部服务与许可合规**：核对已启用的对象存储、邮件、短信、支付及 AI Provider 凭据与脱敏日志；分发产物保留 MIT 许可证与第三方组件版权文件。
+> Run real-database integration tests (such as `test:mysql-e2e` and `test:saas-subscription-db`) strictly against isolated test databases—never against production data.
 
 ---
 
-## 参与贡献
+## Pre-Production Checklist
 
-欢迎通过 Issue 与 Pull Request 参与 Zelo 公共底座建设与文档完善；我们也**特别欢迎各行业开发者基于 Zelo 打造并发布独立的开源或 Open-Core 业务包（含自主商业化的扩展功能模块）**，共同壮大开源 SaaS 业务生态：
+Before deploying your chosen base and Core assembly to production, verify:
 
-1. Fork 本仓库并从最新主干创建语义清晰的功能或修复分支。
-2. 保持底座无行业依赖：`platform-*`、`core-contracts`、`core-host` 不得反向依赖具体业务 Core；公共协议变更须经正式包出口同步更新 OpenAPI、生产者与消费者。
-3. 提交前按改动范围运行相关类型检查、契约检查与定向测试，并在 PR 描述中写清背景、改动入口与验证结果。
-4. 若你使用 AI 编程助手协作开发，请先查阅 [AGENTS.md](AGENTS.md)（Claude 入口见 [CLAUDE.md](CLAUDE.md)）；开发新业务 Core 可直接使用 [Core Agent 模板](packages/core-contracts/README.md#交给开发agent的任务模板)。
-
-> 仓库根目录 `docs/` 保留为维护者本地开发资料，已排除在公开提交与发行包之外；所有面向开源社区的技术与接入文档均随源码模块维护。
+- **Pinned Artifacts & Lock Consistency**: Pin the base release, Core `.tgz` packages, and `core.deployment.lock.json` digests; verify Node version, contract compatibility, and migration chains; explicitly register Core deployment admission as SaaS admin after first boot.
+- **Secrets & Environment Hardening**: Use external isolated env configuration with `NODE_ENV=production` and `RENTAL_DEPLOYMENT_PROFILE=production`, disable demo reset toggles, supply unique >= 32-byte random secrets, and configure explicit `CORS_ALLOWED_ORIGINS` and `TRUST_PROXY_HOPS`.
+- **Migration & Disaster-Recovery Drills**: Run preflight, migration, backup, restore, and upgrade drills in staging (tooling available under [scripts/ops](scripts/ops)).
+- **External Integrations & License Compliance**: Verify storage, email, SMS, payment, and AI provider credentials and redacted logs; keep the MIT license and third-party notices in all distributed artifacts.
 
 ---
 
-## 安全反馈
+## Contributing
 
-如发现身份认证绕过、跨租户越权、凭据泄露或 Core 权限隔离缺陷，**请勿直接提交公开 Issue**。请先对复现材料脱敏，通过维护者私密渠道或 GitHub Private Vulnerability Reporting 联系报告。
+Issues, Pull Requests, and documentation improvements to the Zelo base are always welcome. **We especially encourage developers across industries to build and publish independent open-source or open-core business packages (including commercial extension modules)** to expand the open SaaS ecosystem:
+
+1. Fork this repository and branch cleanly from `main`.
+2. Keep the base strictly industry-agnostic: `platform-*`, `core-contracts`, and `core-host` must never depend on any specific business Core. Shared contract updates must flow through official package exports with matching OpenAPI, producer, and consumer updates.
+3. Run the relevant type checks, contract checks, and targeted tests before opening a PR, and document context, entrypoints, and verification evidence in your PR description.
+4. If you collaborate with an AI coding agent, read [AGENTS.md](AGENTS.md) first (Claude entrypoint: [CLAUDE.md](CLAUDE.md)); for new business Cores, start with the [Core Agent Template](packages/core-contracts/README.md#交给开发agent的任务模板).
+
+> The root `docs/` directory is reserved for maintainers' private local notes and is excluded from public commits and releases; all public technical and integration documentation lives alongside source modules.
 
 ---
 
-## 许可证与第三方致谢
+## Security
 
-Zelo 公开发布的自有源码及配套说明文档采用 **[MIT License](LICENSE)** 开源，允许自由使用、修改、分发和商业使用；分发时须保留版权与许可证声明。
+If you discover an authentication bypass, cross-tenant authorization leak, credential exposure, or Core isolation vulnerability, **please do not open a public Issue**. Redact sensitive details and report it privately to the maintainers or via GitHub Private Vulnerability Reporting.
 
-项目原名 Nativark，许可证保留原作者版权署名。
+---
 
-项目中引用的第三方开源组件与素材遵循各自原始许可证，并在源码与发行包中保留对应版权和来源文件：
+## License & Third-Party Notices
 
-- **UIArc**：[许可证](packages/ui-arc/LICENSE) · [来源与集成说明](packages/ui-arc/README.md)
-- **Motiq**：[许可证](packages/ui-motiq/LICENSE) · [来源与集成说明](packages/ui-motiq/README.md)
-- **Tablecn**：[集成说明](packages/ui-tablecn/README.md)
-- **Animate UI（侧栏组件）**：[许可证](packages/platform-admin/src/components/animate-sidebar/LICENSE.md) · [来源与适配说明](apps/admin/src/components/animate-sidebar/README.md)
+Zelo's original public source code and documentation are released under the **[MIT License](LICENSE)**, permitting free use, modification, distribution, and commercial adoption with copyright and license notice retention.
+
+The project was formerly called Nativark. The license retains the original copyright notice.
+
+Third-party open-source components and assets remain under their respective licenses, with upstream license and attribution files preserved in source and release bundles:
+
+- **UIArc**: [License](packages/ui-arc/LICENSE) · [Source & Integration Notes](packages/ui-arc/README.md)
+- **Motiq**: [License](packages/ui-motiq/LICENSE) · [Source & Integration Notes](packages/ui-motiq/README.md)
+- **Tablecn**: [Integration Notes](packages/ui-tablecn/README.md)
+- **Animate UI (Sidebar)**: [License](packages/platform-admin/src/components/animate-sidebar/LICENSE.md) · [Source & Adapter Notes](apps/admin/src/components/animate-sidebar/README.md)
