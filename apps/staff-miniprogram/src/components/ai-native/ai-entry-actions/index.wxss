@@ -1,5 +1,0 @@
-.entry-actions { min-width: 0; }
-.entry-actions__row { padding: 24rpx 0; border-bottom: 1rpx solid var(--border); }
-.entry-actions__row:last-child { border-bottom: 0; padding-bottom: 0; }
-.entry-actions__label, .entry-actions__message { white-space: pre-wrap; word-break: break-all; }
-.entry-actions button { min-height: 88rpx; }

@@ -1,8 +1,0 @@
-{
-  "navigationStyle": "custom",
-  "usingComponents": {
-    "ui-icon": "/components/ui-icon/index",
-    "sheet": "/components/sheet/index",
-    "nav-bar": "/components/nav-bar/index"
-  }
-}

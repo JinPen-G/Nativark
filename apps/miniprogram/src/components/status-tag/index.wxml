@@ -1,1 +1,0 @@
-<text wx:if="{{label}}" class="tag tag--{{tone}} {{small ? 'tag--small' : ''}}">{{label}}</text>

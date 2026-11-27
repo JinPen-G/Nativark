@@ -1,4 +1,0 @@
-.faq { padding: 16rpx 0; }
-.faq + .faq { border-top: 1rpx solid var(--border); }
-.faq__q { font-size: var(--font-body); font-weight: var(--fw-semibold); }
-.faq__a { font-size: var(--font-secondary); color: var(--secondary); margin-top: 8rpx; line-height: 1.6; }

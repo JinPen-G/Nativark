@@ -258,7 +258,7 @@ On Windows, use `./start-dev.ps1 -Legacy` or `start-dev.cmd -Legacy`. Logs go to
 
 > When switching back to standalone `platform-api` or `rental-api`, unset `RENTAL_PRISMA_LEGACY` and point `RENTAL_PRISMA_CLIENT` to that host's `generated/client/index.d.ts` (see [Client Selection Script](scripts/build-selected-prisma.cjs)).
 
-The existing single-repository CI, updater, and OPS builder select the legacy stack through `build:legacy`. The `api` and `web` image targets use their isolated legacy Client and outputs built from the same commit. [Legacy Dockerfile](scripts/ops/deployment/Dockerfile) · [Existing Deployment](scripts/ops/deployment/README.md)
+The [legacy image workflow](.github/workflows/nativark-release.yml) runs manually against the [complete pinned legacy checkout](https://github.com/JinPen-G/Zelo/tree/46db0945dee92ac916f7265e95948943fc8b641d). It uses that version's Client, Dockerfile and migrations. A manual rebuild does not authorize the installed updater. Continue to use the original migration receipts and the [deployment procedure](scripts/ops/deployment/README.md) for existing databases.
 
 These offline checks use fixed commits without the old Rental paths, root test directory, or a database. For a historical single-repository distribution check, use `--legacy-single-repo --commit <recorded commit>` with the distribution verifier. For a published archive, prefer the original asset and its recorded SHA-256.
 
@@ -284,10 +284,7 @@ Zelo/
 │   ├── example-multi-core-admin/     # [Example] Base + Rental + Tickets dual-Core Web host
 │   ├── rental-api/                   # [Official Core] Base + Rental standalone API (optional AI / MCP)
 │   ├── rental-admin/                 # [Official Core] Base + Rental standalone Web host
-│   ├── api/ & admin/                 # [Legacy Composite] Composite dev entry consuming split single-source packages
-│   ├── tenant-website/               # [Rental Client] Tenant booking storefront
-│   ├── enterprise-portal/            # [Rental Client] Enterprise customer portal
-│   ├── miniprogram/ & staff-miniprogram/  # [Rental Client] Customer & staff WeChat Mini Programs
+│   └── api/ & admin/                 # [Legacy Composite] Composite dev entry consuming split single-source packages
 ├── packages/
 │   ├── core-contracts/               # [Base] Core manifests, compatibility, check CLI, capability CLI & source exporter
 │   ├── core-host/                    # [Base] Core registry, lifecycle & removal preflight engine
@@ -340,8 +337,7 @@ Zelo/
 | `packages/example-tickets-core` | Lightweight ticketing Core example (minimal non-rental reference) | [Tickets Core](packages/example-tickets-core/README.md) · [API](apps/example-tickets-api/README.md) · [Web](apps/example-tickets-admin/README.md) |
 | `packages/rental-core`, `packages/rental-mcp-host` | Official rental business Core and opt-in Rental MCP host adapter | [Rental Core](packages/rental-core/README.md) · [API](apps/rental-api/README.md) · [Web](apps/rental-admin/README.md) · [MCP Host](packages/rental-mcp-host/README.md) |
 | `apps/example-multi-core-api` / `admin` | Dual-Core coexistence reference host (Rental + Tickets) | [Multi-Core API](apps/example-multi-core-api/README.md) · [Multi-Core Web](apps/example-multi-core-admin/README.md) |
-| `apps/tenant-website`, `apps/enterprise-portal` | Tenant booking storefront and enterprise portal for Rental Core | [Storefront](apps/tenant-website/README.md) · [Enterprise Portal](apps/enterprise-portal/README.md) |
-| `apps/miniprogram`, `apps/staff-miniprogram` | Customer and staff WeChat Mini Programs for Rental Core | [Customer Mini Program](apps/miniprogram/README.md) · [Staff Mini Program](apps/staff-miniprogram/README.md) |
+| `workspace/apps/` in the independent Rental repository | Booking storefront, enterprise portal, and customer/staff WeChat Mini Programs; built in the dual-repository `full` profile | [Client development and historical checks](https://github.com/JinPen-G/Zelo-rental-core/blob/main/README.en.md#preparing-a-standalone-dev-workspace) |
 | `apps/api`, `apps/admin`, `packages/shared` | Legacy composite entrypoints and compatibility barrel consuming the split packages | [API Module](apps/api/src/app.module.ts) · [Admin Rules](apps/admin/AGENTS.md) · [Shared Index](packages/shared/src/index.ts) |
 | [Zelo-website](https://github.com/JinPen-G/Zelo-website) | The separately maintained Zelo website; the base build does not install website dependencies | [Website source and notices](https://github.com/JinPen-G/Zelo-website) |
 

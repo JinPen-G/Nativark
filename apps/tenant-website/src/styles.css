@@ -1,9 +1,0 @@
-@import "@rental-os/rental-core/clients/website-ui/styles";
-
-@font-face {
-  font-family: "Manrope";
-  src: url("/fonts/manrope-variable.ttf") format("truetype");
-  font-style: normal;
-  font-weight: 200 800;
-  font-display: swap;
-}

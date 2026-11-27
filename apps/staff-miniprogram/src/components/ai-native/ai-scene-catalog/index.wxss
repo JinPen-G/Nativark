@@ -1,4 +1,0 @@
-.scene-directory { min-width: 0; }
-.scene-directory__row { padding: 24rpx 0; border-bottom: 1rpx solid var(--border); }
-.scene-directory__text { white-space: pre-wrap; word-break: break-all; }
-.scene-directory__pages { display: flex; align-items: center; flex-wrap: wrap; gap: 16rpx; }

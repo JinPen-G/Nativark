@@ -258,7 +258,7 @@ Windows 使用 `./start-dev.ps1 -Legacy` 或 `start-dev.cmd -Legacy`，日志在
 
 > 使用独立公共宿主或独立 Rental 宿主时，请清除 `RENTAL_PRISMA_LEGACY` 并指向各自宿主的 `generated/client/index.d.ts`（详参 [Client 选择规则](scripts/build-selected-prisma.cjs)）。
 
-原单仓 CI、更新器和 OPS 构建继续经 `build:legacy` 固定旧组合。镜像使用隔离生成的原 Client 和同提交产物，供既有 `api` / `web` 目标消费。[旧组合 Dockerfile](scripts/ops/deployment/Dockerfile) · [原部署入口](scripts/ops/deployment/README.md)
+[历史镜像工作流](.github/workflows/nativark-release.yml)仅手动复建 [完整固定旧版](https://github.com/JinPen-G/Zelo/tree/46db0945dee92ac916f7265e95948943fc8b641d)。复建使用旧版自己的 Client、Dockerfile 和迁移材料；其 CI 不会放行已安装的定时更新器。现有旧库保留原迁移账，后续切换按[原部署入口](scripts/ops/deployment/README.md)核定。
 
 固定提交的离线构建可用以下命令核验，不需要旧 Rental 路径、根测试目录或数据库。要核旧单仓分发，在同一分发命令上改用 `--legacy-single-repo --commit <原固定提交>`。已发行旧包应优先从原资产按记录的 SHA-256 核对。
 
@@ -284,10 +284,7 @@ Zelo/
 │   ├── example-multi-core-admin/     # [示例宿主] 底座 + Rental + 工单 双 Core 后台
 │   ├── rental-api/                   # [官方 Core 宿主] 底座 + Rental 独立 API（可选启用 AI / MCP）
 │   ├── rental-admin/                 # [官方 Core 宿主] 底座 + Rental 独立后台
-│   ├── api/ & admin/                 # [兼容组合] 保留原开发入口，底层消费上述拆分单源包
-│   ├── tenant-website/               # [Rental 客户端] 租户对外预约网站
-│   ├── enterprise-portal/            # [Rental 客户端] 企业客户门户
-│   ├── miniprogram/ & staff-miniprogram/  # [Rental 客户端] 客户与员工微信小程序
+│   └── api/ & admin/                 # [兼容组合] 保留原开发入口，底层消费上述拆分单源包
 ├── packages/
 │   ├── core-contracts/               # [底座] Core 清单/兼容/包校验/能力索引 CLI 与底座源码导出
 │   ├── core-host/                    # [底座] Core 注册目录、生命周期与移除预检内核
@@ -340,8 +337,7 @@ Zelo/
 | `packages/example-tickets-core` | 轻量工单 Core 示例包（非租赁最小参考） | [工单 Core](packages/example-tickets-core/README.md) · [API](apps/example-tickets-api/README.md) · [Web](apps/example-tickets-admin/README.md) |
 | `packages/rental-core`、`packages/rental-mcp-host` | 官方租赁业务 Core 包及显式选装的 Rental MCP 宿主 | [Rental Core](packages/rental-core/README.md) · [API](apps/rental-api/README.md) · [Web](apps/rental-admin/README.md) · [MCP 宿主](packages/rental-mcp-host/README.md) |
 | `apps/example-multi-core-api` / `admin` | Rental + 工单 双 Core 并存示范宿主 | [双 Core API](apps/example-multi-core-api/README.md) · [双 Core Web](apps/example-multi-core-admin/README.md) |
-| `apps/tenant-website`、`apps/enterprise-portal` | Rental Core 配套租户预约网站与企业客户门户 | [客户网站](apps/tenant-website/README.md) · [企业门户](apps/enterprise-portal/README.md) |
-| `apps/miniprogram`、`apps/staff-miniprogram` | Rental Core 配套客户与员工微信小程序 | [客户小程序](apps/miniprogram/README.md) · [员工小程序](apps/staff-miniprogram/README.md) |
+| 独立 Rental 的 `workspace/apps/` | 配套预约网站、企业门户、客户和员工微信小程序；以双仓 `full` 组合构建 | [四端开发与旧验证入口](https://github.com/JinPen-G/Zelo-rental-core/blob/main/README.md#源码开发工作区) |
 | `apps/api`、`apps/admin`、`packages/shared` | 原组合工程兼容入口与共享总出口（底层消费拆分后的单源包） | [API 装配](apps/api/src/app.module.ts) · [Admin 规则](apps/admin/AGENTS.md) · [shared 出口](packages/shared/src/index.ts) |
 | [Zelo-website](https://github.com/JinPen-G/Zelo-website) | 独立维护的 Zelo 官网；底座构建不安装官网依赖 | [官网源码与许可](https://github.com/JinPen-G/Zelo-website) |
 

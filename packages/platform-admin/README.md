@@ -39,7 +39,7 @@
 
 业务页面从 [Rental 后台导读](../rental-core/admin/README.md) 进入。统一登记订单、工单、能力、地点、商品资产、商业、治理、会员、工作台与报表、渠道、开业、支付对账十二组页面。各组导读给出业务数据、操作和权限来源。页面贡献使用公共 UI、宿主请求与查询缓存，服务端按身份、经营范围及业务权限裁定。
 
-Rental 客户入口分别由[租户网站](../../apps/tenant-website/README.md)、[企业门户](../../apps/enterprise-portal/README.md)、[客户小程序](../../apps/miniprogram/README.md)和[员工小程序](../../apps/staff-miniprogram/README.md)装配。可复用页面、会话和业务客户端分别进入 [网站 UI](../rental-core/clients/website-ui/README.md)、[网站请求](../rental-core/clients/website/README.md)、[企业门户页面](../rental-core/clients/enterprise-portal/README.md)、[企业请求](../rental-core/clients/enterprise/README.md)、[客户原生贡献](../rental-core/clients/miniprogram/README.md)及[员工原生贡献](../rental-core/clients/staff/README.md)。Web 宿主提供构建、站点入口与会话运输，原生宿主负责原页面、设备运输及存储。服务端对应 [Rental HTTP 入口](../../apps/rental-api/README.md)。
+Rental 的租户网站、企业门户、客户小程序和员工小程序在[独立仓的 `full` 组合](https://github.com/JinPen-G/Zelo-rental-core/blob/main/README.md#源码开发工作区)装配。可复用页面、会话和业务客户端分别进入 [网站 UI](../rental-core/clients/website-ui/README.md)、[网站请求](../rental-core/clients/website/README.md)、[企业门户页面](../rental-core/clients/enterprise-portal/README.md)、[企业请求](../rental-core/clients/enterprise/README.md)、[客户原生贡献](../rental-core/clients/miniprogram/README.md)及[员工原生贡献](../rental-core/clients/staff/README.md)。Web 宿主提供构建、站点入口与会话运输，原生宿主负责原页面、设备运输及存储。服务端对应 [Rental HTTP 入口](../../apps/rental-api/README.md)。
 
 [独立 Zelo 官网](https://github.com/JinPen-G/Zelo-website)维护公开介绍和演示预约，预约提交到[公共演示申请入口](../platform-server/src/modules/demo-requests/public-demo-request.controller.ts)。登录演示使用本包的定稿副本，不安装或加载官网工程。租户商城的商品、预约和订单页面在 Rental 独立宿主。第三方组件和保留适配从 [UIArc](../ui-arc/README.md) 及本页的来源说明追溯。
 
