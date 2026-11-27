@@ -50,7 +50,11 @@ node scripts/ops/release-verify.cjs mcp <本地ZeloGit目录> <基线完整SHA> 
 
 ### 生成下一对正式资产
 
-先由两仓负责人提交配套新版本并冻结完整 SHA。以 `0.1.18`／`0.1.15` 为下一组拟定版本，底座的根 manifest 与原 npm 锁版本须一致，Rental 的包版本、`RENTAL_CORE_VERSION` 和各宿主依赖须一致。保持已经使用的发行来源 `JinPen-G/Nativark` 与 `JinPen-G/nativark-rental-core`。独立仓根 `core.manifest.json` 保留最后一次已核发现结果，等本次完成后再单独回填。底座固定提交须已包含本节的正式工作流，派发时该提交是 `main` 的目标。两仓批准的 commit 和实际 Tag 值是下列命令的输入。
+Zelo `v0.1.18` 与 Rental Core `v0.1.15` 已于北京时间 2026-11-27 08:18（UTC 00:18）正式发布。两 Tag 分别固定到 `46db0945dee92ac916f7265e95948943fc8b641d` 与 `7e20d6ef0b206e16a9162f4a2a6e88c13cbc0497`，对应资产为 `platform-source-0.1.18.tgz` 和 `rental-0.1.15.tgz`。[Zelo 已发布版本](https://github.com/JinPen-G/Zelo/releases/tag/v0.1.18) · [Rental 已发布版本](https://github.com/JinPen-G/Zelo-rental-core/releases/tag/v0.1.15)
+
+后继发版由两仓负责人确定各自尚未使用的新版本，提交配套修改并冻结完整 SHA。底座的根 manifest 与原 npm 锁版本须一致，Rental 的包版本、`RENTAL_CORE_VERSION` 和各宿主依赖须一致。已发布 Tag、资产和历史部署锁保持原身份，修订使用新的版本和 Tag。保持已经使用的发行来源 `JinPen-G/Nativark` 与 `JinPen-G/nativark-rental-core`。独立仓根 `core.manifest.json` 保留最后一次已核发现结果，待新资产回读和正式配对 CI 成功后按下文单独更新。
+
+底座固定提交须已包含本节的正式工作流，派发时该提交是 `main` 的目标。下列 `ZELO_SHA`、`RENTAL_SHA`、`ZELO_TAG` 和 `RENTAL_TAG` 填写本次批准的新发行输入。开发 CI 的成功回执用于开发组合核验，正式发布和服务器切换分别取得对应材料与批准。
 
 在固定 Linux Node 24.13.0 构建环境，已安装 Zelo 原锁依赖，并采用本仓离线守卫的任务目录设置。`ASSET_DIR` 是现存空目录。先在各自仓库发布不存在的新版本 Tag，普通推送。用 `git ls-remote --tags` 回读两 Tag 的提交，检查与 `ZELO_SHA` 和 `RENTAL_SHA` 完全一致。以下是两个已批准新 Tag 都尚未创建时的命令。已有 Tag 或同名 Release 时先核其原对象与资产。
 
