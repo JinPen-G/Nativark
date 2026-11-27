@@ -1,13 +1,14 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-const h = require('./fixtures/ai-native/knowledge-service.cjs');
+const h = require('./fixtures/ai-native/knowledge-public.cjs');
 
 test.after(() => assert.deepEqual(h.attempts, []));
 
 test('publication does not let the repository mutate the caller scope after commit', async () => {
   const f = h.harness();
   const ctx = h.context();
-  const parsed = await h.parsed(f, ctx);
+  await f.documents.create(ctx, h.draft());
+  const parsed = await f.documents.parseDocument(ctx, { documentId: 'doc-1', expectedRevision: 1, operationId: 'parse-1' });
   parsed.document.indexing = 'indexed';
   f.repo.seed(parsed);
   const originalCommit = f.repo.commit.bind(f.repo);

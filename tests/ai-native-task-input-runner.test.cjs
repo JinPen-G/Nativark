@@ -1,7 +1,9 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { AiTaskRunner } = require('../apps/api/src/modules/ai-native/runner/ai-task-runner.service');
+require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
+const { createControllerSourceLoader } = require('../scripts/controller-sources.cjs');
+const sourceLoader = createControllerSourceLoader(require('node:path').resolve(__dirname, '..'));
+const { AiTaskRunner } = sourceLoader.load(sourceLoader.resolveSource(__filename, '@rental-os/platform-server/ai-runtime', true));
 const input = { taskId: 'task-a', runId: 'run-a', holderId: 'worker-a', expectedTaskRevision: 1, expectedRunRevision: 1, expectedFencingToken: '0', leaseMs: 1000 };
 
 function setup() {
@@ -10,7 +12,7 @@ function setup() {
   const commit = kind => { trace.push(kind); state.taskRevision++; state.runRevision++; return { taskRevision: state.taskRevision, lease: lease() }; };
   const deps = {
     leases: { readMetadata: async () => ({ taskId: 'task-a', revision: state.taskRevision, status: state.status, cancelRequestedAt: null }),
-      claimRun: async () => { trace.push('claim'); return lease(); }, claimRecoveryRun: async () => { trace.push('claim-recovery'); return lease(); },
+      claimRun: async () => { trace.push('claim'); return lease(); }, claimRecoveryRun: async () => { trace.push('claim-recovery'); return { ...lease(), purpose: 'recovery_only' }; },
       releaseRun: async c => { trace.push('release'); assert.equal(c.expectedTaskRevision, state.taskRevision); assert.equal(c.expectedRunRevision, state.runRevision); return { released: true, revision: ++state.runRevision }; } },
     plan: { resolve: async () => ({ taskId: 'task-a', runId: 'run-a', taskRevision: state.taskRevision,
       steps: ['clarify', 'continue'].map(registrationRef => ({ registrationRef, operation: 'readonly', toolCode: 'rental.order.explain', toolVersion: '1' })),
@@ -70,8 +72,10 @@ test('previously registered but unstarted step continues only under a fresh exec
   assert.equal((await h.run(false)).status, 'paused');
   assert.equal(h.trace.filter(t => t === 'execute:clarify').length, 1);
   const recovery = setup(); recovery.state.existing = 'pending';
-  assert.equal((await recovery.run(true)).status, 'unavailable');
+  // PENDING alone cannot attest whether its original admission dispatched.
+  assert.equal((await recovery.run(true)).status, 'unknown');
   assert.equal(recovery.trace.includes('execute:clarify'), false);
+  assert.deepEqual(recovery.trace, ['claim-recovery', 'outcome', 'release']);
 });
 test('effect-provided paused input cannot replace a persisted successful clarification', async () => {
   const h = setup(); h.deps.effects.execute = async () => ({ kind: 'paused', pause: 'input', resultRef: 'model-said-wait', outputBytes: 1 });

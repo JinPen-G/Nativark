@@ -1,7 +1,12 @@
 "use strict";
 const test = require("node:test"), assert = require("node:assert/strict"), h = require("./fixtures/ai-native/contract-consumer.cjs"); h.blockNetwork(test);
-require("ts-node").register({ transpileOnly: false, compilerOptions: { module: "commonjs", moduleResolution: "node" } });
-const { AI_NATIVE_COMPONENT_SCHEMAS: base } = require("../apps/api/src/contracts/ai-native-schemas"), { AI_KNOWLEDGE_DRAFT_SCHEMAS: schemas } = require("../packages/shared/src/ai-knowledge-draft-schemas"), f = require("./fixtures/ai-native/knowledge-contracts.cjs");
+const { createControllerSourceLoader } = require('../scripts/controller-sources.cjs');
+const sourceLoader = createControllerSourceLoader(require('node:path').resolve(__dirname, '..'));
+const load = name => sourceLoader.load(sourceLoader.resolveSource(__filename, name, true));
+const { AI_KNOWLEDGE_DRAFT_SCHEMAS: schemas, AI_TASK_FACT_SCHEMA } = load("@rental-os/platform-contracts");
+const { AI_EXECUTION_CONTEXT_SCHEMAS } = load("@rental-os/platform-contracts/ai-gateway");
+const base = { ...AI_EXECUTION_CONTEXT_SCHEMAS, AiFactReference: AI_TASK_FACT_SCHEMA };
+const f = require("./fixtures/ai-native/knowledge-contracts.cjs");
 const validators = h.validatorsFor(schemas, base), yes = (n, x) => assert.equal(validators[n](x), true, JSON.stringify(validators[n].errors)), no = (n, x) => assert.equal(validators[n](x), false, n);
 test("C06 closed reference graph has no external URLs or retrieval/ACL implementation", () => h.checkClosed(schemas, { ...base, ...schemas }));
 test("documents express every lifecycle/parse/index state without assuming retrieval readiness", () => {
@@ -46,7 +51,7 @@ test("C06 confirmed memory needs record reference; deleted tombstone contains no
   no("AiMemoryDraft", { ...tombstone, status: "deleted", deletedAt: h.time, preference });
 });
 test("C06 TS all sources/recalls/preferences/changes compile, unauthorized fields reject", () => {
-  assert.deepEqual(h.compileConsumer(`import type { AiKnowledgeDocumentDraft, AiKnowledgeChunkDraft, AiKnowledgeSourceDraft, AiKnowledgeRecallDraft, AiMemoryDraft, AiMemoryChangeDraft, AiPreferenceValueDraft } from "../packages/shared/src/ai-knowledge-draft";
+  assert.deepEqual(h.compileConsumer(`import type { AiKnowledgeDocumentDraft, AiKnowledgeChunkDraft, AiKnowledgeSourceDraft, AiKnowledgeRecallDraft, AiMemoryDraft, AiMemoryChangeDraft, AiPreferenceValueDraft } from "@rental-os/platform-contracts";
 const doc: AiKnowledgeDocumentDraft = ${JSON.stringify(f.document)};
 const chunk: AiKnowledgeChunkDraft = ${JSON.stringify(f.chunk)};
 const sources: AiKnowledgeSourceDraft[] = ${JSON.stringify([f.source, { kind: "business_fact", fact: h.fact }])};

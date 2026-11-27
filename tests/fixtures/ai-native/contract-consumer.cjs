@@ -39,10 +39,19 @@ function validatorsFor(leaf, baseSchemas) {
 function compileConsumer(source) {
   const ts = require("typescript"), path = require("node:path");
   const root = path.resolve(__dirname, "../../.."), file = path.join(root, "tests/__virtual_ai_consumer__.ts");
-  const options = { strict: true, noEmit: true, skipLibCheck: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, moduleResolution: ts.ModuleResolutionKind.Node10, types: [] };
+  const options = { strict: true, noEmit: true, skipLibCheck: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, moduleResolution: ts.ModuleResolutionKind.Node10, experimentalDecorators: true, emitDecoratorMetadata: true, esModuleInterop: true, types: [] };
   const host = ts.createCompilerHost(options), read = host.readFile.bind(host), exists = host.fileExists.bind(host);
   host.readFile = name => path.resolve(name) === file ? source : read(name);
   host.fileExists = name => path.resolve(name) === file || exists(name);
+  // Resolve public packages from this workspace's declared exports. A stale
+  // node_modules link or dist must not make a retired source look installed.
+  let loader;
+  host.resolveModuleNames = (names, from) => names.map(name => {
+    if (!name.startsWith("@rental-os/")) return ts.resolveModuleName(name, from, options, host).resolvedModule;
+    loader ??= require("../../../scripts/controller-sources.cjs").createControllerSourceLoader(root);
+    const resolvedFileName = loader.resolveSource(from, name);
+    return { resolvedFileName, extension: resolvedFileName.endsWith(".tsx") ? ts.Extension.Tsx : ts.Extension.Ts };
+  });
   return ts.getPreEmitDiagnostics(ts.createProgram([file], options, host)).map(d => ({ code: d.code, message: ts.flattenDiagnosticMessageText(d.messageText, "\n") }));
 }
 function checkClosed(schema, available) {

@@ -1,13 +1,15 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 const { blockNetwork, compileConsumer } = require('./fixtures/ai-native/contract-consumer.cjs'); blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { ChatCompletionsAdapter } = require('../apps/api/src/modules/ai-native/chat-completions.adapter');
+const { createControllerSourceLoader } = require('../scripts/controller-sources.cjs');
+const sourceLoader = createControllerSourceLoader(require('node:path').resolve(__dirname, '..'));
+const gateway = sourceLoader.load(sourceLoader.resolveSource(__filename, '@rental-os/platform-server/ai-gateway', true));
+const { createPublicModelAdapters } = sourceLoader.load(sourceLoader.resolveSource(__filename, '@rental-os/ai-native-server/model-adapters', true));
 const connection = { baseUrl: 'https://synthetic.example.test/v1' }, credential = 'synthetic-key';
 const input = () => ({ callId: 'input-1', model: 'model-1', messages: [{ role: 'user', content: 'Synthetic' }], maxOutputTokens: 20, signal: new AbortController().signal });
 function harness(options = {}) {
   const sent = [];
-  const adapter = new ChatCompletionsAdapter({ post: async request => { sent.push(request); return { status: 200, body: JSON.stringify({ choices: [{ message: { content: 'answer' }, finish_reason: 'stop' }] }) }; }, postStream: async function* (request) { sent.push(request); yield { kind: 'headers', status: 200 }; yield { kind: 'chunk', bytes: Buffer.from('data: {"choices":[{"index":0,"delta":{"content":"answer"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n') }; } }, options);
+  const adapter = createPublicModelAdapters('openai_chat_completions', options, { post: async request => { sent.push(request); return { status: 200, body: JSON.stringify({ choices: [{ message: { content: 'answer' }, finish_reason: 'stop' }] }) }; }, postStream: async function* (request) { sent.push(request); yield { kind: 'headers', status: 200 }; yield { kind: 'chunk', bytes: Buffer.from('data: {"choices":[{"index":0,"delta":{"content":"answer"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n') }; } })[0];
   return { adapter, sent };
 }
 const collect = async value => { const result = []; for await (const event of value) result.push(event); return result; };
@@ -35,12 +37,12 @@ test('missing AbortSignal and malformed credentials yield redacted protocol conf
   await assert.rejects(f.adapter.generate({ ...input(), signal: undefined }, credential, connection), e => e.code === 'CONFIG_INVALID'); assert.equal(f.sent.length, 0);
 });
 test('real strict noEmit validates shared INTERNAL request parser used by gateway and adapter', () => {
-  assert.deepEqual(compileConsumer('import { ChatCompletionsAdapter } from "../apps/api/src/modules/ai-native/chat-completions.adapter"; import { ModelGatewayService } from "../apps/api/src/modules/ai-native/model-gateway.service";'), []);
+  assert.deepEqual(compileConsumer('import { createPublicModelAdapters } from "@rental-os/ai-native-server/model-adapters"; import { ModelGatewayService } from "@rental-os/platform-server/ai-gateway"; createPublicModelAdapters("openai_chat_completions");'), []);
 });
 test('bounded media protocol is opt-in and never opens text-only Gateway ingress', async () => {
   const { createHash } = require('node:crypto');
-  const { modelRequestSchema } = require('../apps/api/src/modules/ai-native/model-gateway.ports');
-  const { prepareGatewayTextIntent } = require('../apps/api/src/modules/ai-native/gateway-intent');
+  const { modelRequestSchema } = gateway;
+  const { prepareGatewayTextIntent } = gateway;
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZioAAAAASUVORK5CYII=', 'base64');
   const wav = Buffer.alloc(46);
   wav.write('RIFF'); wav.writeUInt32LE(38, 4); wav.write('WAVEfmt ', 8); wav.writeUInt32LE(16, 16);

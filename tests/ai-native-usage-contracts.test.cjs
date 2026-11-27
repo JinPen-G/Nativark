@@ -1,7 +1,11 @@
 "use strict";
 const test = require("node:test"), assert = require("node:assert/strict"), h = require("./fixtures/ai-native/contract-consumer.cjs"); h.blockNetwork(test);
-require("ts-node").register({ transpileOnly: false, compilerOptions: { module: "commonjs", moduleResolution: "node" } });
-const { AI_NATIVE_COMPONENT_SCHEMAS: c01 } = require("../apps/api/src/contracts/ai-native-schemas"), { AI_GATEWAY_DRAFT_SCHEMAS: c03 } = require("../packages/shared/src/ai-gateway-draft-schemas"), { AI_USAGE_DRAFT_SCHEMAS: schemas } = require("../packages/shared/src/ai-usage-draft-schemas"), f = require("./fixtures/ai-native/usage-contracts.cjs");
+const { createControllerSourceLoader } = require('../scripts/controller-sources.cjs');
+const sourceLoader = createControllerSourceLoader(require('node:path').resolve(__dirname, '..'));
+const load = name => sourceLoader.load(sourceLoader.resolveSource(__filename, name, true));
+const { AI_EXECUTION_CONTEXT_SCHEMAS: c01, AI_GATEWAY_DRAFT_SCHEMAS: c03 } = load("@rental-os/platform-contracts/ai-gateway");
+const { AI_USAGE_DRAFT_SCHEMAS: schemas } = load("@rental-os/platform-contracts/ai-usage");
+const f = require("./fixtures/ai-native/usage-contracts.cjs");
 const base = { ...c01, ...c03 }, validators = h.validatorsFor(schemas, base), yes = (n, x) => assert.equal(validators[n](x), true, JSON.stringify(validators[n].errors)), no = (n, x) => assert.equal(validators[n](x), false, n);
 test("C07 closed references compose C01/C03 without billing or runtime admission", () => h.checkClosed(schemas, { ...base, ...schemas }));
 test("C07 platform selection needs no provider fields and does not imply ready", () => {
@@ -64,7 +68,7 @@ for (const mutation of f.mutations) test(`C07 ${mutation.status}/${mutation.reas
   if (mutation.status === "conflict") no("AiUsageMutationResultDraft", { ...mutation, record: f.records[1] });
 });
 test("C07 TS consumers cover all quantities/limits/secrets/ledger/conflicts and reject unsafe variants", () => {
-  assert.deepEqual(h.compileConsumer(`import type { AiUsageQuantityDraft, AiBudgetLimitDraft, AiTenantModelSettingsInputDraft, AiTenantModelSettingsSummaryDraft, AiUsageSettingsDraft, AiUsageRecordDraft, AiUsageMutationResultDraft } from "../packages/shared/src/ai-usage-draft";
+  assert.deepEqual(h.compileConsumer(`import type { AiUsageQuantityDraft, AiBudgetLimitDraft, AiTenantModelSettingsInputDraft, AiTenantModelSettingsSummaryDraft, AiUsageSettingsDraft, AiUsageRecordDraft, AiUsageMutationResultDraft } from "@rental-os/platform-contracts/ai-usage";
 const quantities: AiUsageQuantityDraft[] = ${JSON.stringify(f.quantities)};
 const budgets: AiBudgetLimitDraft[] = ${JSON.stringify(f.budgets)};
 const input: AiTenantModelSettingsInputDraft = ${JSON.stringify(f.input)};
