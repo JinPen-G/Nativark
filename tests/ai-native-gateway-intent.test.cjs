@@ -1,15 +1,18 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { prepareGatewayTextIntent: prepare } = require('../apps/api/src/modules/ai-native/gateway-intent');
-const { UnifiedAiGatewayService } = require('../apps/api/src/modules/ai-native/unified-ai-gateway.service');
+const { createControllerSourceLoader } = require('../scripts/controller-sources.cjs');
+const loader = createControllerSourceLoader(require('node:path').resolve(__dirname, '..'));
+const gatewayModule = loader.load(loader.resolveSource(__filename, '@rental-os/platform-server/ai-gateway', true));
+const { prepareGatewayTextIntent: prepare, UnifiedAiGatewayService } = gatewayModule;
 const policy = { sceneCode: 'order.explain', maxOutputTokens: 128 };
 const intent = () => ({ draftVersion: 'ain-c03-draft-2', requestId: 'request-1', sceneCode: 'order.explain', messages: [{ role: 'user', content: [{ kind: 'text', text: 'first' }, { kind: 'text', text: ' second' }] }], requiredFeatures: ['text'], optionalFeatures: [], maxOutputTokens: 64 });
 const reject = (code, body) => assert.throws(body, e => e.code === code);
 
 test('media resolver revalidates authorization after storage and snapshots caller context', async () => {
-  const { AuthorizedGatewayMediaAttachmentResolver } = require('../apps/api/src/modules/ai-native/gateway-media-attachment.resolver');
+  // This host-owned file/ACL adapter belongs to the selected independent Rental source.
+  const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+  const { AuthorizedGatewayMediaAttachmentResolver } = load('@rental-os/ai-native-server/runtime/gateway-media-attachment.resolver');
   const bytes = Buffer.from('bounded image'), contentHash = require('node:crypto').createHash('sha256').update(bytes).digest('hex');
   const context = { tenantId: 'tenant-1', workspaceId: 'workspace-1', actorId: 'actor-1' };
   const reference = { kind: 'image', attachmentId: 'attachment-1', attachmentRevision: 1 };
@@ -23,7 +26,7 @@ test('media resolver revalidates authorization after storage and snapshots calle
 });
 
 test('media count rejects before attachment reads and cancellation prevents late content', async () => {
-  const { prepareGatewayIntent } = require('../apps/api/src/modules/ai-native/gateway-intent');
+  const { prepareGatewayIntent } = gatewayModule;
   const input = intent(); input.requiredFeatures.push('image');
   input.messages[0].content = Array.from({ length: 9 }, (_, i) => ({ kind: 'image', attachmentId: `image-${i}`, attachmentRevision: 1 }));
   let reads = 0;
@@ -83,14 +86,18 @@ function gateway(binding = { ...policy, routeScene: 'chat' }) {
     routing: require('./fixtures/ai-native/unified-routing.cjs')(async () => { events.push('route'); return { profile: { id: 'profile-1', model: 'server-selected' } }; }),
     admission: { admit: async input => { events.push('admit'); hashes.push(input.requestHash); return { id: 'admission-1', ...input }; }, transition: async (_s,_c,_f,to) => { events.push(to); } },
     usage: { reserve: async () => { events.push('reserve'); return { id: 'usage-1' }; }, settle: async () => { events.push('settle'); }, markUnknown: async () => { events.push('unknown-usage'); } },
-    audit: { append: async () => { events.push('audit'); } },
+    audit: { append: async entry => { events.push(entry.event); } },
     transport: { invoke: async (_c, request) => { requests.push(request); return { text: 'done', usage: { inputTokens: 1, outputTokens: 2 } }; },
       stream: async function* (_c, request) { requests.push(request); yield { kind: 'text_delta', delta: 'part' }; yield { kind: 'result', result: { text: 'done', usage: { inputTokens: 1, outputTokens: 2 } } }; } }
   });
   return { events, requests, hashes, context, ports, service: new UnifiedAiGatewayService(ports, 10000, binding) };
 }
 test('authorized WAV invoke enters the same routing and single accounting lifecycle', async () => {
-  const f = gateway(), input = intent(), bytes = Buffer.from('bounded WAV fixture');
+  const f = gateway(), input = intent(), bytes = Buffer.alloc(1644);
+  // The same bounded PCM fixture used by task-model-host; actual media validation stays enabled.
+  bytes.write('RIFF'); bytes.writeUInt32LE(bytes.length - 8, 4); bytes.write('WAVEfmt ', 8); bytes.writeUInt32LE(16, 16);
+  bytes.writeUInt16LE(1, 20); bytes.writeUInt16LE(1, 22); bytes.writeUInt32LE(8000, 24); bytes.writeUInt32LE(16000, 28);
+  bytes.writeUInt16LE(2, 32); bytes.writeUInt16LE(16, 34); bytes.write('data', 36); bytes.writeUInt32LE(1600, 40);
   const contentHash = require('node:crypto').createHash('sha256').update(bytes).digest('hex');
   input.requiredFeatures = ['text', 'audio'];
   input.messages[0].content.push({ kind: 'audio', attachmentId: 'audio-1', attachmentRevision: 2 });
@@ -105,13 +112,13 @@ test('authorized WAV invoke enters the same routing and single accounting lifecy
   };
   assert.equal((await f.service.invokeIntent(f.context, input)).text, 'done');
   assert.equal(f.requests[0].messages[0].content[2].contentHash, contentHash);
-  assert.deepEqual(f.events, ['route','admit','reserve','audit','settle','completed']);
+  assert.deepEqual(f.events, ['route','ai.invoke.prepared','admit','reserve','ai.invoke.admitted','settle','completed']);
   const bad = gateway(); bad.ports.media = { resolve: async (_context, ref) => ({ ...ref,
     mediaType: 'audio/wav', contentHash: '0'.repeat(64), bytes }) };
   await assert.rejects(bad.service.invokeIntent(bad.context, input), e => e.code === 'CAPABILITY_UNSUPPORTED');
   assert.deepEqual(bad.events, []);
   let streamReads = 0;
-  const {prepareGatewayIntent} = require('../apps/api/src/modules/ai-native/gateway-intent');
+  const {prepareGatewayIntent} = gatewayModule;
   await assert.rejects(prepareGatewayIntent(input, policy, 'stream', f.context, {resolve: async()=>{streamReads++;}}),
     e=>e.code==='CAPABILITY_UNSUPPORTED');
   assert.equal(streamReads,0); // No supported audio streaming adapter: reject before bytes or dispatch.
@@ -121,7 +128,7 @@ for (const mode of ['invoke', 'stream']) test(`${mode} text intent enters existi
   if (mode === 'invoke') assert.equal((await f.service.invokeTextIntent(f.context, input)).text, 'done');
   else { const events = []; for await (const event of f.service.streamTextIntent(f.context, input)) events.push(event); assert.deepEqual(events.map(e => e.kind), ['text_delta','result']); }
   assert.equal(f.requests[0].model, 'server-selected'); assert.equal(f.requests[0].messages[0].content, 'first second');
-  assert.deepEqual(f.events, ['route','admit','reserve','audit','settle','completed']); assert.equal('model' in input, false);
+  assert.deepEqual(f.events, ['route',`ai.${mode}.prepared`,'admit','reserve',`ai.${mode}.admitted`,'settle','completed']); assert.equal('model' in input, false);
 });
 for (const mode of ['invoke', 'stream']) test(`${mode} text intent rejects invalid capability or scene before routing`, async () => {
   for (const input of [{ ...intent(), model: 'injected' }, { ...intent(), requiredFeatures: ['tools'] }, { ...intent(), sceneCode: 'other' }]) {

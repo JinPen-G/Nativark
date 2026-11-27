@@ -1,9 +1,10 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true } });
+const { createControllerSourceLoader } = require('../scripts/controller-sources.cjs');
+const loader = createControllerSourceLoader(require('node:path').resolve(__dirname, '..'));
 const { dbFactory } = require('./fixtures/ai-native/knowledge-persistent-content.cjs');
-const { composePersistedKnowledge } = require('../apps/api/src/modules/ai-native/knowledge/persistent-knowledge.composition');
+const { composePersistedKnowledge } = loader.load(loader.resolveSource(__filename, '@rental-os/ai-native-server/knowledge-persistence', true));
 const scope = { kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'space-a' };
 const context = { actor: { kind: 'user', userId: 'user-a' }, audience: 'operator', scope, requestId: 'req-a', contractVersion: 'test', authorizedAt: '2026-10-06T00:00:00Z' };
 async function setup() {
@@ -18,7 +19,9 @@ async function setup() {
     if (state.revoked || c.actor.userId !== 'user-a' || JSON.stringify(c.scope) !== JSON.stringify(scope) || state.denied.has(req.document?.documentId)) return null;
     return { scope: structuredClone(scope), actor: { actorKind: 'user', actorId: 'user-a' }, audience: 'operator', accessKey: 'synthetic-grant' };
   } };
+  const retentionUnavailable = async () => { throw Error('This recall fixture does not provide deletion authority'); };
   const bundle = composePersistedKnowledge({ db, authorization, memoryAuthorization: authorization,
+    retention: { lockSource: retentionUnavailable, inspectSource: retentionUnavailable, eraseCopies: retentionUnavailable },
     files: { assertBound: async (current, binding) => { assert.deepEqual(current.scope, scope); assert.equal(binding.workspaceId, scope.workspaceId); assert.equal(binding.attachmentId, `attachment-${binding.documentId}`); },
       read: async () => ({ mediaType: 'text/plain', bytes: new TextEncoder().encode('Synthetic camping guide') }) },
     clock: { now: () => Date.parse('2026-10-06T00:00:00Z') },

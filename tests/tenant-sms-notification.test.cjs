@@ -1,15 +1,11 @@
 const assert = require("node:assert/strict");
-const path = require("node:path");
 
 require("ts-node").register({
   transpileOnly: true,
   compilerOptions: { module: "commonjs", moduleResolution: "node", experimentalDecorators: true, emitDecoratorMetadata: true }
 });
 
-const { NotificationDeliveryUnknownError, TenantIntegrationRuntimeService } = require(path.join(
-  __dirname,
-  "../apps/api/src/modules/integrations/tenant-integration.runtime.service"
-));
+const { NotificationDeliveryUnknownError, TenantIntegrationRuntimeService } = require("@rental-os/platform-server/integration-sms");
 
 const logs = [];
 const configs = new Map([

@@ -1,8 +1,9 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { UnifiedAiGatewayService } = require('../apps/api/src/modules/ai-native/unified-ai-gateway.service');
+const { createControllerSourceLoader } = require('../scripts/controller-sources.cjs');
+const loader = createControllerSourceLoader(require('node:path').resolve(__dirname, '..'));
+const { UnifiedAiGatewayService } = loader.load(loader.resolveSource(__filename, '@rental-os/platform-server/ai-gateway', true));
 const ctx = { tenantId: 'tenant-1', workspaceId: 'space-1', actorId: 'actor-1' };
 const request = { callId: 'call-1', model: 'synthetic', messages: [{ role: 'user', content: 'synthetic' }], maxOutputTokens: 10 };
 const result = () => ({ kind: 'result', result: { text: 'done', usage: { inputTokens: 1, outputTokens: 2 } } });
