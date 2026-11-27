@@ -34,7 +34,7 @@
 }
 ```
 
-上例为字段说明。运行号、版本和摘要须填写真实值。配置摘要由已核更新器的 `runtime_configuration()` 在服务器显式启用 `app` profile 后读取，确认包含 API/Web，再返回摘要。它绑定实际环境、启动命令、挂载、网络和服务配置。现有 Compose 配置为 API/Web 指定 `command` 或 `entrypoint` 时，候选进入 `awaiting-runtime-binding-review`，由维护窗口核收发行挂载及其适用版本。自动切换适用于沿正式镜像默认启动的组合。
+上例为字段说明。运行号、版本和摘要须填写真实值。配置摘要由已核更新器的 `runtime_configuration()` 在服务器显式启用 `app` profile 后读取，确认包含 API/Web，再返回摘要。它绑定实际环境、启动命令、挂载、网络和服务配置。默认镜像启动沿原路径处理，公共 AI 保留旧库组合须额外登记下文运行绑定。其他显式命令或 `entrypoint` 进入 `awaiting-runtime-binding-review` 或明确拒绝。
 
 每小时无数据变化更新还需要 `.hourly-update/paired-authorization.json`。该文件由获得发布授权的运维写入，更新器只读取，CI 产物不能提供或改写它。
 
@@ -50,11 +50,37 @@
 
 两份本机记录必须归当前运维用户所有，权限为 `0600`，路径为普通文件。首次旧库桥接与迁移账尚未核收时保留 `legacy-combined` 状态，由原门禁返回 `awaiting-migration-bridge`。数据、原 SQL、schema、能力或顺序变化返回迁移待批准；原 `pending-migration.json` 存在时也暂停切换。授权缺失或过期返回发布待批准。正式构建回执中的 `releaseApproved` 和 `serverUpdateEligible` 持续保留原 `false`，本机授权单独校验。
 
-候选通过后先核同组镜像归档并加载，使用原 `--observe-pair` 核实际双镜像。切换前再核原镜像、Compose 配置、有效授权及同次 CI。版本分别比较，任何一仓降级或同版替换都进入保持状态。成对切换使用单独的 `compose.pair-images.yml` 叠加镜像选择，原 `compose.override.yml` 中的显式旧库 command 和挂载继续参与运行。人工调用 Compose 时也须按相同顺序包含这两个 override。
+候选通过后先核同组镜像归档并加载，使用原 `--observe-pair` 核实际双镜像。切换前再核原镜像、Compose 配置、有效授权及同次 CI。版本分别比较，任何一仓降级或同版替换都进入保持状态。成对切换使用单独的 `compose.pair-images.yml` 叠加镜像选择，已登记旧库组合同时写入精确模板命令和该版归档挂载。原 `compose.override.yml` 继续提供其余核定配置。人工调用 Compose 时也须按相同顺序包含这两个 override。
 
 更新前写入两镜像回退标签和原基线日志，失败或进程中断后沿原 `restore()` 恢复两角色和基线。该路径限定无数据变化更新，旧账迁移与数据恢复继续由维护流程处理。成功采用的原输入材料保留供下次比较和回退，下载 ZIP 与一次性解包目录在退出时清理。相同候选和本机条件的 pending 会复用紧凑结果，每小时仍核线上健康及官方运行状态。
 
 安装此源码前需要核收上述工具、真实基线和本机授权。现有仅执行 `holding-current-pair` 的脚本提供小时健康巡检，自动发现和升级须以新入口实际安装及门禁结果分别核定。
+
+### 公共 AI 保留旧库的运行绑定
+
+首次旧库桥接、权限衔接和实际启动通过后，运维把该次正式底座归档原字节留在 `prepared/<运行号>-<尝试号>/runtime/platform-source.tgz`，将以下 `runtimeBinding` 加入真实 `paired-active.json`。归档与同目录 `api/` 中完整 v2 锁的 `base.platform.sha256` 必须一致。该登记属于首次维护核收，更新器只继承已生效的绑定。
+
+```json
+{
+  "runtimeBinding": {
+    "format": "zelo-legacy-public-retention-1",
+    "platformArchive": "/home/ritiadm/zelo/.hourly-update/prepared/<运行号>-<尝试号>/runtime/platform-source.tgz",
+    "platformSha256": "<该版正式底座归档SHA256>",
+    "archiveTarget": "/run/zelo-release/platform-source.tgz",
+    "templateSha256": "16052646c62dc7bcdc36f218d44c47ad9767fb0b5dad888f90879ddb437daa35"
+  }
+}
+```
+
+允许的 API command 是更新器 `legacy_command(runtimeBinding)` 返回的完整数组。它从同一 `dist-ai-public-retention` 读取原工厂，显式构造 `LegacyRentalDataSelection`，沿原 bootstrap 和旧账观察启动。模板只有归档容器路径一个变量，保留原 public-retention 选择且 MCP 关闭。首次已经采用 `/run/zelo-release/platform-source-<版本>.tgz` 的同正文模板也可登记，该容器路径之后保持固定，实际版本始终以所挂归档与锁的原摘要确定。使用新登记时推荐上述无版本容器路径。
+
+归档挂载使用 `type: bind`、精确 source/target、`read_only: true`、`bind.create_host_path: false`。API 的工作目录为 `/app`、用户为 `node`，明确配置 `RENTAL_DEPLOYMENT_LOCK=/app/apps/rental-api/prisma-deployment/core.deployment.lock.json` 和 `RENTAL_PUBLIC_AI_DATA_PACKAGE_DIR=/app/public-ai-data`。模板调用的九个宿主/公共出口产物按已核 0.2.2 镜像的字节清单验证，合同变化须核收后更新模板。额外挂载覆盖固定应用、依赖或归档时拒绝。Web 沿同次正式镜像默认 command/entrypoint 启动。
+
+登记时配置摘要调用 `runtime_configuration(runtimeBinding)`。它先核完整模板、归档原字节、同版锁和精确只读挂载，随后只将受管归档的宿主 source 归一为固定标记，其他配置继续参与摘要。本机 `paired-authorization.json` 还须明确增加 `runtimeBindingFormat: zelo-legacy-public-retention-1` 和 `legacyTemplateSha256`，值与上例模板摘要相同。首次桥接记录、配置摘要、授权有效期、原 pending 和无数据变化要求继续逐项核对。
+
+每次候选的底座归档由原正式 Release 下载核验取得，来源与同次 CI 的 API/Web、完整双 SHA 和部署锁核同，和 API 输入一起保存到新的 prepared 目录。切换用同一 Compose 覆盖文件绑定两个新镜像及新归档，启动后再核实际容器 command/entrypoint、API 用户/目录和只读挂载。授权摘要因此可跨已核同模板的无数据变化候选继续使用。
+
+`zelo-paired-rollback-2` 日志保存旧 active、两镜像、旧运行绑定和候选绑定。失败或中断恢复先识别现场属于旧/新哪一份已核绑定，再成对恢复旧镜像和旧归档挂载，核健康和实际运行材料后恢复 active，最后删除 journal。旧版日志读取继续保留。已采用与待核失败材料各自留存，发现同运行目录已存在时暂停交人工核对，避免覆盖原恢复证据。此源码路径的实际服务器切换验收与安装分别记录。
 
 ## 独立 Rental 发布材料离线校验
 

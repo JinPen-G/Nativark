@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 import signal
@@ -48,6 +48,60 @@ VERIFIER_FILES = {
     "scripts/ops/release-verify.cjs": "125d958dfb95fbac33a0461eff54aadc5ed82ed2a722fc4f32d65c95b288e7f2",
     "scripts/ops/release-composition.cjs": "b41a828cb473da96b91886d3cb683196f4b7a2f69c70df1e4be86b7c77a21aa8",
     "scripts/ops/release-build-evidence.cjs": "55846235cd96db49a1bcf87d58b742b581be09a4c6ff5bad7def331f1ac922f8",
+}
+
+
+# 原公共保留旧库启动模板。唯一变量是只读底座归档路径，其字节由正式锁和 Release 核定。
+LEGACY_BINDING_FORMAT = "zelo-legacy-public-retention-1"
+LEGACY_ARCHIVE_TARGET = "/run/zelo-release/platform-source.tgz"
+LEGACY_COMMAND_TEMPLATE = r'''
+const { createRequire } = require("node:module");
+const { isAbsolute, resolve } = require("node:path");
+const host = createRequire("/app/apps/rental-api/dist-ai-public-retention/ai-public-retention-main.js");
+const { bootstrapFreshRentalComposition } = host("./bootstrap.js");
+const { readFreshRentalAiSelection } = host("./ai-fresh-main.js");
+const { LegacyRentalDataSelection, createRentalAiHostModule } = host("./ai-app.module.js");
+const { RENTAL_AI_EXTENSION_FILES, readRentalAiDataExtension, createRentalAiMysqlPlans } = host("./ai-data-extension.js");
+const { requirePublicAiDataPackage } = host("@rental-os/public-ai-data/public-data-package");
+const { readCorePackageOrdinaryFile } = host("@rental-os/platform-core-host/core-package-preflight");
+const { createRentalPlatformRetentionRequests } = host("@rental-os/rental-ai-adapters");
+
+void bootstrapFreshRentalComposition(async completeLock => {
+  const directory = process.env.RENTAL_PUBLIC_AI_DATA_PACKAGE_DIR ?? "";
+  if (!isAbsolute(directory)) throw new Error("须提供同镜像公共AI数据目录");
+  const fresh = await readFreshRentalAiSelection(completeLock, directory);
+  const base = fresh.base;
+  const release = base.dataCapabilities.find(item => item.id === "ai-native");
+  const data = requirePublicAiDataPackage(directory, release);
+  const extensionFiles = new Map(await Promise.all(RENTAL_AI_EXTENSION_FILES.map(async ({ file }) =>
+    [file, await readCorePackageOrdinaryFile(resolve("/app/apps/rental-api", file), 32 * 1024 * 1024)])));
+  const extension = readRentalAiDataExtension(extensionFiles);
+  const plans = createRentalAiMysqlPlans(data.contribution, extension, release);
+  const legacy = new LegacyRentalDataSelection({
+    lock: base,
+    platformArchive: await readCorePackageOrdinaryFile("__ZELO_PLATFORM_ARCHIVE__", 128 * 1024 * 1024),
+    additionalPhysical: [{ owner: "rental-ai-extension", read: plans.extension.readPhysical }]
+  });
+  return { base, register: () => createRentalAiHostModule({
+    lock: base, fresh, legacy, platformRetention: createRentalPlatformRetentionRequests
+  }) };
+}).catch(error => {
+  process.stderr.write(`${error instanceof Error ? error.name : "Error"}: Zelo旧库启动失败\n`);
+  process.exitCode = 1;
+});
+'''.lstrip("\n")
+LEGACY_TEMPLATE_SHA256 = "16052646c62dc7bcdc36f218d44c47ad9767fb0b5dad888f90879ddb437daa35"
+# 这些固定产物共同构成模板调用合同。合同变化须先核收新模板。
+LEGACY_HOST_FILES = {
+    "apps/rental-api/dist-ai-public-retention/bootstrap.js": "63677219ecbb476b111269ae3a1821e03f1dc4e8f72fb184715934f8754a2b64",
+    "apps/rental-api/dist-ai-public-retention/ai-fresh-main.js": "9bdb983ee2d6830b3047a3d51993992d9beabd88772564d5842a5c490158f4a5",
+    "apps/rental-api/dist-ai-public-retention/ai-app.module.js": "777d00034c682b148cc40edbbc462d90d9a0e20acc456ac3b8e6ff32c6f4f379",
+    "apps/rental-api/dist-ai-public-retention/ai-data-extension.js": "78a9fbc96ef7fb8a1e3aaa57935e890ddd3bdb15ac7f9409220cdf667ee484a2",
+    "apps/rental-api/dist-ai-public-retention/legacy-data-selection.js": "bbd5f4ccd88a9259d006ea7e870396994aff95e9077bf7ec2a0ba9ef096d2491",
+    "packages/platform-core-host/dist/core-package-preflight/index.js": "ff896513f682f38cf947efb8c00e76eed1fccd3e207d6d0bdc0fbbd9e4236fb4",
+    "packages/platform-core-host/dist/core-package-preflight/archive-source.js": "e39509ce5b92205945c886c373c8b0adf42768fa83d70a06c2b38629a783aed3",
+    "packages/rental-ai-adapters/dist/index.js": "561f243df2927a22e30a057ede54395cf4081332bc1987d1475b5e515384e7ed",
+    "packages/rental-ai-adapters/dist/platform-retention.js": "ca319aaac54aa681847b231f84731a4935635ce5c6d57c41b7a1afa3da0e53e8"
 }
 
 
@@ -107,21 +161,30 @@ def smoke():
             raise RuntimeError(f"运行验收失败 {url}")
 
 
-def override_text(tags):
+def override_text(tags, binding=None):
+    if binding:
+        services = {service: {"image": tags[service]} for service in SERVICES}
+        services["api"].update(command=legacy_command(binding), volumes=[legacy_volume(binding)])
+        # Compose 在 JSON/YAML 字符串中也插值美元符，须保留原 JavaScript 模板字面量。
+        return OVERRIDE_HEADER + json.dumps({"services": services}, ensure_ascii=False).replace("$", "$$") + "\n"
     return (
         OVERRIDE_HEADER + "services:\n"
         + "".join(f"  {service}:\n    image: {tags[service]}\n" for service in SERVICES)
     )
 
 
-def switch(tags, expected, paired=False):
+def switch(tags, expected, paired=False, binding=None, configuration=None):
     # 缺失或被重打标签的旧镜像不能写入有效 override。
     for service in SERVICES:
         actual = run("docker", "image", "inspect", "--format", "{{.Id}}", tags[service], capture=True)
         if not IMAGE_ID.fullmatch(actual) or actual != expected[service]:
             raise RuntimeError(f"{service} 的本机镜像与切换记录不一致")
     destination = PAIR_OVERRIDE if paired else OVERRIDE
-    store(destination, override_text(tags))
+    if binding:
+        validate_legacy_binding(binding)
+    store(destination, override_text(tags, binding))
+    if configuration is not None and runtime_configuration(binding, require_supported_startup=True) != configuration:
+        raise RuntimeError("切换后的运行绑定或原配置不一致")
     overlays = ["-f", str(OVERRIDE)]
     if paired:
         overlays += ["-f", str(PAIR_OVERRIDE)]
@@ -129,24 +192,38 @@ def switch(tags, expected, paired=False):
         "--no-build", "--pull", "never", "--wait", "--wait-timeout", "180", *SERVICES, timeout=210)
     if current() != expected:
         raise RuntimeError("启动镜像与指定版本不一致")
+    if binding:
+        observe_legacy_runtime(binding)
     smoke()
 
 
 def restore():
     old = json.loads(JOURNAL.read_text(encoding="utf-8"))
-    if old.get("format") == "zelo-paired-rollback-1":
+    if old.get("format") in ("zelo-paired-rollback-1", "zelo-paired-rollback-2"):
         # 新日志保存原完整本地基线。这里只回退已批准无数据变化的镜像对。
         baseline = old["active"]
         expected = baseline["imageIds"]
         tags = rollback_tags(expected)
-        if (old.get("runtimeConfigurationSha256") != runtime_configuration()
+        binding = baseline.get("runtimeBinding")
+        bindings = [binding]
+        if old["format"] == "zelo-paired-rollback-2":
+            candidate_binding = old["candidateBinding"]
+            if ((binding is None) != (candidate_binding is None)
+                    or binding and binding["archiveTarget"] != candidate_binding.get("archiveTarget")):
+                raise RuntimeError("回退日志的运行模板类型或挂载目标发生变化")
+            bindings.append(candidate_binding)
+        if (not DIGEST.fullmatch(old.get("runtimeConfigurationSha256", ""))
+                or not runtime_matches(old["runtimeConfigurationSha256"], bindings)
                 or old.get("tags") != tags or not DIGEST.fullmatch(old.get("candidateIdentitySha256", ""))):
             raise RuntimeError("配对回退记录或现场运行配置已变化，须人工恢复")
-        switch(tags, expected, paired=True)
+        if binding:
+            validate_legacy_binding(binding, baseline)
+        switch(tags, expected, paired=True, binding=binding,
+               configuration=old["runtimeConfigurationSha256"])
         write_json(ACTIVE_PAIR, baseline)
         write_json(FAILED, {"identitySha256": old["candidateIdentitySha256"]})
-        JOURNAL.unlink()
         status("rolled-back", images=expected)
+        JOURNAL.unlink()
         return
     if (not SHA.fullmatch(old["commit"]) or type(old["ci"]) is not int or old["ci"] < 1
             or set(old["images"]) != set(SERVICES)
@@ -394,6 +471,7 @@ def verify_release(repository, version, commit, digest, prefix, directory):
         raise RuntimeError("Release 资产摘要与部署锁不同")
     download(f"https://api.github.com/repos/{repository}/releases/assets/{asset['id']}",
              directory / name, digest, 128 * 1024 * 1024, asset["size"], "application/octet-stream")
+    return directory / name
 
 
 def review(candidate, baseline, evidence, context_digest):
@@ -434,19 +512,100 @@ console.log(JSON.stringify({ candidate: candidate.identitySha256, web: digest.di
     return result["versions"]
 
 
-def authorization_valid(value, configuration):
+def legacy_command(binding):
+    return ["node", "--input-type=commonjs", "--eval",
+            LEGACY_COMMAND_TEMPLATE.replace("__ZELO_PLATFORM_ARCHIVE__", binding["archiveTarget"])]
+
+
+def legacy_volume(binding):
+    return {"type": "bind", "source": binding["platformArchive"], "target": binding["archiveTarget"],
+            "read_only": True, "bind": {"create_host_path": False}}
+
+
+def legacy_host(api_directory):
+    for name, digest in LEGACY_HOST_FILES.items():
+        file = api_directory / name
+        if file.resolve() != file.absolute() or not file.is_file() or file_digest(file) != digest:
+            raise RuntimeError("旧库启动合同已变化，须核收新的运行模板")
+    lock_file = api_directory / "apps/rental-api/prisma-deployment/core.deployment.lock.json"
+    lock = json.loads(lock_file.read_text(encoding="utf-8"))
+    base = lock.get("base", {})
+    if (lock.get("lockVersion") != 2 or len(lock.get("postCapability", [])) != 1
+            or [core.get("manifest", {}).get("id") for core in base.get("cores", [])] != ["rental"]
+            or [capability.get("id") for capability in base.get("dataCapabilities", [])] != ["ai-native"]):
+        raise RuntimeError("旧库模板只接受已核公共 AI 保留且 MCP 关闭的组合")
+    return base
+
+
+def validate_legacy_binding(binding, active=None):
+    if (not isinstance(binding, dict) or set(binding) != {
+            "format", "platformArchive", "platformSha256", "archiveTarget", "templateSha256"}
+            or binding["format"] != LEGACY_BINDING_FORMAT
+            or binding["templateSha256"] != LEGACY_TEMPLATE_SHA256
+            or hashlib.sha256(LEGACY_COMMAND_TEMPLATE.encode()).hexdigest() != LEGACY_TEMPLATE_SHA256
+            or not isinstance(binding["archiveTarget"], str)
+            or not re.fullmatch(r"/run/zelo-release/platform-source(?:-\d+\.\d+\.\d+)?\.tgz", binding["archiveTarget"])):
+        raise RuntimeError("缺少已核定的旧库运行绑定")
+    archive = Path(binding["platformArchive"])
+    prepared = archive.parent.parent
+    if (prepared.parent != STATE / "prepared" or not re.fullmatch(r"[1-9]\d*-[1-9]\d*", prepared.name)
+            or archive != prepared / "runtime/platform-source.tgz" or archive.resolve() != archive.absolute()
+            or not archive.is_file() or not 0 < archive.stat().st_size <= 128 * 1024 * 1024):
+        raise RuntimeError("旧库归档须为同次 prepared 中独立留存的普通文件")
+    base = legacy_host(prepared / "api")
+    if (binding["platformSha256"] != base["platform"]["sha256"]
+            or file_digest(archive) != binding["platformSha256"]):
+        raise RuntimeError("旧库运行归档与同版部署锁不一致")
+    if active and (active.get("directory") != str(prepared / "api")
+                   or f"{active.get('runId')}-{active.get('runAttempt')}" != prepared.name):
+        raise RuntimeError("旧库运行绑定与原成对基线不同")
+    return binding
+
+
+def runtime_matches(configuration, bindings):
+    for binding in bindings:
+        try:
+            if runtime_configuration(binding, require_supported_startup=True) == configuration:
+                return True
+        except (RuntimeError, OSError):
+            continue
+    return False
+
+
+def observe_legacy_runtime(binding):
+    validate_legacy_binding(binding)
+    for role in SERVICES:
+        container = json.loads(run("docker", "inspect", "--format", "{{json .}}",
+                                   f"{PROJECT}-{role}-1", capture=True))
+        image = json.loads(run("docker", "image", "inspect", "--format", "{{json .Config}}",
+                               container["Image"], capture=True))
+        actual = container["Config"]
+        expected_command = legacy_command(binding) if role == "api" else image.get("Cmd")
+        if actual.get("Cmd") != expected_command or actual.get("Entrypoint") != image.get("Entrypoint"):
+            raise RuntimeError("实际容器启动命令与核定镜像和模板不同")
+        if role == "api":
+            mounted = [item for item in container["Mounts"] if item["Destination"] == binding["archiveTarget"]]
+            if (actual.get("WorkingDir") != "/app" or actual.get("User") != "node" or len(mounted) != 1
+                    or mounted[0]["Type"] != "bind" or mounted[0]["Source"] != binding["platformArchive"]
+                    or mounted[0]["RW"] is not False):
+                raise RuntimeError("实际 API 容器没有使用核定的只读旧库归档")
+
+
+def authorization_valid(value, configuration, binding=None):
     try:
         expires = datetime.fromisoformat(value["validUntil"])
         return (value.get("format") == "zelo-paired-authorization-1"
                 and value.get("scope") == "official-pair-no-data-change"
                 and isinstance(value.get("approvalReference"), str) and bool(value["approvalReference"].strip())
                 and value.get("runtimeConfigurationSha256") == configuration
+                and (binding is None or value.get("runtimeBindingFormat") == LEGACY_BINDING_FORMAT
+                     and value.get("legacyTemplateSha256") == LEGACY_TEMPLATE_SHA256)
                 and expires.tzinfo is not None and expires > datetime.now(timezone.utc))
     except (KeyError, TypeError, ValueError):
         return False
 
 
-def runtime_configuration(require_default_startup=False):
+def runtime_configuration(binding=None, require_supported_startup=False):
     args = [*COMPOSE, "-f", str(OVERRIDE)]
     if PAIR_OVERRIDE.exists():
         if PAIR_OVERRIDE.is_symlink() or not PAIR_OVERRIDE.read_text().startswith(OVERRIDE_HEADER):
@@ -455,7 +614,38 @@ def runtime_configuration(require_default_startup=False):
     config = json.loads(run(*args, "--profile", "app", "config", "--format", "json", capture=True))
     if any(service not in config.get("services", {}) for service in SERVICES):
         raise RuntimeError("展开配置缺少 app profile 的 API/Web")
-    if require_default_startup and any(
+    if binding:
+        validate_legacy_binding(binding)
+        api, web = (config["services"][role] for role in SERVICES)
+        command = legacy_command(binding)
+        # Compose config 保留供容器创建时消费的 $$ 转义，实际容器仍须逐字等于原模板。
+        escaped_command = [part.replace("$", "$$") for part in command]
+        if (api.get("command") not in (command, escaped_command) or api.get("entrypoint") is not None
+                or api.get("working_dir", "/app") != "/app" or api.get("user", "node") != "node"
+                or web.get("command") is not None or web.get("entrypoint") is not None
+                or api.get("environment", {}).get("RENTAL_DEPLOYMENT_LOCK") != "/app/apps/rental-api/prisma-deployment/core.deployment.lock.json"
+                or api.get("environment", {}).get("RENTAL_PUBLIC_AI_DATA_PACKAGE_DIR") != "/app/public-ai-data"):
+            raise RuntimeError("运行命令、身份或数据路径与原旧库模板不同")
+        api["command"] = command
+        volumes = api.get("volumes", [])
+        if len({volume.get("target") for volume in volumes}) != len(volumes):
+            raise RuntimeError("API 挂载目标必须唯一")
+        mounted = [volume for volume in volumes if volume.get("target") == binding["archiveTarget"]]
+        if mounted != [legacy_volume(binding)]:
+            raise RuntimeError("旧库底座归档必须精确只读挂载")
+        for volume in volumes:
+            target = PurePosixPath(volume["target"])
+            if target == PurePosixPath(binding["archiveTarget"]):
+                continue
+            protected = [PurePosixPath(value) for value in (
+                "/app/apps", "/app/packages", "/app/node_modules", "/app/public-ai-data", "/app/vendor",
+                "/app/package.json", "/app/package-lock.json", binding["archiveTarget"])]
+            if any(target == item or target in item.parents or item in target.parents for item in protected):
+                raise RuntimeError("额外挂载覆盖了固定镜像或旧库归档")
+        # 仅在完整归档及模板已核同后归一这一受管路径，后继授权仍绑定其余配置。
+        mounted[0]["source"] = "@zelo-verified-platform-archive"
+        api["volumes"] = sorted(volumes, key=lambda volume: volume["target"])
+    elif require_supported_startup and any(
             config["services"][service].get(field) is not None
             for service in SERVICES for field in ("command", "entrypoint")):
         return None
@@ -515,11 +705,12 @@ def check_candidate(run_record, directory, images, apply):
     checked = review(inputs / "api", baseline, pair, manifest["contextSha256"])
     lock = json.loads((inputs / "api/apps/rental-api/prisma-deployment/core.deployment.lock.json").read_text())
     lock = lock.get("base", lock)
+    archives = {}
     for role, repository, prefix, digest in (
         ("platform", REPOSITORY, "platform-source", lock["platform"]["sha256"]),
         ("rental", "JinPen-G/Zelo-rental-core", "rental", lock["cores"][0]["sha256"]),
     ):
-        verify_release(repository, versions[role], record[role + "Commit"], digest, prefix, directory)
+        archives[role] = verify_release(repository, versions[role], record[role + "Commit"], digest, prefix, directory)
     detail = {"platformCommit": record["platformCommit"], "rentalCommit": record["rentalCommit"],
               "identitySha256": checked["identitySha256"], "versions": versions}
     if checked["status"] != "awaiting-release-approval":
@@ -528,9 +719,13 @@ def check_candidate(run_record, directory, images, apply):
     if PENDING.exists():
         pending("awaiting-migration-approval", run_record, **detail)
         return
+    binding = baseline.get("runtimeBinding")
+    if binding:
+        validate_legacy_binding(binding, baseline)
+        observe_legacy_runtime(binding)
     if (baseline.get("format") != "zelo-paired-active-1" or baseline.get("imageIds") != images
             or not isinstance(baseline.get("dataApprovalReference"), str) or not baseline["dataApprovalReference"].strip()
-            or baseline.get("runtimeConfigurationSha256") != runtime_configuration()):
+            or baseline.get("runtimeConfigurationSha256") != runtime_configuration(binding)):
         pending("awaiting-baseline-review", run_record, **detail)
         return
     if any(stable_version(versions[role]) < stable_version(baseline["versions"][role]) for role in VERSION_ROLES):
@@ -542,17 +737,22 @@ def check_candidate(run_record, directory, images, apply):
     if not AUTHORIZATION.exists():
         pending("awaiting-release-approval", run_record, **detail)
         return
-    # 显式旧库命令绑定原发行挂载。替换镜像前须由维护窗口重新核收该启动材料。
-    if runtime_configuration(require_default_startup=True) is None:
+    if runtime_configuration(binding, require_supported_startup=True) is None:
         pending("awaiting-runtime-binding-review", run_record, **detail)
         return
     authorization = private_json(AUTHORIZATION)
-    if not authorization_valid(authorization, baseline["runtimeConfigurationSha256"]):
+    if not authorization_valid(authorization, baseline["runtimeConfigurationSha256"], binding):
         pending("awaiting-release-approval", run_record, **detail)
         return
     if FAILED.exists() and private_json(FAILED).get("identitySha256") == checked["identitySha256"]:
         pending("holding-failed-pair", run_record, **detail)
         return
+    destination = STATE / "prepared" / f"{run_record['id']}-{run_record['run_attempt']}"
+    candidate_binding = None
+    if binding:
+        legacy_host(inputs / "api")
+        candidate_binding = {**binding, "platformArchive": str(destination / "runtime/platform-source.tgz"),
+                             "platformSha256": lock["platform"]["sha256"]}
     if not apply:
         pending("ready-for-authorized-pair-update", run_record, **detail)
         return
@@ -585,7 +785,7 @@ def check_candidate(run_record, directory, images, apply):
     observed = observe_pair(receipt, policy["buildRecordSha256"])
     write_json(pair / "images.json", {role: observed[role] for role in SERVICES})
     review(inputs / "api", baseline, pair, manifest["contextSha256"])
-    if current() != images or runtime_configuration() != baseline["runtimeConfigurationSha256"]:
+    if current() != images or runtime_configuration(binding) != baseline["runtimeConfigurationSha256"]:
         raise RuntimeError("切换前原组合或配置发生变化")
     latest_run = github(f"{REPOSITORY}/actions/runs/{run_record['id']}")
     if (not official_run(latest_run) or latest_run["run_attempt"] != run_record["run_attempt"]
@@ -593,28 +793,38 @@ def check_candidate(run_record, directory, images, apply):
         raise RuntimeError("切换前正式 CI 失去成功状态")
     if (PENDING.exists() or private_json(ACTIVE_PAIR) != baseline
             or private_json(AUTHORIZATION) != authorization
-            or not authorization_valid(authorization, baseline["runtimeConfigurationSha256"])):
+            or not authorization_valid(authorization, baseline["runtimeConfigurationSha256"], binding)):
         raise RuntimeError("切换前授权、原基线或迁移状态变化")
-    destination = STATE / "prepared" / f"{run_record['id']}-{run_record['run_attempt']}"
     destination.parent.mkdir(exist_ok=True)
     if destination.exists():
         raise RuntimeError("已有同运行恢复材料，须先核收原事务")
     old_tags = rollback_tags(images)
     for role in SERVICES:
         run("docker", "image", "tag", images[role], old_tags[role])
+    if candidate_binding:
+        runtime = inputs / "runtime"
+        runtime.mkdir()
+        shutil.copyfile(archives["platform"], runtime / "platform-source.tgz")
+        # 原资产公开可读，node 用户通过只读单文件 bind 取得它，私有配置权限保持。
+        (runtime / "platform-source.tgz").chmod(0o444)
     inputs.rename(destination)
     shutil.copyfile(receipt, destination / "image-pair.json")
-    write_json(JOURNAL, {"format": "zelo-paired-rollback-1", "active": baseline, "tags": old_tags,
+    if candidate_binding:
+        validate_legacy_binding(candidate_binding)
+    write_json(JOURNAL, {"format": "zelo-paired-rollback-2", "active": baseline, "tags": old_tags,
+                        "candidateBinding": candidate_binding,
                         "runtimeConfigurationSha256": baseline["runtimeConfigurationSha256"],
                         "candidateIdentitySha256": checked["identitySha256"]})
     try:
         tags = {role: f"zelo-rental-{role}:ci-{run_record['id']}-{run_record['run_attempt']}" for role in SERVICES}
-        switch(tags, observed["runtimeImageIds"], paired=True)
+        switch(tags, observed["runtimeImageIds"], paired=True, binding=candidate_binding,
+               configuration=baseline["runtimeConfigurationSha256"])
         write_json(ACTIVE_PAIR, {"format": "zelo-paired-active-1", "directory": str(destination / "api"),
                                 "contextSha256": manifest["contextSha256"], **detail,
                                 "imageIds": observed["runtimeImageIds"],
                                 "imagePairSha256": policy["buildRecordSha256"],
                                 "dataApprovalReference": baseline["dataApprovalReference"],
+                                **({"runtimeBinding": candidate_binding} if candidate_binding else {}),
                                 "runId": run_record["id"], "runAttempt": run_record["run_attempt"],
                                 "runtimeConfigurationSha256": baseline["runtimeConfigurationSha256"]})
         (STATE / "pending-pair.json").unlink(missing_ok=True)
@@ -647,14 +857,18 @@ def update(apply):
         pending("awaiting-verifier-installation", candidate)
         return
     active = private_json(ACTIVE_PAIR) if ACTIVE_PAIR.exists() else {}
+    if active.get("runtimeBinding"):
+        validate_legacy_binding(active["runtimeBinding"], active)
+        observe_legacy_runtime(active["runtimeBinding"])
     if (active.get("runId") == candidate["id"] and active.get("runAttempt") == candidate["run_attempt"]
-            and active.get("imageIds") == images and active.get("runtimeConfigurationSha256") == runtime_configuration()):
+            and active.get("imageIds") == images
+            and active.get("runtimeConfigurationSha256") == runtime_configuration(active.get("runtimeBinding"))):
         status("holding-current-pair", images=images, runId=candidate["id"])
         return
     watched = {path.name: file_digest(path) if path.is_file() else None
                for path in (ACTIVE_PAIR, AUTHORIZATION, PENDING, FAILED)}
     watched.update(runId=candidate["id"], runAttempt=candidate["run_attempt"], apply=apply,
-                   configuration=runtime_configuration(), updater=file_digest(Path(__file__)))
+                   configuration=runtime_configuration(active.get("runtimeBinding")), updater=file_digest(Path(__file__)))
     poll_digest = hashlib.sha256(json.dumps(watched, sort_keys=True).encode()).hexdigest()
     seen = STATE / "paired-poll.json"
     if seen.exists() and private_json(seen).get("sha256") == poll_digest:
