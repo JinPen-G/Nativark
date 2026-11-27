@@ -55,6 +55,37 @@ const verificationScripts = {
   'test:rental': 'npm run test:rental:dist && npm run test:rental:legacy',
 };
 
+/** 测试材料由独立仓登记；不成为 npm 工作区，也不进入默认或发行源码。 */
+function mapVerificationSource(raw, declaration, source) {
+  const files = new Map(), origins = new Map();
+  if (declaration === undefined) return { files, origins, roots: [] };
+  if (declaration?.format !== 'rental-development-verification-1' || !Array.isArray(declaration.paths)
+    || !declaration.paths.length) throw Error('开发验证材料清单无效');
+  const roots = [];
+  for (const entry of declaration.paths) {
+    if (!['tests', 'scripts'].includes(entry?.target) || entry.source !== 'workspace/' + entry.target
+      || roots.includes(entry.source)) throw Error('开发验证材料只能登记独立 tests/scripts 原目录');
+    roots.push(entry.source);
+    const prefix = entry.source + '/';
+    let count = 0;
+    for (const [name, bytes] of raw) {
+      if (!name.startsWith(prefix)) continue;
+      const relative = name.slice(prefix.length);
+      assertSourcePath(relative);
+      if (!/\.(?:[cm]?[jt]sx?|json|md|sql|prisma|html|css)$/u.test(relative)
+        || /(?:^|\/)(?:dist|generated|coverage)(?:\/|$)/u.test(relative))
+        throw Error('开发验证材料含非源码文件：' + name);
+      const target = entry.target + '/' + relative;
+      if (target === verificationGuard) throw Error('原离线守卫必须来自固定底座，不能被业务材料覆盖');
+      files.set(target, bytes);
+      origins.set(slash(path.join(root, target)), { ...source, path: name, sha256: sha256(bytes) });
+      count++;
+    }
+    if (!count) throw Error('独立源码缺少声明的验证目录：' + entry.source);
+  }
+  return { files, origins, roots };
+}
+
 const freshAiHostExport = name => ['ai-app-module', 'ai-data-extension'].includes(name.replace(/^\.\//u, ''));
 const needsHistoricalWeb = rental => !rental.layout.paths.some(entry => entry.target === 'packages/web-client')
   && (rental.layoutKind === 'legacy-root' || /^0\.1\.(?:[0-9]|1[0-4])$/u.test(rental.metadata.version));
@@ -102,6 +133,7 @@ function compatibilitySnapshot(raw, entry) {
 function mapRentalSource(raw, layout, source) {
   if (layout?.format !== 'rental-source-layout-1' || !Array.isArray(layout.paths) || !layout.paths.length)
     throw Error('Rental 源码清单格式无效');
+  const verification = mapVerificationSource(raw, layout.verification, source);
   const files = new Map(), origins = new Map(), targets = new Set(), sourceRoots = new Set();
   for (const entry of layout.paths) {
     if (!entry || typeof entry.source !== 'string' || typeof entry.target !== 'string') throw Error('源码映射无效');
@@ -167,6 +199,7 @@ function mapRentalSource(raw, layout, source) {
     if (metadata.name !== expectedName) throw Error('Rental 源码工作区名称不匹配：' + entry.target);
     for (const [name, bytes] of raw) {
       assertSourcePath(name);
+      if (verification.roots.some(directory => name.startsWith(directory + '/'))) continue;
       if (!name.startsWith(prefix) || name === layoutFile || name === 'tools/prepare-workspace.cjs') continue;
       if (entry.source === '.' && name.startsWith('workspace/')
         && !layout.paths.some(other => other !== entry && name.startsWith(other.source + '/')))
@@ -185,7 +218,7 @@ function mapRentalSource(raw, layout, source) {
     }
   }
   if (!targets.has(coreDirectory)) throw Error('Rental 源码清单缺少领域包');
-  return { snapshot: snapshotFromFiles(source.commit, files), origins, workspaces: [...targets], layout };
+  return { snapshot: snapshotFromFiles(source.commit, files), origins, workspaces: [...targets], layout, verification };
 }
 
 /** 开发只核固定提交；正式发行仍强制版本Tag。旧根布局由显式兼容清单映射。 */
@@ -316,10 +349,12 @@ function bindIndependentWorkspaceLinks(lock, selected, workspaces, semver, publi
       if (!pinned && Object.hasOwn(metadata.optionalDependencies ?? {}, name)) continue;
       throw Error('独立工作区依赖缺少兼容的固定来源：' + target + ' -> ' + name);
     }
-    // Preserve older lock provenance when it already supplies these specs.
-    // In the detached case, the workspace specs were verified above against
-    // the exact existing records and need no old manifest in the base tree.
-    if (!Object.hasOwn(lock.packages, target)) packages[target] = metadata;
+    // The base can now own a public 0.2.x SDK at the same path where this
+    // composition explicitly selects Rental's fixed 0.1.x compatibility copy.
+    // Bind that selected manifest after checking every required dependency;
+    // retaining the public manifest would compare two different products.
+    // External pins and the nested public-retention SDK stay unchanged.
+    packages[target] = metadata;
   }
   return { ...lock, packages };
 }
@@ -412,6 +447,10 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
   }
   if (withTests) for (const file of [...verificationTests, verificationGuard])
     if (!files.has(file)) throw Error('固定开发验证材料缺失：' + file);
+  if (withTests) for (const [file, bytes] of rental.verification?.files ?? []) {
+    if (files.has(file)) throw Error('独立验证材料与底座/构建来源冲突：' + file);
+    files.set(file, bytes);
+  }
   if (adapterSources) for (const [file, bytes] of adapterSources.files)
     files.set(adapterSources.directory + '/' + file, bytes);
   const workspaces = new Map();
@@ -540,7 +579,10 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
     (multi ? `Rental 与工单的普通开发按[双 Core API](apps/example-multi-core-api/README.md)及[双 Core 后台](apps/example-multi-core-admin/README.md)准备同一部署锁。` : '') +
     (withTests ? `\n\n本组合显式包含七份原测试材料、工单示例及原离线守卫。按宿主说明生成同版所选 Client 并执行 \`npm run build\` 后，运行 \`npm run test:rental\`。` +
       `该命令先跑四份 dist 用例，再串行执行两份 legacy 用例；后者自行建立并清理 \`output/.tmp/rental-lead-participants\`，已有目录会拒绝覆盖。` +
-      `测试不启动服务或连接数据库；行存储和部署观察仍是用例内的明确 fixture。发行和未选择 \`--with-tests\` 的组合不携带这些材料。\n\n` : '') +
+      `这六份用例不启动服务或连接数据库；行存储和部署观察仍是用例内的明确 fixture。` +
+      `独立清单若另行登记 \`workspace/tests\`、\`workspace/scripts\`，原字节随组合保留，但不会自动执行或追加到上述命令。` +
+      `其他用例的实际宿主/辅助文件与数据库前提须按其源码核对，历史脚本不可当作当前环境操作授权。` +
+      `发行和未选择 \`--with-tests\` 的组合不携带这些材料。\n\n` : '') +
     `发布前将 Core 自己的改动提交并打版本标签，再按 [Core 构建与发行](packages/rental-core/README.md#使用与构建)` +
     `核固定底座/独立 Core 来源和归档。部署锁、租户授权与成员分配独立办理。\n\n` +
     `开发新 Core 从 [五步手册](packages/core-contracts/README.md#五步快速接入)开始；` +
@@ -548,7 +590,7 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
   const directories = new Set();
   for (const file of files.keys()) for (let directory = path.posix.dirname(file); directory !== '.'; directory = path.posix.dirname(directory))
     directories.add(directory);
-  for (const [file, bytes] of files) if (file.endsWith('.md')) {
+  for (const [file, bytes] of files) if (file.endsWith('.md') && !rental.verification?.files.has(file)) {
     const text = Buffer.from(bytes).toString('utf8').replace(/\[([^\]]+)\]\(([^\s)]+)\)/gu, (original, label, target) => {
       if (/^(?:[a-z]+:|#)/iu.test(target)) return original;
       const [name, anchor] = target.split('#');
@@ -573,7 +615,9 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
     format: 'nativark-core-development-source-2', profile, mode: rental.mode,
     host: profile === 'domain' ? null : multi ? 'example-multi-core' : 'rental',
     coreIds: multi ? ['rental', 'example-tickets'] : ['rental'], ai: Boolean(options.ai), mcp: Boolean(options.mcp),
-    ...(withTests ? { verification: { suite: 'rental-original', files: [...verificationTests, verificationGuard],
+    ...(withTests ? { verification: { suite: 'rental-original',
+      files: [...verificationTests, verificationGuard, ...(rental.verification?.files.keys() ?? [])],
+      sourceLayout: rental.layout.verification ?? null,
       supportWorkspaces: ['packages/example-tickets-core'], scripts: verificationScripts } } : {}),
     platform: { version: platform.version, source: platform.source, layout: 'platform-source', packageRoot: '.' },
     ...(options.freshAi ? { installation: 'fresh-ai' } : {}),
@@ -587,8 +631,11 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
     workspaces: [...workspaces].map(([directory, metadata]) => ({ path: directory, name: metadata.name, version: metadata.version })),
     files: [...files].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([file, bytes]) => ({ ...describe(file, bytes),
       ...(generated.has(file) ? { generated: true } : {
-        origin: rental.origins.get(slash(path.join(root, file))) ?? { ...platform.source, path: file },
-        transformed: file.endsWith('.md') || file.endsWith('/package.json'),
+        origin: rental.origins.get(slash(path.join(root, file)))
+          ?? (withTests ? rental.verification?.origins.get(slash(path.join(root, file))) : undefined)
+          ?? { ...platform.source, path: file },
+        transformed: !rental.verification?.files.has(file)
+          && (file.endsWith('.md') || file.endsWith('/package.json')),
       }) })),
   }));
   return { files, platform, rental };
