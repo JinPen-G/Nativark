@@ -2,7 +2,7 @@
 
 [hourly-update.py](hourly-update.py) 为现有 `nativark-demo` API、Web 更新流程固定 Git 提交，核对 CI、数据库文件差异、现有镜像与回退收据，并按 [Dockerfile](Dockerfile) 构建指定版本。
 
-此更新器与[单仓发布 CI](../../../.github/workflows/nativark-release.yml) 选用旧组合 `api`、`web` 镜像目标。两者通过该 Dockerfile 的 `npm run build:legacy` 编译同一旧组合，独立于本地公共根启动入口。
+存量 `nativark-demo` 目前仍运行旧组合。[历史复建 CI](../../../.github/workflows/nativark-release.yml) 仅允许手动检出完整固定版本 `46db0945dee92ac916f7265e95948943fc8b641d`，使用该版本自己的 Dockerfile、锁和迁移材料。公共主线的 push 只走公共构建及显式的双仓流程。历史复建不会提供旧更新器所需的 `main` push 放行证据，已安装的旧应用可继续运行。
 
 源码归档由 `git_source_archive` 的精确白名单生成。构建需要的两份脚本为 [build-selected-prisma.cjs](../../build-selected-prisma.cjs) 和 [miniprogram-shared-types.cjs](../../miniprogram-shared-types.cjs)，它们与 `scripts/ops/deployment` 一并进入归档。
 
@@ -32,7 +32,7 @@ python -B scripts/ops/deployment/hourly-update.py --self-test
 
 ## Zelo 仓库更名兼容
 
-主仓库为 `JinPen-G/Zelo`，服务器部署根为 `/home/ritiadm/zelo`。服务器安装的更新器须同步 `REPOSITORY` 与 `ROOT`；仅更新 GitHub 链接或仓库源码不会自动替换已安装脚本。工作流显示名为“Zelo 发布”，文件路径 `nativark-release.yml` 保留，CI 仍严格核对固定提交、main push 和仓库身份。
+主仓库为 `JinPen-G/Zelo`，服务器部署根为 `/home/ritiadm/zelo`。仅更新 GitHub 链接或源码不会替换服务器上的脚本。旧更新器仍要求固定提交的 `nativark-release.yml` 主线推送及成功记录；更名后的历史手动复建不满足它。存量实例先回读当前版本与旧迁移账，后续切换走双仓同一配对和既有审批。
 
 已有 `nativark-demo` Compose 项目、镜像标签、数据库、回退收据及 `# Nativark hourly update managed images` 识别标记保持兼容。目录移动只按实际服务器维护授权执行；仓库更名不授权数据库迁移或改写历史发布包来源。
 
@@ -147,4 +147,4 @@ node scripts/ops/release-prepare-pair.cjs release "$ZELO_REPO" "$ZELO_COMMIT" "$
 node scripts/ops/release-verify.cjs paired-review <候选目录> <候选收据SHA256> <基线目录或legacy-combined> <基线收据SHA256或-> <证据目录>
 ```
 
-证据不匹配时退出 `1`。已核镜像组合如果涉及旧库或新旧 AI 数据切换，返回 `awaiting-migration-bridge`。已有 prepared 基线的迁移材料有差异时返回 `awaiting-migration-approval`，一致时等待 `awaiting-release-approval`。三种待处理状态均退出 `2`，保留正式审批入口。首切后续须另核原账、数据库前置、实际 TLS／私有媒体和应用健康。现行定时更新器继续使用原单仓工作流与回退路径。
+证据不匹配时退出 `1`。已核镜像组合如果涉及旧库或新旧 AI 数据切换，返回 `awaiting-migration-bridge`。已有 prepared 基线的迁移材料有差异时返回 `awaiting-migration-approval`，一致时等待 `awaiting-release-approval`。三种待处理状态均退出 `2`，保留正式审批入口。首切须另核原账、数据库前置、实际 TLS／私有媒体和应用健康。旧服务继续使用原镜像和回退记录；这份核验不替换服务器上的定时更新器。

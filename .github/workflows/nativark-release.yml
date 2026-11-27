@@ -1,34 +1,47 @@
-name: Zelo 发布
+name: 历史 Rental 组合复建
 
 on:
-  push:
-    branches: [main, codex/nativark-hourly-release]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
+    inputs:
+      legacy_commit:
+        description: 已验旧组合源码的完整 SHA
+        required: true
+        default: 46db0945dee92ac916f7265e95948943fc8b641d
+        type: string
 
 permissions:
   contents: read
 
 jobs:
   images:
+    if: github.repository == 'JinPen-G/Zelo' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      LEGACY_COMMIT: ${{ inputs.legacy_commit }}
     steps:
-      - name: 检出固定提交
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          persist-credentials: false
-      - name: 构建旧组合 API 和 Web 发布镜像
+      - name: 核对允许复建的历史提交
         shell: bash
         run: |
           set -euo pipefail
+          test "$LEGACY_COMMIT" = 46db0945dee92ac916f7265e95948943fc8b641d
+      - name: 检出完整历史组合
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.LEGACY_COMMIT }}
+          persist-credentials: false
+      - name: 复建并验证同版历史 API 和 Web
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$LEGACY_COMMIT"
           for service in api web; do
             docker build --file scripts/ops/deployment/Dockerfile --target "$service" \
-              --build-arg "PRODUCT_COMMIT=$GITHUB_SHA" --tag "nativark-$service:$GITHUB_SHA" .
+              --build-arg "PRODUCT_COMMIT=$LEGACY_COMMIT" --tag "nativark-$service:$LEGACY_COMMIT" .
             test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' \
-              "nativark-$service:$GITHUB_SHA")" = "$GITHUB_SHA"
+              "nativark-$service:$LEGACY_COMMIT")" = "$LEGACY_COMMIT"
           done
-          docker run --rm --network none --entrypoint sh "nativark-api:$GITHUB_SHA" -ec \
+          docker run --rm --network none --entrypoint sh "nativark-api:$LEGACY_COMMIT" -ec \
             'test -s dist/main.js && test -s prisma/schema.prisma &&
              test ! -d /app/docs && test ! -d /app/output &&
              node -e "
@@ -44,6 +57,6 @@ jobs:
                require(\"@prisma/client\");
                require(\"./dist/app.module.js\");
              "'
-          docker run --rm --network none --entrypoint sh "nativark-web:$GITHUB_SHA" -ec \
+          docker run --rm --network none --entrypoint sh "nativark-web:$LEGACY_COMMIT" -ec \
             'test -s /usr/share/nginx/html/index.html && nginx -V >/dev/null 2>&1'
           python3 scripts/ops/deployment/hourly-update.py --self-test
