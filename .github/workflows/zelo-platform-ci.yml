@@ -57,11 +57,45 @@ jobs:
           # does not keep maintainer originals out of a public checkout.
           tracked_private=$(git ls-tree -r --name-only "$GITHUB_SHA" -- \
             docs assets .impeccable apps/deepseek-harness-clone apps/deepseek-harness-original \
-            apps/primefold-clone apps/website apps/website-next)
+            apps/primefold-clone apps/website apps/website-next \
+            apps/api apps/admin apps/rental-api apps/rental-admin \
+            apps/example-multi-core-api apps/example-multi-core-admin \
+            apps/tenant-website apps/enterprise-portal apps/miniprogram apps/staff-miniprogram \
+            packages/rental-core packages/rental-mcp-host packages/rental-ai-adapters \
+            packages/shared packages/web-client)
           if [[ -n "$tracked_private" ]]; then
-            echo '公开源码仍追踪维护者原稿或参考镜像' >&2
+            echo '公开源码仍追踪维护者原稿、参考镜像或已迁出的业务副本' >&2
             exit 1
           fi
+          node --input-type=module <<'NODE'
+          import { strict as assert } from 'node:assert';
+          import { execFileSync } from 'node:child_process';
+          import { posix as path } from 'node:path';
+          const commit = process.env.GITHUB_SHA;
+          const git = (...args) => execFileSync('git', ['--no-replace-objects', '--no-lazy-fetch', ...args],
+            { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+          for (const name of ['ai-native-server', 'ai-native-admin', 'ai-native-data']) {
+            const directory = `packages/${name}/`;
+            const files = git('ls-tree', '-r', '--name-only', '-z', commit, '--', directory)
+              .split('\0').filter(Boolean).map(file => file.slice(directory.length));
+            const tracked = new Set(files);
+            const manifest = JSON.parse(git('show', `${commit}:${directory}public-source-files.json`));
+            assert(Array.isArray(manifest.files) && manifest.files.length > 0, `${name} 缺少正式公共源码清单`);
+            const declared = new Set(manifest.files);
+            assert.equal(declared.size, manifest.files.length, `${name} 公共源码清单重复`);
+            for (const file of declared) {
+              assert(typeof file === 'string' && file && !file.includes('\\') && !path.isAbsolute(file)
+                && path.normalize(file) === file && file !== '..' && !file.startsWith('../'),
+              `${name} 公共源码路径无效`);
+              assert(tracked.has(file), `${name} 公共源码清单缺件：${file}`);
+            }
+            // Historical tests remain evidence. Runtime sources, data and package
+            // metadata must belong to the committed public package selection.
+            const extra = files.filter(file => !declared.has(file) && !/^(?:test|tests)\//u.test(file));
+            assert.equal(extra.length, 0, `${name} 仍追踪非公共源码：${extra.slice(0, 12).join(', ')}`);
+          }
+          console.log('公开 Git 树的业务退场与三份 AI 源码清单通过');
+          NODE
           if [[ "$CI_PROFILE" == platform ]]; then
             npm ci --workspace @rental-os/core-contracts --include-workspace-root --ignore-scripts \
               --no-audit --no-fund --cache "$task/npm-cache"

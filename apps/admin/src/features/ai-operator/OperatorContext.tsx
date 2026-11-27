@@ -1,5 +1,0 @@
-/** 原后台兼容入口；正文与恢复状态由选装 Rental 助手单源提供。 */
-export * from "@rental-os/rental-core/admin/assistant/source/ai-operator/OperatorContext";
-import { OperatorProvider as OriginalOperatorProvider } from "@rental-os/rental-core/admin/assistant/source/ai-operator/OperatorContext";
-import { bindLegacyRentalAssistant } from "./legacy-host";
-export const OperatorProvider = bindLegacyRentalAssistant(OriginalOperatorProvider);

@@ -23,7 +23,7 @@
 
 **Zelo** is a standalone, open-source, multi-tenant SaaS foundation. It distills the infrastructure nearly every B2B SaaS product has to rebuild from scratch—authentication, multi-tenancy and organizational RBAC, SaaS subscriptions, a shared admin console, encrypted external integrations, an optional governed AI Native / MCP runtime, and a standardized **pluggable Core lifecycle with independent upgrades**—into a clean, industry-agnostic base.
 
-Domain applications plug into the base as standalone **Cores (business packages)**, each owning its own domain schema, SQL migrations, admin UI contributions, and optional AI tools. **The base starts, builds, and exports cleanly with zero Cores installed.** This repository also includes the lightweight starter **Example Tickets Core** and the first official business Core—**[Rental Core](#built-in-business-core-examples)** (also published independently at [JinPen-G/Zelo-rental-core](https://github.com/JinPen-G/Zelo-rental-core))—as runnable demos and reference implementations for building CRM, TMS, ticketing, or any vertical SaaS Core.
+Domain applications plug into the base as standalone **Cores (business packages)**, each owning its own domain schema, SQL migrations, admin UI contributions, and optional AI tools. **The base starts, builds, and exports cleanly with zero Cores installed.** This repository includes the lightweight **Example Tickets Core** as an integration example. **[Rental Core](#built-in-business-core-examples)** is maintained in [JinPen-G/Zelo-rental-core](https://github.com/JinPen-G/Zelo-rental-core), with its domain code, API and admin hosts, booking storefront, enterprise portal, and customer/staff Mini Programs. These examples show how to build CRM, TMS, ticketing, and other vertical Cores.
 
 > **Quick Navigation**: [Why Zelo](#why-zelo) · [Core Capabilities](#core-capabilities) · [Architecture & Core Model](#architecture--core-extension-model) · [5-Step Core Integration](#integrate-your-business-core-in-5-steps) · [Core Ecosystem & Monetization](#build-the-core-ecosystem--monetize-extensions) · [Built-in Core Examples](#built-in-business-core-examples) · [Quick Start](#quick-start) · [Repository Structure](#repository-structure) · [Developer Guide](#developer-guide) · [Verification](#verification--testing) · [Contributing](#contributing)
 
@@ -186,7 +186,7 @@ Because the Zelo base is released under the permissive **[MIT License](LICENSE)*
 
 ## Built-in Business Core Examples
 
-This repository contains the platform base, the Tickets example, and Rental compatibility sources. The standalone Rental repository maintains the Rental and Tickets composite host:
+Zelo maintains the public platform and Tickets teaching example. The independent Rental repository maintains Rental applications and the Rental/Tickets composite host:
 
 ### 1. Example Tickets Core (Lightweight Starter)
 - **Purpose**: Minimal non-rental business Core template scoped strictly by tenant—no stores, inventory, payments, or AI dependencies.
@@ -261,34 +261,13 @@ The public admin listens on `http://127.0.0.1:5176` and the API on port 3091 by 
 ### 4. Option B: Run a Core Host or the Full Composite Dev Entry
 
 - **Standalone hosts**: See the [Tickets guide](apps/example-tickets-api/README.md#单工单的五步) or [the independent Rental host](https://github.com/JinPen-G/Zelo-rental-core/blob/main/workspace/apps/rental-api/README.md). The standalone Rental API, admin, four client apps, Web session package, and domain package come from the Rental repository. Pin both repositories by full commit SHA.
-- **Reproduce a legacy composite release**: Use its original API/Web images or rebuild with `build:legacy` at its recorded Git commit, preserving that version's configuration and migration receipts. Run the commands below only in a pinned checkout that still contains the complete legacy stack, against an isolated development database:
+- **Historical composite entrypoints**: The current `dev:legacy`, `build:legacy`, and `start-dev.ps1 -Legacy` stop with the exact historical checkout instructions. To reproduce the old combined application, use the [complete fixed checkout `46db0945…`](https://github.com/JinPen-G/Zelo/tree/46db0945dee92ac916f7265e95948943fc8b641d), its original lock, Client, and isolated database. Follow the README at that commit. Current development uses the independent Rental workspace above.
 
-```bash
-docker compose up -d mysql
-npm run db:legacy:generate
-npm run build -w @rental-os/shared
-npm run db:legacy:migrate:deploy
-npm run db:legacy:seed
-```
-
-Then point the current shell explicitly to the composite Prisma Client (PowerShell shown below; use `export` in Bash) and start API + Admin:
-
-```powershell
-$env:RENTAL_PRISMA_CLIENT = (Resolve-Path 'node_modules/.prisma/client/index.d.ts').Path
-$env:RENTAL_PRISMA_LEGACY = '1'
-npm run dev:legacy
-```
-
-On Windows, use `./start-dev.ps1 -Legacy` or `start-dev.cmd -Legacy`. Logs go to `output/runtime/rental-os-dev`. Add `-SkipDocker` to use an existing local database. Both profiles reuse locked dependencies and skip migrations and initialization by default. `-SkipDatabaseChecks` skips the launcher's schema and port checks. The public API still checks the migration receipts. Stop the selected API before using `-ApplyMigrations` and leave `-SkipDatabaseChecks` off.
-
-| Entrypoint | Default URL | Notes |
+| Entrypoint | Default URL | Scope |
 | --- | --- | --- |
-| **Zero-Core Admin Console** (Option A) | `http://127.0.0.1:5176` | Pure platform base console |
-| **Composite Admin Console** (Option B) | `http://127.0.0.1:5175` | Base + built-in Rental Core console |
-| **Platform API health** | `http://127.0.0.1:3091/api/health` | `nativark-platform-api` |
-| **Legacy API health** | `http://127.0.0.1:3000/api/health` | `rental-os-api` |
-
-> When switching back to standalone `platform-api` or `rental-api`, unset `RENTAL_PRISMA_LEGACY` and point `RENTAL_PRISMA_CLIENT` to that host's `generated/client/index.d.ts` (see [Client Selection Script](scripts/build-selected-prisma.cjs)).
+| **Public admin** | `http://127.0.0.1:5176` | Zero-Core platform console |
+| **Public API health** | `http://127.0.0.1:3091/api/health` | Public platform API |
+| **Rental applications** | Configured by the selected Rental workspace | Independent API, admin, and four clients |
 
 The [legacy image workflow](.github/workflows/nativark-release.yml) runs manually against the [complete pinned legacy checkout](https://github.com/JinPen-G/Zelo/tree/46db0945dee92ac916f7265e95948943fc8b641d). It uses that version's Client, Dockerfile and migrations. A manual rebuild does not authorize the installed updater. Continue to use the original migration receipts and the [deployment procedure](scripts/ops/deployment/README.md) for existing databases.
 
@@ -311,8 +290,7 @@ Zelo/
 │   ├── platform-api/                 # [Base] Zero-Core standalone platform API host (41 models / 14 migrations)
 │   ├── platform-admin/               # [Base] Zero-Core standalone platform Web admin host
 │   ├── example-tickets-api/          # [Example] Base + Tickets Core standalone API host
-│   ├── example-tickets-admin/        # [Example] Base + Tickets Core standalone Web host
-│   └── api/ & admin/                 # [Legacy Composite] Composite dev entry consuming split single-source packages
+│   └── example-tickets-admin/        # [Example] Base + Tickets Core standalone Web host
 ├── packages/
 │   ├── core-contracts/               # [Base] Core manifests, compatibility, check CLI, capability CLI & source exporter
 │   ├── core-host/                    # [Base] Core registry, lifecycle & removal preflight engine
@@ -321,12 +299,9 @@ Zelo/
 │   ├── platform-core-host/           # [Base] Host adapter for Core auth, grants, bindings & package management APIs
 │   ├── platform-admin/               # [Base] Admin shell factory, settings/Core pages & Core page primitives (CorePage etc.)
 │   ├── ui-arc/ & ui-motiq/ & ui-tablecn/  # [Base UI] Design system, motion & data-table source libraries
-│   ├── web-client/                   # [Base Frontend] Shared session & HTTP layer for external web clients
 │   ├── ai-native-server/ & ai-native-data/ & ai-native-admin/  # [Optional AI] AI Runtime, migrations & admin UI
 │   ├── mcp-server/                   # [Optional MCP] OAuth-protected MCP transport & consent control plane
-│   ├── example-tickets-core/         # [Example Core] Lightweight ticketing business package
-│   ├── rental-core/ & rental-mcp-host/  # [Official Core] Rental business package & opt-in MCP adapter
-│   └── shared/                       # [Compat Export] Aggregated shared barrel re-exporting platform & Rental contracts
+│   └── example-tickets-core/         # [Example Core] Lightweight ticketing business package
 ├── clients/
 │   └── harness-plugin/               # [Optional MCP Client] Standard OAuth MCP consumer plugin for Harness
 ├── config/                           # Unified environment loader & deployment checks
@@ -363,10 +338,10 @@ Zelo/
 | Path | Responsibility | Guide |
 | --- | --- | --- |
 | `packages/example-tickets-core` | Lightweight ticketing Core example (minimal non-rental reference) | [Tickets Core](packages/example-tickets-core/README.md) · [API](apps/example-tickets-api/README.md) · [Web](apps/example-tickets-admin/README.md) |
-| `packages/rental-core`, `packages/rental-mcp-host` | Official rental business Core and opt-in Rental MCP host adapter | [Rental Core](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/README.md) · [API](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/README.md) · [Standalone Web](https://github.com/JinPen-G/Zelo-rental-core/blob/5cef75a1814814a4a4ccc1172de15f16dc5ff74e/workspace/apps/rental-admin/README.md) · [MCP Host](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/workspace/packages/rental-mcp-host/README.md) |
+| Rental repository: domain package and `workspace/packages/rental-mcp-host` | Official rental business Core and opt-in Rental MCP host adapter | [Rental Core](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/README.md) · [API](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/README.md) · [Standalone Web](https://github.com/JinPen-G/Zelo-rental-core/blob/5cef75a1814814a4a4ccc1172de15f16dc5ff74e/workspace/apps/rental-admin/README.md) · [MCP Host](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/workspace/packages/rental-mcp-host/README.md) |
 | Standalone Rental `multi-core` development workspace | Rental and Tickets dual-Core API and admin app | [Setup and historical verification](https://github.com/JinPen-G/Zelo-rental-core/blob/main/README.en.md#rental-and-tickets-example) |
 | `workspace/apps/` in the independent Rental repository | Booking storefront, enterprise portal, and customer/staff WeChat Mini Programs; built in the dual-repository `full` profile | [Client development and historical checks](https://github.com/JinPen-G/Zelo-rental-core/blob/main/README.en.md#preparing-a-standalone-dev-workspace) |
-| `apps/api`, `apps/admin`, `packages/shared` | Legacy composite entrypoints and compatibility barrel consuming the split packages | [API Module](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/app.module.ts) · [Admin Rules](packages/platform-admin/AGENTS.md) · [Shared Index](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/workspace/packages/shared/src/index.ts) |
+| Historical combined app; independent Rental `workspace/packages/shared` | Original app preserved at its fixed historical commit; the compatibility barrel belongs to Rental | [API Module](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/app.module.ts) · [Admin Rules](packages/platform-admin/AGENTS.md) · [Shared Index](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/workspace/packages/shared/src/index.ts) |
 | [Zelo-website](https://github.com/JinPen-G/Zelo-website) | The separately maintained Zelo website; the base build does not install website dependencies | [Website source and notices](https://github.com/JinPen-G/Zelo-website) |
 
 > **Compatibility Naming Note**: The brand, main repository, and standalone companion repositories now follow the **Zelo** naming (`JinPen-G/Zelo`, official Rental Core `JinPen-G/Zelo-rental-core`, and marketing site `JinPen-G/Zelo-website`), and the GitHub Core discovery topic is now **`zelo-core`**. Future official base releases retain `https://github.com/JinPen-G/Nativark` as their stable `source.repository` (use the Zelo URL to clone and browse the source), while historical packages, deployment locks, and source receipts remain immutable—do not rewrite old packages or hand-edit locks; see [Stable Release Source After Renaming](packages/core-contracts/README.md#stable-release-source) for export and update steps. Workspace package scopes (`@rental-os/*`) and certain environment prefixes (`RENTAL_*`) remain for migration and client compatibility without affecting zero-Core export or standalone execution.

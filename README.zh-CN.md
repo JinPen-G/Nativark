@@ -23,7 +23,7 @@
 
 **Zelo** 是一个可独立运行的开源多租户 SaaS 底座。它把几乎所有企业级 SaaS 都要重复建设的底层能力——身份认证、多租户与组织权限、SaaS 订阅、公共管理后台、加密外部集成、受控 AI Native / MCP 引擎，以及标准化的 **Core 插件化接入与独立升级机制**——沉淀为纯净的公共平台。
 
-业务系统通过独立的 **Core（业务包）** 接入底座，各自维护领域模型、数据迁移、页面贡献与可选 AI 工具。**底座默认零 Core 即可独立启动、打包与源码导出**；仓库随附轻量教学包 **Example Tickets Core** 与首个官方业务包 **[Rental Core](#内置业务-core-示例)**（同步独立开源于 [JinPen-G/Zelo-rental-core](https://github.com/JinPen-G/Zelo-rental-core)），用于开箱演示并作为构建 CRM、TMS、工单或任意垂直业务 Core 的参考实现。
+业务系统通过独立的 **Core（业务包）** 接入底座，各自维护领域模型、数据迁移、页面贡献与可选 AI 工具。**底座默认零 Core 即可独立启动、打包与源码导出**；本仓库保留轻量教学包 **Example Tickets Core** 作为接入示例。**[Rental Core](#内置业务-core-示例)** 的领域代码、API、后台、预约网站、企业门户及客户／员工小程序在 [JinPen-G/Zelo-rental-core](https://github.com/JinPen-G/Zelo-rental-core) 独立维护，供 CRM、TMS、工单等业务 Core 参考。
 
 > **快速导航**：[为什么选择 Zelo](#为什么选择-zelo) · [底座核心能力](#底座核心能力) · [架构与 Core 模型](#架构与-core-扩展模型) · [五步接入业务 Core](#五步接入自己的业务-core) · [Core 生态与商业扩展](#共建-core-业务包生态与商业扩展) · [内置 Core 示例](#内置业务-core-示例) · [本地运行](#本地运行) · [项目组成](#项目组成) · [开发导读](#开发导读) · [验证改动](#验证改动) · [参与贡献](#参与贡献)
 
@@ -186,7 +186,7 @@ Zelo 公共底座采用宽松的 **[MIT License](LICENSE)**，**开发者对自�
 
 ## 内置业务 Core 示例
 
-本仓库包含公共底座、工单示例和 Rental 兼容源码。Rental 与工单的组合宿主在独立 Rental 仓维护：
+Zelo 维护公共底座与工单教学示例。Rental 业务应用及 Rental 与工单的组合宿主由独立 Rental 仓维护：
 
 ### 1. Example Tickets Core（轻量教学示例）
 - **定位**：最小化非租赁业务 Core 样板，仅按租户范围隔离，不引入门店、库存、资金或 AI 依赖。
@@ -261,34 +261,13 @@ npm run dev
 ### 4. 方式 B：运行含业务 Core 的宿主或完整组合开发入口
 
 - **按标准包运行宿主**：参考 [单工单五步](apps/example-tickets-api/README.md#单工单的五步)或[独立 Rental 宿主](https://github.com/JinPen-G/Zelo-rental-core/blob/main/workspace/apps/rental-api/README.md)。标准 Rental 组合使用独立仓的 API、后台、四端、Web 会话和领域包；配套构建须指定两仓完整提交。
-- **复查原完整组合（底座 + Rental + AI）**：使用原发布的 API/Web 镜像，或从该版本记录的原 Git 提交重建 `build:legacy`；保留它自己的配置、迁移和数据库账。以下原开发命令应在仍含完整旧组合的固定检出及专用开发库运行：
+- **历史组合入口**：当前 `dev:legacy`、`build:legacy` 和 `start-dev.ps1 -Legacy` 会停止并给出固定历史检出说明。复现旧组合须使用[完整固定检出 `46db0945…`](https://github.com/JinPen-G/Zelo/tree/46db0945dee92ac916f7265e95948943fc8b641d)、该版原锁、Client 与专用数据库，按该提交的 README 操作。当前 Rental 开发使用上面的独立工作区。
 
-```bash
-docker compose up -d mysql
-npm run db:legacy:generate
-npm run build -w @rental-os/shared
-npm run db:legacy:migrate:deploy
-npm run db:legacy:seed
-```
-
-随后在当前终端显式指定原组合生成的 Prisma Client（PowerShell 示例，Bash 用 `export`），再启动 API 与管理后台：
-
-```powershell
-$env:RENTAL_PRISMA_CLIENT = (Resolve-Path 'node_modules/.prisma/client/index.d.ts').Path
-$env:RENTAL_PRISMA_LEGACY = '1'
-npm run dev:legacy
-```
-
-Windows 使用 `./start-dev.ps1 -Legacy` 或 `start-dev.cmd -Legacy`，日志在 `output/runtime/rental-os-dev`。复用原本地数据库时加 `-SkipDocker`。两种启动模式均复用锁定依赖，默认跳过迁移和初始化。`-SkipDatabaseChecks` 仅跳过启动器的 schema 与端口检查，公共 API 仍核对迁移账。`-ApplyMigrations` 不能与之同用，且须先关闭对应本树 API。
-
-| 入口 | 默认地址 | 说明 |
+| 入口 | 默认地址 | 范围 |
 | --- | --- | --- |
-| **零 Core 公共后台**（方式 A） | `http://127.0.0.1:5176` | 纯底座管理后台 |
-| **组合管理后台**（方式 B） | `http://127.0.0.1:5175` | 底座 + 内置 Rental Core 组合后台 |
-| **公共 API 健康检查** | `http://127.0.0.1:3091/api/health` | `nativark-platform-api` |
-| **旧组合 API 健康检查** | `http://127.0.0.1:3000/api/health` | `rental-os-api` |
-
-> 使用独立公共宿主或独立 Rental 宿主时，请清除 `RENTAL_PRISMA_LEGACY` 并指向各自宿主的 `generated/client/index.d.ts`（详参 [Client 选择规则](scripts/build-selected-prisma.cjs)）。
+| **公共后台** | `http://127.0.0.1:5176` | 零 Core 底座控制台 |
+| **公共 API 健康检查** | `http://127.0.0.1:3091/api/health` | 公共底座 API |
+| **Rental 应用** | 按所选 Rental 工作区配置 | 独立 API、后台与四端 |
 
 [历史镜像工作流](.github/workflows/nativark-release.yml)仅手动复建 [完整固定旧版](https://github.com/JinPen-G/Zelo/tree/46db0945dee92ac916f7265e95948943fc8b641d)。复建使用旧版自己的 Client、Dockerfile 和迁移材料；其 CI 不会放行已安装的定时更新器。现有旧库保留原迁移账，后续切换按[原部署入口](scripts/ops/deployment/README.md)核定。
 
@@ -311,8 +290,7 @@ Zelo/
 │   ├── platform-api/                 # [纯底座] 零 Core 独立公共 API 宿主（41 模型 / 14 迁移）
 │   ├── platform-admin/               # [纯底座] 零 Core 独立公共 Web 后台宿主
 │   ├── example-tickets-api/          # [示例宿主] 底座 + 工单 Core 独立 API
-│   ├── example-tickets-admin/        # [示例宿主] 底座 + 工单 Core 独立后台
-│   └── api/ & admin/                 # [兼容组合] 保留原开发入口，底层消费上述拆分单源包
+│   └── example-tickets-admin/        # [示例宿主] 底座 + 工单 Core 独立后台
 ├── packages/
 │   ├── core-contracts/               # [底座] Core 清单/兼容/包校验/能力索引 CLI 与底座源码导出
 │   ├── core-host/                    # [底座] Core 注册目录、生命周期与移除预检内核
@@ -321,12 +299,9 @@ Zelo/
 │   ├── platform-core-host/           # [底座] 公共身份与标准 Core 授权/绑定/包管理宿主适配
 │   ├── platform-admin/               # [底座] 公共后台外壳、设置页与 Core 页面框架（CorePage 等）
 │   ├── ui-arc/ & ui-motiq/ & ui-tablecn/  # [底座 UI] 设计系统、动效与数据表格源库
-│   ├── web-client/                   # [底座前端] 外部 Web 客户端共用会话与请求基础层
 │   ├── ai-native-server/ & ai-native-data/ & ai-native-admin/  # [可选 AI] AI Runtime、数据迁移与控制台
 │   ├── mcp-server/                   # [可选 MCP] 受保护 MCP 传输与 OAuth 授权控制面
-│   ├── example-tickets-core/         # [示例 Core] 轻量工单业务包
-│   ├── rental-core/ & rental-mcp-host/  # [官方 Core] 租赁业务包及显式选装 MCP 适配
-│   └── shared/                       # [兼容出口] 既有各端总出口，转接公共与 Rental 单源契约
+│   └── example-tickets-core/         # [示例 Core] 轻量工单业务包
 ├── clients/
 │   └── harness-plugin/               # [可选 MCP 客户端] Harness 标准 MCP 消费插件
 ├── config/                           # 统一环境加载与部署校验
@@ -363,10 +338,10 @@ Zelo/
 | 路径 | 职责说明 | 阅读入口 |
 | --- | --- | --- |
 | `packages/example-tickets-core` | 轻量工单 Core 示例包（非租赁最小参考） | [工单 Core](packages/example-tickets-core/README.md) · [API](apps/example-tickets-api/README.md) · [Web](apps/example-tickets-admin/README.md) |
-| `packages/rental-core`、`packages/rental-mcp-host` | 官方租赁业务 Core 包及显式选装的 Rental MCP 宿主 | [Rental Core](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/README.md) · [API](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/README.md) · [独立 Web](https://github.com/JinPen-G/Zelo-rental-core/blob/5cef75a1814814a4a4ccc1172de15f16dc5ff74e/workspace/apps/rental-admin/README.md) · [MCP 宿主](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/workspace/packages/rental-mcp-host/README.md) |
+| 独立 Rental 仓：领域包及 `workspace/packages/rental-mcp-host` | 官方租赁业务 Core 包及显式选装的 Rental MCP 宿主 | [Rental Core](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/README.md) · [API](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/README.md) · [独立 Web](https://github.com/JinPen-G/Zelo-rental-core/blob/5cef75a1814814a4a4ccc1172de15f16dc5ff74e/workspace/apps/rental-admin/README.md) · [MCP 宿主](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/workspace/packages/rental-mcp-host/README.md) |
 | 独立 Rental 的 `multi-core` 开发组合 | Rental + 工单双 Core API 和后台 | [独立组合与历史入口](https://github.com/JinPen-G/Zelo-rental-core#rental-与工单双-core-示例) |
 | 独立 Rental 的 `workspace/apps/` | 配套预约网站、企业门户、客户和员工微信小程序；以双仓 `full` 组合构建 | [四端开发与旧验证入口](https://github.com/JinPen-G/Zelo-rental-core/blob/main/README.md#源码开发工作区) |
-| `apps/api`、`apps/admin`、`packages/shared` | 原组合工程兼容入口与共享总出口（底层消费拆分后的单源包） | [API 装配](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/app.module.ts) · [Admin 规则](packages/platform-admin/AGENTS.md) · [shared 出口](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/workspace/packages/shared/src/index.ts) |
+| 历史组合应用；独立 Rental 的 `workspace/packages/shared` | 原应用沿固定历史提交保留；兼容总出口由 Rental 维护 | [API 装配](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/app.module.ts) · [Admin 规则](packages/platform-admin/AGENTS.md) · [shared 出口](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/workspace/packages/shared/src/index.ts) |
 | [Zelo-website](https://github.com/JinPen-G/Zelo-website) | 独立维护的 Zelo 官网；底座构建不安装官网依赖 | [官网源码与许可](https://github.com/JinPen-G/Zelo-website) |
 
 > **关于兼容命名**：品牌、主仓库与独立配套仓库已统一为 Zelo 命名体系（主仓 `JinPen-G/Zelo`、官方 Rental Core 仓 `JinPen-G/Zelo-rental-core`、官网仓 `JinPen-G/Zelo-website`），GitHub Core 发现标签已切换为 **`zelo-core`**。官方底座的新发行继续用 `https://github.com/JinPen-G/Nativark` 作为稳定的 `source.repository`（clone 与浏览源码使用 Zelo 地址），历史包、部署锁和来源收据保持原值；不得修改旧包或手改锁把来源替换为新名称，具体导出和旧安装更新步骤见[更名后的稳定发行来源](packages/core-contracts/README.md#stable-release-source)。为保障既有迁移、构建及客户端兼容，workspace 包名（`@rental-os/*`）及部分环境键（`RENTAL_*`）仍保留原前缀，不影响零 Core 底座的独立导出与运行。

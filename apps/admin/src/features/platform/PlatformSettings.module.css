@@ -1,4 +1,0 @@
-.stack { composes: stack from "@rental-os/platform-admin/platform-settings/styles"; }
-.controls { composes: controls from "@rental-os/platform-admin/platform-settings/styles"; }
-.context { composes: context from "@rental-os/platform-admin/platform-settings/styles"; }
-.footerNote { composes: footerNote from "@rental-os/platform-admin/platform-settings/styles"; }
