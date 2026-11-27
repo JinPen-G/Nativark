@@ -18,7 +18,7 @@
 
 已有宿主可继续导入原页面位置，或使用 `@rental-os/platform-admin/subscription`。单独使用客户端时注入已有 `request`。字段来自 `@rental-os/platform-contracts/subscription`，资料与验证见 [公共后台包](../../../README.md) 和 [订阅服务验证](../../../../platform-server/src/modules/subscription/README.md#接口与验证)。
 
-页头沿[原品牌解析](../../app/branding.ts)读取当前租户与用户品牌。Rental 宿主向 `TenantSubscriptionPage` 传 `description="所有经营空间共用同一订阅。"`，向 `SubscriptionProPage` 传 `standardDescription="基础租赁经营"`，保留原订阅说明与对比卡文案。其他宿主使用公共缺省说明；这些展示参数不参与订阅权益、金额或开通判断。[原租户入口](../../../../../apps/admin/src/features/subscription/TenantSubscriptionPage.tsx) · [原版本对比入口](../../../../../apps/admin/src/features/subscription/SubscriptionProPage.tsx)
+页头沿[原品牌解析](../../app/branding.ts)读取当前租户与用户品牌。Rental 宿主向 `TenantSubscriptionPage` 传 `description="所有经营空间共用同一订阅。"`，向 `SubscriptionProPage` 传 `standardDescription="基础租赁经营"`，保留原订阅说明与对比卡文案。其他宿主使用公共缺省说明；这些展示参数不参与订阅权益、金额或开通判断。[原租户入口](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/admin/src/features/subscription/TenantSubscriptionPage.tsx) · [原版本对比入口](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/admin/src/features/subscription/SubscriptionProPage.tsx)
 
 ## 语言资源
 

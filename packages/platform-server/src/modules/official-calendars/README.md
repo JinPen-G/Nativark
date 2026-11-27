@@ -20,7 +20,7 @@
 
 业务读取通过 `@rental-os/platform-server/official-calendar-reader` 的 `OFFICIAL_CALENDAR_SOURCE_READER` 提供 `createOfficialCalendarSourceReader` 的冻结结果。该对象包含 `listVersions`、`getVersion`、`findVersionById`、`getApplicableVersion`、`latestVersionForYear` 和 `availableSourceSummaryForYear`，均调用同一来源实例。业务 Controller 继续使用其本端权限和原版本引用。
 
-原 Rental [服务构造入口](../../../../../apps/api/src/modules/rental-core/official-calendar-source.service.ts)保留单参数数据库构造并继承同一公共实现，[旧 Controller](../../../../../apps/api/src/modules/rental-core/official-calendar-source.controller.ts)再导出同一公共类。原配置 DTO 出口兼容同一运行时校验类。官方字段从 `@rental-os/platform-contracts/official-calendar` 正式出口消费，原 Rental/shared 合同由所属作者兼容再导出。
+原 Rental [服务构造入口](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/rental-core/official-calendar-source.service.ts)保留单参数数据库构造并继承同一公共实现，[旧 Controller](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/rental-core/official-calendar-source.controller.ts)再导出同一公共类。原配置 DTO 出口兼容同一运行时校验类。官方字段从 `@rental-os/platform-contracts/official-calendar` 正式出口消费，原 Rental/shared 合同由所属作者兼容再导出。
 
 ## 版本与历史规则
 

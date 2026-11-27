@@ -21,7 +21,7 @@
 
 公共应用将组织页接在 `/settings/organizations`，平台参数、运维、预约和日历分别使用原 `/platform/system`、`/platform/operations`、`/platform/demo-requests` 和 `/platform/official-calendars`。菜单和直接页面使用同源可见性检查；原 `/system-rules`、`/security-baseline` 等深链接定位同一已登记页面。个人改密继续走 `/settings/security` 的原账号安全页。[公共应用注册](../../application.tsx) · [原菜单及兼容路径](../../application-navigation.tsx) · [个人改密](../../session-pages.tsx)
 
-原 [组织与权限页](../../../../../apps/admin/src/features/platform/PlatformPage.tsx)、[平台参数](../../../../../apps/admin/src/features/platform/PlatformSystemPage.tsx)、[运维](../../../../../apps/admin/src/features/platform/PlatformOperationsPage.tsx)、[预约](../../../../../apps/admin/src/features/platform/DemoRequestsPage.tsx)和[官方日历](../../../../../apps/admin/src/features/platform/OfficialCalendarSourcePage.tsx)窄转接同一页面。原 [安全设置入口](../../../../../apps/admin/src/features/platform/PlatformSecuritySettings.tsx) 再导出公共组件，[原 API](../../../../../apps/admin/src/api/platform.ts) 将六个对应方法委托公共客户端。官方日历与公共安全共用原布局类，兼容 CSS module 继续提供原类名。[原样式入口](../../../../../apps/admin/src/features/platform/PlatformSettings.module.css)
+原 [组织与权限页](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/admin/src/features/platform/PlatformPage.tsx)、[平台参数](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/admin/src/features/platform/PlatformSystemPage.tsx)、[运维](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/admin/src/features/platform/PlatformOperationsPage.tsx)、[预约](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/admin/src/features/platform/DemoRequestsPage.tsx)和[官方日历](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/admin/src/features/platform/OfficialCalendarSourcePage.tsx)窄转接同一页面。原 [安全设置入口](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/admin/src/features/platform/PlatformSecuritySettings.tsx) 再导出公共组件，[原 API](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/admin/src/api/platform.ts) 将六个对应方法委托公共客户端。官方日历与公共安全共用原布局类，兼容 CSS module 继续提供原类名。[原样式入口](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/admin/src/features/platform/PlatformSettings.module.css)
 
 SaaS 页面沿原 `hasPermission` 规则：租户、日历和预约使用平台分面；参数和 AI 仍需明确权限或通配权限。`system:user:manage` 不属于原 SaaS 页面许可，组织与权限深链接保持原拒绝，平台治理页保留原说明块并不读取租户工具。页面可见性不改变后端 allowlist。[同源可见性](../../application-access.ts) · [治理页](../platform-tools/PlatformToolsPage.tsx)
 
@@ -39,6 +39,6 @@ SaaS 页面沿原 `hasPermission` 规则：租户、日历和预约使用平台�
 
 ## 验证
 
-定向验证覆盖六个接口的路径、字段、信号与失败 Promise，组织读取/维护、地点范围及 SaaS 安全保存的可见性矩阵，原兼容入口、个人改密职责和共同提交声明。Vite 的 CSS 编译入口核对原四个类与公共样式同源，词条逐项核对原值。[组件与隔离规则](../../../../../apps/admin/AGENTS.md) · [项目验证规则](../../../../../AGENTS.md#修改验证与交付)
+定向验证覆盖六个接口的路径、字段、信号与失败 Promise，组织读取/维护、地点范围及 SaaS 安全保存的可见性矩阵，原兼容入口、个人改密职责和共同提交声明。Vite 的 CSS 编译入口核对原四个类与公共样式同源，词条逐项核对原值。[组件与隔离规则](../../../AGENTS.md) · [项目验证规则](../../../../../AGENTS.md#修改验证与交付)
 
 类型、声明与 CSS 编译各自提供定向证据。实际接口和页面使用所属宿主的注册及当前授权；独立运行从[公共后台宿主](../../../../../apps/platform-admin/README.md)和[公共 API](../../../../../apps/platform-api/README.md)进入。

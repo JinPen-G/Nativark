@@ -16,13 +16,13 @@
 | [HTTP 政策](platform-tools-http-policy.ts) | 两个原权限、五个原路径及租户 audience 边界 |
 | [OpenAPI 字段](platform-tools-openapi.ts) | 宿主组合需要的请求与响应 schema |
 
-原 [PlatformService](../../../../../apps/api/src/modules/platform/platform.service.ts) 的 MySQL 分支委托五个同名公共方法。`listDictionaries(defaults?)` 与 `listNumberRules(defaults?)` 允许可信 Rental 适配传入原默认资料，其他方法的原请求及结果保持。原 [Controller](../../../../../apps/api/src/modules/platform/platform.controller.ts) 保留窄入口，独立公共宿主注册本模块 Controller，各组合按实际装配选择唯一 HTTP 执行者。宿主通过原 `PLATFORM_AUTH_DATA_STORE` 注入相同数据库。[公共页面](../../../../platform-admin/src/features/platform-tools/README.md)
+原 [PlatformService](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/platform/platform.service.ts) 的 MySQL 分支委托五个同名公共方法。`listDictionaries(defaults?)` 与 `listNumberRules(defaults?)` 允许可信 Rental 适配传入原默认资料，其他方法的原请求及结果保持。原 [Controller](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/platform/platform.controller.ts) 保留窄入口，独立公共宿主注册本模块 Controller，各组合按实际装配选择唯一 HTTP 执行者。宿主通过原 `PLATFORM_AUTH_DATA_STORE` 注入相同数据库。[公共页面](../../../../platform-admin/src/features/platform-tools/README.md)
 
-原三个默认字典和五条默认编号含租赁业务语义，继续留在 Rental 适配及初始化来源。零 Core 公共缺省为空。仓库搜索中，五个方法的业务入口均经原平台 Controller，未发现 Rental 订单或合同服务调用此取号器。现有业务自己的编号算法继续由原领域负责。[原默认资料](../../../../../apps/api/src/modules/platform/platform.service.ts) · [原初始化](../../../../../apps/api/prisma/seed.ts)
+原三个默认字典和五条默认编号含租赁业务语义，继续留在 Rental 适配及初始化来源。零 Core 公共缺省为空。仓库搜索中，五个方法的业务入口均经原平台 Controller，未发现 Rental 订单或合同服务调用此取号器。现有业务自己的编号算法继续由原领域负责。[原默认资料](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/platform/platform.service.ts) · [原初始化](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/prisma/seed.ts)
 
 ## 范围、原子性与历史
 
-字典使用 `system:dictionary:manage`，编号使用 `system:number-rule:manage`。租户管理员及原有效通配权限沿原授权生效，SaaS 账号拒绝租户工具。原 Guard 对这两类配置没有另设 `all` 或全部地点门槛，公共服务保留对应工具权限在当前租户内的语义。当前账号、角色、会话、租户状态及签名范围由公共主体围栏在事务中核对。[原 Guard](../../../../../apps/api/src/common/api-auth.guard.ts)
+字典使用 `system:dictionary:manage`，编号使用 `system:number-rule:manage`。租户管理员及原有效通配权限沿原授权生效，SaaS 账号拒绝租户工具。原 Guard 对这两类配置没有另设 `all` 或全部地点门槛，公共服务保留对应工具权限在当前租户内的语义。当前账号、角色、会话、租户状态及签名范围由公共主体围栏在事务中核对。[原 Guard](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/common/api-auth.guard.ts)
 
 每次操作采用 Serializable 事务，先锁原 Tenant 父记录，再沿原公共身份围栏锁定和复验账号、会话、角色及权限。取号、规则保存、配置写入与审计共用此事务。取号递增在锁内读取最新序列，保存省略当前流水时同样在锁内保留原值。审计失败、提交前撤权、配置版本/状态变化和数据库冲突均使本事务失败，调用方重新读取核对，取号失败后是否已提交沿原结果处理。
 
@@ -38,7 +38,7 @@ fixture 中的事务与锁用于验证参加者调用及提交边界。真实 My
 
 ## 筛选预设
 
-筛选预设保存当前租户的 UI 筛选偏好。原已登录运营账号可访问，SaaS 账号沿原 Guard 条件拒绝。数据使用公共 schema 中既有的 `FilterPreset`，租户内共享预设，原名称唯一键为 `tenantId/scopeKey/name`。预设内容由消费页面解释，业务读取继续经过对应接口的原权限和范围检查。[原 Guard](../../../../../apps/api/src/common/api-auth.guard.ts) · [公共模型](../../../../../apps/platform-api/prisma/schema.prisma)
+筛选预设保存当前租户的 UI 筛选偏好。原已登录运营账号可访问，SaaS 账号沿原 Guard 条件拒绝。数据使用公共 schema 中既有的 `FilterPreset`，租户内共享预设，原名称唯一键为 `tenantId/scopeKey/name`。预设内容由消费页面解释，业务读取继续经过对应接口的原权限和范围检查。[原 Guard](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/common/api-auth.guard.ts) · [公共模型](../../../../../apps/platform-api/prisma/schema.prisma)
 
 | 入口 | 职责 |
 | --- | --- |
@@ -56,7 +56,7 @@ fixture 中的事务与锁用于验证参加者调用及提交边界。真实 My
 
 ### 宿主接入
 
-宿主将 `PlatformFilterPresetDatabase` 合入同一公共数据库端口，沿已有 `PLATFORM_AUTH_DATA_STORE` 注入实例，并注册 `PlatformFilterPresetService` 与 `PlatformFilterPresetController`。原组合的 `PlatformService` MySQL 分支经 `PlatformRepository` 将四个同名方法委托给该实例，原演示内存适配继续由原宿主管理。原根模块登记唯一公共服务，使用同一 `PrismaService`，各组合选择一个实际 HTTP Controller，保留原客户端入口。[公共装配](../../platform-server.module.ts) · [原根装配](../../../../../apps/api/src/application-services.module.ts) · [原平台服务](../../../../../apps/api/src/modules/platform/platform.service.ts) · [实际客户端](../../../../platform-admin/src/features/platform-tools/client.ts)
+宿主将 `PlatformFilterPresetDatabase` 合入同一公共数据库端口，沿已有 `PLATFORM_AUTH_DATA_STORE` 注入实例，并注册 `PlatformFilterPresetService` 与 `PlatformFilterPresetController`。原组合的 `PlatformService` MySQL 分支经 `PlatformRepository` 将四个同名方法委托给该实例，原演示内存适配继续由原宿主管理。原根模块登记唯一公共服务，使用同一 `PrismaService`，各组合选择一个实际 HTTP Controller，保留原客户端入口。[公共装配](../../platform-server.module.ts) · [原根装配](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/application-services.module.ts) · [原平台服务](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/platform/platform.service.ts) · [实际客户端](../../../../platform-admin/src/features/platform-tools/client.ts)
 
 公共政策聚合合入 `PLATFORM_FILTER_PRESET_HTTP_OPERATIONS`，正式 tools 出口暴露服务、Controller、DTO、存储类型、受控登记和 OpenAPI 工厂。四个原操作和新增范围目录都使用原自助 `self`，服务继续核当前 operator 会话并拒绝 SaaS 身份。公共 Guard 的默认拒绝要求方法和路径准确登记。原组合保留 filter-presets 的已登录自助白名单，独立宿主经同一 Guard/ALS 与公共主体围栏进入。[公共政策](../../platform-http-policy.ts) · [公共 Guard](../../platform-auth.guard.ts) · [现有模块出口](index.ts)
 

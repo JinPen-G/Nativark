@@ -14,7 +14,7 @@
 | [支付运输](payment-provider-transport.ts)、[Stripe验签](stripe-signature.ts)、[回调限流](payment-webhook-rate-limit.ts) | 原RSA/HMAC签名、精确微信验签材料、受控请求、供应商错误分类和只读连接探针，业务资金及回调归属由实际Core裁定 |
 | [微信运输](wechat-mini-program.adapter.ts) | `/integration-wechat` 共用原 code/session、手机号一次性凭证、AppID token 缓存与错误类；不保存客户身份，业务调用者核渠道与水印 |
 | [公共后台](../../../../platform-admin/src/features/integrations/README.md)、[请求工厂](../../../../platform-admin/src/features/integrations/client.ts) | 默认 Web 登记目录、保存与连接测试，原页面转接同一组件，请求使用宿主唯一认证客户端 |
-| [Rental 参加者](../../../../../apps/api/src/modules/integrations/rental-integration-business.participant.ts) | 在原配置事务核租赁结算、支付／退款、短信队列及文件／上传依赖 |
+| [Rental 参加者](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/integrations/rental-integration-business.participant.ts) | 在原配置事务核租赁结算、支付／退款、短信队列及文件／上传依赖 |
 | [公共 schema](../../../../../apps/platform-api/prisma/schema.prisma)、[数据计划](../../../../../apps/platform-api/src/platform-data.ts) | 独立公共链的配置和适配日志表，迁移摘要与实际应用账分别核验 |
 
 ## 装配与生命周期
@@ -39,7 +39,7 @@ IMAP 使用 `EXAMINE` 和 `BODY.PEEK`。超过 1 MB 的邮件只读取最多 64 
 
 测试区分 `configuration` 和 `live`。占用、探针和结果均关联原配置内容与修订，迟到结果继续拒绝。短信探针查询模板，存储探针 HEAD 随机对象，支付探针由原宿主读取供应商接口。新业务默认要求当前配置通过 live 测试，原事实恢复可沿原调用使用 `requireLiveTest: false`，并保留业务权限和配置关联。
 
-测试账通过窄存储的 `updateTestConfiguration` 核对租户、配置 ID、修订时间、启用与默认标志、设置、凭据密文和秘密字段。`integrationTestWhere` 将 JSON `null` 映射为当前宿主生成客户端的 `Prisma.JsonNull`，其余条件按原值传递。[公共数据库](../../../../../apps/platform-api/src/database.ts)与[Rental 兼容入口](../../../../../apps/api/src/modules/integrations/tenant-integration.service.ts)分别使用自身客户端，空对象与空数组仍按原值比较。
+测试账通过窄存储的 `updateTestConfiguration` 核对租户、配置 ID、修订时间、启用与默认标志、设置、凭据密文和秘密字段。`integrationTestWhere` 将 JSON `null` 映射为当前宿主生成客户端的 `Prisma.JsonNull`，其余条件按原值传递。[公共数据库](../../../../../apps/platform-api/src/database.ts)与[Rental 兼容入口](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/integrations/tenant-integration.service.ts)分别使用自身客户端，空对象与空数组仍按原值比较。
 
 凭据使用原 `INTEGRATION_ENCRYPTION_KEY`、密钥 ID／历史环及稳定指纹设置。公共宿主只消费进程配置，密钥由部署人员维护。历史信封、存储前缀和 nonce 前缀沿原格式。
 

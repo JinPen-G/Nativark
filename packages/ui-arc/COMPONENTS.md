@@ -16,21 +16,21 @@
 
 新增页面先查本清单和适配器 API；备用组件按需单独接入并安装其依赖，不要打包整个目录。不要修改 vendor，尺寸与动效保留原设计；颜色、圆角、语言和声音由平台适配层负责。
 
-型号、资产和数量库存卡使用原 UIArc Card / quick look / BottomSheet；图片区域由 [CatalogCardMedia](../../apps/admin/src/features/catalog/CatalogCardMedia.tsx) 复用本地 Product listing Pro 公开编译预览的图片子树与原 CSS，仍走既有鉴权图片读取和 190px contain 图像区。仅接入图片部分，没有接入商城筛选或快速加购；来源、固定哈希及许可边界见 [SOURCE](../../apps/admin/src/features/catalog/archive/product-listing/SOURCE.md)。定价分组、品类属性、库存余额及异常原因来自原业务接口，相关实页验证见[管理后台记录](../../docs/管理后台/管理后台-开发记录.md#2026-11-09型号与库存卡片及租户实页补查)。
+型号、资产和数量库存卡使用原 UIArc Card / quick look / BottomSheet；图片区域由 [CatalogCardMedia](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/admin/src/features/catalog/CatalogCardMedia.tsx) 复用本地 Product listing Pro 公开编译预览的图片子树与原 CSS，仍走既有鉴权图片读取和 190px contain 图像区。仅接入图片部分，没有接入商城筛选或快速加购；来源、固定哈希及许可边界见 [SOURCE](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/admin/src/features/catalog/archive/product-listing/SOURCE.md)。定价分组、品类属性、库存余额及异常原因来自原业务接口，相关实页验证见[管理后台记录](../../docs/管理后台/管理后台-开发记录.md#2026-11-09型号与库存卡片及租户实页补查)。
 
 已导出的平台 API：`Button`、`Form`、`FormField`、`FormSection`、`SidebarMenu`、`UserMenu`、`Modal`、`App`、`Empty`、`Skeleton`、`Radio`、`Collapse`、`Dropdown`、`Drawer`、`Tabs`、`Segmented`、`Tooltip`、`InfoPopover`、`Input`、`SearchField`、`DataTableLeading`、`DataTableMoney`、`dataTableSelectionColumn`、`DataTableSelectionSummary`、`useDataTableSelection`、`DataTableStatus`、`DataTableNote`、`DataTableStatusTone`、`Select`、`Checkbox`、`Slider`、`PasswordField`、`PasswordStrength`、`PhoneInput`、`FeedbackProvider`、`useFeedback`、`ConfirmAction`、`Switch`、`ActionButton`、`SaveButton`、`CopyButton`、`Alert`、`Progress`、`Steps`、`Pagination`、`DatePicker`、`ColorPicker`、`RichTextEditor`、`Upload`、`Table`、`ListSection`、`ListFilters`、`useListFilter`、`ListFilterBar`、`ListFilterItem`、`AnimatedTable`、`DataTable`、`DataTableColumnHeader`、`DataTableViewOptions`、`DataTableSortList`、`DataTableToolbar`、`TableRefreshProvider`、`DataTableRowActions`、`DataTableRowAction`、`TimePicker`、`TimeInput`、`FileUpload`、`FileUploadItem`、`FileUploadProps`。
 
 ## 2026-11-09 运营概览与经营报表
 
-`DonutChart` 与 `Treemap` 已从统一 UI 入口导出。两者由保留的公开源码派生，继续使用原 CSS、公共类型、几何、选择/下钻与动画，只补中文界面和辅助信息；业务标签与金额不改写。来源见 [DonutChart](../../apps/admin/src/components/ui/donut-chart-source.json) 和 [Treemap](../../apps/admin/src/components/ui/treemap-source.json)。英文原版/派生的5种环形图及4种树图 SSR 输出逐字一致，原 vendor 未修改。
+`DonutChart` 与 `Treemap` 已从统一 UI 入口导出。两者由保留的公开源码派生，继续使用原 CSS、公共类型、几何、选择/下钻与动画，只补中文界面和辅助信息；业务标签与金额不改写。来源见 [DonutChart](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/admin/src/components/ui/donut-chart-source.json) 和 [Treemap](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/admin/src/components/ui/treemap-source.json)。英文原版/派生的5种环形图及4种树图 SSR 输出逐字一致，原 vendor 未修改。
 
-概览订单/库存、报表库存/费用使用 [Split bar Pro 的本地完整接入](../../apps/admin/src/components/insights/split-bar/SOURCE.md)。它来自用户提供的公开编译预览还原，保留全部原 CSS、几何、图例隐藏/恢复、键盘及动效参数，不声称官方受保护付费源码。唯一交互修复是稳定外置标签槽，防止悬停小分类时图例跳走而漏接鼠标点击。页面保留全量事实，图中隐藏不会改总订单数、库存或费用；刷新后不允许隐藏全部剩余分类。
+概览订单/库存、报表库存/费用使用 [Split bar Pro 的本地完整接入](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/admin/src/components/insights/split-bar/SOURCE.md)。它来自用户提供的公开编译预览还原，保留全部原 CSS、几何、图例隐藏/恢复、键盘及动效参数，不声称官方受保护付费源码。唯一交互修复是稳定外置标签槽，防止悬停小分类时图例跳走而漏接鼠标点击。页面保留全量事实，图中隐藏不会改总订单数、库存或费用；刷新后不允许隐藏全部剩余分类。
 
 Metrics dashboard Pro 仅用于选型和布局参考；当前正式接口无逐日序列，不接示例趋势。客户/地点的贡献切换、分类下钻、报表明细页签和响应式布局的实页证据见[管理后台记录](../../docs/管理后台/管理后台-开发记录.md#2026-11-09运营概览与经营报表分析视图)。原筛选、CSV、权限、币种及业务动作契约保留。
 
 ## 2026-10-29 业务 Copilot 预览
 
-业务侧栏复用本地归档 `ai-side-panel` 原 CSS 的停靠/底部面板；用户限定仅取按钮与侧栏效果，业务内容在独立适配层装配。原组件目录、shared、许可与导入哈希保留，来源和实际接入范围见 [Copilot 说明](../../apps/admin/src/features/copilot/README.md)。右键菜单沿已安装的 Animate UI Base UI ContextMenu；共享列表、卡片和已接入详情按完整记录提供上下文，不提供字段级右键。仅本地演示，未连接模型或执行真实业务；未改 vendor。
+业务侧栏复用本地归档 `ai-side-panel` 原 CSS 的停靠/底部面板；用户限定仅取按钮与侧栏效果，业务内容在独立适配层装配。原组件目录、shared、许可与导入哈希保留，来源和实际接入范围见 [Copilot 说明](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/admin/src/features/copilot/README.md)。右键菜单沿已安装的 Animate UI Base UI ContextMenu；共享列表、卡片和已接入详情按完整记录提供上下文，不提供字段级右键。仅本地演示，未连接模型或执行真实业务；未改 vendor。
 
 ## 2026-11-08 公共结果态
 

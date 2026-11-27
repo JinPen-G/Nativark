@@ -225,11 +225,11 @@ node packages/core-contracts/dist/check.js <解包后的Core目录> --host <宿�
 - `$ref` 只使用本地 `#/components/schemas/...`，引用本 Core 或平台公共 schema；不能借另一个 Core 的 schema 隐式取得依赖。检查不访问外部 URL。
 - 包检查会读取该 JSON 并核对归属和最小文档字段。该检查不替代完整 OpenAPI 规范校验、Controller/DTO 对照和实际接口验证。
 
-宿主从正式出口调用 `CoreOpenApiContributionSchema.parse` 和 `composeCoreOpenApi(platformDocument, selectedCores)`。只有所有贡献无冲突时才返回 `document`；失败返回定位明确的 `issues`，不修改原文档。结果用于实际 `/api/openapi.json` 与同版本离线输出。公共、Rental 和工单宿主消费同一组合器，挂载集合由宿主提供。[公共文档](../../apps/platform-api/README.md) · [Rental 文档](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/openapi.ts) · [原组合](../../apps/api/src/contracts/openapi-document.ts)
+宿主从正式出口调用 `CoreOpenApiContributionSchema.parse` 和 `composeCoreOpenApi(platformDocument, selectedCores)`。只有所有贡献无冲突时才返回 `document`；失败返回定位明确的 `issues`，不修改原文档。结果用于实际 `/api/openapi.json` 与同版本离线输出。公共、Rental 和工单宿主消费同一组合器，挂载集合由宿主提供。[公共文档](../../apps/platform-api/README.md) · [Rental 文档](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/openapi.ts) · [原组合](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/contracts/openapi-document.ts)
 
 简单Zod3请求/响应可用正式出口 `coreOpenApiSchema(schema)`生成OpenAPI 3.0字段。当前支持普通对象、字符串/数字/布尔、枚举/基础字面量、数组、判别联合、可选/可空/默认值和已列明的基础校验；未知类型、refine/transform等额外逻辑明确拒绝，不静默丢规则。字段默认值须是可序列化纯值；业务前提仍在操作说明中表达。实际消费者见[工单HTTP合同及生成器](../example-tickets-core/src/openapi.ts)，Controller同片核对路径、输入与输出，生成成功不代表接口已经部署。
 
-保留 Rental 旧路径时，受控宿主可给检查器/组合器传入属于该 Core 的精确 `METHOD /path` 白名单；这个例外由宿主维护，不在 Core 清单中提供，也不会创建或放宽任何路由授权。静态检查命令默认使用新 Core 命名空间。原组合通过[同源文档适配](../../apps/api/src/contracts/openapi-document.ts)维持原 operationId、schema 名称及已挂载旧路径，兼容映射不改变原接口授权。
+保留 Rental 旧路径时，受控宿主可给检查器/组合器传入属于该 Core 的精确 `METHOD /path` 白名单；这个例外由宿主维护，不在 Core 清单中提供，也不会创建或放宽任何路由授权。静态检查命令默认使用新 Core 命名空间。原组合通过[同源文档适配](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/contracts/openapi-document.ts)维持原 operationId、schema 名称及已挂载旧路径，兼容映射不改变原接口授权。
 
 ## 提供服务端贡献
 
@@ -260,7 +260,7 @@ Core从实际接口方法/路径及权限声明生成 `CoreHttpContribution`，�
 
 结果成功时提供 `registry.resolve(method, path, audience)`，path为原宿主归一、剥离 `/api`后的路径。未知方法/路径/分面不返回政策；同一路径参数与静态段重叠、重复标识、未声明权限或错误Core/版本拒绝，失败不返回部分目录。大小写匹配和GET的隐式HEAD沿原Express语义，GET/HEAD政策不得重叠；参数值仍由所属Controller/schema校验。旧Rental路径沿原兼容政策，新Core不声明旧路由例外。
 
-[工单示范](../example-tickets-core/src/http.ts)的 `createTicketsHttpContribution()`直接从TICKETS_HTTP生成九条政策，Nest和OpenAPI仍消费同一声明；分页与旧数组读取共享本Core读取权限。实际部署目录在创建时通过可选 `http`接收贡献，主应用Guard统一消费目录及当前原身份准入；新增Core无需修改Guard内的逐业务判断。未知政策或无贡献的路径保持原默认拒绝。[宿主接线](../../apps/api/src/modules/core-host/README.md#core业务http准入)
+[工单示范](../example-tickets-core/src/http.ts)的 `createTicketsHttpContribution()`直接从TICKETS_HTTP生成九条政策，Nest和OpenAPI仍消费同一声明；分页与旧数组读取共享本Core读取权限。实际部署目录在创建时通过可选 `http`接收贡献，主应用Guard统一消费目录及当前原身份准入；新增Core无需修改Guard内的逐业务判断。未知政策或无贡献的路径保持原默认拒绝。[宿主接线](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/core-host/README.md#core业务http准入)
 
 ## Core 管理 HTTP 合同
 
@@ -283,7 +283,7 @@ Core从实际接口方法/路径及权限声明生成 `CoreHttpContribution`，�
 | 当前部署的Core准入及修订 | POST `deployment-admission/read` | 当前SaaS主体与 `system:tenant:manage` |
 | 原部署准入操作只读核对 | POST `deployment-admission-operations/read` | 当前SaaS主体、`system:tenant:manage` 与本人原操作 |
 
-`coreManagementHttpPolicy`用于原Guard消费准确方法/路径的管理政策。当前API有对应Controller/原主体服务组合，实际主Guard/AppModule接线沿PCH宿主片办理。[API适配](../../apps/api/src/modules/core-host/README.md)
+`coreManagementHttpPolicy`用于原Guard消费准确方法/路径的管理政策。当前API有对应Controller/原主体服务组合，实际主Guard/AppModule接线沿PCH宿主片办理。[API适配](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/core-host/README.md)
 
 成功响应沿原 `{ data, requestId }` 信封，原键冲突与对象修订冲突返回409，当前权限不足403，部署/数据未就绪503，输入400和会话401分别表达。初始化配置由所选Core自己的schema解析，接口资料链接该Core配置说明。目录投影只给正式显示字段，完整清单沿受控注册维护。
 
@@ -305,7 +305,7 @@ Core从实际接口方法/路径及权限声明生成 `CoreHttpContribution`，�
 
 `POST /api/platform/core-host/scope/read`接收 `coreId` 与Core需要时的 `container`，主体由原会话确定。返回unbound或bound；bound包含当前绑定及Core真实返回的ready/configuration_required/unavailable。读取不会首次初始化、补默认配置或执行业务。[范围HTTP合同](src/scope-http.ts) · [服务端范围合同](src/server.ts)
 
-宿主先核当前成员使用权，再调用已登记Core的 `resolveScope` 和 `readReadiness`，返回前重新核原身份/授权和绑定修订、数据版本。Core返回绑定必须属于原租户和所选范围。范围服务拥有自己的事务，宿主不在调用它时跨事务持有人员锁；最终业务请求仍须原Guard/服务端再次授权。`createCoreScopeOpenApi()`提供同源接口资料，主组合/Guard接线沿公共窗口办理。[API适配](../../apps/api/src/modules/core-host/README.md#当前core范围与就绪)
+宿主先核当前成员使用权，再调用已登记Core的 `resolveScope` 和 `readReadiness`，返回前重新核原身份/授权和绑定修订、数据版本。Core返回绑定必须属于原租户和所选范围。范围服务拥有自己的事务，宿主不在调用它时跨事务持有人员锁；最终业务请求仍须原Guard/服务端再次授权。`createCoreScopeOpenApi()`提供同源接口资料，主组合/Guard接线沿公共窗口办理。[API适配](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/core-host/README.md#当前core范围与就绪)
 
 ## 声明页面与操作
 
@@ -343,7 +343,7 @@ React 的 `CoreAdminPageAction` 还可声明 `slot`。省略时使用主操作�
 
 Rental 的商品、订单、养护、会员及经营页面通过 `createRentalAdminContribution(version, contexts)` 合入同一 Core。工作台和报表由 `useOperationsContext` 提供当前会话、业务范围、客户预览与已认证的 JSON / CSV 请求，页面复用同一外壳和原按钮；无需修改底座内部。[统一贡献](../rental-core/admin/index.tsx) · [工作台三步接入与原权限](../rental-core/admin/operations/README.md#接入与旧宿主)
 
-Rental 的会员、渠道等页面使用独立租户绑定；订单等空间业务使用 `rental-workspace` 容器绑定。标准 [服务端贡献](../rental-core/src/server.ts) 和 [平台适配](../rental-core/src/platform-host.ts) 共用原当前账号、Core 授权、成员分配及绑定，空间业务额外核原空间成员和已保存配置。宿主供给同一数据库及真实部署观察，组合工厂本身不创建空间或开通租户。[原组合工厂](../../apps/api/src/modules/core-host/original-rental.ts)
+Rental 的会员、渠道等页面使用独立租户绑定；订单等空间业务使用 `rental-workspace` 容器绑定。标准 [服务端贡献](../rental-core/src/server.ts) 和 [平台适配](../rental-core/src/platform-host.ts) 共用原当前账号、Core 授权、成员分配及绑定，空间业务额外核原空间成员和已保存配置。宿主供给同一数据库及真实部署观察，组合工厂本身不创建空间或开通租户。[原组合工厂](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/core-host/original-rental.ts)
 
 ## 组合 Prisma 源码
 

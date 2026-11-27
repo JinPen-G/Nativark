@@ -27,7 +27,7 @@ const sourcePaths = [
   "packages/ui-motiq/runtime", "packages/ui-motiq/LICENSE", "packages/ui-motiq/README.md",
   ...PLATFORM_SOURCE_SCRIPTS,
   "config", "AGENTS.md", "CLAUDE.md", "LICENSE", ".env.example", ".gitignore", ".gitattributes",
-  "tsconfig.base.json", "package.json", "package-lock.json", "apps/admin/AGENTS.md"
+  "tsconfig.base.json", "package.json", "package-lock.json", "packages/platform-admin/AGENTS.md"
 ];
 type Json = Record<string, unknown>;
 interface Package extends Json {

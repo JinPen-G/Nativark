@@ -26,7 +26,7 @@ const invitationApi = createOperatorInvitationApi("/api");
 
 `renderHeader` 让原路由供给当前品牌和图标，受权数据与页面工具由公共页面提供。缺省页头使用公共 `PageHeading`。Core 的业务词典沿原贡献机制接入。
 
-展示文案可由业务宿主供给，权限和业务数据仍走原来源。Rental 接受页传 `invitationTitle="接受运营邀请"`、`businessScopeLabel="经营空间"`；邀请侧窗传 `title="邀请运营用户"`、`revokeTitle="撤回这封运营邀请？"`。Rental 寄件页传原说明“查看当前租户各经营空间的短信、邮件和运营邀请发送记录。”与 `businessScopeLabel="经营空间"`，列表和详情共用同一标签。未提供这些参数的公共宿主使用成员和业务范围文案。[接受入口](../../../../../apps/admin/src/features/tenant-access/AcceptOperatorInvitationPage.tsx) · [寄件入口](../../../../../apps/admin/src/features/dispatch/TenantDispatchPage.tsx)
+展示文案可由业务宿主供给，权限和业务数据仍走原来源。Rental 接受页传 `invitationTitle="接受运营邀请"`、`businessScopeLabel="经营空间"`；邀请侧窗传 `title="邀请运营用户"`、`revokeTitle="撤回这封运营邀请？"`。Rental 寄件页传原说明“查看当前租户各经营空间的短信、邮件和运营邀请发送记录。”与 `businessScopeLabel="经营空间"`，列表和详情共用同一标签。未提供这些参数的公共宿主使用成员和业务范围文案。[接受入口](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/admin/src/features/tenant-access/AcceptOperatorInvitationPage.tsx) · [寄件入口](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/admin/src/features/dispatch/TenantDispatchPage.tsx)
 
 寄件与客服页头沿[原品牌解析](../../app/branding.ts)保持当前租户、用户和平台品牌的回退顺序，列表字段、原邮件预览与表单交互保持同源。
 

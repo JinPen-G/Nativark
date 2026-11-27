@@ -113,7 +113,7 @@ public-client 登记 / 审查由原当前 SaaS 管理身份办理。通知与准
 
 通知 / 验证由当前两级已批准政策裁定。只有两级都明确 verificationRequired:false 且有原依据才返回 not_required，否则须原已完成 MFA 证据，绑定账号、会话、空间、resource、请求 / policy hash、修订与期限。普通登录、实名、Origin、nonce 或模型确认均不能补该证据。[同意政策读取](src/prisma-oauth-consent-review.ts)
 
-原 OAuth、管理与业务日志沿同一 OperationLog 写入，缺原关联、失败或缺日志 ID 在原事务拒绝。事件仅保留原键、引用和修订，凭据、nonce、正文及私人政策由各自原存储保管。历史收据按独立当前读权读取，政策停新与历史读取分别核定。[原 OAuth 审计](../rental-mcp-host/src/original-mcp-oauth-audit.ts) · [原日志服务](../../apps/api/src/common/operation-log.service.ts)
+原 OAuth、管理与业务日志沿同一 OperationLog 写入，缺原关联、失败或缺日志 ID 在原事务拒绝。事件仅保留原键、引用和修订，凭据、nonce、正文及私人政策由各自原存储保管。历史收据按独立当前读权读取，政策停新与历史读取分别核定。[原 OAuth 审计](../rental-mcp-host/src/original-mcp-oauth-audit.ts) · [原日志服务](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/common/operation-log.service.ts)
 
 ### 可选业务 Core 准入
 
@@ -222,7 +222,7 @@ public-client 登记 / 审查由原当前 SaaS 管理身份办理。通知与准
 | 目录 | 同 Native 原目录 GET Guard、Core 配置分页与正式目录 facts，保留 partial / cursor / configurationVersion。[资源](../rental-mcp-host/src/original-mcp-catalog-resources.ts) · [Core 运行时](../rental-core/src/mysql-core-runtime.ts) |
 | 可用性 | 原专属 scope 与 availability POST Guard，复用原履约准入、库存快照及 computeAvailability。[授权](../rental-mcp-host/src/original-mcp-availability-read-authority.ts) · [资源](../rental-mcp-host/src/original-mcp-availability-resources.ts) |
 | 原订单问题 | status / fees / payments / next_steps 按原请求选择消费历史订单、报价与检查，保留缺项和不可执行候选。[订单资源](../rental-mcp-host/src/original-mcp-order-status-resources.ts) · [业务运行时](../rental-core/src/mysql-business-runtime.ts) |
-| 支付 / 退款事实 | 专用财务 Guard 与原 Native 分页，金额 / 状态来自原 PaymentRuntime，缺记录、缺资金事实保持原 unavailable / not_loaded。[固定 Guard](../../apps/api/src/common/api-auth.guard.ts) · [支付兼容入口](../../apps/api/src/modules/integrations/payment.runtime.service.ts) |
+| 支付 / 退款事实 | 专用财务 Guard 与原 Native 分页，金额 / 状态来自原 PaymentRuntime，缺记录、缺资金事实保持原 unavailable / not_loaded。[固定 Guard](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/common/api-auth.guard.ts) · [支付兼容入口](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/integrations/payment.runtime.service.ts) |
 | 原请求 scope / 政策 | canonical scope 只查已有行，订阅与当前资源 policy 在同 Native 复验。[scope](../rental-mcp-host/src/original-mcp-request-scope.ts) · [请求 authority](../rental-mcp-host/src/original-mcp-request-authority.ts) |
 | 原请求保存 / 核对 | 必需同 Native association 审计，saveIn 返回 prepared / commit:not_observed，reconcileIn 按原键只读且 Task 为 not_loaded。[统一参加者](../rental-mcp-host/src/original-mcp-request-participant.ts) · [保存审计](../rental-mcp-host/src/original-mcp-request-save-audit.ts) |
 

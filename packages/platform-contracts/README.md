@@ -10,9 +10,9 @@ import { TenantStatus, type PlatformSessionContextResponse } from "@rental-os/pl
 
 订阅可从 `@rental-os/platform-contracts/subscription` 单独导入。原 `@rental-os/shared` 继续再导出同一枚举和字段，基础版/PRO、统一期限、金额可空及原请求语义沿SUB专项。Core开通、成员分配和业务权限不由套餐字段代替。
 
-服务端通过 `@rental-os/platform-contracts/request-fingerprint` 使用原确定性 SHA-256 算法。平台审计、文件绑定和 Core 幂等共用这一实现，原 API 路径转接同一函数。该 Node 子出口按需加载，根合同继续用于浏览器及业务类型消费。[指纹源码](src/request-fingerprint.ts) · [原 API 接点](../../apps/api/src/common/request-fingerprint.ts)
+服务端通过 `@rental-os/platform-contracts/request-fingerprint` 使用原确定性 SHA-256 算法。平台审计、文件绑定和 Core 幂等共用这一实现，原 API 路径转接同一函数。该 Node 子出口按需加载，根合同继续用于浏览器及业务类型消费。[指纹源码](src/request-fingerprint.ts) · [原 API 接点](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/common/request-fingerprint.ts)
 
-文件冻结校验从 @rental-os/platform-contracts/file-content-binding 导入，只核原内容摘要、提交路径和稳定存储位置。位置引用不包含凭据或供应商客户端，缺冻结证据返回undefined；不能把文件存在或旧active状态当成已冻结、可读取或允许上传。该Node子出口按需加载，Rental与其他文件消费者共用同一校验。[冻结依据](src/file-content-binding.ts) · [旧文件接点](../../apps/api/src/modules/integrations/file-content-binding.ts)
+文件冻结校验从 @rental-os/platform-contracts/file-content-binding 导入，只核原内容摘要、提交路径和稳定存储位置。位置引用不包含凭据或供应商客户端，缺冻结证据返回undefined；不能把文件存在或旧active状态当成已冻结、可读取或允许上传。该Node子出口按需加载，Rental与其他文件消费者共用同一校验。[冻结依据](src/file-content-binding.ts) · [旧文件接点](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/integrations/file-content-binding.ts)
 
 文件上传、完成与下载合同可从 `@rental-os/platform-contracts/files` 导入，根出口也提供同一类型。原shared/infrastructure再导出原八项声明，已有DTO、OpenAPI与客户端消费的字段保持；业务对象归属、文件ACL和冻结证据仍由服务端核验。[文件合同](src/files.ts) · [原兼容出口](../shared/src/infrastructure.ts)
 

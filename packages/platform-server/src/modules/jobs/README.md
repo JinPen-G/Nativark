@@ -8,7 +8,7 @@
 2. 宿主提供 `JobLedgerDataStore` 的 `asyncJob.findMany/create`，由 `JobLedgerRepository` 适配原表。读取与完成能力按需提供 `findFirst/update`。应用接入当前持久模式和适配日志回调，内存宿主传入原 `jobsByTenant` Map 与初始任务。
 3. 在原权限入口和公共请求上下文中调用台账。需要手动运行时，在 `execution` 中供给同一 `JobLedgerExecutionStorage`、`buildRunResult` 和 `recordRunLog`，分别负责原任务读取/完成、已确认结果与运行日志。运行前核对执行存储的 `getJob/finishJob` 和两项回调是否齐全。缺少执行参加者、有效结果或对应存储能力时抛出 `ServiceUnavailableException`。业务 Core 提供任务类型、对象关联与有效执行者，执行和恢复按当前授权、原操作与收据办理。
 
-公共应用缺省从空内存台账开始。原 API 由 `IntegrationsService` 提供业务种子、执行结果和运行日志，`IntegrationsRepository` 接入原 SQL 存储，`JobsController` 使用同一服务实例。内存执行共用原 Map 和行对象。[原服务](../../../../../apps/api/src/modules/integrations/integrations.service.ts) · [原仓储](../../../../../apps/api/src/modules/integrations/integrations.repository.ts) · [原 HTTP](../../../../../apps/api/src/modules/jobs/jobs.controller.ts)
+公共应用缺省从空内存台账开始。原 API 由 `IntegrationsService` 提供业务种子、执行结果和运行日志，`IntegrationsRepository` 接入原 SQL 存储，`JobsController` 使用同一服务实例。内存执行共用原 Map 和行对象。[原服务](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/integrations/integrations.service.ts) · [原仓储](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/integrations/integrations.repository.ts) · [原 HTTP](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/jobs/jobs.controller.ts)
 
 ## HTTP 接入
 

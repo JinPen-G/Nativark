@@ -1,6 +1,6 @@
 # 文件存储与原回执
 
-本模块提供公共文件应用、字节处理、格式校验、元数据、上传会话及原回执。Core通过受控宿主登记自己的真实业务权威，再调用同一创建、完成、下载、删除和清理实现。原组合继续提供当前身份、业务授权及专用资料裁定。[模块出口](index.ts) · [原消费者](../../../../../apps/api/src/modules/integrations/file-storage.runtime.service.ts)
+本模块提供公共文件应用、字节处理、格式校验、元数据、上传会话及原回执。Core通过受控宿主登记自己的真实业务权威，再调用同一创建、完成、下载、删除和清理实现。原组合继续提供当前身份、业务授权及专用资料裁定。[模块出口](index.ts) · [原消费者](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/integrations/file-storage.runtime.service.ts)
 
 ## 阅读路径
 
@@ -27,7 +27,7 @@
 | [原冻结合同](../../../../platform-contracts/src/file-content-binding.ts) | 存储位置及已冻结字节指纹，原兼容入口继续消费同源合同 |
 | [Rental 附件权限](../../../../rental-core/src/file-access.ts) | 当前业务对象读取 ACL、已发布商品图、客户敏感附件以及业务引用存在性 |
 
-原 [FilesController](../../../../../apps/api/src/modules/files/files.controller.ts) 混合公共工具及实名、承运等 Rental 专用入口，各自保留原 Guard 和业务授权。原 [员工控制器](../../../../../apps/api/src/modules/files/staff-uploads.controller.ts) 再导出 [Rental员工HTTP](../../../../rental-core/src/http-staff-uploads.controller.ts)，继续校验场景、阶段、地点范围、本人上传和检查绑定；[实际接线](../../../../../apps/api/src/modules/files/staff-http.providers.ts)供给同一文件/数据库及原始body解析器。原 [文件 ACL 接线](../../../../../apps/api/src/modules/files/file-business-access.service.ts) 供给同一 Rental 事实仓储、报价读取和客户敏感资料参加者。
+原 [FilesController](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/files/files.controller.ts) 混合公共工具及实名、承运等 Rental 专用入口，各自保留原 Guard 和业务授权。原 [员工控制器](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/files/staff-uploads.controller.ts) 再导出 [Rental员工HTTP](../../../../rental-core/src/http-staff-uploads.controller.ts)，继续校验场景、阶段、地点范围、本人上传和检查绑定；[实际接线](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/files/staff-http.providers.ts)供给同一文件/数据库及原始body解析器。原 [文件 ACL 接线](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/files/file-business-access.service.ts) 供给同一 Rental 事实仓储、报价读取和客户敏感资料参加者。
 
 ## Core 接入
 
@@ -52,7 +52,7 @@ await files.downloadUrl(tenantId, fileAssetId, owner);
 
 需要文件目录时，从同一 `/files` 出口使用 `FileLedgerApplication`，给它提供 `storage`、实际 `authority`、存储模式和原创建日志回调，然后调用 `listFiles(query)`。当前租户从同一ALS读取，存储等待后复核权限范围；缺业务权威时拒绝读取。`excludedScene` 只供所属业务明确排除自己的专用来源，公共模块没有Rental场景枚举。
 
-`createFile` 与配套存储函数 `createSimulationFileAsset` 只登记原开发模拟元数据，不上传对象。普通Core附件使用前面的原键上传链；模拟创建在应用入口继续拒绝生产模式，日志失败向上返回并保留已经写入的原台账事实。列表和应用返回投影不包含存储键或公开地址。原[服务](../../../../../apps/api/src/modules/integrations/integrations.service.ts)与[存储](../../../../../apps/api/src/modules/integrations/integrations.repository.ts)继续在公共调用前处理Rental专用场景。
+`createFile` 与配套存储函数 `createSimulationFileAsset` 只登记原开发模拟元数据，不上传对象。普通Core附件使用前面的原键上传链；模拟创建在应用入口继续拒绝生产模式，日志失败向上返回并保留已经写入的原台账事实。列表和应用返回投影不包含存储键或公开地址。原[服务](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/integrations/integrations.service.ts)与[存储](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/integrations/integrations.repository.ts)继续在公共调用前处理Rental专用场景。
 
 ## 业务与字节边界
 
@@ -60,7 +60,7 @@ await files.downloadUrl(tenantId, fileAssetId, owner);
 
 公共字节读取保持原八秒流超时、取消、响应类型、精确声明长度、累计字节上限及最终长度核对。取消时释放 reader 和 timer。签名、网络请求和旧测试注入点沿原提供者实现。`completeOriginalFileUpload`按原会话与文件的持久状态选择完成回读或冻结恢复，调用`freezeFileUploadContent`计算实际字节SHA-256。进入冻结内核的字节先核对原声明大小和20MB上限，包括业务参加者提供的受控字节，再在原事务记录唯一冻结目标。占用前将原文件／会话快照中的 Date 按 JSON 语义保留，有效期或日期修订变化时返回冲突。`beforeWrite`接收已确认提交的原占用快照，公共应用在同一短事务复验当前业务ACL、配置修订及文件／会话版本后发送一次PUT，恢复仅核对原目标。原知识授权及其受控字节来源在占用前复验。最终激活前仍核完整日期快照，再统一委托`activateOriginalFileUpload`，调用方供给原事务、完整版本CAS及领域复验。Rental的冻结结果沿原结果事务收口，模拟激活沿原Tenant新写入锁。专用检查、企业凭证和隐私擦除各自保持原授权及unknown收据。
 
-`s3ObjectReadRequest(config, storageKey, at)` 使用服务端实际配置生成同一 S3 GET 和请求头签名。[Rental 检查对象读取](../../../../rental-core/src/inspection-object-reader.ts)沿原文件/会话、订单空间、MIME、精确长度及冻结摘要读取，返回流前和流末复验同一持久事实与配置。[知识正文读取](../../../../../apps/api/src/modules/integrations/knowledge-object-reader.ts)消费同一签名函数，知识 ACL、正文绑定和受控运输继续由原消费者维护。原[检查对象入口](../../../../../apps/api/src/modules/integrations/inspection-object-reader.ts)再导出同一实现，检查媒体、员工文件与既有 AI 消费者沿原调用链使用。
+`s3ObjectReadRequest(config, storageKey, at)` 使用服务端实际配置生成同一 S3 GET 和请求头签名。[Rental 检查对象读取](../../../../rental-core/src/inspection-object-reader.ts)沿原文件/会话、订单空间、MIME、精确长度及冻结摘要读取，返回流前和流末复验同一持久事实与配置。[知识正文读取](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/integrations/knowledge-object-reader.ts)消费同一签名函数，知识 ACL、正文绑定和受控运输继续由原消费者维护。原[检查对象入口](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/integrations/inspection-object-reader.ts)再导出同一实现，检查媒体、员工文件与既有 AI 消费者沿原调用链使用。
 
 `persistUploadFacts(tx, tenantId, facts, metadata)` 仅接调用方已经使用的原事务，先创建 `pending_upload` 文件，再以同一文件 ID 创建原上传会话。metadata 由原编排过滤客户端保留字段并补入可信操作者、空间、配置和专用证据，仓储保持原内容。`findUploadSession(tenantId, reference)` 只读取当前租户下指定原会话 ID 或原幂等键。
 

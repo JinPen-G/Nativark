@@ -13,7 +13,7 @@
 | Core包管理 | [公共装配](src/core-package-assembly.ts)、[提交意图审计](src/core-package-audit.ts)、[接口资料](src/core-packages/openapi.ts)供给发现、固定发行、包预检、候选及原结果读取 |
 | 移除与审计 | [移除预检](src/platform-core-removal.ts)、[审计](src/platform-core-audit.ts)；缺平台依赖读取拒绝移除，原收据的引用同事务保存 |
 | MySQL结构观察 | [不可变SQL预期](src/mysql-structure.ts)、[实际物理读取](src/mysql-physical.ts)；核表/列/默认值/键/CHECK/外键，缺数据保持不可用 |
-| 直接消费者 | [公共宿主](../../apps/platform-api/src/core-assembly.ts)、[原组合兼容适配](../../apps/api/src/modules/core-host/README.md) |
+| 直接消费者 | [公共宿主](../../apps/platform-api/src/core-assembly.ts)、[原组合兼容适配](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/core-host/README.md) |
 
 ```ts
 import { composePlatformCoreApplication, createPlatformCoreHttpAccess, CoreHostModule } from "@rental-os/platform-core-host";

@@ -11,7 +11,7 @@
 | [状态投影](subscription-state.ts)、[服务时区与周年](subscription-term.ts) | 读取按当前时间投影排期，写入保留原周年锚点和半开期间 |
 | [独立公共 schema](../../../../../apps/platform-api/prisma/schema.prisma) | 公共期限和办理表，独立公共迁移链维护 |
 | [公共后台](../../../../platform-admin/src/features/subscription/README.md) | 聚合视图、版本对比、申请、办理、目录和到期浮窗 |
-| [Rental 转接](../../../../../apps/api/src/modules/subscription/subscription.service.ts) | 原 Prisma 与真实已发布品类目录参加者，兼容员工投影和原 Core 调用 |
+| [Rental 转接](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/subscription/subscription.service.ts) | 原 Prisma 与真实已发布品类目录参加者，兼容员工投影和原 Core 调用 |
 
 ## 装配
 

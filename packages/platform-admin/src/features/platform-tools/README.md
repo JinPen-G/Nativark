@@ -9,7 +9,7 @@
 | [可见性](platformToolsAccess.ts) | 原 `/platform/tools` 路径和各自权限，SaaS 账号显示原租户工具说明并且不发起租户查询 |
 | [双语词条](messages.ts) | 原英语值与新增错误/刷新提示，供两个宿主语言表合并 |
 
-原 [平台工具页](../../../../../apps/admin/src/features/platform/PlatformToolsPage.tsx) 再导出同一完整页面。原 [API](../../../../../apps/admin/src/api/platformOps.ts) 的十九个对应方法委托公共客户端。[公共应用接点](../../application.tsx)
+原 [平台工具页](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/admin/src/features/platform/PlatformToolsPage.tsx) 再导出同一完整页面。原 [API](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/admin/src/api/platformOps.ts) 的十九个对应方法委托公共客户端。[公共应用接点](../../application.tsx)
 
 字典页保留原四个组信息字段，编辑已有组时保留原字典项数组。新组通过原 Form.List 输入首个字典项的编码、显示名称、值、排序、启停和备注，空编码/名称/值沿原表单和服务端校验拒绝，零 Core 租户可从空列表创建第一组字典。编号页保留原编码、名称、模块、前缀、日期格式、流水长度、重置周期与启停字段。编号表单没有当前流水编辑控件，保存省略该字段，由服务在事务锁内保留最新流水。
 

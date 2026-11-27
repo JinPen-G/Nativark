@@ -40,6 +40,6 @@
 
 ## 原宿主与验证
 
-原 [邀请适配](../../../../../apps/api/src/modules/notifications/tenant-operator-invitations.service.ts)、[寄件适配](../../../../../apps/api/src/modules/notifications/tenant-dispatch.service.ts) 和 [客服适配](../../../../../apps/api/src/modules/notifications/tenant-support-email.service.ts) 保留原构造依赖。三个租户管理 Controller 继承公共 HTTP，邀请创建和预览使用原请求适配，公开接受入口使用公共同源请求类。Rental 日志与经营空间的联接留在寄件宿主参加者，权限和账号写入沿原账户仓储执行。
+原 [邀请适配](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/notifications/tenant-operator-invitations.service.ts)、[寄件适配](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/notifications/tenant-dispatch.service.ts) 和 [客服适配](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/notifications/tenant-support-email.service.ts) 保留原构造依赖。三个租户管理 Controller 继承公共 HTTP，邀请创建和预览使用原请求适配，公开接受入口使用公共同源请求类。Rental 日志与经营空间的联接留在寄件宿主参加者，权限和账号写入沿原账户仓储执行。
 
 行为验证复用 [tenant-messaging.test.cjs](../../../../../tests/tenant-messaging.test.cjs)，按原离线隔离入口执行。类型和离线行为、实际邮箱、真实数据库及宿主验收分别取证。

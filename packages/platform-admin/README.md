@@ -26,7 +26,7 @@
 | [外壳](src/components/BusinessShell.tsx)、[页头插槽](src/components/workspace/WorkspaceHeader.tsx) | 原几何与动效、单个活动路由、表单原生提交关联及卸载清理 |
 | [详情与事实布局](src/components/RecordDetailLayout.tsx)、[看板](src/components/kanban-board/KanbanBoard.tsx) | `/ui` 供给原记录布局/内容栈、事实/可选展开、QueryState/内容切换、列表控件和受控看板，Core提供业务事实和回调 |
 | [构建适配](config/vite.ts)、[样式](src/styles.css) | 同源 UIArc 别名、动效偏好、按钮图标与严格看板适配；环境/代理由宿主管理 |
-| [原后台适配](../../apps/admin/src/app/adminRuntime.ts) | 原 authStore/request/queryClient 消费端口，旧源码入口窄转接同一公共实现 |
+| [原后台适配](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/admin/src/app/adminRuntime.ts) | 原 authStore/request/queryClient 消费端口，旧源码入口窄转接同一公共实现 |
 
 ## 宿主与业务贡献
 
@@ -35,7 +35,7 @@
 | [零 Core](../../apps/platform-admin/README.md) | 以公共浏览器会话和空页面注册表组装公共应用，保留公共管理、设置与个人入口 |
 | [独立 Rental](https://github.com/JinPen-G/Zelo-rental-core/blob/5cef75a1814814a4a4ccc1172de15f16dc5ff74e/workspace/apps/rental-admin/README.md)、[独立双 Core](https://github.com/JinPen-G/Zelo-rental-core/blob/main/workspace/apps/example-multi-core-admin/README.md) | 宿主登记所选页面。两者共用 [Rental 浏览器装配](../rental-core/admin/browser/README.md)，由已验证会话提供经营范围、原深链接和业务通知。双 Core 另登记工单贡献 |
 | [工单](../../apps/example-tickets-admin/README.md) | 公共浏览器会话加 [工单页面贡献](../example-tickets-core/admin/index.tsx)，页面与操作使用所属 Core 的绑定、就绪和访问状态 |
-| [原管理后台](../../apps/admin/src/app/App.tsx)、[原路由](../../apps/admin/src/app/AppRouter.tsx) | 保留原会话、路由和业务组合，逐项转接公共组件和 Rental 页面。原 AI 工作台与平台模型配置消费 [AI 呈现包](../ai-native-admin/README.md)，Operator/Copilot 的业务接点由 Rental 宿主提供 |
+| [原管理后台](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/admin/src/app/App.tsx)、[原路由](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/admin/src/app/AppRouter.tsx) | 保留原会话、路由和业务组合，逐项转接公共组件和 Rental 页面。原 AI 工作台与平台模型配置消费 [AI 呈现包](../ai-native-admin/README.md)，Operator/Copilot 的业务接点由 Rental 宿主提供 |
 
 业务页面从 [Rental 后台导读](../rental-core/admin/README.md) 进入。统一登记订单、工单、能力、地点、商品资产、商业、治理、会员、工作台与报表、渠道、开业、支付对账十二组页面。各组导读给出业务数据、操作和权限来源。页面贡献使用公共 UI、宿主请求与查询缓存，服务端按身份、经营范围及业务权限裁定。
 
