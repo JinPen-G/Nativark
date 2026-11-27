@@ -8,13 +8,27 @@ export type GitHubFetcher = typeof fetch;
 export const GITHUB_API = "https://api.github.com";
 const headers = { "User-Agent": "Zelo-Core", "X-GitHub-Api-Version": "2026-03-10" };
 const downloadHosts = new Set(["api.github.com", "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"]);
+const officialRental = {
+  id: 1470386426,
+  stable: "https://github.com/JinPen-G/nativark-rental-core",
+  canonical: "https://github.com/JinPen-G/Zelo-rental-core",
+} as const;
+
+/** Only the documented top-level rename can retain the old release identity.
+ * A redirect, ordinary repository metadata, or an arbitrary alias cannot grant it. */
+export function officialRentalReleaseSource(repository: string): string | undefined {
+  return [officialRental.stable, officialRental.canonical].some(name => name.toLowerCase() === repository.toLowerCase())
+    ? officialRental.stable : undefined;
+}
+const githubPath = (repository: string) => `/repos/${repository.slice("https://github.com/".length)}`;
 
 /** 连接已坏时取消失败不覆盖原网络/HTTP诊断。 */
 async function discard(body: ReadableStream<Uint8Array> | null): Promise<void> {
   try { await body?.cancel(); } catch { /* 响应已中断，无剩余内容需要读取。 */ }
 }
 
-export async function readGitHubResponse(url: string, binary: boolean, limit: number, fetcher: GitHubFetcher): Promise<Uint8Array> {
+async function readResponse(url: string, binary: boolean, limit: number, fetcher: GitHubFetcher,
+  verifiedMetadataRedirect?: string): Promise<Uint8Array> {
   const signal = AbortSignal.timeout(binary ? 120_000 : 30_000);
   for (let redirects = 0; redirects <= 3; redirects++) {
     let response: Response;
@@ -28,9 +42,17 @@ export async function readGitHubResponse(url: string, binary: boolean, limit: nu
       const location = response.headers.get("location");
       await discard(response.body);
       const target = location && URL.canParse(location, url) ? new URL(location, url) : undefined;
-      if (!target || target.protocol !== "https:" || target.username || target.password || target.port || !downloadHosts.has(target.hostname))
+      if (!target || target.protocol !== "https:" || target.username || target.password || target.port || target.hash || !downloadHosts.has(target.hostname))
         throw new GitHubCoreReadError("response_invalid", "Release下载跳转不属于支持的GitHub地址");
       url = target.href;
+      continue;
+    }
+    if (verifiedMetadataRedirect && redirects === 0 && [301, 308].includes(response.status)) {
+      const location = response.headers.get("location");
+      await discard(response.body);
+      if (location !== verifiedMetadataRedirect)
+        throw new GitHubCoreReadError("response_invalid", "官方 Rental 旧地址未指向原 GitHub 仓库 ID");
+      url = verifiedMetadataRedirect;
       continue;
     }
     if (response.status !== 200) {
@@ -65,8 +87,41 @@ export async function readGitHubResponse(url: string, binary: boolean, limit: nu
   throw new GitHubCoreReadError("response_invalid", "Release下载跳转次数超过上限");
 }
 
-export async function readGitHubJson(path: string, fetcher: GitHubFetcher): Promise<unknown> {
-  const bytes = await readGitHubResponse(GITHUB_API + path, false, 4 * 1024 * 1024, fetcher);
+export function readGitHubResponse(url: string, binary: boolean, limit: number, fetcher: GitHubFetcher): Promise<Uint8Array> {
+  return readResponse(url, binary, limit, fetcher);
+}
+
+async function readJson(path: string, fetcher: GitHubFetcher, verifiedMetadataRedirect?: string): Promise<unknown> {
+  const bytes = await readResponse(GITHUB_API + path, false, 4 * 1024 * 1024, fetcher, verifiedMetadataRedirect);
   try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
   catch { throw new GitHubCoreReadError("response_invalid", "GitHub返回的资料不是有效JSON"); }
+}
+
+export async function readGitHubJson(path: string, fetcher: GitHubFetcher): Promise<unknown> {
+  return readJson(path, fetcher);
+}
+
+/** Verify both public name lookups. Only the exact original numeric redirect
+ * may be followed. Release and Contents requests stay on that verified ID. */
+export async function resolveGitHubRepository(repository: string, fetcher: GitHubFetcher) {
+  const path = githubPath(repository);
+  if (!officialRentalReleaseSource(repository)) return { path, sourceRepository: repository };
+  const originalPath = githubPath(officialRental.stable), canonicalPath = githubPath(officialRental.canonical);
+  const idPath = `/repositories/${officialRental.id}`;
+  const [original, canonical] = await Promise.all([
+    readJson(originalPath, fetcher, GITHUB_API + idPath), readGitHubJson(canonicalPath, fetcher),
+  ]);
+  function metadata(value: unknown) {
+    if (!value || typeof value !== "object" || !("id" in value) || value.id !== officialRental.id
+      || !("html_url" in value) || value.html_url !== officialRental.canonical
+      || !("full_name" in value) || value.full_name !== officialRental.canonical.slice("https://github.com/".length)
+      || !("private" in value) || value.private !== false || !("archived" in value) || value.archived !== false
+      || !("default_branch" in value) || typeof value.default_branch !== "string" || !value.default_branch || value.default_branch.length > 240)
+      throw new GitHubCoreReadError("response_invalid", "官方 Rental 新旧地址未核到同一公开 GitHub 仓库");
+    return { default_branch: value.default_branch, private: false as const, archived: false as const };
+  }
+  const originalMetadata = metadata(original), canonicalMetadata = metadata(canonical);
+  if (originalMetadata.default_branch !== canonicalMetadata.default_branch)
+    throw new GitHubCoreReadError("response_invalid", "官方 Rental 新旧地址的默认分支观察不一致");
+  return { path: idPath, sourceRepository: officialRental.stable, metadata: canonicalMetadata };
 }

@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { CORE_MANIFEST_FILE, CoreIdSchema, CoreManifestSchema, CorePackagePathSchema, CoreSourceSchema, type CoreManifest } from "./manifest";
 import { GitHubCoreRepositorySchema, inspectGitHubCoreRelease, type GitHubCoreReleasePin, type GitHubCoreReleaseSelection } from "./github";
-import { GitHubCoreReadError, readGitHubJson, type GitHubFetcher } from "./github-http";
+import { GitHubCoreReadError, readGitHubJson, resolveGitHubRepository, type GitHubFetcher } from "./github-http";
 
 export const CORE_REPOSITORY_INDEX_FILE = "core.index.json";
 export const CoreRepositoryIndexSchema = z.object({
@@ -77,9 +77,9 @@ async function readRepositoryFile(repoPath: string, file: string, commit: string
 export async function inspectGitHubCoreRepository(repositoryInput: string, options: { includeReleases?: boolean } = {},
   fetcher: GitHubFetcher = fetch): Promise<GitHubCoreRepositoryInspection> {
   const repository = GitHubCoreRepositorySchema.parse(repositoryInput);
-  const repoPath = `/repos/${repository.slice("https://github.com/".length)}`;
+  const resolved = await resolveGitHubRepository(repository, fetcher), repoPath = resolved.path;
   const metadata = z.object({ private: z.literal(false), archived: z.literal(false), default_branch: z.string().min(1).max(240) })
-    .parse(await readGitHubJson(repoPath, fetcher));
+    .parse(resolved.metadata ?? await readGitHubJson(repoPath, fetcher));
   const commit = z.object({ sha: CoreSourceSchema.shape.commit })
     .parse(await readGitHubJson(`${repoPath}/commits/${encodeURIComponent(metadata.default_branch)}`, fetcher)).sha;
   const result: GitHubCoreRepositoryInspection = { repository, commit, checkedAt: new Date().toISOString(), state: "identified", cores: [] };
@@ -118,13 +118,14 @@ export async function inspectGitHubCoreRepository(repositoryInput: string, optio
       continue;
     }
     const manifest = parsed.data;
-    if (declaration.id && manifest.id !== declaration.id || manifest.source.repository.replace(/\.git$/u, "") !== repository) {
+    if (declaration.id && manifest.id !== declaration.id || resolved.metadata && manifest.id !== "rental"
+      || manifest.source.repository.replace(/\.git$/u, "") !== resolved.sourceRepository) {
       core.state = "invalid";
       core.issues.push({ code: "manifest_identity", message: "清单Core身份或来源与选定仓库索引不一致" });
       continue;
     }
     core.manifest = manifest;
-    core.releaseSelection = { repository, coreId: manifest.id, version: manifest.version,
+    core.releaseSelection = { repository: resolved.sourceRepository, coreId: manifest.id, version: manifest.version,
       tag: parsedIndex ? `${manifest.id}/v${manifest.version}` : `v${manifest.version}` };
     if (!options.includeReleases) continue;
     try {

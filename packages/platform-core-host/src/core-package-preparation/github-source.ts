@@ -1,10 +1,8 @@
 /** 从宿主登记的固定 Release 读取原资产，复用 GitHub 有界传输和前后 pin 核验。
  * 缓存只保留一个已下载固定包，同一固定发行合并读取，当前管理权限仍由消费应用复验。 */
-import { isDeepStrictEqual } from "node:util";
 import {
-  GitHubCoreReleasePinSchema, GitHubCoreReadError, inspectGitHubCoreRelease, type GitHubCoreReleasePin
+  GitHubCoreReleasePinSchema, GitHubCoreReadError, downloadGitHubCoreRelease, type GitHubCoreReleasePin
 } from "@rental-os/core-contracts/github";
-import { GITHUB_API, readGitHubResponse } from "@rental-os/core-contracts/github-http";
 import { readCoreArchive } from "@rental-os/core-contracts/archive";
 import { inspectCorePackageFiles } from "@rental-os/core-contracts/package";
 import { requestFingerprint } from "@rental-os/platform-contracts/request-fingerprint";
@@ -28,16 +26,7 @@ export function createPlatformCorePackageGitHubSource(input: {
     const deadline = AbortSignal.timeout(180_000), transport = input.fetcher ?? fetch;
     const fetcher: typeof fetch = (url, options) => transport(url, { ...options,
       signal: options?.signal ? AbortSignal.any([options.signal, deadline]) : deadline });
-    const selection = { repository: pin.repository, coreId: pin.coreId, version: pin.version, tag: pin.tag };
-    const unchanged = async () => {
-      if (!isDeepStrictEqual(pin, await inspectGitHubCoreRelease(selection, fetcher)))
-        throw new GitHubCoreReadError("release_changed", "原 Release、Tag 提交或资产已变化，请核对原固定版本");
-    };
-    await unchanged();
-    const repository = pin.repository.slice("https://github.com/".length);
-    const bytes = await readGitHubResponse(`${GITHUB_API}/repos/${repository}/releases/assets/${pin.assetId}`, true, pin.size, fetcher);
-    if (bytes.length !== pin.size) throw new GitHubCoreReadError("response_invalid", "资产长度与原固定发行不同");
-    await unchanged();
+    const { bytes } = await downloadGitHubCoreRelease(pin, fetcher);
     const allowedRoutes = Object.hasOwn(legacyApiRoutes, pin.coreId) ? legacyApiRoutes[pin.coreId] : [];
     const inspected = inspectCorePackageFiles(readCoreArchive(bytes, pin.sha256).files, undefined, allowedRoutes);
     const manifest = inspected.manifest;

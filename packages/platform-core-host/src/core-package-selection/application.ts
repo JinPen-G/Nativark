@@ -6,7 +6,7 @@ import { z } from "zod";
 import { CoreAccessError } from "@rental-os/core-host";
 import type { CoreHostSqlClient } from "@rental-os/core-host/mysql";
 import {
-  GitHubCoreReadError, GitHubCoreReleasePinSchema, type GitHubCoreReleaseSelection
+  GitHubCoreReadError, GitHubCoreReleasePinSchema, gitHubCoreReleaseMatchesSelection, type GitHubCoreReleaseSelection
 } from "@rental-os/core-contracts/github";
 import type { SystemUserRow } from "@rental-os/platform-contracts";
 import { PlatformPrincipalAuthority } from "@rental-os/platform-server/principal";
@@ -65,8 +65,7 @@ export function composePlatformCorePackageSelection<Tx extends PlatformCoreTrans
     if (!input.releases) return unavailable("release_source_unavailable", "宿主尚未提供固定 GitHub 发行读取");
     try {
       const release = GitHubCoreReleasePinSchema.parse(await input.releases.inspect(selection));
-      if (release.repository !== selection.repository || release.coreId !== selection.coreId
-        || release.version !== selection.version || release.tag !== selection.tag)
+      if (!gitHubCoreReleaseMatchesSelection(selection, release))
         return unavailable("release_changed", "读取的发行与原选择不一致，请核对原版本");
       return { status: "inspected" as const, release };
     } catch (error) {

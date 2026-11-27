@@ -8,7 +8,8 @@ import { CoreArtifactHashSchema, CoreIdSchema, CoreSourceSchema } from "./manife
 import { CoreReleaseVersionSchema } from "./version";
 import type { CoreHostVersions } from "./compatibility";
 import { prepareCoreInstall } from "./install";
-import { GITHUB_API, GitHubCoreReadError, readGitHubJson, readGitHubResponse, type GitHubFetcher } from "./github-http";
+import { GITHUB_API, GitHubCoreReadError, officialRentalReleaseSource, readGitHubJson, readGitHubResponse,
+  resolveGitHubRepository, type GitHubFetcher } from "./github-http";
 export { GitHubCoreReadError } from "./github-http";
 export { GitHubCoreDiscoveryQuerySchema, createGitHubCoreDiscovery } from "./github-discovery";
 export type { GitHubCoreDiscoveryPage, GitHubCoreDiscoveryResult } from "./github-discovery";
@@ -34,12 +35,18 @@ export const GitHubCoreReleasePinSchema = z.object({
 }).strict().refine(validTag, tagMessage);
 export type GitHubCoreReleasePin = z.infer<typeof GitHubCoreReleasePinSchema>;
 
-const repoPath = (selection: GitHubCoreReleaseSelection) => `/repos/${selection.repository.slice("https://github.com/".length)}`;
+/** Check a reader's result at the application boundary. The reader itself must
+ * have verified the public numeric repository ID before issuing an alias pin. */
+export function gitHubCoreReleaseMatchesSelection(selection: GitHubCoreReleaseSelection, pin: GitHubCoreReleasePin): boolean {
+  return pin.coreId === selection.coreId && pin.version === selection.version && pin.tag === selection.tag
+    && (pin.repository === selection.repository || selection.coreId === "rental"
+      && officialRentalReleaseSource(selection.repository) === pin.repository);
+}
+
 const assetName = (selection: GitHubCoreReleaseSelection) => `${selection.coreId}-${selection.version}.tgz`;
 
 const gitObject = z.object({ type: z.enum(["commit", "tag"]), sha: CoreSourceSchema.shape.commit });
-async function resolveTag(selection: GitHubCoreReleaseSelection, fetcher: GitHubFetcher): Promise<string> {
-  const path = repoPath(selection);
+async function resolveTag(path: string, selection: GitHubCoreReleaseSelection, fetcher: GitHubFetcher): Promise<string> {
   const reference = z.object({ ref: z.literal(`refs/tags/${selection.tag}`), object: gitObject })
     .parse(await readGitHubJson(`${path}/git/ref/tags/${encodeURIComponent(selection.tag)}`, fetcher));
   let object = reference.object;
@@ -54,45 +61,60 @@ async function resolveTag(selection: GitHubCoreReleaseSelection, fetcher: GitHub
   return object.sha;
 }
 
-async function readPin(selection: GitHubCoreReleaseSelection, fetcher: GitHubFetcher): Promise<GitHubCoreReleasePin> {
+async function readPin(path: string, selection: GitHubCoreReleaseSelection, fetcher: GitHubFetcher): Promise<GitHubCoreReleasePin> {
   const release = z.object({
     id: remoteId, tag_name: z.literal(selection.tag), draft: z.literal(false), prerelease: z.literal(false),
     published_at: z.string().min(1),
     assets: z.array(z.object({ id: remoteId, name: z.string(), state: z.string(), size: z.number().int(), digest: z.string().nullable() }))
-  }).parse(await readGitHubJson(`${repoPath(selection)}/releases/tags/${encodeURIComponent(selection.tag)}`, fetcher));
+  }).parse(await readGitHubJson(`${path}/releases/tags/${encodeURIComponent(selection.tag)}`, fetcher));
   const assets = release.assets.filter(asset => asset.name === assetName(selection));
   if (assets.length !== 1 || assets[0].state !== "uploaded")
     throw new GitHubCoreReadError("response_invalid", `Release须包含唯一已上传的${assetName(selection)}`);
   const asset = assets[0];
   if (!asset.digest?.startsWith("sha256:"))
     throw new GitHubCoreReadError("response_invalid", "Release资产缺少GitHub提供的SHA-256摘要；重新发布新版本，或使用已核定摘要的本地包入口");
-  return GitHubCoreReleasePinSchema.parse({ ...selection, commit: await resolveTag(selection, fetcher),
+  return GitHubCoreReleasePinSchema.parse({ ...selection, commit: await resolveTag(path, selection, fetcher),
     releaseId: release.id, assetId: asset.id, sha256: asset.digest.slice(7), size: asset.size });
 }
 
 /** 只读固定发行资料；调用方保存并展示返回的pin，准备阶段仍须验证原固定内容。 */
 export async function inspectGitHubCoreRelease(selection: GitHubCoreReleaseSelection, fetcher: GitHubFetcher = fetch): Promise<GitHubCoreReleasePin> {
-  return readPin(GitHubCoreReleaseSelectionSchema.parse(selection), fetcher);
+  const chosen = GitHubCoreReleaseSelectionSchema.parse(selection);
+  const resolved = await resolveGitHubRepository(chosen.repository, fetcher);
+  if (resolved.metadata && chosen.coreId !== "rental")
+    throw new GitHubCoreReadError("response_invalid", "官方 Rental 仓库只提供原 Rental 发行身份");
+  return readPin(resolved.path, { ...chosen, repository: resolved.sourceRepository }, fetcher);
+}
+
+/** Download once under the same verified repo and re-read before and after.
+ * Callers still inspect the standard package and its strictly pinned source. */
+export async function downloadGitHubCoreRelease(input: GitHubCoreReleasePin, fetcher: GitHubFetcher = fetch) {
+  const pin = GitHubCoreReleasePinSchema.parse(input);
+  const { repository, coreId, version, tag } = pin;
+  if (officialRentalReleaseSource(repository) && (coreId !== "rental" || officialRentalReleaseSource(repository) !== repository))
+    throw new GitHubCoreReadError("release_changed", "官方 Rental 须使用核定的原稳定发行 pin，请重新查看该版本");
+  const selection = { repository, coreId, version, tag };
+  const unchanged = async () => {
+    const resolved = await resolveGitHubRepository(repository, fetcher);
+    const current = await readPin(resolved.path, { ...selection, repository: resolved.sourceRepository }, fetcher);
+    if ((Object.keys(pin) as Array<keyof GitHubCoreReleasePin>).some(key => pin[key] !== current[key]))
+      throw new GitHubCoreReadError("release_changed", "选定Release、Tag提交或资产已变化；停止准备，请核对来源并选择新版本");
+    return resolved.path;
+  };
+  const path = await unchanged();
+  const bytes = await readGitHubResponse(`${GITHUB_API}${path}/releases/assets/${pin.assetId}`, true, pin.size, fetcher);
+  if (bytes.length !== pin.size) throw new GitHubCoreReadError("response_invalid", "Release资产下载长度与锁定资料不一致");
+  await unchanged();
+  return { pin, bytes };
 }
 
 /** 旧路径许可由真实宿主供给，固定发行检查和本地准备共用同一精确集合。 */
 export async function prepareGitHubCoreRelease(input: GitHubCoreReleasePin, directory: string, host: CoreHostVersions,
   fetcher: GitHubFetcher = fetch, legacyApiRoutes: readonly string[] = []) {
   const allowedRoutes = [...legacyApiRoutes];
-  const pin = GitHubCoreReleasePinSchema.parse(input);
-  const { repository, coreId, version, tag } = pin;
-  const selection = { repository, coreId, version, tag };
-  const unchanged = async () => {
-    const current = await readPin(selection, fetcher);
-    if ((Object.keys(pin) as Array<keyof GitHubCoreReleasePin>).some(key => pin[key] !== current[key]))
-      throw new GitHubCoreReadError("release_changed", "选定Release、Tag提交或资产已变化；停止准备，请核对来源并选择新版本");
-  };
-  await unchanged();
-  const bytes = await readGitHubResponse(`${GITHUB_API}${repoPath(selection)}/releases/assets/${pin.assetId}`, true, pin.size, fetcher);
-  if (bytes.length !== pin.size) throw new GitHubCoreReadError("response_invalid", "Release资产下载长度与锁定资料不一致");
-  await unchanged();
+  const { pin, bytes } = await downloadGitHubCoreRelease(input, fetcher);
   // 所有远端/来源检查完成后才写候选，沿用本地安装的摘要、兼容、重复核对与失败清理。
   return { ...prepareCoreInstall(bytes, pin.sha256, directory, host, {
-    id: coreId, version, source: { repository, commit: pin.commit }
+    id: pin.coreId, version: pin.version, source: { repository: pin.repository, commit: pin.commit }
   }, allowedRoutes), release: pin };
 }

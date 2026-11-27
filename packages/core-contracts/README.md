@@ -510,7 +510,11 @@ node packages/core-contracts/dist/github-release.js prepare <固定Release JSON>
 
 Node专用出口 `@rental-os/core-contracts/github` 提供 `inspectGitHubCoreRelease`、`prepareGitHubCoreRelease` 及两份输入 schema。两条命令成功退出0，失败退出1；成功stdout只有JSON，失败stderr不包含响应正文、签名下载URL或凭据。下载有时间/大小上限，仅跟随GitHub受支持的HTTPS资产地址，失败没有落地半包。固定内容的检查不证明发布者或代码已经审核。
 
-仓库可添加 `zelo-core` Topic供发现入口检索；**Topic本身不发布版本、不安装也不授权**。GitHub行为依据[按Tag读取Release](https://docs.github.com/en/rest/releases/releases#get-a-release-by-tag-name)、[资产与摘要](https://docs.github.com/en/rest/releases/assets#get-a-release-asset)、[读取引用](https://docs.github.com/en/rest/git/refs#get-a-reference)和[附注Tag](https://docs.github.com/en/rest/git/tags#get-a-tag)。[公开 Rental Core](https://github.com/JinPen-G/Zelo-rental-core)提供同一标准的固定发行，可用 `inspect JinPen-G/Zelo-rental-core rental <版本>` 读取（注：`0.1.14` 及更早历史发行包内部来源仍记录改名前的 `nativark-rental-core`，自改名后新版本起与 `Zelo-rental-core` 一致）。包准备成功后，继续按所选[宿主说明](../../apps/rental-api/README.md)构建、准备数据并启动，再授权租户及成员；候选目录本身不代表业务已安装可用。
+仓库可添加 `zelo-core` Topic 供发现入口检索。Topic 不发布版本、不安装也不授权。GitHub 行为依据[按 Tag 读取 Release](https://docs.github.com/en/rest/releases/releases#get-a-release-by-tag-name)、[资产与摘要](https://docs.github.com/en/rest/releases/assets#get-a-release-asset)、[读取引用](https://docs.github.com/en/rest/git/refs#get-a-reference)和[附注 Tag](https://docs.github.com/en/rest/git/tags#get-a-tag)。
+
+[官方 Rental Core](https://github.com/JinPen-G/Zelo-rental-core)可从 `JinPen-G/Zelo-rental-core` 或 `JinPen-G/nativark-rental-core` 读取。读取器核定两个地址在 GitHub 上均为同一未归档公开仓库（ID `1470386426`），才会用改名前的 `https://github.com/JinPen-G/nativark-rental-core` 作为固定发行来源；`v0.1.15` 也保留该来源。两个地址生成同一 pin，包内身份和历史安装锁按原值核对。仅认可该官方更名；其他仓库的重定向不会取得另一来源的发行身份。已有来源不同的安装仍遵守 `source_conflict`。
+
+准备成功后，按[独立 Rental 宿主说明](https://github.com/JinPen-G/Zelo-rental-core/blob/main/workspace/apps/rental-api/README.md)构建、准备数据并启动，再授权租户及成员。候选目录不代表业务已安装可用。
 
 ## 发现公开 Core 仓库
 
