@@ -121,6 +121,17 @@ test("Bundle pack refuses an incomplete archive report before recording delivery
 
 // One owner contains global resolver/fetch changes; no unrelated tests run inside it.
 test("Rental bundle loads through real profile and Loader without granting business access", async t => {
+  // Preserve the original Task recovery schema compatibility assertion at the
+  // real Harness boundary; the public MCP reader does not require Harness tools.
+  const { createControllerSourceLoader } = require(path.join(root, "scripts/controller-sources.cjs"));
+  const loader = createControllerSourceLoader(root, path.join(harness, "node_modules"), { controllerRoots: [] });
+  const { createOriginalTaskRecoveryRead } = loader.load(loader.resolveSource(__filename,
+    "@rental-os/mcp-server/original-task-recovery-read", true));
+  const read = createOriginalTaskRecoveryRead({ name: "synthetic_original_recovery", description: "Original Task observation only.",
+    outputSchema: { type: "object", properties: { recovery: {} }, required: ["recovery"], additionalProperties: false },
+    read: async () => { throw new Error("Schema inspection must not invoke an original reader"); } });
+  assert.equal(read.inputSchema.properties.inputRef.format, "uuid");
+  assert.throws(() => mcp("@deepseek-ai/dsh-tools").assertSupportedJsonSchema(read.inputSchema), error => error.code === "UNSUPPORTED_SCHEMA");
   const output = fs.mkdtempSync(path.join(prepareOutput(), "loader-"));
   const profile = path.join(output, "profile");
   const staged = path.join(profile, "node_modules/@rental-os/harness-plugin");

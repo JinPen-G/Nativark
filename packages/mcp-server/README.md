@@ -16,7 +16,7 @@
 
 全部子出口及声明以包配置为准。ESM 消费者使用 `exports` 的 `import` 入口，原 Node10 类型解析通过精确 `typesVersions` 取得同一构建声明。源码链接用于阅读，运行消费使用正式包出口。[包配置](package.json)
 
-`@modelcontextprotocol/server` 2.2.0、TypeScript 6.0.3 和 Node 类型 22.20.1 已登记在包声明与根锁文件中。准备本检出的 npm workspace 依赖后，在仓库根执行以下构建和类型命令。[依赖锁](../../package-lock.json)
+`@modelcontextprotocol/server` 2.2.0、TypeScript 6.0.3 和 Node 类型 22.20.1 已登记在包声明与根锁文件中。公共协议测试使用本包开发依赖 `@modelcontextprotocol/client` 2.2.0，与同一 npm 锁一起准备；它不作为服务端运行依赖，也不要求安装 Harness。准备本检出的 npm workspace 依赖后，在仓库根执行以下构建和类型命令。[依赖锁](../../package-lock.json)
 
 ```bash
 npm run build -w @rental-os/mcp-server
@@ -266,20 +266,22 @@ Resources 的额度 signal 与 endpoint / 协议信号相交，迟到读取停�
 
 前三类测试默认读取本仓 `node_modules`，已有依赖放在其他受管仓库时，将 `MCP_TEST_TOOLCHAIN_ROOT` 指向其仓库根。编译器、`@types/node`、官方 SDK 和 Zod 都从同一明确目录解析，缺包会给出前置错误；测试源码和一次性产物仍属于当前工作树。Web 共用 [原身份夹具](../../tests/fixtures/mcp/original-identity.cjs) 的工具链，产物在 `output/.tmp` 下按进程独占，正常结束、失败和取消会释放自己的产物及钩子。
 
-官方 client 用例另需 `@modelcontextprotocol/client`；原 Harness 发现用例另需本仓 `clients/harness-plugin/src/connection.ts`，完整 Harness 组合使用明确的 `HARNESS_ROOT`。这些依赖只在对应原用例加载，缺失不能被当作已通过。已有工具链可先执行 server/SQL 定向段，原命令例如：
+官方 client 用例消费本包已锁定的开发依赖 `@modelcontextprotocol/client` 2.2.0；原 Harness 发现用例另需本仓 `clients/harness-plugin/src/connection.ts`，完整 Harness 组合使用明确的 `HARNESS_ROOT`。原 Task schema 的 Harness 兼容断言留在完整 Harness 组合测试，公共 foundation 不加载 `dsh-tools`。这些依赖只在对应原用例加载，缺失不能被当作已通过。准备同锁工具链后，公共原用例可执行 `node --test tests/mcp-foundation.test.cjs tests/mcp-public-client-registry.test.cjs`。
 
-[源码加载器](../../scripts/controller-sources.cjs) 默认只解析所选工作区的正式包出口，不扫描宿主控制器或准备 Prisma。控制器消费者必须传 `controllerRoots`，内存 Prisma 必须传工作区内的 `schemaPath`；缺件、未声明出口、越界与空控制器集合拒绝。MCP 测试可用 `MCP_TEST_SOURCE_ROOT` 指定已准备的固定组合；使用原身份夹具时另需显式 `MCP_TEST_SCHEMA` 和 `MCP_TEST_IDENTITY_HOST_SOURCE`，缺选择在创建产物前拒绝。其原 Native 类型消费者另选 `MCP_TEST_IDENTITY_HOST_CONFIG`。该夹具仍需要原 Rental 身份适配，单独提供公共 schema 不代表完整身份测试已就绪；未选宿主不回退旧 API。公共源码解析回归可运行 `node --test --test-name-pattern="source loader resolves" tests/mcp-foundation.test.cjs`。
+[源码加载器](../../scripts/controller-sources.cjs) 默认只解析所选工作区的正式包出口，不扫描宿主控制器或准备 Prisma。控制器消费者必须传 `controllerRoots`，内存 Prisma 必须传工作区内的 `schemaPath`；缺件、未声明出口、越界与空控制器集合拒绝。MCP 测试可用 `MCP_TEST_SOURCE_ROOT` 指定已准备的固定组合；使用原身份夹具时另需显式 `MCP_TEST_SCHEMA`（同根完整 schema），缺选择在创建产物前拒绝。其原 Native 类型消费者另选 `MCP_TEST_IDENTITY_HOST_CONFIG`。该夹具仍需要原 Rental 身份适配，单独提供公共 schema 不代表完整身份测试已就绪；未选宿主不回退旧 API。公共源码解析回归可运行 `node --test --test-name-pattern="source loader resolves" tests/mcp-foundation.test.cjs`。
 
 [路由权限检查](../../scripts/validate-route-permissions.cjs) 必须选择 `--authority platform|rental` 和 `--permissions <同版目录源码>`。公共模式另选 `--permission-export PLATFORM_PERMISSIONS`，只加载正式公共政策；Rental 模式沿原 http-auth 与 Shared 装配。`--app-module <宿主源码> --module-export <模块类>` 核真实 Nest 挂载，可加 `--controllers <源码根>` 限定该权威负责的控制器；未选宿主时沿原目录静态扫描。缺目录、空集合、未匹配或缺权限仍失败，不以匿名或本人政策通配放行。[API 合同检查](../../scripts/validate-api-contracts.cjs) 可选择正式包的 `--document-factory` 与按宿主顺序重复的 `--document-transform <包>#<工厂>`；旧双常量模式仍保留三方比对。`--offline-prisma --schema <同版schema>` 的自定义 Client 输出只映射官方内存产物，不创建实例、读取旧 Client 或连接数据库。[DTO 检查](../../scripts/validate-dto-coverage.cjs) 通过正式 exports 核对所选源码的合同，不借安装目录内的旧声明产物。
+
+已有工具链也可执行原 SQL 定向段：
 
 ```powershell
 $env:MCP_TEST_TOOLCHAIN_ROOT = '包含既有node_modules的仓库根绝对路径'
 node --test --test-name-pattern="^Prisma OAuth SQL store compiles" tests/mcp-mysql-store.test.cjs
 ```
 
-正式包编译版本以 [package.json](package.json) 和锁文件为准；定向测试记录实际使用的工具链版本。离线守卫及写入目录沿本仓规则核定，以上 SQL 用例使用明确的事务替身，不连接 MySQL。公开检出当前仍缺旧 Harness 源码和部分 client/schema 依赖，完整连接验证需准备对应前置。
+正式包编译版本以 [package.json](package.json) 和锁文件为准；定向测试记录实际使用的工具链版本。离线守卫及写入目录沿本仓规则核定，以上 SQL 用例使用明确的事务替身，不连接 MySQL。官方 client 已在本包开发依赖及锁中声明；完整 Harness 连接验证另需准备兼容宿主和所选业务 schema，不能借包声明认定已安装或已连通。
 
-foundation 还保留实际输入 schema 被 Harness 校验器以 UNSUPPORTED_SCHEMA 拒绝的用例，完整输入约束保持。已有离线或声明证据只对应其固定版本及注入边界，当前客户端兼容、完整 API-Prisma strict、真实登录 / MFA、持久数据库与发布仍须各自取证。
+原 Task 输入 schema 被 Harness 校验器以 `UNSUPPORTED_SCHEMA` 拒绝的断言保留在 Harness 组合测试，公共 foundation 继续核原闭合输入约束。已有离线或声明证据只对应其固定版本及注入边界，当前客户端兼容、完整 API-Prisma strict、真实登录 / MFA、持久数据库与发布仍须各自取证。
 
 运行前检查上述脚本实际读写。离线 Node 使用原 Prisma preload 和 `DATABASE_URL=mysql://offline:offline@127.0.0.1:1/rental_os_offline`，audit / TEMP / TMP / 缓存集中本树绝对任务目录。原旧编译 / 隔离入口的 output 路径及退出清理也须满足该写入边界。阶段执行材料由原开发记录保管，公开说明仅链接版本内可读的源码和验证入口。[离线守卫](../../tests/fixtures/ai-native/prisma-offline-preload.cjs) · [验证与清理规则](../../AGENTS.md#修改验证与交付)
 

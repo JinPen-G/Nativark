@@ -146,7 +146,30 @@ function fixture(api, requestedScopes = scopes) {
         const view = { stage, revision: data.detail.metadata.revision, authorizationId: data.detail.metadata.operationKey }; audit.push(view); f.afterAudit?.(view);
         return { id: 'original-audit-' + (f.auditRows.length + auditRows.length) };
       } }, authSession: { findFirst: async query => session.revokedAt === null && session.expiresAt > new Date() && query.where.id === session.id ? structuredClone(session) : null },
-      async $queryRaw(parts, ...values) { assert.ok(Array.isArray(parts.raw)); const sql = parts.join('?').replace(/\s+/g, ' ').trim(), table = /FROM (\w+)/.exec(sql)[1];
+      async $queryRaw(parts, ...values) {
+        // The current Core reader passes Sql objects and holds its workspace mutex.
+        // Keep this branch closed to the original catalog queries in this fixture.
+        if (Array.isArray(parts?.strings) && Array.isArray(parts?.values)) {
+          assert.ok(f.catalogComposition); assert.equal(nested, false);
+          const bound = [], flatten = part => part.strings.map((text, index) => {
+            if (!index) return text; const value = part.values[index - 1];
+            return (value?.strings ? flatten(value) : (bound.push(value), '?')) + text;
+          }).join('');
+          const sql = flatten(parts).replace(/\s+/g, ' ').trim();
+          if (sql === 'SELECT id FROM business_workspaces WHERE tenantId = ? AND id = ? FOR UPDATE') {
+            assert.deepEqual(bound, ['tenant-a', 'workspace-a']); return [{ id: 'workspace-a' }];
+          }
+          if (sql === 'SELECT * FROM rental_item_groups WHERE tenantId = ? AND workspaceId = ? ORDER BY id LIMIT ? LOCK IN SHARE MODE') {
+            assert.deepEqual(bound, ['tenant-a', 'workspace-a', 3]);
+            f.transactionEvents.push(['catalog', transactionId, bound[2]]);
+            if (f.failCatalog) throw Error('explicit database read failure');
+            await f.afterCatalog?.(); return structuredClone(f.catalogRows.slice(0, bound[2]));
+          }
+          assert.equal(sql, 'SELECT b.componentItemGroupId, b.quantity, b.optional, b.substitutionGroup, g.code, g.name, g.tenantId, g.workspaceId FROM rental_bundle_components b JOIN rental_item_groups g ON g.id = b.componentItemGroupId WHERE b.bundleItemGroupId = ? ORDER BY b.componentItemGroupId LIMIT 257 LOCK IN SHARE MODE');
+          assert.equal(bound.length, 1); const row = f.catalogRows.find(row => row.id === bound[0]); assert.ok(row);
+          return structuredClone(row.bundleComponents.map(part => ({ ...part, ...part.componentItemGroup })));
+        }
+        assert.ok(Array.isArray(parts.raw)); const sql = parts.join('?').replace(/\s+/g, ' ').trim(), table = /FROM (\w+)/.exec(sql)[1];
         f.sqlEvents?.push({ transactionId, table, sql });
         if (nested) assert.ok(table.startsWith('mcp_read_') || table==='client_api_rate_buckets', 'budget cannot reacquire original Auth/grant locks');
         if (table==='client_api_rate_buckets') {

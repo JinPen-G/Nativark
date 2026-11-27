@@ -1153,8 +1153,7 @@ async function verifyTaskRecoveryRead(t, createRead) {
   binding.read = async () => { throw new Error("Original reader replacement must not run"); };
   assert.throws(() => createRead({ name: "bad_projection", description: "No loose projection.", outputSchema: { type: "object" }, read: async () => current }), /closed object/);
   assert.equal(read.inputSchema.properties.inputRef.format, "uuid");
-  installed.resolve("@deepseek-ai/dsh-tools");
-  assert.throws(() => installed("@deepseek-ai/dsh-tools").assertSupportedJsonSchema(read.inputSchema), error => error.code === "UNSUPPORTED_SCHEMA");
+  // Harness schema compatibility is checked with its real host in harness-plugin.test.cjs.
   const mutable = { ...command }, initial = read.read(mutable, signal());
   queueMicrotask(() => { mutable.inputRef = "00000000-0000-4000-8000-000000000004"; });
   assert.deepEqual(await initial, current);
