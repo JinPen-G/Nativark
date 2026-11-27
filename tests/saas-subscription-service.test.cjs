@@ -1,10 +1,11 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 require("ts-node").register({ transpileOnly: true, compilerOptions: { module: "commonjs", moduleResolution: "node", experimentalDecorators: true, emitDecoratorMetadata: true } });
-const { SubscriptionService } = require("../apps/api/src/modules/subscription/subscription.service");
+// 公共办理逻辑与 DTO 走正式出口；品类适用标签仍是用例显式数据，不加载旧 Rental 宿主。
+const { SubscriptionService } = require("@rental-os/platform-server/subscription");
 const { validateSync } = require("class-validator");
-const dto = require("../apps/api/src/modules/subscription/subscription-request.dto");
-const shared = require("@rental-os/shared");
+const dto = require("@rental-os/platform-server/subscription-dto");
+const shared = require("@rental-os/platform-contracts/subscription");
 const db = require("@prisma/client");
 const NOW = new Date("2026-06-01T00:00:00Z");
 const clone = (x) => structuredClone(x);

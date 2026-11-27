@@ -1,10 +1,11 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-require("ts-node").register({ transpileOnly: true, moduleTypes: { "apps/admin/src/features/subscription/*.ts": "cjs" }, compilerOptions: { module: "commonjs", moduleResolution: "node", experimentalDecorators: true, emitDecoratorMetadata: true } });
-const operations = require("../apps/admin/src/features/subscription/subscriptionOperations");
-const reminders = require("../apps/admin/src/features/subscription/subscriptionReminder");
-const { SubscriptionService } = require("../apps/api/src/modules/subscription/subscription.service");
-const { serviceDateField } = require("../apps/admin/src/features/subscription/subscriptionDateField");
+// 复用正式公共出口；原时区、修订及授权断言不再依赖旧 Rental 后台或 API 宿主。
+require("ts-node").register({ transpileOnly: true, moduleTypes: { "packages/platform-admin/src/features/subscription/*.ts": "cjs" }, compilerOptions: { module: "commonjs", moduleResolution: "node", experimentalDecorators: true, emitDecoratorMetadata: true } });
+const operations = require("@rental-os/platform-admin/subscription/subscriptionOperations");
+const reminders = require("@rental-os/platform-admin/subscription/subscriptionReminder");
+const { SubscriptionService } = require("@rental-os/platform-server/subscription");
+const { serviceDateField } = require("@rental-os/platform-admin/subscription/subscriptionDateField");
 const overview = { tenantId: "t1", tenantName: "租户", tenantCode: "one", plan: "standard", serviceStatus: "active", revision: 4, timeZone: "Asia/Shanghai", startAt: "2024-02-28T16:30:00.000Z", endAt: "2027-02-27T16:30:00.000Z", anniversaryAnchor: "2024-02-28T16:30:00.000Z" };
 const base = { operationType: "renew", plan: "standard", source: "historical_register", timeZone: "Asia/Shanghai", startAt: "2027-02-28T00:30:00", termMode: "years", serviceYears: 1, reason: "既有合同" };
 
