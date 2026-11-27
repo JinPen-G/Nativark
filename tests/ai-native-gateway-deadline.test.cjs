@@ -2,15 +2,18 @@
 const test = require('node:test'), assert = require('node:assert/strict');
 const { blockNetwork, compileConsumer } = require('./fixtures/ai-native/contract-consumer.cjs');
 blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true } });
-const { ModelGatewayService } = require('../apps/api/src/modules/ai-native/model-gateway.service');
+const { createControllerSourceLoader } = require('../scripts/controller-sources.cjs');
+const sourceLoader = createControllerSourceLoader(require('node:path').resolve(__dirname, '..'));
+const { ModelGatewayService, GatewayCapacityService } = sourceLoader.load(
+  sourceLoader.resolveSource(__filename, '@rental-os/platform-server/ai-gateway', true));
 const ctx = { tenantId: 'tenant-1', workspaceId: 'space-1', actorId: 'actor-1' };
 const input = { callId: 'call-1', model: 'model-1', messages: [{ role: 'user', content: 'Synthetic only' }], maxOutputTokens: 10 };
 const never = () => new Promise(() => {});
 const tick = () => new Promise(resolve => setImmediate(resolve));
 test('rolling replicas keep independent process and tenant admission limits and preserve waiting deadlines', async () => {
-  const { GatewayCapacityService } = require('../apps/api/src/modules/ai-native/gateway-capacity.service');
-  const { DEFAULT_GATEWAY_CAPACITY_LIMITS: limits } = require('../apps/api/src/modules/ai-native/gateway-capacity.runtime');
+  // The configured ceilings belong to the original Rental host; the gate is public.
+  const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+  const { DEFAULT_GATEWAY_CAPACITY_LIMITS: limits } = load('@rental-os/ai-native-server/runtime/gateway-capacity.runtime');
   const timers = new Set(); let time = 1000;
   const clock = { now: () => time, setTimer(callback) { timers.add(callback); return callback; }, clearTimer: timer => timers.delete(timer) };
   const gates = [new GatewayCapacityService(limits, clock), new GatewayCapacityService(limits, clock)];
@@ -98,5 +101,5 @@ test('deadline cannot be disabled, infinite or silently invalid', () => {
   const f = harness(); for (const limit of [0, -1, Infinity, 120001, 1.5]) assert.throws(() => new ModelGatewayService(f.ports, [f.adapter], limit), e => e.code === 'CONFIG_INVALID');
 });
 test('actual noEmit consumer includes gateway implementation; no transpileOnly type bypass', () => {
-  assert.deepEqual(compileConsumer('import { ModelGatewayService } from "../apps/api/src/modules/ai-native/model-gateway.service"; import type { GatewayPorts, ModelAdapter } from "../apps/api/src/modules/ai-native/model-gateway.ports"; declare const ports: GatewayPorts; declare const adapter: ModelAdapter; new ModelGatewayService(ports, [adapter], 10);'), []);
+  assert.deepEqual(compileConsumer('/// <reference types="node" />\nimport { ModelGatewayService } from "@rental-os/platform-server/ai-gateway"; import type { GatewayPorts, ModelAdapter } from "@rental-os/platform-server/ai-gateway"; declare const ports: GatewayPorts; declare const adapter: ModelAdapter; new ModelGatewayService(ports, [adapter], 10);'), []);
 });

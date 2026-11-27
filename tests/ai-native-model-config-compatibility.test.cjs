@@ -1,7 +1,7 @@
 "use strict";
 const test = require("node:test"), assert = require("node:assert/strict"), network = require("./fixtures/ai-native/contract-consumer.cjs"); network.blockNetwork(test);
-require("ts-node").register({ transpileOnly: false, compilerOptions: { module: "commonjs", moduleResolution: "node", experimentalDecorators: true, emitDecoratorMetadata: true } });
-const { TenantModelConfigService: Service } = require("../apps/api/src/modules/ai-native/tenant-model-config.service"), { SecretBox } = require("../apps/api/src/common/secret-box"), f = require("./fixtures/ai-native/model-config-compatibility.cjs");
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { TenantModelConfigService: Service } = load('@rental-os/ai-native-server/runtime/tenant-model-config.service'), { SecretBox } = load('@rental-os/platform-server/secret-box'), f = require("./fixtures/ai-native/model-config-compatibility.cjs");
 const setup = () => f.harness(Service, SecretBox), fail = (op, code) => assert.rejects(op, e => e.code === code);
 test("empty tenant selects platform with no supplier fields and no ready claim", async () => {
   const x = setup(); assert.deepEqual(await x.service.selection(f.context), { mode: "platform_managed", revision: 0 });

@@ -1,9 +1,9 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
-const { TenantModelConfigService } = require('../apps/api/src/modules/ai-native/tenant-model-config.service');
-const { SecretBox } = require('../apps/api/src/common/secret-box');
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { TenantModelConfigService } = load('@rental-os/ai-native-server/runtime/tenant-model-config.service');
+const { SecretBox } = load('@rental-os/platform-server/secret-box');
 const f = require('./fixtures/ai-native/model-config-compatibility.cjs');
 function setup() {
   const rows = new Map(), events = [], secrets = new SecretBox({ get: () => 'synthetic-encryption-only' });

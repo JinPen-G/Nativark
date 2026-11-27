@@ -1,38 +1,45 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true } });
-const { PrismaKnowledgeReadAdapter } = require('../apps/api/src/modules/ai-native/knowledge/prisma-knowledge-read.adapter');
-const { PrismaKnowledgeRepository } = require('../apps/api/src/modules/ai-native/knowledge/prisma-knowledge.repository');
-const { KnowledgeDocumentService } = require('../apps/api/src/modules/ai-native/knowledge/knowledge-document.service');
-const { KnowledgeSourceService } = require('../apps/api/src/modules/ai-native/knowledge/knowledge-source.service');
-const { KnowledgeRetrievalService } = require('../apps/api/src/modules/ai-native/knowledge/knowledge-retrieval.service');
-const { KnowledgeTextParser } = require('../apps/api/src/modules/ai-native/knowledge/knowledge-text-parser');
+const { createControllerSourceLoader } = require('../scripts/controller-sources.cjs');
+const sourceLoader = createControllerSourceLoader(require('node:path').resolve(__dirname, '..'));
+const { composePersistedKnowledge, createPersistedKnowledgePorts, composeKnowledgeServices, KnowledgeModule } = sourceLoader.load(
+  sourceLoader.resolveSource(__filename, '@rental-os/ai-native-server/knowledge-persistence', true));
 const { dbFactory } = require('./fixtures/ai-native/knowledge-persistent-content.cjs');
-const { composePersistedKnowledge, createPersistedKnowledgePorts } = require('../apps/api/src/modules/ai-native/knowledge/persistent-knowledge.composition');
-const { KnowledgeModule } = require('../apps/api/src/modules/ai-native/knowledge/knowledge.module');
 const scope = { kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'space-a' };
 const context = { actor: { kind: 'user', userId: 'user-a' }, audience: 'operator', scope, requestId: 'req-a', contractVersion: 'test', authorizedAt: '2026-10-06T00:00:00Z' };
 const owner = { actorKind: 'user', actorId: 'user-a' };
 const now = () => Date.parse('2026-10-06T00:00:00Z');
 async function setup() {
-  const db = dbFactory(), repo = new PrismaKnowledgeRepository(db, () => new Date(now()));
+  const db = dbFactory();
   const state = { revoked: false, afterQuery: null };
   const authorization = { async authorize(c, req) {
     if (state.revoked || JSON.stringify(c.scope) !== JSON.stringify(scope) || c.actor.userId !== 'user-a' || (req.document && req.document.owner.actorId !== owner.actorId)) return null;
     return { scope, actor: owner, audience: 'operator', accessKey: 'synthetic-access-1' };
   } };
-  const docs = new KnowledgeDocumentService({ repository: repo, authorization, clock: { now }, files: { read: async () => ({ mediaType: 'text/plain', bytes: new TextEncoder().encode('Synthetic camping SOP') }) }, parser: new KnowledgeTextParser() });
-  const adapter = new PrismaKnowledgeReadAdapter(db, repo, authorization, { now });
-  const sources = new KnowledgeSourceService(docs, adapter);
+  // These cases exercise retained content and withdrawal. Original deletion
+  // still requires a real retention participant and is unavailable here.
+  const deletionUnavailable = () => { throw Error('This content fixture has no deletion authority'); };
   const selection = { select: async () => ({ grant: await authorization.authorize(context, { scope, action: 'search' }), documents: [{ documentId: 'doc-a', documentVersion: 'v1', aclRevision: 1 }] }) };
-  const retrieval = new KnowledgeRetrievalService(docs, sources, selection, adapter);
+  const ports = createPersistedKnowledgePorts({
+    db, authorization, memoryAuthorization: authorization, clock: { now },
+    files: { read: async () => ({ mediaType: 'text/plain', bytes: new TextEncoder().encode('Synthetic camping SOP') }),
+      assertBound: async (current, binding) => {
+        assert.deepEqual(current.scope, scope);
+        assert.deepEqual(binding, { attachmentId: 'attachment-a', documentId: 'doc-a', workspaceId: scope.workspaceId });
+      } },
+    selection, retention: { lockSource: deletionUnavailable, inspectSource: deletionUnavailable, eraseCopies: deletionUnavailable },
+    gateway: { invoke: async () => { throw Error('must not dispatch'); }, stream: async function* () { throw Error('must not dispatch'); } },
+    cache: { maxEntries: 10, maxBytes: 20000, ttlMs: 1000 }, policy: { sceneCode: 'knowledge', maxOutputTokens: 100 },
+  });
+  const { documents: docs, sources, retrieval } = composeKnowledgeServices(ports);
+  const repo = ports.documents.repository, adapter = ports.content;
   const document = { draftVersion: 'ain-c06-draft-1', documentId: 'doc-a', documentVersion: 'v1', attachmentId: 'attachment-a', owner, scope, aclRevision: 1, title: 'Synthetic SOP', publication: 'published', parsing: 'parsed', indexing: 'indexed', validFrom: '2026-10-01T00:00:00Z' };
   const chunk = { draftVersion: 'ain-c06-draft-1', documentId: 'doc-a', documentVersion: 'v1', chunkId: 'chunk-a', scope, aclRevision: 1, locator: { kind: 'section', sectionId: 'section-a', paragraph: 1 }, text: 'Synthetic camping SOP', trust: 'untrusted_data' };
   const contentHash = require('node:crypto').createHash('sha256').update(chunk.text).digest('hex');
   await repo.commit({ scope, documentId: 'doc-a', expectedRevision: 0, next: { document, revision: 1, contentHash }, chunks: [chunk], newVersion: true, operation: { id: 'seed-a', fingerprint: 'seed-hash' } });
   const source = { kind: 'document', documentId: chunk.documentId, documentVersion: chunk.documentVersion, chunkId: chunk.chunkId, scope, aclRevision: 1, locator: chunk.locator };
-  return { db, repo, state, authorization, docs, adapter, sources, retrieval, source, chunk };
+  return { db, repo, state, authorization, docs, adapter, sources, retrieval, source, chunk, retention: ports.retention };
 }
 test('actual repository -> content -> source and lexical retrieval return immutable scoped evidence', async () => {
   const s = await setup();
@@ -114,7 +121,7 @@ test('search returns references only, respects finite limits and does not promot
 
 async function persistedSetup() {
   const s = await setup();
-  const deps = { db: s.db, authorization: s.authorization, memoryAuthorization: s.authorization,
+  const deps = { db: s.db, authorization: s.authorization, memoryAuthorization: s.authorization, retention: s.retention,
     files: { ...s.docs.ports.files, assertBound: async (current, binding) => {
       // Synthetic lifecycle fixture only, not a production FileStorage source.
       assert.deepEqual(current.scope, scope);
@@ -152,13 +159,13 @@ test('persisted factory and existing dynamic module reject missing or empty trus
   }
   const ports = createPersistedKnowledgePorts(s.deps), module = KnowledgeModule.register(ports);
   assert.equal(module.controllers, undefined); assert.equal(module.imports, undefined);
+  const KnowledgeDocumentService = s.docs.constructor, KnowledgeSourceService = s.sources.constructor;
   const services = module.providers[0].useFactory(); assert.ok(services.documents instanceof KnowledgeDocumentService);
   assert.ok(services.sources instanceof KnowledgeSourceService); assert.equal(s.db.queries.length, 0);
 });
 test('real index receipts replay once and cannot revive an older generation after withdrawal', async () => {
   const s = await persistedSetup();
-  const { PrismaKnowledgeIndexAdapter } = require('../apps/api/src/modules/ai-native/knowledge/prisma-knowledge-index.adapter');
-  const adapter = new PrismaKnowledgeIndexAdapter(s.db, s.authorization);
+  const adapter = createPersistedKnowledgePorts(s.deps).index;
   let head = await s.bundle.index.request(context, { documentId: 'doc-a', expectedRevision: 1, operationId: 'index-a', kind: 'upsert' });
   const value = { scope, documentId: 'doc-a', job: head.indexJob };
   await adapter.apply(context, value); const count = s.db.state.operations.size;

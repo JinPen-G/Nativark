@@ -1,10 +1,10 @@
 "use strict";
 const test = require("node:test"), assert = require("node:assert/strict"), network = require("./fixtures/ai-native/contract-consumer.cjs"); network.blockNetwork(test);
-require("ts-node").register({ transpileOnly: false, compilerOptions: { module: "commonjs", moduleResolution: "node", experimentalDecorators: true, emitDecoratorMetadata: true } });
-const { TenantModelConfigService } = require("../apps/api/src/modules/ai-native/tenant-model-config.service");
-const { SecretBox } = require("../apps/api/src/common/secret-box");
-const { ModelGatewayService } = require("../apps/api/src/modules/ai-native/model-gateway.service");
-const { ChatCompletionsAdapter } = require("../apps/api/src/modules/ai-native/chat-completions.adapter");
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { TenantModelConfigService } = load('@rental-os/ai-native-server/runtime/tenant-model-config.service');
+const { SecretBox, SECRET_BOX_ENVELOPE_PATTERN } = load('@rental-os/platform-server/secret-box');
+const { ModelGatewayService } = load('@rental-os/platform-server/ai-gateway');
+const { ChatCompletionsAdapter } = load('@rental-os/ai-native-server/runtime/chat-completions.adapter');
 const context = { tenantId: "synthetic-tenant", workspaceId: "synthetic-space", actorId: "synthetic-admin" };
 const input = () => ({ protocol: "openai_chat_completions", baseUrl: "https://synthetic-model.example.test/v1/", model: "custom-org/custom-model", apiKey: "synthetic-key-not-real", expectedRevision: 0 });
 function harness() {
@@ -16,7 +16,7 @@ function harness() {
       rows.set(tenant, structuredClone(next)); return true;
     }
   } };
-  const secrets = new SecretBox({ get: name => name === "INTEGRATION_ENCRYPTION_KEY" ? "synthetic-encryption-test-only" : "production" });
+  const secrets = new SecretBox({ get: name => name === "INTEGRATION_ENCRYPTION_KEY" ? "synthetic-encryption-key-for-offline-tests-32" : name === "NODE_ENV" ? "production" : undefined });
   return { rows, ports, actions, secrets, service: new TenantModelConfigService(ports, secrets) };
 }
 const rejects = (op, code) => assert.rejects(op, e => e.code === code && e.message === code);
@@ -27,7 +27,7 @@ test("tenant selects arbitrary model and URL; key is encrypted and never returne
   assert.equal(result.baseUrl, "https://synthetic-model.example.test/v1"); assert.equal(result.keyConfigured, true);
   assert.equal(JSON.stringify(result).includes(input().apiKey), false);
   const row = h.rows.get(context.tenantId);
-  assert.match(row.credentialsEncrypted, /^v1:/); assert.equal(JSON.stringify(row).includes(input().apiKey), false);
+  assert.match(row.credentialsEncrypted, SECRET_BOX_ENVELOPE_PATTERN); assert.equal(JSON.stringify(row).includes(input().apiKey), false);
   assert.deepEqual(await h.service.get(context), result);
 });
 test("missing config selects platform without inventing ready state or a route", async () => {

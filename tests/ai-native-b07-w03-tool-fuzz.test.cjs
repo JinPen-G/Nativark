@@ -1,8 +1,8 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-require("ts-node").register({ transpileOnly: false, compilerOptions: { module: "commonjs", moduleResolution: "node" } });
-const { ChatProtocolPolicy } = require("../apps/api/src/modules/ai-native/chat-completions.adapter");
+const { load } = require("./fixtures/ai-native/rental-compatibility-source.cjs");
+const { ChatProtocolPolicy } = load("@rental-os/ai-native-server/runtime/chat-completions.adapter");
 const fuzz = require("./fixtures/ai-native/b07-tool-fuzz.cjs");
 
 test("tool fuzz corpus uses the existing strict protocol validator", () => {

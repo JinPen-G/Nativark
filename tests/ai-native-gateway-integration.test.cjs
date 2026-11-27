@@ -1,13 +1,13 @@
 "use strict";
 const test = require("node:test"), assert = require("node:assert/strict");
 require("./fixtures/ai-native/contract-consumer.cjs").blockNetwork(test);
-require("ts-node").register({ transpileOnly: false, compilerOptions: { module: "commonjs", moduleResolution: "node", experimentalDecorators: true, emitDecoratorMetadata: true } });
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const classes = {
-  Config: require("../apps/api/src/modules/ai-native/tenant-model-config.service").TenantModelConfigService,
-  SecretBox: require("../apps/api/src/common/secret-box").SecretBox,
-  Gateway: require("../apps/api/src/modules/ai-native/model-gateway.service").ModelGatewayService,
-  Adapter: require("../apps/api/src/modules/ai-native/chat-completions.adapter").ChatCompletionsAdapter,
-  Transport: require("../apps/api/src/modules/ai-native/model-egress.transport").ModelEgressTransport
+  Config: load('@rental-os/ai-native-server/runtime/tenant-model-config.service').TenantModelConfigService,
+  SecretBox: load('@rental-os/platform-server/secret-box').SecretBox,
+  Gateway: load('@rental-os/platform-server/ai-gateway').ModelGatewayService,
+  Adapter: load('@rental-os/ai-native-server/runtime/chat-completions.adapter').ChatCompletionsAdapter,
+  Transport: load('@rental-os/ai-native-server/runtime/model-egress.transport').ModelEgressTransport
 };
 const f = require("./fixtures/ai-native/gateway-integration.cjs");
 const reject = (op, code) => assert.rejects(op, e => e.code === code && e.message === code);

@@ -1,11 +1,8 @@
 'use strict';
-const assert = require('node:assert/strict'), path = require('node:path'), fs = require('node:fs');
-const { createRequire } = require('node:module');
-const root = path.resolve(__dirname, '../../..'), req = createRequire(path.join(root, 'apps/api/package.json'));
-assert.ok(fs.realpathSync(req.resolve('@prisma/client')).startsWith(fs.realpathSync(path.join(root, 'apps/api/node_modules/@prisma/client')) + path.sep));
-if (!process[Symbol.for('ts-node.register.instance')]) require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { PrismaUsageSettlementRepository } = require('../../../apps/api/src/modules/ai-native/usage-settlement.repository');
-const { UsageAccountingService } = require('../../../apps/api/src/modules/ai-native/usage-accounting.service');
+// Workspace settlement keeps the original selected Rental authority and ledger.
+const { load } = require('./rental-compatibility-source.cjs');
+const { PrismaUsageSettlementRepository } = load('@rental-os/ai-native-server/runtime/usage-settlement.repository');
+const { UsageAccountingService } = load('@rental-os/ai-native-server/runtime/usage-accounting.service');
 const { contexts } = require('./contract-consumer.cjs');
 const clone = v => structuredClone(v), now = new Date('2026-10-04T00:00:00Z');
 const scope = { id: 'scope-test', kind: 'WORKSPACE', tenantId: 'tenant-test', workspaceId: 'space-test' };
