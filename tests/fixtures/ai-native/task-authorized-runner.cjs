@@ -1,8 +1,5 @@
 'use strict';
-const { AuthService } = require('../../../apps/api/src/modules/auth/auth.service');
-const { SubscriptionService } = require('../../../apps/api/src/modules/subscription/subscription.service');
-const { composePersistedTaskAuthorization } = require('../../../apps/api/src/modules/ai-native/task-authorization.composition');
-const { aiPersistenceScopeColumns } = require('../../../apps/api/src/modules/ai-native/persistence-scope');
+const { load, prepare } = require('./rental-compatibility-source.cjs');
 const { AI_TASK_INPUT_DRAFT_VERSION } = require('./local-shared.cjs');
 const { user } = require('./authorization-baseline.cjs');
 const { taskInputHarness } = require('./task-input-harness.cjs');
@@ -13,6 +10,11 @@ const operations = ['read_metadata', 'read_events', 'claim_run', 'claim_recovery
 
 // Real AuthService, SubscriptionService and authorization composition; database, registry and tool facts are synthetic.
 async function authorizedRunnerHarness(extraTables = {}) {
+  await prepare();
+  const { RentalAuthService } = load('@rental-os/rental-core/auth-service');
+  const { SubscriptionService } = load('@rental-os/platform-server/subscription');
+  const { composePersistedTaskAuthorization } = load('@rental-os/ai-native-server/runtime/task-authorization.composition');
+  const { aiPersistenceScopeColumns } = load('@rental-os/ai-native-server/runtime/persistence-scope');
   const scene = 'synthetic-clarification';
   const scopes = [{ id: 'scope-platform', ...aiPersistenceScopeColumns({ kind: 'platform' }) },
     { id: 'scope-tenant', ...aiPersistenceScopeColumns({ kind: 'tenant', tenantId: 'tenant-a' }) },
@@ -33,7 +35,7 @@ async function authorizedRunnerHarness(extraTables = {}) {
   }, { aiTaskInputRequest: [['scopeId', 'taskId', 'id'], ['scopeId', 'taskId', 'runId', 'stepId', 'planHash']],
     aiTaskInputReceipt: [['scopeId', 'taskId', 'requestId'], ['scopeId', 'taskId', 'submissionKey']] });
   const identity = { user: user({ id: 'user-a' }), session: true, membership: true, workspace: 'workspace-a' };
-  const auth = new AuthService({
+  const auth = new RentalAuthService({
     getAuthSession: async () => identity.session ? { id: 'session-a', userId: identity.user.id, audience: 'operator', currentWorkspaceId: identity.workspace } : undefined,
     findUserById: async () => identity.user,
     findWorkspaceScopedUser: async () => identity.membership ? identity.user : undefined,
@@ -56,7 +58,7 @@ async function authorizedRunnerHarness(extraTables = {}) {
   const configuration = () => ({ ...h.configuration(), authorization, inputSource: h.source,
     registrationAuthority: { resolve: async c => ({ ...await h.registrationAuthority.resolve(c), context: await current.authority.resolve(c.taskId, 'transition_task') }) },
     transitionAuthority: { resolve: async c => ({ ...await h.transitionAuthority.resolve(c), context: await current.authority.resolve(c.taskId, 'transition_task') }) } });
-  const compose = () => require('../../../apps/api/src/modules/ai-native/runner/authorized-persistent-task-input.composition').composeAuthorizedPersistentTaskInputRunner(configuration());
+  const compose = () => load('@rental-os/ai-native-server/runtime/runner/authorized-persistent-task-input.composition').composeAuthorizedPersistentTaskInputRunner(configuration());
   const submit = (root, patch = {}) => root.inputs.submit({ draftVersion: AI_TASK_INPUT_DRAFT_VERSION, taskId: 'task-a',
     requestId: h.state.aiTaskInputRequest[0].id, expectedRevision: 1, submissionKey: 'answer-a',
     answers: [{ fieldId: 'clarification_text', value: 'Explain the existing order only' }], ...patch });

@@ -1,5 +1,8 @@
 'use strict';
-const { Prisma } = require('../../../apps/api/node_modules/@prisma/client');
+// Decimal is the official schema-independent Prisma runtime value. This finite
+// SQL store does not instantiate or select a generated business Client.
+const { Decimal } = require('@prisma/client/runtime/library');
+const Prisma = { Decimal };
 
 function clone(value) {
   if (value instanceof Prisma.Decimal) return new Prisma.Decimal(value);

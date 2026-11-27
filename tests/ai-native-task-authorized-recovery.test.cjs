@@ -1,11 +1,12 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'es2022', experimentalDecorators: true, emitDecoratorMetadata: true } });
+require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
 const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
-const { PrismaTaskTakeoverRepository } = require('../apps/api/src/modules/ai-native/runner/prisma-task-takeover.repository');
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 const runSettled = (h, root, extra) => Promise.allSettled([root.runner.run({ ...h.claim(), ...extra })]);
 async function takeOver(h, root) {
+  const { PrismaTaskTakeoverRepository } = load('@rental-os/ai-native-server/runtime/runner/prisma-task-takeover.repository');
   const old = h.held();
   const next = await new PrismaTaskTakeoverRepository(h.db, root.authorization.authority, () => h.control.now).takeover({
     taskId: 'task-a', runId: 'run-a', previousHolderId: old.holderId, holderId: 'human-a',
@@ -17,7 +18,11 @@ async function takeOver(h, root) {
 for (const mode of ['permissions', 'platform', 'tenant', 'scene', 'subscription']) test(`real authorization stops the next effect after committed first success and ${mode} withdrawal`, async () => {
   const h = await authorizedRunnerHarness(), root = h.compose(); let changed = false;
   h.storeControl.beforeCommit = async draft => {
-    if (changed || draft.aiStep[0]?.status !== 'SUCCEEDED' || !draft.aiTaskExecutionCharge.length || !draft.aiTaskExecutionCharge.every(c => c.status === 'RECORDED')) return;
+    const step = draft.aiStep[0];
+    const charges = draft.aiTaskExecutionCharge.filter(c => c.stepId === step?.id);
+    // Run overhead has its own active interval while this Step settles.
+    if (changed || step?.status !== 'SUCCEEDED' || charges.length !== 3 || !charges.every(c => c.status === 'RECORDED')) return;
+    assert.deepEqual(charges.map(c => c.resource).sort(), ['ACTIVE_MS', 'OUTPUT_BYTES', 'STEPS']);
     changed = true;
     if (mode === 'permissions') h.identity.user.permissions = [];
     else if (mode === 'subscription') draft.tenant[0].subscription.endAt = h.control.now;
@@ -89,7 +94,7 @@ for (const mode of ['cancel', 'takeover']) test(`an actual ${mode} during execut
   h.authorization.credentials.current = async () => {
     const marker = h.trace.lastIndexOf('aiTaskResultArtifact.create');
     const outsideTransaction = h.trace.lastIndexOf('transaction.begin') < h.trace.lastIndexOf('transaction.commit');
-    if (!blocked && marker >= 0 && outsideTransaction && h.trace.slice(marker).includes('aiBudgetPolicy.read')) {
+    if (!blocked && marker >= 0 && outsideTransaction && h.trace.slice(marker).includes('aiBudgetPolicy.readMany')) {
       blocked = true; entered.resolve(); await release.promise;
     }
     return original();
@@ -140,8 +145,14 @@ test('recovery-only claim reconciles a committed artifact without registering or
   assert.deepEqual(h.executions, ['input-clarify']); assert.equal(h.state.aiStep.length, 1);
   assert.equal(h.state.aiStep[0].status, 'SUCCEEDED'); assert.deepEqual(h.state.aiTaskResultArtifact, artifact);
   assert.equal(h.state.aiTaskExecutionBudget[0].consumedSteps, 1n);
-  assert.equal((await root.runner.run(h.claim())).status, 'succeeded');
-  assert.deepEqual(h.executions, ['input-clarify', 'input-continue']);
+  // The original artifact settles its Step, but does not measure the abandoned
+  // Run interval. Generic reconnect must retain that debt without new effects.
+  const debt = h.clone(h.state.aiTaskExecutionCharge.filter(c => c.stepId === null && c.status === 'UNKNOWN'));
+  assert.ok(debt.length > 0); assert.ok(debt.every(c => c.resource === 'ACTIVE_MS'));
+  await assert.rejects(root.runner.run(h.claim()), { code: 'AI_RESULT_UNKNOWN' });
+  assert.deepEqual(debt.map(c => h.state.aiTaskExecutionCharge.find(row => row.chargeId === c.chargeId)), debt);
+  assert.deepEqual(h.executions, ['input-clarify']); assert.equal(h.state.aiStep.length, 1);
+  assert.deepEqual(h.state.aiTaskResultArtifact, artifact);
 });
 
 test('AI-off recovery still reads and accounts a committed artifact without a new execution grant', async () => {

@@ -1,16 +1,9 @@
 'use strict';
 const assert = require('node:assert/strict');
-const { Prisma } = require('../../../apps/api/node_modules/@prisma/client');
+const { Decimal } = require('@prisma/client/runtime/library');
+const { load, prepare } = require('./rental-compatibility-source.cjs');
 const { AI_TASK_DRAFT_VERSION, AI_CONTRACT_DRAFT_VERSION } = require('./local-shared.cjs');
 const { createTaskInputStore, clone } = require('./task-input-store.cjs');
-const { AiTaskRepository } = require('../../../apps/api/src/modules/ai-native/ai-task.repository');
-const { AiStepRegistrationRepository } = require('../../../apps/api/src/modules/ai-native/ai-step-registration.repository');
-const { AiStepTransitionRepository } = require('../../../apps/api/src/modules/ai-native/ai-step-transition.repository');
-const { AiTaskTransitionRepository } = require('../../../apps/api/src/modules/ai-native/ai-task-transition.repository');
-const { createAiTaskRunnerOutcomePort } = require('../../../apps/api/src/modules/ai-native/runner/ai-task-runner-outcome-adapter');
-const { composePersistentTaskRunner } = require('../../../apps/api/src/modules/ai-native/runner/persistent-task-runner.composition');
-const { aiPersistenceScopeColumns } = require('../../../apps/api/src/modules/ai-native/persistence-scope');
-const { requestFingerprint } = require('../../../apps/api/src/modules/rental-core/rental-idempotency.repository');
 const scope = { kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'workspace-a' };
 const syntheticContext = { contractVersion: AI_CONTRACT_DRAFT_VERSION, requestId: 'synthetic-request', authorizedAt: '2026-10-06T12:00:00Z',
   audience: 'operator', actor: { kind: 'user', userId: 'user-a' }, scope,
@@ -18,12 +11,21 @@ const syntheticContext = { contractVersion: AI_CONTRACT_DRAFT_VERSION, requestId
 
 // Auth, plan policy, registered input and tool responses are explicit synthetic dependencies.
 async function taskInputHarness(extraTables = {}, constraints = {}) {
+  await prepare();
+  const { AiTaskRepository } = load('@rental-os/ai-native-server/runtime/ai-task.repository');
+  const { AiStepRegistrationRepository } = load('@rental-os/ai-native-server/runtime/ai-step-registration.repository');
+  const { AiStepTransitionRepository } = load('@rental-os/ai-native-server/runtime/ai-step-transition.repository');
+  const { AiTaskTransitionRepository } = load('@rental-os/ai-native-server/runtime/ai-task-transition.repository');
+  const { createAiTaskRunnerOutcomePort } = load('@rental-os/ai-native-server/runtime/runner/ai-task-runner-outcome-adapter');
+  const { composePersistentTaskRunner } = load('@rental-os/ai-native-server/runtime/runner/persistent-task-runner.composition');
+  const { aiPersistenceScopeColumns } = load('@rental-os/ai-native-server/runtime/persistence-scope');
+  const { requestFingerprint } = load('@rental-os/platform-contracts/request-fingerprint');
   const control = { now: new Date('2026-10-06T12:00:00Z'), tick: 0, revoked: false, context: structuredClone(syntheticContext), execute: null };
   const stored = createTaskInputStore({
     aiTask: [{ id: 'task-a', scopeId: 'scope-a', scopeKind: 'WORKSPACE', scope: aiPersistenceScopeColumns(scope), ownerKind: 'USER', ownerId: 'user-a', audience: 'OPERATOR',
       status: 'RUNNING', revision: 1, eventCursor: 0n, cancelRequestedAt: null, archivedAt: null, contractVersion: AI_TASK_DRAFT_VERSION,
       sceneCode: 'synthetic-clarification', sceneVersion: '1', createdAt: new Date(control.now), updatedAt: new Date(control.now) }],
-    aiRun: [{ id: 'run-a', scopeId: 'scope-a', taskId: 'task-a', sequence: 1, revision: 1, fencingToken: new Prisma.Decimal(1), leaseOwnerId: 'bootstrap',
+    aiRun: [{ id: 'run-a', scopeId: 'scope-a', taskId: 'task-a', sequence: 1, revision: 1, fencingToken: new Decimal(1), leaseOwnerId: 'bootstrap',
       leaseExpiresAt: new Date(control.now.getTime() + 100000), status: 'RUNNING', actorKind: 'USER', actorId: 'user-a' }],
     aiStep: [], aiTaskRunPlan: [], aiTaskResultArtifact: [], aiTaskExecutionBudget: [], aiTaskExecutionCharge: [], aiTaskEvent: [],
     aiGatewayInvocation: [], aiGatewayAccountingReceipt: [], aiInvocationAdmission: [], operationLog: [], ...extraTables

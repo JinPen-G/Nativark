@@ -1,11 +1,3 @@
 'use strict';
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const { createRequire } = require('node:module');
-const root = path.resolve(__dirname, '../../..');
-const apiRequire = createRequire(path.join(root, 'apps/api/package.json'));
-const entry = fs.realpathSync(apiRequire.resolve('@rental-os/shared'));
-const localShared = fs.realpathSync(path.join(root, 'packages/shared'));
-assert.ok(entry.startsWith(localShared + path.sep), 'API shared must resolve inside this worktree');
-module.exports = apiRequire('@rental-os/shared');
+// Original business contracts come from the explicitly selected independent host.
+module.exports = require('./rental-compatibility-source.cjs').load('@rental-os/shared');
