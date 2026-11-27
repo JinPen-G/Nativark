@@ -40,6 +40,20 @@ const supportScripts = [
   'scripts/rental-build-snapshot.cjs', 'scripts/rental-host-lock.cjs', 'scripts/verify-rental-distribution.cjs',
   'scripts/prepare-rental-workspace.cjs',
 ];
+// Original regression material is opt-in and needs the real portal consumer.
+// Keep this list explicit: release and ordinary development filters stay unchanged.
+const verificationTests = [
+  'http-native-response.test.cjs', 'package-exports.test.cjs',
+  'payment-callback-access.test.cjs', 'recovery-access.test.cjs',
+  'legacy-access-preparation.test.cjs', 'legacy-access-adoption.test.cjs', 'core-session-cases.cjs',
+].map(file => coreDirectory + '/test/' + file);
+const verificationGuard = 'tests/fixtures/ai-native/prisma-offline-preload.cjs';
+const verificationScripts = {
+  'test:rental:dist': 'node --test ' + verificationTests.slice(0, 4).join(' '),
+  // Both original legacy entries own the same temporary directory and clean it on exit.
+  'test:rental:legacy': verificationTests.slice(4, 6).map(file => 'node ' + file).join(' && '),
+  'test:rental': 'npm run test:rental:dist && npm run test:rental:legacy',
+};
 
 const freshAiHostExport = name => ['ai-app-module', 'ai-data-extension'].includes(name.replace(/^\.\//u, ''));
 const needsHistoricalWeb = rental => !rental.layout.paths.some(entry => entry.target === 'packages/web-client')
@@ -315,6 +329,9 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
     throw Error('Rental 开发来源须是独立仓库');
   const profile = options.profile ?? 'domain';
   if (!['domain', 'host', 'full', 'multi-core'].includes(profile)) throw Error('开发范围须为 domain、host、full 或 multi-core');
+  const withTests = options.withTests === true;
+  if (withTests && (rental.mode !== 'development' || profile !== 'full'))
+    throw Error('原回归材料只接受 --mode development --profile full --with-tests；发行不包含测试');
   const multi = profile === 'multi-core';
   // The legacy dual-Core AI host uses a different data contract from the fresh single-Rental chain.
   if (multi && (rental.mode !== 'development' || options.ai || options.freshAi || options.mcp))
@@ -372,16 +389,17 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
     if (entry) selected.push(entry);
   }
   const supportWorkspaces = ['packages/shared', ...(historicalWeb ? ['packages/web-client'] : []), 'packages/ai-native-admin',
-    ...(multi ? ['packages/example-tickets-core'] : []),
+    ...(multi || withTests ? ['packages/example-tickets-core'] : []),
     ...(options.ai || needsAiData ? ['packages/ai-native-data'] : []),
     ...(options.ai ? ['packages/ai-native-server'] : []),
     ...(options.mcp ? ['packages/mcp-server'] : [])];
   const extras = supportWorkspaces.filter(directory => !selected.some(entry => entry.target === directory));
-  const support = readBuildSnapshot(options.commit, options.repo, [...extras, ...supportScripts]);
+  const support = readBuildSnapshot(options.commit, options.repo,
+    [...extras, ...supportScripts, ...(withTests ? [verificationGuard] : [])]);
   const files = new Map(platform.files);
   for (const [absolute, bytes] of support.files) {
     const relative = path.relative(root, absolute).split(path.sep).join('/');
-    if (isSource(relative)) files.set(relative, bytes);
+    if (isSource(relative) || withTests && relative === verificationGuard) files.set(relative, bytes);
   }
   for (const [absolute, bytes] of rental.snapshot.files) {
     const relative = path.relative(root, absolute).split(path.sep).join('/');
@@ -389,8 +407,11 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
     if (!options.freshAi && freshHost?.aiFiles.some(file => freshHost.target + '/' + file === relative)) continue;
     if (!freshMcp && freshHost?.mcpFiles?.some(file => freshHost.target + '/' + file === relative)) continue;
     if (!publicRetention && freshHost?.publicRetentionFiles?.some(file => freshHost.target + '/' + file === relative)) continue;
-    if (isSource(relative) && selected.some(entry => relative.startsWith(entry.target + '/'))) files.set(relative, bytes);
+    if ((isSource(relative) || withTests && verificationTests.includes(relative))
+      && selected.some(entry => relative.startsWith(entry.target + '/'))) files.set(relative, bytes);
   }
+  if (withTests) for (const file of [...verificationTests, verificationGuard])
+    if (!files.has(file)) throw Error('固定开发验证材料缺失：' + file);
   if (adapterSources) for (const [file, bytes] of adapterSources.files)
     files.set(adapterSources.directory + '/' + file, bytes);
   const workspaces = new Map();
@@ -467,6 +488,7 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
         + (profile === 'domain' ? coreDirectory : 'apps/rental-api') + '/tsconfig.json',
       'check:core': 'node scripts/check-selected-prisma-types.cjs --mode rental --config packages/rental-core/tsconfig.json',
       capabilities: 'npm run capabilities -w @rental-os/core-contracts --',
+      ...(withTests ? verificationScripts : {}),
       ...(options.ai && profile !== 'domain' ? {
         'build:ai': 'npm run build:ai -w @rental-os/rental-api',
         'check:ai': 'node scripts/check-selected-prisma-types.cjs --mode rental-ai --config apps/rental-api/tsconfig.ai.json',
@@ -516,6 +538,9 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
     (profile === 'domain' ? `当前仅领域源码，尚不包含独立宿主，不能据此启动完整服务。` : `实际生成所选 Client、构建、迁移准备和启动按 [Rental 宿主](apps/rental-api/README.md)执行。`) +
     (profile === 'full' ? `四端构建分别使用 \`npm run build:tenant-website\`、\`npm run build:enterprise-portal\`、\`npm run build:miniprogram\` 和 \`npm run build:staff-miniprogram\`；原宿主构建前置和标准包锁仍须满足。` : '') +
     (multi ? `Rental 与工单的普通开发按[双 Core API](apps/example-multi-core-api/README.md)及[双 Core 后台](apps/example-multi-core-admin/README.md)准备同一部署锁。` : '') +
+    (withTests ? `\n\n本组合显式包含七份原测试材料、工单示例及原离线守卫。按宿主说明生成同版所选 Client 并执行 \`npm run build\` 后，运行 \`npm run test:rental\`。` +
+      `该命令先跑四份 dist 用例，再串行执行两份 legacy 用例；后者自行建立并清理 \`output/.tmp/rental-lead-participants\`，已有目录会拒绝覆盖。` +
+      `测试不启动服务或连接数据库；行存储和部署观察仍是用例内的明确 fixture。发行和未选择 \`--with-tests\` 的组合不携带这些材料。\n\n` : '') +
     `发布前将 Core 自己的改动提交并打版本标签，再按 [Core 构建与发行](packages/rental-core/README.md#使用与构建)` +
     `核固定底座/独立 Core 来源和归档。部署锁、租户授权与成员分配独立办理。\n\n` +
     `开发新 Core 从 [五步手册](packages/core-contracts/README.md#五步快速接入)开始；` +
@@ -548,6 +573,8 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
     format: 'nativark-core-development-source-2', profile, mode: rental.mode,
     host: profile === 'domain' ? null : multi ? 'example-multi-core' : 'rental',
     coreIds: multi ? ['rental', 'example-tickets'] : ['rental'], ai: Boolean(options.ai), mcp: Boolean(options.mcp),
+    ...(withTests ? { verification: { suite: 'rental-original', files: [...verificationTests, verificationGuard],
+      supportWorkspaces: ['packages/example-tickets-core'], scripts: verificationScripts } } : {}),
     platform: { version: platform.version, source: platform.source, layout: 'platform-source', packageRoot: '.' },
     ...(options.freshAi ? { installation: 'fresh-ai' } : {}),
     ...(publicRetention ? { publicRetention: publicRetention.receipt } : {}),
@@ -583,12 +610,13 @@ function argumentsOf(args) {
     if (name === '--ai' && result.ai === undefined) { result.ai = true; continue; }
     if (name === '--fresh-ai' && result.ai === undefined) { result.ai = true; result.freshAi = true; continue; }
     if (name === '--mcp' && result.mcp === undefined) { result.mcp = true; continue; }
+    if (name === '--with-tests' && result.withTests === undefined) { result.withTests = true; continue; }
     const field = names[name], value = args[++index];
     if (!field || !value || value.startsWith('--') || result[field] !== undefined) throw Error('未知、重复或缺少值的源码准备参数');
     result[field] = value;
   }
   if (['repo', 'repository', 'commit', 'coreRepo', 'coreCommit', 'out'].some(name => !result[name]))
-    throw Error('用法：prepare-rental-workspace --repo <底座Git目录> --repository <GitHub地址> --commit <完整SHA> --core-repo <独立CoreGit目录> --core-commit <完整SHA> --out <新.tgz文件> [--mode development|release] [--profile domain|host|full|multi-core] [--ai|--fresh-ai] [--mcp]');
+    throw Error('用法：prepare-rental-workspace --repo <底座Git目录> --repository <GitHub地址> --commit <完整SHA> --core-repo <独立CoreGit目录> --core-commit <完整SHA> --out <新.tgz文件> [--mode development|release] [--profile domain|host|full|multi-core] [--ai|--fresh-ai] [--mcp] [--with-tests]');
   return result;
 }
 
