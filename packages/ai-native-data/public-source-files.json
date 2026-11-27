@@ -1,0 +1,20 @@
+{
+  "files": [
+    "LICENSE",
+    "README.md",
+    "README.public.md",
+    "package.json",
+    "package.public.json",
+    "prisma-public/.gitattributes",
+    "prisma-public/20261126000000-initial.sql",
+    "prisma-public/provenance.json",
+    "prisma-public/schema.prisma",
+    "public-source-files.json",
+    "src/public-data-admission.ts",
+    "src/public-data-package.ts",
+    "src/public-data.ts",
+    "src/public-mysql-data.ts",
+    "tsconfig.json",
+    "tsconfig.public.json"
+  ]
+}

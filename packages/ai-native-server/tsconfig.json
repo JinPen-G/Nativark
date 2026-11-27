@@ -1,17 +1,6 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "./tsconfig.public.json",
   "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "dist",
-    "declaration": true,
-    "types": [
-      "node"
-    ],
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true,
-    "strictPropertyInitialization": false
-  },
-  "include": [
-    "src/**/*.ts"
-  ]
+    "outDir": "dist"
+  }
 }

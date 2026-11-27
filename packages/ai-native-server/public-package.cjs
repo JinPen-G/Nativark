@@ -32,8 +32,18 @@ function readPublicAiServerProject(sources) {
   const versions = metadata.typesVersions?.['*'];
   for (const name of additions.entries) {
     const path = `src/${name}.ts`;
-    if (Object.hasOwn(metadata.exports ?? {}, `./${name}`) || !versions || Object.hasOwn(versions, name)
-      || config.files.includes(path) || !sources.has(path)) throw Error(`公共 AI 后继入口冲突或不存在：${name}`);
+    if (!versions || !sources.has(path)) throw Error(`公共 AI 后继入口冲突或不存在：${name}`);
+    // The ordinary public manifest now includes the original successor entries.
+    // Accept only the same complete declaration; partial or redirected entries
+    // must still fail instead of being silently overwritten by the projection.
+    if (Object.hasOwn(metadata.exports ?? {}, `./${name}`) || Object.hasOwn(versions, name) || config.files.includes(path)) {
+      const entry = metadata.exports?.[`./${name}`], types = versions[name];
+      if (!entry || Object.keys(entry).length !== 2 || entry.types !== `./dist/${name}.d.ts`
+        || entry.default !== `./dist/${name}.js` || !Array.isArray(types) || types.length !== 1
+        || types[0] !== `dist/${name}.d.ts` || config.files.filter(file => file === path).length !== 1)
+        throw Error(`公共 AI 后继入口冲突或不存在：${name}`);
+      continue;
+    }
     metadata.exports[`./${name}`] = { types: `./dist/${name}.d.ts`, default: `./dist/${name}.js` };
     versions[name] = [`dist/${name}.d.ts`];
     config.files.push(path);

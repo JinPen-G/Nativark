@@ -1,7 +1,18 @@
 {
-  "extends": "./tsconfig.json",
-  "compilerOptions": { "outDir": "dist-public", "newLine": "lf", "noEmitOnError": true },
-  "include": [],
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist-public",
+    "declaration": true,
+    "types": [
+      "node"
+    ],
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "strictPropertyInitialization": false,
+    "newLine": "lf",
+    "noEmitOnError": true
+  },
   "files": [
     "src/task-errors.ts",
     "src/request-binding.ts",
@@ -25,6 +36,14 @@
     "src/public-platform-finance.ts",
     "src/runtime/budget/public-budget-ledger.ts",
     "src/runtime/original-result-reads.ts",
-    "src/runtime/original-task-recovery-read.ts"
-  ]
+    "src/runtime/original-task-recovery-read.ts",
+    "src/approval-persistence.ts",
+    "src/knowledge-persistence.ts",
+    "src/platform-retention.ts",
+    "src/task-observation.ts",
+    "src/runtime/public-approval-persistence.ts",
+    "src/runtime/public-rental-adapter-ports.ts",
+    "src/runtime/platform-retention-http.ts"
+  ],
+  "include": []
 }

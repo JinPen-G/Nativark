@@ -4,7 +4,7 @@
   "private": true,
   "license": "MIT",
   "type": "commonjs",
-  "description": "Zelo 公共 AI 模型设置、平台预算与额度、Task 和原结果观察",
+  "description": "Zelo 公共 AI 配置、Task、Gateway 单账、审批、知识、正文保留与原结果观察",
   "files": ["dist", "README.md", "LICENSE"],
   "exports": {
     "./task-errors": { "types": "./dist/task-errors.d.ts", "default": "./dist/task-errors.js" },
@@ -29,7 +29,14 @@
     "./public-platform-finance": { "types": "./dist/public-platform-finance.d.ts", "default": "./dist/public-platform-finance.js" },
     "./runtime/budget/public-budget-ledger": { "types": "./dist/runtime/budget/public-budget-ledger.d.ts", "default": "./dist/runtime/budget/public-budget-ledger.js" },
     "./runtime/original-result-reads": { "types": "./dist/runtime/original-result-reads.d.ts", "default": "./dist/runtime/original-result-reads.js" },
-    "./runtime/original-task-recovery-read": { "types": "./dist/runtime/original-task-recovery-read.d.ts", "default": "./dist/runtime/original-task-recovery-read.js" }
+    "./runtime/original-task-recovery-read": { "types": "./dist/runtime/original-task-recovery-read.d.ts", "default": "./dist/runtime/original-task-recovery-read.js" },
+    "./approval-persistence": { "types": "./dist/approval-persistence.d.ts", "default": "./dist/approval-persistence.js" },
+    "./knowledge-persistence": { "types": "./dist/knowledge-persistence.d.ts", "default": "./dist/knowledge-persistence.js" },
+    "./platform-retention": { "types": "./dist/platform-retention.d.ts", "default": "./dist/platform-retention.js" },
+    "./task-observation": { "types": "./dist/task-observation.d.ts", "default": "./dist/task-observation.js" },
+    "./runtime/public-approval-persistence": { "types": "./dist/runtime/public-approval-persistence.d.ts", "default": "./dist/runtime/public-approval-persistence.js" },
+    "./runtime/public-rental-adapter-ports": { "types": "./dist/runtime/public-rental-adapter-ports.d.ts", "default": "./dist/runtime/public-rental-adapter-ports.js" },
+    "./runtime/platform-retention-http": { "types": "./dist/runtime/platform-retention-http.d.ts", "default": "./dist/runtime/platform-retention-http.js" }
   },
   "typesVersions": { "*": {
     "task-errors": ["dist/task-errors.d.ts"],
@@ -54,7 +61,14 @@
     "public-platform-finance": ["dist/public-platform-finance.d.ts"],
     "runtime/budget/public-budget-ledger": ["dist/runtime/budget/public-budget-ledger.d.ts"],
     "runtime/original-result-reads": ["dist/runtime/original-result-reads.d.ts"],
-    "runtime/original-task-recovery-read": ["dist/runtime/original-task-recovery-read.d.ts"]
+    "runtime/original-task-recovery-read": ["dist/runtime/original-task-recovery-read.d.ts"],
+    "approval-persistence": ["dist/approval-persistence.d.ts"],
+    "knowledge-persistence": ["dist/knowledge-persistence.d.ts"],
+    "platform-retention": ["dist/platform-retention.d.ts"],
+    "task-observation": ["dist/task-observation.d.ts"],
+    "runtime/public-approval-persistence": ["dist/runtime/public-approval-persistence.d.ts"],
+    "runtime/public-rental-adapter-ports": ["dist/runtime/public-rental-adapter-ports.d.ts"],
+    "runtime/platform-retention-http": ["dist/runtime/platform-retention-http.d.ts"]
   } },
   "dependencies": {
     "@rental-os/platform-contracts": "0.1.0",

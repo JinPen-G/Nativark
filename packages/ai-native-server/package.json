@@ -1,236 +1,82 @@
 {
   "name": "@rental-os/ai-native-server",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "private": true,
   "license": "MIT",
-  "description": "AI Native 原业务失败出箱与通知草稿收据参加者",
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
-  ],
-  "typesVersions": {
-    "*": {
-      "business-events/prisma-business-failure-outbox": [
-        "dist/business-events/prisma-business-failure-outbox.d.ts"
-      ],
-      "business-events/return-exception-source": [
-        "dist/business-events/return-exception-source.d.ts"
-      ],
-      "privacy/notification-draft-reader": [
-        "dist/privacy/notification-draft-reader.d.ts"
-      ],
-      "privacy/retention-policy": [
-        "dist/privacy/retention-policy.d.ts"
-      ],
-      "task-errors": [
-        "dist/task-errors.d.ts"
-      ],
-      "knowledge-fingerprint": [
-        "dist/knowledge-fingerprint.d.ts"
-      ],
-      "request-binding": [
-        "dist/request-binding.d.ts"
-      ],
-      "task-transactions": [
-        "dist/task-transactions.d.ts"
-      ],
-      "task-persistence": [
-        "dist/task-persistence.d.ts"
-      ],
-      "task-resource-ledger": [
-        "dist/task-resource-ledger.d.ts"
-      ],
-      "task-runner-resources": [
-        "dist/task-runner-resources.d.ts"
-      ],
-      "task-steps": [
-        "dist/task-steps.d.ts"
-      ],
-      "task-measured-effects": [
-        "dist/task-measured-effects.d.ts"
-      ],
-      "gateway-admission": [
-        "dist/gateway-admission.d.ts"
-      ],
-      "public-tenant-gateway": [
-        "dist/public-tenant-gateway.d.ts"
-      ],
-      "public-tenant-task-authority": [
-        "dist/public-tenant-task-authority.d.ts"
-      ],
-      "platform-transactions": [
-        "dist/platform-transactions.d.ts"
-      ],
-      "runtime/*": [
-        "dist/runtime/*.d.ts"
-      ],
-      "tenant-configuration-transactions": [
-        "dist/tenant-configuration-transactions.d.ts"
-      ],
-      "model-configuration": [
-        "dist/model-configuration.d.ts"
-      ],
-      "model-adapters": [
-        "dist/model-adapters.d.ts"
-      ],
-      "public-platform-model-settings": [
-        "dist/public-platform-model-settings.d.ts"
-      ],
-      "public-tenant-model-settings": [
-        "dist/public-tenant-model-settings.d.ts"
-      ],
-      "public-ai-work-center": [
-        "dist/public-ai-work-center.d.ts"
-      ],
-      "public-platform-finance": [
-        "dist/public-platform-finance.d.ts"
-      ],
-      "execution-context-validation": [
-        "dist/execution-context-validation.d.ts"
-      ]
-    }
-  },
+  "type": "commonjs",
+  "description": "Zelo 公共 AI 配置、Task、Gateway 单账、审批、知识、正文保留与原结果观察",
+  "files": ["dist", "README.md", "LICENSE"],
   "exports": {
-    "./business-events/prisma-business-failure-outbox": {
-      "types": "./dist/business-events/prisma-business-failure-outbox.d.ts",
-      "default": "./dist/business-events/prisma-business-failure-outbox.js"
-    },
-    "./business-events/return-exception-source": {
-      "types": "./dist/business-events/return-exception-source.d.ts",
-      "default": "./dist/business-events/return-exception-source.js"
-    },
-    "./privacy/notification-draft-reader": {
-      "types": "./dist/privacy/notification-draft-reader.d.ts",
-      "default": "./dist/privacy/notification-draft-reader.js"
-    },
-    "./privacy/retention-policy": {
-      "types": "./dist/privacy/retention-policy.d.ts",
-      "default": "./dist/privacy/retention-policy.js"
-    },
-    "./task-errors": {
-      "types": "./dist/task-errors.d.ts",
-      "default": "./dist/task-errors.js"
-    },
-    "./knowledge-fingerprint": {
-      "types": "./dist/knowledge-fingerprint.d.ts",
-      "default": "./dist/knowledge-fingerprint.js"
-    },
-    "./request-binding": {
-      "types": "./dist/request-binding.d.ts",
-      "default": "./dist/request-binding.js"
-    },
-    "./task-transactions": {
-      "types": "./dist/task-transactions.d.ts",
-      "default": "./dist/task-transactions.js"
-    },
-    "./task-persistence": {
-      "types": "./dist/task-persistence.d.ts",
-      "default": "./dist/task-persistence.js"
-    },
-    "./task-resource-ledger": {
-      "types": "./dist/task-resource-ledger.d.ts",
-      "default": "./dist/task-resource-ledger.js"
-    },
-    "./task-runner-resources": {
-      "types": "./dist/task-runner-resources.d.ts",
-      "default": "./dist/task-runner-resources.js"
-    },
-    "./task-steps": {
-      "types": "./dist/task-steps.d.ts",
-      "default": "./dist/task-steps.js"
-    },
-    "./task-measured-effects": {
-      "types": "./dist/task-measured-effects.d.ts",
-      "default": "./dist/task-measured-effects.js"
-    },
-    "./gateway-admission": {
-      "types": "./dist/gateway-admission.d.ts",
-      "default": "./dist/gateway-admission.js"
-    },
-    "./public-tenant-gateway": {
-      "types": "./dist/public-tenant-gateway.d.ts",
-      "default": "./dist/public-tenant-gateway.js"
-    },
-    "./public-tenant-task-authority": {
-      "types": "./dist/public-tenant-task-authority.d.ts",
-      "default": "./dist/public-tenant-task-authority.js"
-    },
-    "./platform-transactions": {
-      "types": "./dist/platform-transactions.d.ts",
-      "default": "./dist/platform-transactions.js"
-    },
-    "./runtime/*": {
-      "types": "./dist/runtime/*.d.ts",
-      "default": "./dist/runtime/*.js"
-    },
-    "./tenant-configuration-transactions": {
-      "types": "./dist/tenant-configuration-transactions.d.ts",
-      "default": "./dist/tenant-configuration-transactions.js"
-    },
-    "./model-configuration": {
-      "types": "./dist/model-configuration.d.ts",
-      "default": "./dist/model-configuration.js"
-    },
-    "./model-adapters": {
-      "types": "./dist/model-adapters.d.ts",
-      "default": "./dist/model-adapters.js"
-    },
-    "./public-platform-model-settings": {
-      "types": "./dist/public-platform-model-settings.d.ts",
-      "default": "./dist/public-platform-model-settings.js"
-    },
-    "./public-tenant-model-settings": {
-      "types": "./dist/public-tenant-model-settings.d.ts",
-      "default": "./dist/public-tenant-model-settings.js"
-    },
-    "./public-ai-work-center": {
-      "types": "./dist/public-ai-work-center.d.ts",
-      "default": "./dist/public-ai-work-center.js"
-    },
-    "./public-platform-finance": {
-      "types": "./dist/public-platform-finance.d.ts",
-      "default": "./dist/public-platform-finance.js"
-    },
-    "./execution-context-validation": {
-      "types": "./dist/execution-context-validation.d.ts",
-      "default": "./dist/execution-context-validation.js"
-    }
+    "./task-errors": { "types": "./dist/task-errors.d.ts", "default": "./dist/task-errors.js" },
+    "./request-binding": { "types": "./dist/request-binding.d.ts", "default": "./dist/request-binding.js" },
+    "./task-transactions": { "types": "./dist/task-transactions.d.ts", "default": "./dist/task-transactions.js" },
+    "./task-persistence": { "types": "./dist/task-persistence.d.ts", "default": "./dist/task-persistence.js" },
+    "./task-resource-ledger": { "types": "./dist/task-resource-ledger.d.ts", "default": "./dist/task-resource-ledger.js" },
+    "./task-runner-resources": { "types": "./dist/task-runner-resources.d.ts", "default": "./dist/task-runner-resources.js" },
+    "./task-steps": { "types": "./dist/task-steps.d.ts", "default": "./dist/task-steps.js" },
+    "./task-measured-effects": { "types": "./dist/task-measured-effects.d.ts", "default": "./dist/task-measured-effects.js" },
+    "./gateway-admission": { "types": "./dist/gateway-admission.d.ts", "default": "./dist/gateway-admission.js" },
+    "./public-tenant-gateway": { "types": "./dist/public-tenant-gateway.d.ts", "default": "./dist/public-tenant-gateway.js" },
+    "./public-tenant-task-authority": { "types": "./dist/public-tenant-task-authority.d.ts", "default": "./dist/public-tenant-task-authority.js" },
+    "./platform-transactions": { "types": "./dist/platform-transactions.d.ts", "default": "./dist/platform-transactions.js" },
+    "./tenant-configuration-transactions": { "types": "./dist/tenant-configuration-transactions.d.ts", "default": "./dist/tenant-configuration-transactions.js" },
+    "./execution-context-validation": { "types": "./dist/execution-context-validation.d.ts", "default": "./dist/execution-context-validation.js" },
+    "./model-configuration": { "types": "./dist/model-configuration.d.ts", "default": "./dist/model-configuration.js" },
+    "./model-adapters": { "types": "./dist/model-adapters.d.ts", "default": "./dist/model-adapters.js" },
+    "./public-platform-model-settings": { "types": "./dist/public-platform-model-settings.d.ts", "default": "./dist/public-platform-model-settings.js" },
+    "./public-tenant-model-settings": { "types": "./dist/public-tenant-model-settings.d.ts", "default": "./dist/public-tenant-model-settings.js" },
+    "./public-ai-work-center": { "types": "./dist/public-ai-work-center.d.ts", "default": "./dist/public-ai-work-center.js" },
+    "./public-platform-finance": { "types": "./dist/public-platform-finance.d.ts", "default": "./dist/public-platform-finance.js" },
+    "./runtime/budget/public-budget-ledger": { "types": "./dist/runtime/budget/public-budget-ledger.d.ts", "default": "./dist/runtime/budget/public-budget-ledger.js" },
+    "./runtime/original-result-reads": { "types": "./dist/runtime/original-result-reads.d.ts", "default": "./dist/runtime/original-result-reads.js" },
+    "./runtime/original-task-recovery-read": { "types": "./dist/runtime/original-task-recovery-read.d.ts", "default": "./dist/runtime/original-task-recovery-read.js" },
+    "./approval-persistence": { "types": "./dist/approval-persistence.d.ts", "default": "./dist/approval-persistence.js" },
+    "./knowledge-persistence": { "types": "./dist/knowledge-persistence.d.ts", "default": "./dist/knowledge-persistence.js" },
+    "./platform-retention": { "types": "./dist/platform-retention.d.ts", "default": "./dist/platform-retention.js" },
+    "./task-observation": { "types": "./dist/task-observation.d.ts", "default": "./dist/task-observation.js" },
+    "./runtime/public-approval-persistence": { "types": "./dist/runtime/public-approval-persistence.d.ts", "default": "./dist/runtime/public-approval-persistence.js" },
+    "./runtime/public-rental-adapter-ports": { "types": "./dist/runtime/public-rental-adapter-ports.d.ts", "default": "./dist/runtime/public-rental-adapter-ports.js" },
+    "./runtime/platform-retention-http": { "types": "./dist/runtime/platform-retention-http.d.ts", "default": "./dist/runtime/platform-retention-http.js" }
   },
-  "scripts": {
-    "prebuild": "npm run build -w @rental-os/rental-core && npm run build -w @rental-os/platform-server",
-    "build": "node ../../scripts/build-selected-prisma.cjs --project tsconfig.json --mode rental-ai",
-    "prelint": "npm run build -w @rental-os/rental-core && npm run build -w @rental-os/platform-server",
-    "lint": "node ../../scripts/build-selected-prisma.cjs --project tsconfig.json --mode rental-ai --noEmit"
-  },
+  "typesVersions": { "*": {
+    "task-errors": ["dist/task-errors.d.ts"],
+    "request-binding": ["dist/request-binding.d.ts"],
+    "task-transactions": ["dist/task-transactions.d.ts"],
+    "task-persistence": ["dist/task-persistence.d.ts"],
+    "task-resource-ledger": ["dist/task-resource-ledger.d.ts"],
+    "task-runner-resources": ["dist/task-runner-resources.d.ts"],
+    "task-steps": ["dist/task-steps.d.ts"],
+    "task-measured-effects": ["dist/task-measured-effects.d.ts"],
+    "gateway-admission": ["dist/gateway-admission.d.ts"],
+    "public-tenant-gateway": ["dist/public-tenant-gateway.d.ts"],
+    "public-tenant-task-authority": ["dist/public-tenant-task-authority.d.ts"],
+    "platform-transactions": ["dist/platform-transactions.d.ts"],
+    "tenant-configuration-transactions": ["dist/tenant-configuration-transactions.d.ts"],
+    "execution-context-validation": ["dist/execution-context-validation.d.ts"],
+    "model-configuration": ["dist/model-configuration.d.ts"],
+    "model-adapters": ["dist/model-adapters.d.ts"],
+    "public-platform-model-settings": ["dist/public-platform-model-settings.d.ts"],
+    "public-tenant-model-settings": ["dist/public-tenant-model-settings.d.ts"],
+    "public-ai-work-center": ["dist/public-ai-work-center.d.ts"],
+    "public-platform-finance": ["dist/public-platform-finance.d.ts"],
+    "runtime/budget/public-budget-ledger": ["dist/runtime/budget/public-budget-ledger.d.ts"],
+    "runtime/original-result-reads": ["dist/runtime/original-result-reads.d.ts"],
+    "runtime/original-task-recovery-read": ["dist/runtime/original-task-recovery-read.d.ts"],
+    "approval-persistence": ["dist/approval-persistence.d.ts"],
+    "knowledge-persistence": ["dist/knowledge-persistence.d.ts"],
+    "platform-retention": ["dist/platform-retention.d.ts"],
+    "task-observation": ["dist/task-observation.d.ts"],
+    "runtime/public-approval-persistence": ["dist/runtime/public-approval-persistence.d.ts"],
+    "runtime/public-rental-adapter-ports": ["dist/runtime/public-rental-adapter-ports.d.ts"],
+    "runtime/platform-retention-http": ["dist/runtime/platform-retention-http.d.ts"]
+  } },
   "dependencies": {
     "@rental-os/platform-contracts": "0.1.0",
-    "@rental-os/shared": "0.1.0",
-    "zod": "3.25.76",
+    "@rental-os/platform-server": "0.1.0",
     "@nestjs/common": "^10.4.15",
-    "@nestjs/config": "^3.3.0",
-    "@nestjs/core": "^10.4.15",
     "ajv": "^8.12.0",
     "ajv-formats": "^2.1.1",
-    "class-transformer": "^0.5.1",
-    "class-validator": "^0.14.1",
-    "@rental-os/platform-server": "0.1.0",
-    "@rental-os/core-host": "0.1.0"
+    "zod": "3.25.76"
   },
-  "devDependencies": {
-    "@types/node": "22.20.1",
-    "typescript": "5.9.3"
-  },
-  "peerDependencies": {
-    "@prisma/client": "^5.22.0",
-    "@rental-os/rental-core": "0.1.14"
-  },
-  "peerDependenciesMeta": {
-    "@prisma/client": {
-      "optional": true
-    },
-    "@rental-os/rental-core": {
-      "optional": true
-    }
-  }
+  "peerDependencies": { "@prisma/client": "5.22.0" }
 }

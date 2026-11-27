@@ -1,13 +1,13 @@
 # Zelo 公共 AI 服务端
 
-选装服务包提供公共模型配置、SaaS 设置、Task 与会话原结果读取，以及平台 AI 预算、费率和额度管理。业务 Core 的场景、工具、授权、业务执行和结果字段由其所属宿主提供。
+公共 `0.2.1` 服务包提供模型配置、SaaS 设置、Task／Run／Step、会话与原结果、唯一 Gateway 及预算账、通用审批、知识和正文保留。业务 Core 的场景、工具、授权、业务执行和结果字段由其所属宿主提供。
 
 使用 `public-package.cjs` 的 `publicAiClientPaths(ts, client, expectedSchema, readFile)` 核宿主已选择的公共 AI Prisma Client，并将返回值传给编译 `tsconfig.public.json` 的 `compilerOptions.paths`。`expectedSchema` 来自同一宿主底座及固定公共 AI 数据贡献。该检查只读已生成声明，不生成 Client。
 
-用 `assemblePublicAiPackage('server', sources, emitted, ts)` 从同一固定源码、包相对材料和本次 `dist-public` 相对输出组装安装文件，可交现有确定性归档入口。服务端构建仅使用公共依赖。`package.public.json` 是该安装包的清单。原混合安装继续使用自己的包和原锁。
+用 `assemblePublicAiPackage('server', sources, emitted, ts)` 从同一固定源码、包相对材料和本次 `dist-public` 相对输出组装安装文件，可交现有确定性归档入口。服务端构建仅使用公共依赖。[package.json](https://github.com/JinPen-G/Zelo/blob/main/packages/ai-native-server/package.json) 和 [package.public.json](https://github.com/JinPen-G/Zelo/blob/main/packages/ai-native-server/package.public.json) 使用同一公共身份和30个显式出口；[tsconfig.json](https://github.com/JinPen-G/Zelo/blob/main/packages/ai-native-server/tsconfig.json) 与 [tsconfig.public.json](https://github.com/JinPen-G/Zelo/blob/main/packages/ai-native-server/tsconfig.public.json) 编译相同入口，输出目录分别是 `dist` 和 `dist-public`。旧兼容 `0.1.0` 由独立 Rental 仓库的固定快照提供，既有安装继续使用原包、原锁和原收据。
 
 - `public-platform-model-settings` 以原 Auth、Guard、主体锁和同一数据库观察安装数据。可读旧操作收据，保存不取得模型调用或业务授权。
-- `public-tenant-model-settings` 提供原租户设置读写、旧配置审阅、原键收据、模型目录和协议识别。将 `PublicTenantModelSettingsModule.register` 接到同一公共服务模块及 Client，工厂返回 `{ db, assertDataAvailable }`。用 `withPublicTenantModelSettingsHttpAccess(existingHttpAccess)` 注册原租户权限；在公共 SaaS 模型及财务文档后调用 `createPublicTenantModelSettingsOpenApi(document)`。租户管理员沿已有 `system:params:manage`，保存须带 `operationKey`。目录读取只提供元数据，模型能力与额度继续按原准入检查。
+- `public-tenant-model-settings` 提供原租户设置读写、旧配置审阅、原键收据、模型目录和协议识别。将 `PublicTenantModelSettingsModule.register` 接到同一公共服务模块及 Client，工厂返回 `{ db, assertDataAvailable }`。用 `withPublicTenantModelSettingsHttpAccess(existingHttpAccess)` 注册原租户权限；在公共 SaaS 模型及财务文档后调用 `createPublicTenantModelSettingsOpenApi(document)`。租户管理员须同时具有已有 `system:params:manage` 和完整租户数据范围，保存须带 `operationKey`。目录读取只提供元数据，模型能力与额度继续按原准入检查。
 - `public-platform-finance` 在同一宿主上显式登记原八条 SaaS 财务路由。向 `PublicPlatformFinanceModule.register` 提供同一个 `PlatformServerModule` 和数据库模块，工厂返回 `{ db, profileId, assertDataAvailable }`。`profileId` 由服务器固定选择，`assertDataAvailable` 使用同一个所选数据能力的原账与结构观察。用 `withPublicPlatformFinanceHttpAccess(existingHttpAccess)` 登记原 Guard 政策，并用 `createPlatformFinanceOpenApi(existingDocument)` 合并同版文档。
 - `model-configuration` 供宿主接原租户和平台配置服务，写入依赖真实的当前事务参加者。
 - `task-persistence` 复用原 Task/Run 仓储和结果读取。宿主注入当前动作权限、原输入和独立收据权威，使用与原预算账相同的 `createAiTaskTransactionBoundary()`。新建和领取受当次事务约束；原结果继续由宿主按来源和字段权限投影，读取不会启动任务。
@@ -27,3 +27,18 @@
 工作中心与受控 MCP 的公共读取使用 `@rental-os/platform-contracts/ai-work-center` 的 `AI_PUBLIC_WORK_CENTER_ORIGINAL_READS` 和 `AI_PUBLIC_WORK_CENTER_SCHEMAS`。其中 Task 摘要、Task 结果、会话摘要、会话原结果均只接受定位字段。已安装的公共诊断仅办理 BYOK 文本检测。平台托管执行需接入经审阅费率与原调用的可信输入上限，其他业务场景继续由 Core 提供。
 
 `start` 和 `reconcile` 的 `AiPublicTaskExecution` 返回原 Task 快照。Runner 要求人工接管时，快照附带 `runner.nextAction = manual_handoff` 和原运行计量观察。`pending_original_time` 表示该 Run 仍有待核的活动时间占用。已核结果通过原 `resultId` 读取，Task 状态继续按原快照展示。调用方应保留原定位并交人工核对；合同不会为此授予重新启动或重派权限。
+
+## 审批、知识与保留
+
+- [approval-persistence](https://github.com/JinPen-G/Zelo/blob/main/packages/ai-native-server/src/approval-persistence.ts) 和 [runtime/public-approval-persistence](https://github.com/JinPen-G/Zelo/blob/main/packages/ai-native-server/src/runtime/public-approval-persistence.ts) 复用原提案版本、批准、单次消费、CAS 与原收据。宿主提供原对象权限和同事务业务参加者。
+- [knowledge-persistence](https://github.com/JinPen-G/Zelo/blob/main/packages/ai-native-server/src/knowledge-persistence.ts) 保留原知识版本、索引、来源 ACL、记忆与撤回规则。源文件及读取权威由宿主显式注入。
+- [platform-retention](https://github.com/JinPen-G/Zelo/blob/main/packages/ai-native-server/src/platform-retention.ts) 和 [runtime/platform-retention-http](https://github.com/JinPen-G/Zelo/blob/main/packages/ai-native-server/src/runtime/platform-retention-http.ts) 使用原删除账、正文保护与恢复屏障。观察保持只读，维护在原 Native 事务中末次核权；提交未知按原键读取。
+- [task-observation](https://github.com/JinPen-G/Zelo/blob/main/packages/ai-native-server/src/task-observation.ts) 按当前权限读取原 Task 和事件；[runtime/public-rental-adapter-ports](https://github.com/JinPen-G/Zelo/blob/main/packages/ai-native-server/src/runtime/public-rental-adapter-ports.ts) 提供 Core 适配需要的窄事务与结果端口，其源码仅依赖公共合同与服务。
+
+## 源码与构建边界
+
+[公共保留清单](https://github.com/JinPen-G/Zelo/blob/main/packages/ai-native-server/public-source-files.json) 列出本包的188个 TypeScript 源、metadata、构建配置、装包函数和说明。入口清单继续标识原7个后继出口，已在正式 metadata 中完整登记；投影仅接受与之完全一致的声明。通过 `projectPublicAiServerSources(sources, ts)` 取得同一次固定公共投影，再以所选115模型 Client 编译和装包。
+
+直接宿主见 [公共 API 选装入口](https://github.com/JinPen-G/Zelo/blob/main/apps/platform-api/src/ai-main.ts)及[公共数据准入](https://github.com/JinPen-G/Zelo/blob/main/packages/ai-native-data/README.md)。服务端依赖公共 `platform-contracts`、`platform-server`、NestJS Common、Ajv、Ajv Formats、Zod 和宿主的 Prisma 5.22 Client。包本身不提供依赖默认混合 Client 的构建钩子，固定宿主构建沿 [prepare-platform-public-ai](https://github.com/JinPen-G/Zelo/blob/main/scripts/prepare-platform-public-ai.cjs)。
+
+业务兼容源码和测试由[独立 Rental 仓库](https://github.com/JinPen-G/Zelo-rental-core)维护。源码迁移期间保留清单外的旧叶供固定对照，统一移除由集成方在原兼容验证闭合后办理。公开使用只依赖清单内的源码和正式出口。

@@ -4,18 +4,21 @@
   "private": true,
   "license": "MIT",
   "workspaces": [
-    "apps/*",
-    "packages/*",
-    "!apps/website-next",
-    "!apps/website",
-    "!apps/tenant-website",
-    "!apps/enterprise-portal",
-    "!apps/miniprogram",
-    "!apps/staff-miniprogram",
-    "!apps/example-multi-core-api",
-    "!apps/example-multi-core-admin",
-    "!apps/rental-admin",
-    "!apps/rental-api"
+    "apps/example-tickets-admin",
+    "apps/example-tickets-api",
+    "apps/platform-admin",
+    "apps/platform-api",
+    "packages/ai-native-admin",
+    "packages/ai-native-data",
+    "packages/ai-native-server",
+    "packages/core-contracts",
+    "packages/core-host",
+    "packages/example-tickets-core",
+    "packages/mcp-server",
+    "packages/platform-admin",
+    "packages/platform-contracts",
+    "packages/platform-core-host",
+    "packages/platform-server"
   ],
   "scripts": {
     "prepare:rental-workspace": "node scripts/prepare-rental-workspace.cjs",
@@ -229,12 +232,8 @@
     "lint:platform-admin": "npm run lint -w @rental-os/platform-admin-app",
     "build:example-tickets-admin": "npm run build -w @rental-os/example-tickets-admin",
     "dev:example-tickets-admin": "npm run dev -w @rental-os/example-tickets-admin",
-    "build:ai-native-data": "npm run build -w @rental-os/ai-native-data",
-    "lint:ai-native-data": "npm run lint -w @rental-os/ai-native-data",
-    "build:ai-native-server": "npm run build -w @rental-os/ai-native-server",
-    "lint:ai-native-server": "npm run lint -w @rental-os/ai-native-server",
     "package:rental-host": "node scripts/package-rental-host.cjs",
-    "lint:ai-native-admin": "npm run lint -w @rental-os/ai-native-admin"
+    "prepare:public-ai": "node scripts/prepare-platform-public-ai.cjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
