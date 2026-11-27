@@ -25,9 +25,9 @@
 | [对象存储提供者](../integrations/object-storage.provider.service.ts) | 原 S3/OSS/COS 签名、受控出站请求与连接探针 |
 | [S3 对象读取签名](s3-object-read-request.ts) | 原 GET 路径、请求头签名及配置/键校验，检查与知识对象读取共用；实际出站、字节边界和当前业务授权由消费者处理 |
 | [原冻结合同](../../../../platform-contracts/src/file-content-binding.ts) | 存储位置及已冻结字节指纹，原兼容入口继续消费同源合同 |
-| [Rental 附件权限](../../../../rental-core/src/file-access.ts) | 当前业务对象读取 ACL、已发布商品图、客户敏感附件以及业务引用存在性 |
+| [Rental 附件权限](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/file-access.ts) | 当前业务对象读取 ACL、已发布商品图、客户敏感附件以及业务引用存在性 |
 
-原 [FilesController](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/files/files.controller.ts) 混合公共工具及实名、承运等 Rental 专用入口，各自保留原 Guard 和业务授权。原 [员工控制器](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/files/staff-uploads.controller.ts) 再导出 [Rental员工HTTP](../../../../rental-core/src/http-staff-uploads.controller.ts)，继续校验场景、阶段、地点范围、本人上传和检查绑定；[实际接线](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/files/staff-http.providers.ts)供给同一文件/数据库及原始body解析器。原 [文件 ACL 接线](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/files/file-business-access.service.ts) 供给同一 Rental 事实仓储、报价读取和客户敏感资料参加者。
+原 [FilesController](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/files/files.controller.ts) 混合公共工具及实名、承运等 Rental 专用入口，各自保留原 Guard 和业务授权。原 [员工控制器](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/files/staff-uploads.controller.ts) 再导出 [Rental员工HTTP](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/http-staff-uploads.controller.ts)，继续校验场景、阶段、地点范围、本人上传和检查绑定；[实际接线](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/files/staff-http.providers.ts)供给同一文件/数据库及原始body解析器。原 [文件 ACL 接线](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/files/file-business-access.service.ts) 供给同一 Rental 事实仓储、报价读取和客户敏感资料参加者。
 
 ## Core 接入
 
@@ -60,7 +60,7 @@ await files.downloadUrl(tenantId, fileAssetId, owner);
 
 公共字节读取保持原八秒流超时、取消、响应类型、精确声明长度、累计字节上限及最终长度核对。取消时释放 reader 和 timer。签名、网络请求和旧测试注入点沿原提供者实现。`completeOriginalFileUpload`按原会话与文件的持久状态选择完成回读或冻结恢复，调用`freezeFileUploadContent`计算实际字节SHA-256。进入冻结内核的字节先核对原声明大小和20MB上限，包括业务参加者提供的受控字节，再在原事务记录唯一冻结目标。占用前将原文件／会话快照中的 Date 按 JSON 语义保留，有效期或日期修订变化时返回冲突。`beforeWrite`接收已确认提交的原占用快照，公共应用在同一短事务复验当前业务ACL、配置修订及文件／会话版本后发送一次PUT，恢复仅核对原目标。原知识授权及其受控字节来源在占用前复验。最终激活前仍核完整日期快照，再统一委托`activateOriginalFileUpload`，调用方供给原事务、完整版本CAS及领域复验。Rental的冻结结果沿原结果事务收口，模拟激活沿原Tenant新写入锁。专用检查、企业凭证和隐私擦除各自保持原授权及unknown收据。
 
-`s3ObjectReadRequest(config, storageKey, at)` 使用服务端实际配置生成同一 S3 GET 和请求头签名。[Rental 检查对象读取](../../../../rental-core/src/inspection-object-reader.ts)沿原文件/会话、订单空间、MIME、精确长度及冻结摘要读取，返回流前和流末复验同一持久事实与配置。[知识正文读取](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/integrations/knowledge-object-reader.ts)消费同一签名函数，知识 ACL、正文绑定和受控运输继续由原消费者维护。原[检查对象入口](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/integrations/inspection-object-reader.ts)再导出同一实现，检查媒体、员工文件与既有 AI 消费者沿原调用链使用。
+`s3ObjectReadRequest(config, storageKey, at)` 使用服务端实际配置生成同一 S3 GET 和请求头签名。[Rental 检查对象读取](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/inspection-object-reader.ts)沿原文件/会话、订单空间、MIME、精确长度及冻结摘要读取，返回流前和流末复验同一持久事实与配置。[知识正文读取](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/integrations/knowledge-object-reader.ts)消费同一签名函数，知识 ACL、正文绑定和受控运输继续由原消费者维护。原[检查对象入口](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/integrations/inspection-object-reader.ts)再导出同一实现，检查媒体、员工文件与既有 AI 消费者沿原调用链使用。
 
 `persistUploadFacts(tx, tenantId, facts, metadata)` 仅接调用方已经使用的原事务，先创建 `pending_upload` 文件，再以同一文件 ID 创建原上传会话。metadata 由原编排过滤客户端保留字段并补入可信操作者、空间、配置和专用证据，仓储保持原内容。`findUploadSession(tenantId, reference)` 只读取当前租户下指定原会话 ID 或原幂等键。
 
@@ -68,23 +68,23 @@ await files.downloadUrl(tenantId, fileAssetId, owner);
 
 `uploadOriginalFileBuffer` 将服务端已有字节送入同一原会话、派发复验和完成流程。已完成或冻结待核的会话直接进入原完成读取，运输失败沿 `failOriginalFileUpload` 写原失败收据。失败 CAS 只接仍由本次占用的 pending 会话，其他完成者已经取得的冻结结果继续按其原收据处理。知识观察的授权后快照比较共用 `assertOriginalFileUploadSnapshot`，日期版本和有效期按原JSON语义参与比较，具体主体、空间、文档修订和状态范围由知识参加者核定。
 
-知识上传的 PUT 续签由 [Rental 原续签入口](../../../../rental-core/src/file-application-runtime.ts) 沿 Tenant、配置、会话、文件的原锁顺序核对完整快照。配置读取后的授权复验先于会话和文件的末次读取，读取完成后再复验授权，事务提交后核对原有效期，再返回原临时键的引用。
+知识上传的 PUT 续签由 [Rental 原续签入口](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/file-application-runtime.ts) 沿 Tenant、配置、会话、文件的原锁顺序核对完整快照。配置读取后的授权复验先于会话和文件的末次读取，读取完成后再复验授权，事务提交后核对原有效期，再返回原临时键的引用。
 
-`readOriginalFileUploadReceipt` 保留原会话、文件、配置指纹和有效期。仅仍有效的 `pending_upload` 可以取得原暂存键的 PUT，返回前再核原业务引用、原会话、原文件及当前配置，包括Date版本和会话有效期在授权等待期间的变化。已完成、过期、失败或 `freeze_pending` 返回原回执，续签不会延长有效期或另建目标。租户共享客户资料与空间业务的区别由 Rental 原参加者判断，公共框架没有 Rental 场景枚举。普通 [Rental HTTP 入口](../../../../rental-core/src/http-files.controller.ts)的原键续签由[兼容应用](../../../../rental-core/src/file-application-runtime.ts)在回执全部读取结束后进入 `ReadCommitted` 短事务，复验当前 Auth、角色、Tenant/Core、成员分配与对象范围，按配置 → 会话 → 文件锁序核完整日期快照，沿同一租约再核当前权限，事务结束后核原有效期再返暂存 PUT。
+`readOriginalFileUploadReceipt` 保留原会话、文件、配置指纹和有效期。仅仍有效的 `pending_upload` 可以取得原暂存键的 PUT，返回前再核原业务引用、原会话、原文件及当前配置，包括Date版本和会话有效期在授权等待期间的变化。已完成、过期、失败或 `freeze_pending` 返回原回执，续签不会延长有效期或另建目标。租户共享客户资料与空间业务的区别由 Rental 原参加者判断，公共框架没有 Rental 场景枚举。普通 [Rental HTTP 入口](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/http-files.controller.ts)的原键续签由[兼容应用](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/file-application-runtime.ts)在回执全部读取结束后进入 `ReadCommitted` 短事务，复验当前 Auth、角色、Tenant/Core、成员分配与对象范围，按配置 → 会话 → 文件锁序核完整日期快照，沿同一租约再核当前权限，事务结束后核原有效期再返暂存 PUT。
 
 公共文件应用在普通或专用 `readReceipt` 读取完成后，对带 PUT 引用的结果进入原事务。先复验当前上传权威并锁定原配置，再复验同一权威、读取原会话和文件，比较包括 Date 的完整快照，事务结束后核对原有效期。纯元数据及冻结结果沿原回执读取。
 
-`FileStorageCleanup` 没有计时器或租户发现。原 Nest 宿主仍持有唯一计时器，Rental 兼容应用发现原租户集合并逐租户委托三个清理方法。[兼容应用](../../../../rental-core/src/file-application-runtime.ts)没有启动钩子或另一套定时器。原完成暂存清理在发送 DELETE 前记录 unknown，失应答及提交结果未知时只 HEAD 原键，保持完成文件与证据不变。专用保留场景由原宿主明确传入，缺少租户的调用在查询前拒绝。
+`FileStorageCleanup` 没有计时器或租户发现。原 Nest 宿主仍持有唯一计时器，Rental 兼容应用发现原租户集合并逐租户委托三个清理方法。[兼容应用](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/file-application-runtime.ts)没有启动钩子或另一套定时器。原完成暂存清理在发送 DELETE 前记录 unknown，失应答及提交结果未知时只 HEAD 原键，保持完成文件与证据不变。专用保留场景由原宿主明确传入，缺少租户的调用在查询前拒绝。
 
 三个单租户清理队列按原时间字段与id升序有界选取候选，下一轮从本轮最后一条原候选继续，短批次或队列尾部回到起点。每次仍使用调用方原limit，默认50、最大100，前排缺配置、缺原依据或处于unknown的对象继续保留原事实，后排候选在后续批次取得处理机会。候选查询失败保留先前位置，迟到的并发查询按调度版本核对后更新位置。位置只用于选择下一批，逐对象仍执行原授权、快照锁、占用CAS和原键恢复。
 
-调度位置按稳定宿主归属、租户、清理队列和专用保留场景隔离，存在宿主生命周期内。原store对象稳定的调用方直接使用默认归属。每次重建store包装或清理实例的宿主，在FileCleanupParticipants中供给同一个`schedulingScope`对象，例如原文件运行时实例。重启或独立更新重新创建宿主时从第一批开始，随后继续有界扫描，业务文件、时间、冻结依据和未知收据保持原存储事实。调度状态由WeakMap随宿主生命周期释放。[候选与存储端口](file-cleanup.ts) · [Rental清理参加者](../../../../rental-core/src/file-application-runtime.ts)
+调度位置按稳定宿主归属、租户、清理队列和专用保留场景隔离，存在宿主生命周期内。原store对象稳定的调用方直接使用默认归属。每次重建store包装或清理实例的宿主，在FileCleanupParticipants中供给同一个`schedulingScope`对象，例如原文件运行时实例。重启或独立更新重新创建宿主时从第一批开始，随后继续有界扫描，业务文件、时间、冻结依据和未知收据保持原存储事实。调度状态由WeakMap随宿主生命周期释放。[候选与存储端口](file-cleanup.ts) · [Rental清理参加者](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/file-application-runtime.ts)
 
 Rental 的清理事务通过 `createOriginalFileCleanupTransactions` 共用 Session → File 锁、完整日期快照及调用内收据。主体/Tenant/Core 授权和配置锁在文件锁前由原参加者取得。只有收到原占用事务的提交确认后，公共流程才登记本次 DELETE 或 HEAD 收据；提交失应答保留原状态，由后续调用观察原键。派发前的短事务与运输后的结果事务沿同一收据复核，worker 的存储位置指纹继续由所属参加者核定。
 
 过期未完成上传只有原 `pending_upload`、零次清理且首次占用提交已确认的调用方发送一次 DELETE。session→asset 按原锁序在同一事务内核完整版本、配置和原对象键；冲突一起回滚，事务内不请求对象存储。占用、删除或结果提交失应答，以及 TTL 后恢复或旧失败记录，均只 HEAD 原键，404 才确认删除。未知收据只保存随机标识与证据摘要，供应商错误、凭据和签名地址不落入该字段。
 
-单文件删除调用 `FileStorageCleanup.deleteFileAsset`，所属业务在同一事务复验原文件归属，将 active 文件保存为 `delete_queued`。Core 在原解绑事务中保存这个内部状态后，worker 才能办理首次删除。只有收到本次 `delete_queued → delete_in_progress` 占用提交确认的调用方发送一次 DELETE。单文件请求只处理原目标，worker 沿原租户集合处理排队文件。并发调用、重启、占用或删除失应答后只 HEAD 原键，404 才能确认删除。旧 `delete_pending` 混合了未派发和失应答来源，同样只观察原键，保留未证实结果。结果写入仍匹配原占用修订，迟到响应不能改写新的文件事实。明确在派发前缺配置或授权变化时可释放自己的占用回排队状态。DELETE 开始后，Boolean 失败或异常都保留原结果待核对。员工原只读观察将内部排队及占用状态投影为 `delete_pending`，继续返回原上传收据和恢复语义。[Rental 原删除参加者](../../../../rental-core/src/file-application-runtime.ts) · [员工上传观察](../../../../rental-core/src/file-application-staff-observation.ts)
+单文件删除调用 `FileStorageCleanup.deleteFileAsset`，所属业务在同一事务复验原文件归属，将 active 文件保存为 `delete_queued`。Core 在原解绑事务中保存这个内部状态后，worker 才能办理首次删除。只有收到本次 `delete_queued → delete_in_progress` 占用提交确认的调用方发送一次 DELETE。单文件请求只处理原目标，worker 沿原租户集合处理排队文件。并发调用、重启、占用或删除失应答后只 HEAD 原键，404 才能确认删除。旧 `delete_pending` 混合了未派发和失应答来源，同样只观察原键，保留未证实结果。结果写入仍匹配原占用修订，迟到响应不能改写新的文件事实。明确在派发前缺配置或授权变化时可释放自己的占用回排队状态。DELETE 开始后，Boolean 失败或异常都保留原结果待核对。员工原只读观察将内部排队及占用状态投影为 `delete_pending`，继续返回原上传收据和恢复语义。[Rental 原删除参加者](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/file-application-runtime.ts) · [员工上传观察](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/file-application-staff-observation.ts)
 
 `issueFileDownloadReference` 必须接实际业务 ACL 和成功审计参加者，配置/审计让出执行后继续核对原文件绑定及当前权限。模拟引用需宿主显式允许。原组合在进入公共内核前继续执行实名、知识、企业凭证及专用检查的原拒绝或专用读取规则。可公开商品图片仍经 Rental 原发布证据和当前绑定核验，公共内核没有默认公开场景。
 

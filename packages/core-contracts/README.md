@@ -17,7 +17,7 @@ npm run export:platform -- --repo . --repository https://github.com/JinPen-G/Nat
 
 `@rental-os/core-contracts/platform-source` 也提供文件集与归档接口，可用于源码发行。它只准备源码；运行环境和业务 Core 由使用者按接入说明配置。
 
-使用独立 Rental Core 源码开发时，按[开发工作区准备](../rental-core/README.md#使用与构建)组合两个固定 Git 来源。开发归档保留底座锁定的完整开发工具依赖及 Core 所需依赖，宿主运行包另按生产依赖生成；无需手工补锁或复制维护者的依赖目录。
+使用独立 Rental Core 源码开发时，按[开发工作区准备](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/README.md#使用与构建)组合两个固定 Git 来源。开发归档保留底座锁定的完整开发工具依赖及 Core 所需依赖，宿主运行包另按生产依赖生成；无需手工补锁或复制维护者的依赖目录。
 
 <a id="core-quick-start"></a>
 
@@ -139,17 +139,17 @@ schema 引用支持由局部 `const` 和单一返回表达式组成的同步纯�
 
 已解析的函数参数沿原声明定位实际成员使用。异步客户端读取 `declaration.path` 和 `declaration.method` 时，路径与方法的静态值仍可定位，`request`、`response` 子对象的解析调用保留各自字段的来源缺口。直接改写字段、传出对象、动态成员写入或访问器仍按原引用风险处理。[参数成员定位](src/repository-source.ts)
 
-`openapiSource.controllerParameters` 将列表连接到实际 Controller 参数。类型、可选标记、`defaultExpression` 和静态 `declaredDefault` 沿原声明提供，`defaultStatus` 及 `defaultIssues` 说明动态默认值。无参 `@Query()` 引用本仓可静态枚举的平面DTO时，字段名逐一对应已有正式参数，保留原类型、可选标记、校验/转换表达式与源码行号；该对应不从DTO另生成schema。DTO 的继承、泛型、构造/方法、计算或静态字段、动态Query名、默认与pipe继续标明来源缺口。品类候选 `operation` 的可选string、upgrade/restore及默认upgrade沿正式HTTP声明读取。生成器字段与Controller声明可分别核对，实际输入转换及业务限制继续由原入口执行。[公共订阅参数消费](../platform-server/src/modules/subscription/subscription-platform.controller.ts) · [Rental参数生成规则](../rental-core/src/http-openapi-contract.ts)
+`openapiSource.controllerParameters` 将列表连接到实际 Controller 参数。类型、可选标记、`defaultExpression` 和静态 `declaredDefault` 沿原声明提供，`defaultStatus` 及 `defaultIssues` 说明动态默认值。无参 `@Query()` 引用本仓可静态枚举的平面DTO时，字段名逐一对应已有正式参数，保留原类型、可选标记、校验/转换表达式与源码行号；该对应不从DTO另生成schema。DTO 的继承、泛型、构造/方法、计算或静态字段、动态Query名、默认与pipe继续标明来源缺口。品类候选 `operation` 的可选string、upgrade/restore及默认upgrade沿正式HTTP声明读取。生成器字段与Controller声明可分别核对，实际输入转换及业务限制继续由原入口执行。[公共订阅参数消费](../platform-server/src/modules/subscription/subscription-platform.controller.ts) · [Rental参数生成规则](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/http-openapi-contract.ts)
 
 Controller 参数与请求体沿路由索引的同一父类遍历连接原方法。参数条目和请求体条目的 `controller` 指向使用该方法的子 Controller，原参数的类型、默认值和装饰器保留各自出处。尚无 OpenAPI 字段声明时，参数出处保存在 `controllerSource.controllerParameters`，请求体沿 `controllerRequestBodies` 保存，`apiFieldsStatus` 为 `source-reference`，缺少响应资料的原因位于 `controllerSource.issues`。[继承方法来源](src/repository-source.ts) · [字段连接](src/repository-openapi.ts)
 
 `controllerRequestBodies` 定位原 `@Body()` 参数及其 DTO 属性、类型、默认表达式和装饰器，`fieldNamesStatus` 只说明字段名称是否能静态定位。DTO 资料保持 `source-reference`，JSON Schema 的完整性沿 `schemas` 中的 `status` / `issues` 判断。正则字面量的 `.source` 和所选静态约束读取原声明；动态构造、继承、泛型及运行转换保留缺口。未索引引用的 `mapSources` 指向实际 schema 聚合入口，`schema-map:source-reference` 表示聚合尚未展开，`schema-reference:not-indexed` 表示静态集合缺少所选引用。请求体字段资料与返回体、校验和业务运行分别核对。[请求体与引用读取](src/repository-openapi.ts)
 
-`openapiSource.errorResponses` 提供原操作表显式错误响应的状态码、说明、schema 和字段出处。字符串 schema 按状态码连接到 `schemas` 中的原定义与递归引用，内联 schema 沿原表的字段及引用读取。动态错误表、成员覆盖和缺失引用在该资料的 `status` / `issues` 中保留，请求、成功响应和生成器默认分支按各自来源核验。[原错误响应生成](../rental-core/src/http-openapi-contract.ts)
+`openapiSource.errorResponses` 提供原操作表显式错误响应的状态码、说明、schema 和字段出处。字符串 schema 按状态码连接到 `schemas` 中的原定义与递归引用，内联 schema 沿原表的字段及引用读取。动态错误表、成员覆盖和缺失引用在该资料的 `status` / `issues` 中保留，请求、成功响应和生成器默认分支按各自来源核验。[原错误响应生成](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/http-openapi-contract.ts)
 
-`openapiSource.requestOptions` 从原操作的外层展开读取正文必填、媒体类型和 multipart 编码，保留原值、字段及覆盖来源。字符串按原值读取，动态写入和无法核定所属接口的覆盖保留 `source-reference`。`requestRenderer` 定位公共和 Rental 原生成器的正文条件、缺省必填及媒体类型，最终正文沿对应生成器核对。[公共正文生成](../platform-server/src/platform-openapi.ts) · [Rental 正文生成](../rental-core/src/http-openapi-contract.ts)
+`openapiSource.requestOptions` 从原操作的外层展开读取正文必填、媒体类型和 multipart 编码，保留原值、字段及覆盖来源。字符串按原值读取，动态写入和无法核定所属接口的覆盖保留 `source-reference`。`requestRenderer` 定位公共和 Rental 原生成器的正文条件、缺省必填及媒体类型，最终正文沿对应生成器核对。[公共正文生成](../platform-server/src/platform-openapi.ts) · [Rental 正文生成](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/http-openapi-contract.ts)
 
-`openapiSource.responseOptions` 提供成功码、原始响应媒体类型、响应头、302 跳转、限流和不可用原因的原值、表达式、字段及默认出处。媒体类型和说明字符串按原值读取，嵌套 schema 引用继续沿原定义定位。省略的客户端限流选项使用原 `clientOperation` 的默认表达式，显式 false、未知覆盖和成员写入分别保留准确结果。`responseRenderer` 定位所属平台或 Rental 原渲染函数、默认表达式和按源码顺序排列的响应声明。其 `source-reference` 状态保留原响应组合与宿主转换的核对入口，独立贡献的可用性转换沿同源函数读取。[公共响应生成](../platform-server/src/platform-openapi.ts) · [Rental 独立贡献](../rental-core/src/http-openapi.ts)
+`openapiSource.responseOptions` 提供成功码、原始响应媒体类型、响应头、302 跳转、限流和不可用原因的原值、表达式、字段及默认出处。媒体类型和说明字符串按原值读取，嵌套 schema 引用继续沿原定义定位。省略的客户端限流选项使用原 `clientOperation` 的默认表达式，显式 false、未知覆盖和成员写入分别保留准确结果。`responseRenderer` 定位所属平台或 Rental 原渲染函数、默认表达式和按源码顺序排列的响应声明。其 `source-reference` 状态保留原响应组合与宿主转换的核对入口，独立贡献的可用性转换沿同源函数读取。[公共响应生成](../platform-server/src/platform-openapi.ts) · [Rental 独立贡献](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/http-openapi.ts)
 
 `apiFieldsStatus=indexed` 表示已登记字段资料可静态读取。正式接口贡献的 `details.openapi` 保留请求体、参数、响应、递归引用和 JSON Pointer，原 `x-schemaStatus`、`x-schemaGaps` 继续表达字段完整性。Controller/DTO 对照、动态资料与实际运行按各自入口核验。CLI 显示来源、状态和缺口，`--json` 保留完整资料。
 
@@ -341,9 +341,9 @@ React 的 `CoreAdminPageAction` 还可声明 `slot`。省略时使用主操作�
 
 描述、注册、路径解析和[公共React页面适配](../platform-admin/src/core/index.ts)由同一合同提供。零Core、工单及Rental宿主共用公共应用工厂、页面注册表及授权目录；左栏、面包屑行、铃铛、休息和收展由公共壳提供。没有业务工作区时，收展按钮仍可打开准确空态。Rental旧深链接通过受控兼容入口使用自身当前身份。字段类型、动态动作和表单Promise留在Core/React代码中，API和数据库继续核验当前主体与业务范围。
 
-Rental 的商品、订单、养护、会员及经营页面通过 `createRentalAdminContribution(version, contexts)` 合入同一 Core。工作台和报表由 `useOperationsContext` 提供当前会话、业务范围、客户预览与已认证的 JSON / CSV 请求，页面复用同一外壳和原按钮；无需修改底座内部。[统一贡献](../rental-core/admin/index.tsx) · [工作台三步接入与原权限](../rental-core/admin/operations/README.md#接入与旧宿主)
+Rental 的商品、订单、养护、会员及经营页面通过 `createRentalAdminContribution(version, contexts)` 合入同一 Core。工作台和报表由 `useOperationsContext` 提供当前会话、业务范围、客户预览与已认证的 JSON / CSV 请求，页面复用同一外壳和原按钮；无需修改底座内部。[统一贡献](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/admin/index.tsx) · [工作台三步接入与原权限](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/admin/operations/README.md#接入与旧宿主)
 
-Rental 的会员、渠道等页面使用独立租户绑定；订单等空间业务使用 `rental-workspace` 容器绑定。标准 [服务端贡献](../rental-core/src/server.ts) 和 [平台适配](../rental-core/src/platform-host.ts) 共用原当前账号、Core 授权、成员分配及绑定，空间业务额外核原空间成员和已保存配置。宿主供给同一数据库及真实部署观察，组合工厂本身不创建空间或开通租户。[原组合工厂](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/core-host/original-rental.ts)
+Rental 的会员、渠道等页面使用独立租户绑定；订单等空间业务使用 `rental-workspace` 容器绑定。标准 [服务端贡献](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/server.ts) 和 [平台适配](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/platform-host.ts) 共用原当前账号、Core 授权、成员分配及绑定，空间业务额外核原空间成员和已保存配置。宿主供给同一数据库及真实部署观察，组合工厂本身不创建空间或开通租户。[原组合工厂](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/core-host/original-rental.ts)
 
 ## 组合 Prisma 源码
 
@@ -361,7 +361,7 @@ Core 提供自己的 `model` / `enum`。`publicRelations` 按公共模型名列�
 
 组合函数只返回源码。宿主在自己的客户端输出目录执行原 Prisma 校验与生成，部署迁移仍从固定包和版本锁准备；既有组合库继续核原迁移账与历史恢复依据。[源码](src/prisma.ts) · [迁移准备](src/deployment.ts)
 
-Rental 已提供自己的完整业务 schema、关系贡献和 MySQL 数据计划。宿主用 `createRentalPrismaContribution` 组合源码，将 `createRentalMysqlDataPlan().publicForeignKeys` 交给公共计划，再用两份计划观察原迁移账；Core 作者无需将业务模型复制到平台 schema。[Rental三步数据接入](../rental-core/prisma/README.md)
+Rental 已提供自己的完整业务 schema、关系贡献和 MySQL 数据计划。宿主用 `createRentalPrismaContribution` 组合源码，将 `createRentalMysqlDataPlan().publicForeignKeys` 交给公共计划，再用两份计划观察原迁移账；Core 作者无需将业务模型复制到平台 schema。[Rental三步数据接入](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/prisma/README.md)
 
 ## 分别更新底座或一个 Core
 
@@ -408,7 +408,7 @@ node scripts/check-rental-legacy-migrations.cjs --sql \
 
 先构建本包，再用实际发行元数据和迁移账快照执行只读预检。
 
-底座源码发行版本取[根包](../../package.json)的 `version`；Core 实现版本取自己的正式清单，Rental 的来源是[发行身份](../rental-core/src/core-identity.ts)。源码或产物变化时使用新发行版本，合同与数据版本按各自变化维护。只更新底座时复用原 Core 包、提交和摘要；只更新一个 Core 时保留原底座与其他 Core 的固定引用，避免把未变更模块按新仓库提交重新打包。
+底座源码发行版本取[根包](../../package.json)的 `version`；Core 实现版本取自己的正式清单，Rental 的来源是[发行身份](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/core-identity.ts)。源码或产物变化时使用新发行版本，合同与数据版本按各自变化维护。只更新底座时复用原 Core 包、提交和摘要；只更新一个 Core 时保留原底座与其他 Core 的固定引用，避免把未变更模块按新仓库提交重新打包。
 
 ```sh
 node packages/core-contracts/dist/plan-update.js <当前锁JSON> <升级请求JSON> <数据观察JSON> --json

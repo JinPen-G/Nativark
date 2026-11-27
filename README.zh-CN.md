@@ -197,7 +197,7 @@ Zelo 公共底座采用宽松的 **[MIT License](LICENSE)**，**开发者对自�
 - **定位**：Zelo 首个完整行业业务 Core，作为复杂业务接入底座的全景参考实现——**它是装在底座上的一个业务包，而非底座本体**。
 - **演示能力**：覆盖摄影设备、露营装备、车辆载具与工程设备四品类租赁全链路（商品/资产/库存/计价策略/报价/订单/交付/归还/检查/结算/企业授信），支持无 AI 与选装 AI Native 两种组合，并附带租户官网、企业客户门户、客户与员工微信小程序四端消费示例。
 - **独立仓库与发行**：同步开源于 **[JinPen-G/Zelo-rental-core](https://github.com/JinPen-G/Zelo-rental-core)**，标准发行包可从 [GitHub Releases](https://github.com/JinPen-G/Zelo-rental-core/releases) 获取，直接通过底座的 GitHub Topic（`zelo-core`）发现接入。
-- **接入入口**：[Rental Core 包导读](packages/rental-core/README.md) · [Rental 独立 API 宿主](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/README.md) · [独立仓的 Rental Web 宿主](https://github.com/JinPen-G/Zelo-rental-core/blob/5cef75a1814814a4a4ccc1172de15f16dc5ff74e/workspace/apps/rental-admin/README.md)
+- **接入入口**：[Rental Core 包导读](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/README.md) · [Rental 独立 API 宿主](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/README.md) · [独立仓的 Rental Web 宿主](https://github.com/JinPen-G/Zelo-rental-core/blob/5cef75a1814814a4a4ccc1172de15f16dc5ff74e/workspace/apps/rental-admin/README.md)
 
 ### 3. Multi-Core 组合宿主（双 Core 并存示范）
 - **定位**：同时装配 **Rental Core** 与 **Example Tickets Core**，在同一套公共身份、数据库与管理后台中演示多 Core 独立授权、独立路由与缓存隔离。
@@ -363,10 +363,10 @@ Zelo/
 | 路径 | 职责说明 | 阅读入口 |
 | --- | --- | --- |
 | `packages/example-tickets-core` | 轻量工单 Core 示例包（非租赁最小参考） | [工单 Core](packages/example-tickets-core/README.md) · [API](apps/example-tickets-api/README.md) · [Web](apps/example-tickets-admin/README.md) |
-| `packages/rental-core`、`packages/rental-mcp-host` | 官方租赁业务 Core 包及显式选装的 Rental MCP 宿主 | [Rental Core](packages/rental-core/README.md) · [API](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/README.md) · [独立 Web](https://github.com/JinPen-G/Zelo-rental-core/blob/5cef75a1814814a4a4ccc1172de15f16dc5ff74e/workspace/apps/rental-admin/README.md) · [MCP 宿主](packages/rental-mcp-host/README.md) |
+| `packages/rental-core`、`packages/rental-mcp-host` | 官方租赁业务 Core 包及显式选装的 Rental MCP 宿主 | [Rental Core](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/README.md) · [API](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/README.md) · [独立 Web](https://github.com/JinPen-G/Zelo-rental-core/blob/5cef75a1814814a4a4ccc1172de15f16dc5ff74e/workspace/apps/rental-admin/README.md) · [MCP 宿主](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/workspace/packages/rental-mcp-host/README.md) |
 | 独立 Rental 的 `multi-core` 开发组合 | Rental + 工单双 Core API 和后台 | [独立组合与历史入口](https://github.com/JinPen-G/Zelo-rental-core#rental-与工单双-core-示例) |
 | 独立 Rental 的 `workspace/apps/` | 配套预约网站、企业门户、客户和员工微信小程序；以双仓 `full` 组合构建 | [四端开发与旧验证入口](https://github.com/JinPen-G/Zelo-rental-core/blob/main/README.md#源码开发工作区) |
-| `apps/api`、`apps/admin`、`packages/shared` | 原组合工程兼容入口与共享总出口（底层消费拆分后的单源包） | [API 装配](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/app.module.ts) · [Admin 规则](packages/platform-admin/AGENTS.md) · [shared 出口](packages/shared/src/index.ts) |
+| `apps/api`、`apps/admin`、`packages/shared` | 原组合工程兼容入口与共享总出口（底层消费拆分后的单源包） | [API 装配](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/app.module.ts) · [Admin 规则](packages/platform-admin/AGENTS.md) · [shared 出口](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/workspace/packages/shared/src/index.ts) |
 | [Zelo-website](https://github.com/JinPen-G/Zelo-website) | 独立维护的 Zelo 官网；底座构建不安装官网依赖 | [官网源码与许可](https://github.com/JinPen-G/Zelo-website) |
 
 > **关于兼容命名**：品牌、主仓库与独立配套仓库已统一为 Zelo 命名体系（主仓 `JinPen-G/Zelo`、官方 Rental Core 仓 `JinPen-G/Zelo-rental-core`、官网仓 `JinPen-G/Zelo-website`），GitHub Core 发现标签已切换为 **`zelo-core`**。官方底座的新发行继续用 `https://github.com/JinPen-G/Nativark` 作为稳定的 `source.repository`（clone 与浏览源码使用 Zelo 地址），历史包、部署锁和来源收据保持原值；不得修改旧包或手改锁把来源替换为新名称，具体导出和旧安装更新步骤见[更名后的稳定发行来源](packages/core-contracts/README.md#stable-release-source)。为保障既有迁移、构建及客户端兼容，workspace 包名（`@rental-os/*`）及部分环境键（`RENTAL_*`）仍保留原前缀，不影响零 Core 底座的独立导出与运行。
@@ -383,7 +383,7 @@ Zelo/
 | **定制公共后台外壳与 Core 页面组件** | 阅读 [platform-admin](packages/platform-admin/README.md)、[Core 页面开发说明](packages/platform-admin/src/core/README.md) 与 [后台规范](packages/platform-admin/AGENTS.md) |
 | **接入或定制 Core 包管理与独立升级** | 阅读 [platform-core-host](packages/platform-core-host/README.md#core-包管理接入) 与 [Core 包管理前端](packages/platform-admin/src/features/core-packages/README.md) |
 | **启用可选 AI Native 或标准 MCP** | 阅读 [ai-native-server](packages/ai-native-server/README.md)、[mcp-server](packages/mcp-server/README.md) 与 [harness-plugin](clients/harness-plugin/README.md) |
-| **参考复杂业务 Core 架构** | 阅读 [Rental Core 导读](packages/rental-core/README.md) 与 [Rental 独立宿主](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/README.md) |
+| **参考复杂业务 Core 架构** | 阅读 [Rental Core 导读](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/README.md) 与 [Rental 独立宿主](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/README.md) |
 
 ---
 

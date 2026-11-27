@@ -33,13 +33,13 @@
 | 消费者 | 职责与依赖入口 |
 | --- | --- |
 | [零 Core](../../apps/platform-admin/README.md) | 以公共浏览器会话和空页面注册表组装公共应用，保留公共管理、设置与个人入口 |
-| [独立 Rental](https://github.com/JinPen-G/Zelo-rental-core/blob/5cef75a1814814a4a4ccc1172de15f16dc5ff74e/workspace/apps/rental-admin/README.md)、[独立双 Core](https://github.com/JinPen-G/Zelo-rental-core/blob/main/workspace/apps/example-multi-core-admin/README.md) | 宿主登记所选页面。两者共用 [Rental 浏览器装配](../rental-core/admin/browser/README.md)，由已验证会话提供经营范围、原深链接和业务通知。双 Core 另登记工单贡献 |
+| [独立 Rental](https://github.com/JinPen-G/Zelo-rental-core/blob/5cef75a1814814a4a4ccc1172de15f16dc5ff74e/workspace/apps/rental-admin/README.md)、[独立双 Core](https://github.com/JinPen-G/Zelo-rental-core/blob/main/workspace/apps/example-multi-core-admin/README.md) | 宿主登记所选页面。两者共用 [Rental 浏览器装配](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/admin/browser/README.md)，由已验证会话提供经营范围、原深链接和业务通知。双 Core 另登记工单贡献 |
 | [工单](../../apps/example-tickets-admin/README.md) | 公共浏览器会话加 [工单页面贡献](../example-tickets-core/admin/index.tsx)，页面与操作使用所属 Core 的绑定、就绪和访问状态 |
 | [原管理后台](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/admin/src/app/App.tsx)、[原路由](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/admin/src/app/AppRouter.tsx) | 保留原会话、路由和业务组合，逐项转接公共组件和 Rental 页面。原 AI 工作台与平台模型配置消费 [AI 呈现包](../ai-native-admin/README.md)，Operator/Copilot 的业务接点由 Rental 宿主提供 |
 
-业务页面从 [Rental 后台导读](../rental-core/admin/README.md) 进入。统一登记订单、工单、能力、地点、商品资产、商业、治理、会员、工作台与报表、渠道、开业、支付对账十二组页面。各组导读给出业务数据、操作和权限来源。页面贡献使用公共 UI、宿主请求与查询缓存，服务端按身份、经营范围及业务权限裁定。
+业务页面从 [Rental 后台导读](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/admin/README.md) 进入。统一登记订单、工单、能力、地点、商品资产、商业、治理、会员、工作台与报表、渠道、开业、支付对账十二组页面。各组导读给出业务数据、操作和权限来源。页面贡献使用公共 UI、宿主请求与查询缓存，服务端按身份、经营范围及业务权限裁定。
 
-Rental 的租户网站、企业门户、客户小程序和员工小程序在[独立仓的 `full` 组合](https://github.com/JinPen-G/Zelo-rental-core/blob/main/README.md#源码开发工作区)装配。可复用页面、会话和业务客户端分别进入 [网站 UI](../rental-core/clients/website-ui/README.md)、[网站请求](../rental-core/clients/website/README.md)、[企业门户页面](../rental-core/clients/enterprise-portal/README.md)、[企业请求](../rental-core/clients/enterprise/README.md)、[客户原生贡献](../rental-core/clients/miniprogram/README.md)及[员工原生贡献](../rental-core/clients/staff/README.md)。Web 宿主提供构建、站点入口与会话运输，原生宿主负责原页面、设备运输及存储。服务端对应 [Rental HTTP 入口](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/README.md)。
+Rental 的租户网站、企业门户、客户小程序和员工小程序在[独立仓的 `full` 组合](https://github.com/JinPen-G/Zelo-rental-core/blob/main/README.md#源码开发工作区)装配。可复用页面、会话和业务客户端分别进入 [网站 UI](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/clients/website-ui/README.md)、[网站请求](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/clients/website/README.md)、[企业门户页面](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/clients/enterprise-portal/README.md)、[企业请求](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/clients/enterprise/README.md)、[客户原生贡献](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/clients/miniprogram/README.md)及[员工原生贡献](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/clients/staff/README.md)。Web 宿主提供构建、站点入口与会话运输，原生宿主负责原页面、设备运输及存储。服务端对应 [Rental HTTP 入口](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/README.md)。
 
 [独立 Zelo 官网](https://github.com/JinPen-G/Zelo-website)维护公开介绍和演示预约，预约提交到[公共演示申请入口](../platform-server/src/modules/demo-requests/public-demo-request.controller.ts)。登录演示使用本包的定稿副本，不安装或加载官网工程。租户商城的商品、预约和订单页面在 Rental 独立宿主。第三方组件和保留适配从 [UIArc](../ui-arc/README.md) 及本页的来源说明追溯。
 
@@ -49,7 +49,7 @@ Rental 的租户网站、企业门户、客户小程序和员工小程序在[独
 
 面板收展始终由公共外壳提供。宿主未提供业务工作区时，打开面板只显示准确空态；无 Core 也可使用收展按钮，不因此开放 Agent 任务。已提供的 Core 工作区和原 Agent/Copilot 插槽继续使用同一外壳。
 
-公共平台页面继续使用原路由和权限。宿主显式提供 `platformAiPage` 时，原平台 AI 配置页进入同一 SaaS 菜单及 Router；[组合工厂](../ai-native-admin/src/platform-application.tsx)复用宿主唯一 `AdminRuntime`，页面选择不启用模型或业务工具。Rental 的原公共页面领域文案由 [Core 文案贡献](../rental-core/admin/public-page-content.ts)提供。
+公共平台页面继续使用原路由和权限。宿主显式提供 `platformAiPage` 时，原平台 AI 配置页进入同一 SaaS 菜单及 Router；[组合工厂](../ai-native-admin/src/public-platform-application.tsx)复用宿主唯一 `AdminRuntime`，页面选择不启用模型或业务工具。Rental 的原公共页面领域文案由 [Core 文案贡献](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/admin/public-page-content.ts)提供。
 
 所选 Core 的 SaaS 管理页通过 `saasPages` 提供原路径、标题、权限和组件，经过同一 SaaS 身份守卫；这类管理页不借用租户 Core 分配或经营空间。工厂返回的 `App.navigation` 只定位真实 Router 中已登记且当前公共权限允许的页面，供原助手受控跳转；未登记、撤权或 Core 页面不会借此获得公共权限。[导航实现](src/application-navigation.tsx)
 
@@ -65,7 +65,7 @@ Rental 的租户网站、企业门户、客户小程序和员工小程序在[独
 
 无可用菜单时首页使用[导航状态提示](src/coreNavigationMessage.ts)，只有 `coreNavigationEntries(pages, context, locale)` 生成可访问侧栏入口时才提示选择 Core。当前 Core 已授权而宿主未装配其页面时提示部署管理员处理，已有登记页但没有可导航入口时提示核对页面入口与权限。租户未开通、成员未分配、部署准入不可用和 SaaS 管理提示继续分别呈现，中文与英文使用同一判断。
 
-Core 的界面词条通过可选 `messages` 传给同一应用工厂，沿原语言 Context 与公共词条合并。多个 Core 由宿主按受控顺序合并资源。Rental 组合从 `@rental-os/rental-core/admin/messages` 导入 `rentalAdminMessages`；[实际资源](../rental-core/admin/messages.ts)保留原词条及六模块合并顺序，Core 作者可以用相同接点提供自己的词条。[组合参数](src/application-context.ts)
+Core 的界面词条通过可选 `messages` 传给同一应用工厂，沿原语言 Context 与公共词条合并。多个 Core 由宿主按受控顺序合并资源。Rental 组合从 `@rental-os/rental-core/admin/messages` 导入 `rentalAdminMessages`；[实际资源](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/admin/messages.ts)保留原词条及六模块合并顺序，Core 作者可以用相同接点提供自己的词条。[组合参数](src/application-context.ts)
 
 有业务容器的宿主再提供 `getCoreContainer(coreId, pageId)`，返回当前已验证范围的 `{ type, id }`；租户范围页面可返回 `undefined`。路由每次读取当前值，变化后替换旧页面及主动作，同一个 Router 不捕获首次装配的容器。所需范围和配置就绪仍由所属 Core 的服务端贡献裁定。
 
@@ -73,11 +73,11 @@ Core 的界面词条通过可选 `messages` 传给同一应用工厂，沿原语
 
 需要经营空间选择、业务通知或详情的宿主，可向 `/application` 提供 `Shell` 组件。它接收 `PlatformShellProps` 并包装同一 `PlatformShell`，传递公共菜单、页面、退出和正文。`contextSwitcher` 供给当前已验证业务上下文的控件，`notifications` 与 `notificationDetails` 供给真实通知和详情。原空间切换仍提交服务端响应并推进同一会话的请求与缓存代次。[组合参数](src/application-context.ts) · [公共壳及插槽](src/PlatformShell.tsx)
 
-桌面或其他宿主的无 DOM 桥接可通过 `RouterBridge` 挂在同一 Router 中，覆盖登录与受保护路由。`clientAuthorizationPage` 接原客户端授权内容和固定租户权限守卫。`App.navigation.useSections()` 与 `useMenuAccess()` 返回当前已过滤的公共/Core 菜单，宿主用 `useNavigationPresentation` 沿同一业务术语重排呈现，页面准入继续读取当前权限和 Core 范围。[应用入口](src/application.tsx) · [同源菜单呈现](../rental-core/admin/browser-navigation-presentation.tsx) · [桌面宿主示范](../rental-core/admin/desktop-browser.tsx)
+桌面或其他宿主的无 DOM 桥接可通过 `RouterBridge` 挂在同一 Router 中，覆盖登录与受保护路由。`clientAuthorizationPage` 接原客户端授权内容和固定租户权限守卫。`App.navigation.useSections()` 与 `useMenuAccess()` 返回当前已过滤的公共/Core 菜单，宿主用 `useNavigationPresentation` 沿同一业务术语重排呈现，页面准入继续读取当前权限和 Core 范围。[应用入口](src/application.tsx) · [同源菜单呈现](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/admin/browser-navigation-presentation.tsx) · [桌面宿主示范](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/admin/desktop-browser.tsx)
 
 通知文案从 `/notifications` 使用 `useNotificationText`。结果声音从 `/sound` 使用 `captureSoundScope` 和 `emitSoundEvent`，沿用宿主唯一 UI Provider 的已验证身份范围、原偏好和跨标签去重。[通知文案](src/notifications.ts) · [声音出口](src/sound.ts)
 
-通知铃铛由 [HeaderNotifications](src/features/notifications/HeaderNotifications.tsx) 消费宿主的消息、读状态更新、刷新和详情投影。Rental 组合经 [业务通知适配](../rental-core/admin/browser-notifications/README.md) 读取原待办与事件，并按当前身份重新建立范围。休息计时与播放器由 [RestProvider](src/features/rest/RestProvider.tsx) 按当前租户会话挂载。声音由 [交互监听](src/features/sound/GlobalInteractionSounds.tsx) 和 [结果事件服务](src/features/sound/soundService.ts) 使用本机偏好与同一身份范围。验证入口见[原休息播放器行为](../../tests/admin-rest-player.test.cjs)和[原声音行为](../../tests/admin-sound.test.cjs)。
+通知铃铛由 [HeaderNotifications](src/features/notifications/HeaderNotifications.tsx) 消费宿主的消息、读状态更新、刷新和详情投影。Rental 组合经 [业务通知适配](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/admin/browser-notifications/README.md) 读取原待办与事件，并按当前身份重新建立范围。休息计时与播放器由 [RestProvider](src/features/rest/RestProvider.tsx) 按当前租户会话挂载。声音由 [交互监听](src/features/sound/GlobalInteractionSounds.tsx) 和 [结果事件服务](src/features/sound/soundService.ts) 使用本机偏好与同一身份范围。验证入口见[原休息播放器行为](../../tests/admin-rest-player.test.cjs)和[原声音行为](../../tests/admin-sound.test.cjs)。
 
 宿主采用服务端返回的新业务范围后，同步调用 `session.invalidateBusinessScope()`。它中止旧请求、递增会话代次、清除同一查询缓存并通知页面，保留公共登录身份和凭据。已有宿主自行供给 `AdminRuntime` 时，在原切换提交点执行等价的取消、代次、缓存及订阅通知；不要创建第二套缓存。[组合参数](src/application-context.ts) · [范围与路由](src/core/CoreRoutes.tsx) · [公共会话](src/runtime/browser-session.ts)
 
@@ -95,7 +95,7 @@ Core 的界面词条通过可选 `messages` 传给同一应用工厂，沿原语
 4. 受控组合调用正式 Core 页面注册函数，将同一注册表传给 `PlatformShell.pages` 和 `createCoreRouteElements`。公共菜单由宿主按原权限提供。
 5. 页面通过 `CorePage` 的操作声明复用原主按钮，通过 `useCoreRequest` 消费本 Core 路径和会话/页面围栏。实际例子及 Agent 模板见[五步接入手册](../core-contracts/README.md#五步快速接入)。
 
-CorePage 的 `title`、`summary` 可显示当前受权对象；`actions` 可声明图标、危险程度、等待状态和等待文案，公共按钮继续等待真实Promise并复验当前操作。`RecordDetailLayout` 接收事实、返回回调及可选Core页头，`RecordDetailStack`提供原内容间距。`KanbanBoard`只映射已经获权的数据和业务回调，宿主调用一次 `platformAdminVite()` 即带入保留看板的严格构建适配。实际接入见[Rental养护工单](../rental-core/admin/work-orders/README.md)和[工作台与经营报表](../rental-core/admin/operations/README.md)。
+CorePage 的 `title`、`summary` 可显示当前受权对象；`actions` 可声明图标、危险程度、等待状态和等待文案，公共按钮继续等待真实Promise并复验当前操作。`RecordDetailLayout` 接收事实、返回回调及可选Core页头，`RecordDetailStack`提供原内容间距。`KanbanBoard`只映射已经获权的数据和业务回调，宿主调用一次 `platformAdminVite()` 即带入保留看板的严格构建适配。实际接入见[Rental养护工单](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/admin/work-orders/README.md)和[工作台与经营报表](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/admin/operations/README.md)。
 
 多分区配置页从 `/shell` 复用 `SettingsGroups` 和 `WorkspacePageActions`，由当前页声明配置分组及主操作；内容、保存请求和权限由 Core 提供。治理类页面直接使用 `/ui` 的原导航、日历、通知、安全及团队图标出口，复用同一主题与几何。[外壳出口](src/shell.ts) · [UI 出口](src/components/ui/index.ts)
 

@@ -21,7 +21,7 @@
 
 场景中的 `orderExplainTool` 字段作为历史摘要输入保留。实际工具名、输入及业务结果由注册参加者校验。
 
-Rental 使用[原 C03 facade](../../../ai-native-server/src/runtime/public-ai-gateway.service.ts)和[原统一入口](../../../ai-native-server/src/runtime/unified-ai-gateway.service.ts)注册[严格工具参加者](../../../ai-native-server/src/runtime/gateway-tool-policy.ts)。[私有运输转接](../../../ai-native-server/src/runtime/routed-model-transport.ts)提供原 BYOK 配置与 Task 事务见证，原预算参加者沿[账务适配](../../../ai-native-server/src/runtime/budget/budget-gateway-adapter.ts)接入。
+Rental 使用[原 C03 facade](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/workspace/packages/ai-native-server/src/runtime/public-ai-gateway.service.ts)和[原统一入口](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/workspace/packages/ai-native-server/src/runtime/unified-ai-gateway.service.ts)注册[严格工具参加者](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/workspace/packages/ai-native-server/src/runtime/gateway-tool-policy.ts)。[私有运输转接](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/workspace/packages/ai-native-server/src/runtime/routed-model-transport.ts)提供原 BYOK 配置与 Task 事务见证，原预算参加者沿[账务适配](../../../ai-native-server/src/runtime/budget/budget-gateway-adapter.ts)接入。
 
 ## 公共合同与验证
 

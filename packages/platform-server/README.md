@@ -39,7 +39,7 @@
 | 接口资料与响应 | [OpenAPI](src/platform-openapi.ts)、[响应信封](src/common/request-id.interceptor.ts)；同一公共政策生成接口资料，信封保持 `data` / `requestId` |
 | 直接消费者 | [默认 API 装配](../../apps/platform-api/src/app.module.ts)与[公共数据库](../../apps/platform-api/src/database.ts)、[默认 Web 装配](../../apps/platform-admin/src/App.tsx)与[公共页面工厂](../platform-admin/src/application.tsx)。[原 API 服务装配](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/application-services.module.ts)供给原数据库及公共应用实例，[Rental 认证适配](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/auth/README.md)解析原业务范围 |
 
-默认公共根模块挂载认证、公共管理、外观、订阅、集成、官方日历、工具与消息应用。文件业务 HTTP、通知台账和作业台账由所选宿主分别登记实际应用，打印还需要真实业务参加者。Rental 组合通过[平台选择器](../rental-core/src/application-platform.ts)复用同一服务实例，原组合从[服务模块](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/application-services.module.ts)供给原数据库与业务参加者。[通知模块](src/modules/notifications/notifications-http.module.ts) · [作业模块](src/modules/jobs/jobs-http.module.ts) · [文件业务 HTTP](../rental-core/src/http-files.controller.ts)
+默认公共根模块挂载认证、公共管理、外观、订阅、集成、官方日历、工具与消息应用。文件业务 HTTP、通知台账和作业台账由所选宿主分别登记实际应用，打印还需要真实业务参加者。Rental 组合通过[平台选择器](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/application-platform.ts)复用同一服务实例，原组合从[服务模块](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/application-services.module.ts)供给原数据库与业务参加者。[通知模块](src/modules/notifications/notifications-http.module.ts) · [作业模块](src/modules/jobs/jobs-http.module.ts) · [文件业务 HTTP](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/http-files.controller.ts)
 
 公共 HTTP 清单、访问类别、权限和文档来自同一份政策。构建后执行 `npm run api:document:platform` 输出同版本 OpenAPI JSON；此命令不启动服务、不读环境文件或数据库。HTTP 文档也由宿主在 `/api/openapi.json` 提供。接口存在不代表 Core 工具已发布或当前主体有业务权限。
 
@@ -84,7 +84,7 @@ const platform = PlatformServerModule.register({
 
 `readPublicSubscriptionTerm(transaction, tenantId)` 在调用方原事务读取当前统一期限和已到生效点的排期，不物化排期、不新建订阅。明确到期拒绝新业务；历史未登记状态保持原“待确认”的兼容，不因此视为永久或批量停业。公共订阅办理消费相同状态/周年算法，金额、收费和已发布功能规则沿原 SUB 规则裁定。此入口不赋予Core使用权或绕过冻结。
 
-短信适配和业务服务从 `@rental-os/platform-server/notification-delivery` 共用结果类型与 `NotificationDeliveryUnknownError`。请求已离开服务而结果未明时，调用方保持原操作/投递记录，查询原回执；错误类型不允许换键重发或证明回滚。[原Provider消费者](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/integrations/tenant-integration.runtime.service.ts) · [Rental消费者](../rental-core/src/business-runtime-ports.ts)
+短信适配和业务服务从 `@rental-os/platform-server/notification-delivery` 共用结果类型与 `NotificationDeliveryUnknownError`。请求已离开服务而结果未明时，调用方保持原操作/投递记录，查询原回执；错误类型不允许换键重发或证明回滚。[原Provider消费者](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/integrations/tenant-integration.runtime.service.ts) · [Rental消费者](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/business-runtime-ports.ts)
 
 构建使用本包 `build`，类型使用本包 `lint`。已有 [登录保护](../../tests/auth-login-lockout.test.cjs)、[外观](../../tests/admin-appearance-settings.test.cjs) 和 [MCP 原审计](../../tests/mcp-original-audit.test.cjs) 保留；命令先核读写及隔离要求。[验证规则](../../AGENTS.md#修改验证与交付)
 

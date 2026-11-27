@@ -1,6 +1,6 @@
 # 公共持久限流
 
-[计数内核](mysql-rate-limit.ts) 从原 [Rental限流服务](../../../../rental-core/src/mysql-client-rate-limit.ts) 复用哈希、可信地址、窗口和原子计数 SQL。[窄存储端口](rate-limit.store.ts) 仅要求同一真实数据库的事务、executeRaw 和 queryRaw，使用官方参数化 SQL，无需加载默认生成 Client。
+[计数内核](mysql-rate-limit.ts) 从原 [Rental限流服务](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/mysql-client-rate-limit.ts) 复用哈希、可信地址、窗口和原子计数 SQL。[窄存储端口](rate-limit.store.ts) 仅要求同一真实数据库的事务、executeRaw 和 queryRaw，使用官方参数化 SQL，无需加载默认生成 Client。
 
 ## 桶和事务
 
@@ -14,7 +14,7 @@ consumeRateLimitBucket 保持 client-api、原 rule.code 与原 identity 的 SHA
 
 [模块出口](index.ts) 由正式 @rental-os/platform-server/public-rate-limit 映射。宿主提供已核同库的 SqlRateLimitStore。consumeRateLimitBucket新增第六个可选源码参数SqlRateLimitTable，默认CLIENT_API_RATE_LIMIT_TABLE，允许的另一个值是PLATFORM_API_RATE_LIMIT_TABLE。内核仅引用本模块两个静态官方raw标识符片段，未知值在事务前拒绝。公共演示预约使用同源 WEBSITE_DEMO_REQUEST_RATE_LIMIT_RULE、clientAddress 与 consumeRateLimitBucket，identity 保持 ip:可信地址，按返回 count 大于5拒绝。
 
-[公共演示预约 Controller](../demo-requests/public-demo-request.controller.ts) 的 DEMO_REQUEST_RATE_LIMIT 由[公共装配](../../platform-server.module.ts)供给。默认装配构造同库DemoRequestRateLimitService，使用公共表。[完整Rental装配](../../../../rental-core/src/application-platform.ts)供给原application.client.rateLimit，routesToPlatform按[公共政策](../../platform-http-policy.ts)选择公共Guard，Controller计数一次并使用原旧桶。原组合宿主沿[原Guard](../../../../rental-core/src/http-auth.ts)计数一次，旧Controller转接创建。
+[公共演示预约 Controller](../demo-requests/public-demo-request.controller.ts) 的 DEMO_REQUEST_RATE_LIMIT 由[公共装配](../../platform-server.module.ts)供给。默认装配构造同库DemoRequestRateLimitService，使用公共表。[完整Rental装配](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/application-platform.ts)供给原application.client.rateLimit，routesToPlatform按[公共政策](../../platform-http-policy.ts)选择公共Guard，Controller计数一次并使用原旧桶。原组合宿主沿[原Guard](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/http-auth.ts)计数一次，旧Controller转接创建。
 
 数据归属采用两个独立物理表。[公共schema](../../../../../apps/platform-api/prisma/schema.prisma) 的 PlatformApiRateBucket 映射 platform_api_rate_buckets，由[公共持久桶迁移](../../../../../apps/platform-api/prisma/migrations/20261123000000_public_rate_limit/migration.sql) 和[公共数据声明](../../../../../apps/platform-api/src/platform-data.ts)维护。零Core或工单宿主使用公共表，原Rental的ClientApiRateBucket/client_api_rate_buckets、原计数和迁移在原数据域保留。
 

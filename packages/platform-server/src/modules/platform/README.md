@@ -28,7 +28,7 @@
 
 角色权限按已登记的 `Permission.kind` 分类，按钮码无需含 `:button:`。列表将 `BUTTON` 仅列入 `buttonPermissions`，普通权限列入 `permissions`；两种保存入口从同一登记类型生成按钮投影，显式按钮字段不能提交操作或菜单权限。原历史权限码仍由宿主的固定兼容映射解释，当前成员的 Core 分配另行校验。[类型及保存](platform-management.repository.ts) · [登记存储](platform-management.store.ts)
 
-原组合宿主提供固定的 [Rental 兼容适配](../../../../../packages/rental-core/src/public-management-compatibility.ts)，在同一公共事务补充租户品类、能力、空间和订单汇总，解释原四个历史权限码及按钮，并核对角色空间引用和目标账号的活跃空间管理员身份。公共默认宿主直接读取公共表和已登记权限。
+原组合宿主提供固定的 [Rental 兼容适配](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/public-management-compatibility.ts)，在同一公共事务补充租户品类、能力、空间和订单汇总，解释原四个历史权限码及按钮，并核对角色空间引用和目标账号的活跃空间管理员身份。公共默认宿主直接读取公共表和已登记权限。
 
 原组合的合法自身状态、密码和角色撤权在具体写入前复验。当前主体、会话、租户和角色行锁保持到提交，预期失权后的响应使用原事务结果。该接点由服务端固定适配选择；公共默认本人保护及其余管理操作的返回前复验沿现有服务执行。[提交点](platform-management.service.ts) · [角色和人员写入](platform-management.repository.ts)
 
@@ -44,7 +44,7 @@
 
 `PlatformManagementService` 的构造依赖为 `PLATFORM_AUTH_DATA_STORE`，类型为 `PlatformManagementDatabase`。宿主使用原 Prisma 实例供给该 token，并将同一服务实例注入原业务适配。内部仓储与主体围栏由该服务创建。[数据库 token](platform-auth-data-store.ts) · [公共模块装配](../../platform-server.module.ts)
 
-所选 Core 可通过 `PlatformApplicationBindings.tenantSummaryProjection` 为 SaaS 租户列表和详情补充原数量列。公共模块将此参加者注入 `PLATFORM_TENANT_SUMMARY_PROJECTION`，读取使用同一管理事务并在返回前复验 SaaS 权限。`workspaceCount` 和 `orderCount` 是可选兼容字段，Core 从实际数据供给，未提供时省略。Rental 使用原经营空间与订单数量，保留公共租户字段及其他 Core 的开通状态。[投影端口](platform-management.store.ts) · [Rental 统计](../../../../../packages/rental-core/src/public-management-compatibility.ts) · [同一宿主组合](../../../../../packages/rental-core/src/application-platform.ts)
+所选 Core 可通过 `PlatformApplicationBindings.tenantSummaryProjection` 为 SaaS 租户列表和详情补充原数量列。公共模块将此参加者注入 `PLATFORM_TENANT_SUMMARY_PROJECTION`，读取使用同一管理事务并在返回前复验 SaaS 权限。`workspaceCount` 和 `orderCount` 是可选兼容字段，Core 从实际数据供给，未提供时省略。Rental 使用原经营空间与订单数量，保留公共租户字段及其他 Core 的开通状态。[投影端口](platform-management.store.ts) · [Rental 统计](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/public-management-compatibility.ts) · [同一宿主组合](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/application-platform.ts)
 
 | 原方法 | 公共接点 |
 | --- | --- |

@@ -16,7 +16,7 @@
 
 公共匿名 Controller 必须取得 DEMO_REQUEST_RATE_LIMIT，其 assertAllowed 使用真实原子桶，按可信 request.ip 执行原 5 次 / 600 秒规则。缺参加者拒绝，限流异常在创建前传播。原组合宿主的 Guard 已执行这一次限流，因此 [旧匿名 Controller](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/modules/demo-requests/public-demo-request.controller.ts) 保留 Guard 前置路径，只转接公共创建。公共 Controller 使用自身限流路径，宿主须按所注册 Controller 明确唯一扣额处。
 
-默认公共模块构造 [DemoRequestRateLimitService](../public-rate-limit/demo-request-rate-limit.ts)，使用公共 PlatformApiRateBucket。公共数据版本0.1.9增加[独立限流表迁移](../../../../../apps/platform-api/prisma/migrations/20261123000000_public_rate_limit/migration.sql)，部署仍须应用同版迁移。完整 Rental 宿主通过 [PlatformApplicationBindings.demoRequestRateLimit](../../platform-server.module.ts)提供原 [ClientApiRateLimitService](../../../../rental-core/src/mysql-client-rate-limit.ts)，沿旧表、旧桶及原清理生命周期。其[公共路径分流](../../../../rental-core/src/application-platform.ts)使该请求走公共 Guard，再由 Controller 扣额一次；原组合继续由原 Guard 扣额、旧 Controller 只创建。公共新表不重复创建或清空 Rental 旧表。
+默认公共模块构造 [DemoRequestRateLimitService](../public-rate-limit/demo-request-rate-limit.ts)，使用公共 PlatformApiRateBucket。公共数据版本0.1.9增加[独立限流表迁移](../../../../../apps/platform-api/prisma/migrations/20261123000000_public_rate_limit/migration.sql)，部署仍须应用同版迁移。完整 Rental 宿主通过 [PlatformApplicationBindings.demoRequestRateLimit](../../platform-server.module.ts)提供原 [ClientApiRateLimitService](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/mysql-client-rate-limit.ts)，沿旧表、旧桶及原清理生命周期。其[公共路径分流](https://github.com/JinPen-G/Zelo-rental-core/blob/78edf34dea4ca7ee7d20abe318f6f9696413beb2/src/application-platform.ts)使该请求走公共 Guard，再由 Controller 扣额一次；原组合继续由原 Guard 扣额、旧 Controller 只创建。公共新表不重复创建或清空 Rental 旧表。
 
 ## 消费和验证
 
