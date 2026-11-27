@@ -1,6 +1,6 @@
 # Rental 组合留存与发布复核
 
-存量 `nativark-demo` 使用已部署的 API 和 Web 镜像。[小时更新器](hourly-update.py) 保留原 cron 和排他锁。正常运行核对两个服务和现有健康地址，并保留原 `pending-migration.json`、`active.json` 和镜像。`--check` 遇到回退日志时报告 `recovery-needed`。`--apply` 仅在已有 `rollback.json` 时恢复其中的旧镜像。恢复前先核本机镜像 ID，两个服务启动及健康通过后才清掉回退日志。MySQL 和卷不参与回退。
+存量 `nativark-demo` 使用已部署的 API 和 Web 镜像。[小时更新器](hourly-update.py) 沿原 cron 和排他锁检查现有健康地址，并发现官方 Zelo `main` 成功的正式配对运行。`--check` 核收候选并报告门禁状态，`--apply` 在本机授权有效、原数据材料完全相同且现场基线核同后成对切换。已有 `rollback.json` 优先进入原恢复入口，健康通过后才清除日志。数据库恢复由获批维护流程执行。
 
 [历史复建 CI](../../../.github/workflows/nativark-release.yml) 按固定历史 Git 提交使用该版本自己的 Dockerfile、锁及迁移材料。新发布使用下文同一次正式双仓 CI 的配对证据。服务器上已经安装的旧脚本仍须在维护窗口按来源及 SHA-256 核准同步，公共主线提交不会自动替换它。
 
@@ -9,6 +9,52 @@
 旧 `apply-column-comments.cjs`（含 dry-run/repair 参数）和 `seed-demo-tenant.cjs` 也在环境、Prisma 及业务 HTTP/DB 访问前返回同一提示、退出 1；根 `db:comments*` 和 `db:seed:demo` 可以继续指向这些脚本。两者原本均为自执行 CLI，没有库出口；误用 `require`/`import` 时抛出同一迁址错误，不执行原正文或终止调用方进程。
 
 主仓库为 `JinPen-G/Zelo`，部署根为 `/home/ritiadm/zelo`。安装时保留 `nativark-demo` 项目、原镜像标签和 `# Nativark hourly update managed images` override 识别标记。已有 Compose 文件、证书、上传数据和私有媒体继续由现场维护。
+
+## 小时双仓候选与本机授权
+
+发现来源固定为仓库 ID `1332293015`、工作流 ID `431931928`、`.github/workflows/rental-release-candidate.yml`，要求同仓 `main` 的 `workflow_dispatch` 运行成功。每次读取最新成功候选的当前尝试次数，按同次产物名及 GitHub ZIP 摘要下载 `rental-image-input` 与 `rental-image-pair`。原 API 宿主、Web 文件、两锁、构建证明、双 SHA、稳定 Release、Tag 解引用及两份公开原资产均须核同。缺失或过期产物会阻断当次更新。
+
+服务器先在 `.hourly-update/verifier/scripts/ops/` 安装固定 `f3bfce5800ea971af6148e843f1e63437d5fa94a` 的 `release-verify.cjs`、`release-composition.cjs`、`release-build-evidence.cjs` 三份 Git 原字节。脚本按内置 SHA-256 核对这组工具，使用既有 `/opt/preview/node-v24.13.0-linux-x64/bin/node`，沿原 `paired-review` 读取材料。核验器升级与更新器安装一同审阅。GitHub Actions 下载需要可用的只读访问能力，可在受信调度环境提供 `GH_TOKEN` 或 `GITHUB_TOKEN`，凭据保持私有。下载转向存储域名时移除认证头。
+
+首次双仓部署核收后，运维在 `.hourly-update/prepared/<运行号>-<尝试号>/` 保留该次 `input` 目录的原内容与同次 `image-pair.json`。`api/` 是迁移比较基线。再登记 `.hourly-update/paired-active.json`，字段如下，摘要、镜像和批准记录均取实际核收结果。
+
+```json
+{
+  "format": "zelo-paired-active-1",
+  "directory": "/home/ritiadm/zelo/.hourly-update/prepared/<运行号>-<尝试号>/api",
+  "contextSha256": "<原宿主收据摘要>",
+  "identitySha256": "<原候选身份摘要>",
+  "imagePairSha256": "<同次image-pair.json原字节摘要>",
+  "imageIds": {"api": "sha256:<实际API镜像ID>", "web": "sha256:<实际Web镜像ID>"},
+  "versions": {"platform": "<实际稳定版本>", "rental": "<实际稳定版本>"},
+  "runId": 0,
+  "runAttempt": 0,
+  "runtimeConfigurationSha256": "<当前Compose展开配置去掉两个image字段后的摘要>",
+  "dataApprovalReference": "<实际迁移账核收与适用旧库桥接批准记录>"
+}
+```
+
+上例为字段说明。运行号、版本和摘要须填写真实值。配置摘要由已核更新器的 `runtime_configuration()` 在服务器显式启用 `app` profile 后读取，确认包含 API/Web，再返回摘要。它绑定实际环境、启动命令、挂载、网络和服务配置。现有 Compose 配置为 API/Web 指定 `command` 或 `entrypoint` 时，候选进入 `awaiting-runtime-binding-review`，由维护窗口核收发行挂载及其适用版本。自动切换适用于沿正式镜像默认启动的组合。
+
+每小时无数据变化更新还需要 `.hourly-update/paired-authorization.json`。该文件由获得发布授权的运维写入，更新器只读取，CI 产物不能提供或改写它。
+
+```json
+{
+  "format": "zelo-paired-authorization-1",
+  "scope": "official-pair-no-data-change",
+  "approvalReference": "<负责人实际批准本配置范围内自动更新的记录>",
+  "runtimeConfigurationSha256": "<与已核运行基线相同的配置摘要>",
+  "validUntil": "<带时区的授权截止时间>"
+}
+```
+
+两份本机记录必须归当前运维用户所有，权限为 `0600`，路径为普通文件。首次旧库桥接与迁移账尚未核收时保留 `legacy-combined` 状态，由原门禁返回 `awaiting-migration-bridge`。数据、原 SQL、schema、能力或顺序变化返回迁移待批准；原 `pending-migration.json` 存在时也暂停切换。授权缺失或过期返回发布待批准。正式构建回执中的 `releaseApproved` 和 `serverUpdateEligible` 持续保留原 `false`，本机授权单独校验。
+
+候选通过后先核同组镜像归档并加载，使用原 `--observe-pair` 核实际双镜像。切换前再核原镜像、Compose 配置、有效授权及同次 CI。版本分别比较，任何一仓降级或同版替换都进入保持状态。成对切换使用单独的 `compose.pair-images.yml` 叠加镜像选择，原 `compose.override.yml` 中的显式旧库 command 和挂载继续参与运行。人工调用 Compose 时也须按相同顺序包含这两个 override。
+
+更新前写入两镜像回退标签和原基线日志，失败或进程中断后沿原 `restore()` 恢复两角色和基线。该路径限定无数据变化更新，旧账迁移与数据恢复继续由维护流程处理。成功采用的原输入材料保留供下次比较和回退，下载 ZIP 与一次性解包目录在退出时清理。相同候选和本机条件的 pending 会复用紧凑结果，每小时仍核线上健康及官方运行状态。
+
+安装此源码前需要核收上述工具、真实基线和本机授权。现有仅执行 `holding-current-pair` 的脚本提供小时健康巡检，自动发现和升级须以新入口实际安装及门禁结果分别核定。
 
 ## 独立 Rental 发布材料离线校验
 
