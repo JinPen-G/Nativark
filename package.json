@@ -27,7 +27,7 @@
     "test:demo-requests": "npm run build -w @rental-os/platform-server && node --test tests/demo-requests.test.cjs",
     "test:demo-requests:legacy": "node --test tests/demo-requests-legacy.test.cjs",
     "test:demo-requests-db": "node scripts/ops/legacy-checkout.cjs",
-    "test:integrations-security": "node scripts/ops/legacy-checkout.cjs",
+    "test:integrations-security": "npm run build -w @rental-os/platform-server && node tests/integrations-security.test.cjs",
     "test:oss-v4": "npm run build -w @rental-os/platform-server && node tests/aliyun-oss-v4.test.cjs",
     "test:integration-connectivity": "node scripts/ops/legacy-checkout.cjs",
     "test:sms-notification": "npm run build -w @rental-os/platform-server && node tests/tenant-sms-notification.test.cjs",
@@ -107,7 +107,8 @@
     "build:example-tickets-admin": "npm run build -w @rental-os/example-tickets-admin",
     "dev:example-tickets-admin": "npm run dev -w @rental-os/example-tickets-admin",
     "package:rental-host": "node scripts/package-rental-host.cjs",
-    "prepare:public-ai": "node scripts/prepare-platform-public-ai.cjs"
+    "prepare:public-ai": "node scripts/prepare-platform-public-ai.cjs",
+    "test:tenant-admin-privilege-write": "npm run build -w @rental-os/platform-server && node tests/tenant-admin-privilege-write.test.cjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
