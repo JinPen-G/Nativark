@@ -1,14 +1,13 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 const h = require('./fixtures/ai-native/knowledge-service.cjs');
-const { dbFactory } = require('./fixtures/ai-native/knowledge-persistent-content.cjs');
 test.after(() => assert.deepEqual(h.attempts, []));
 
 test('server human consent persists a bound confirmation consumed by existing memory lifecycle', async () => {
   const { PersistentMemoryConsentService } = h.load('persistent-memory-consent.service');
   const { PrismaStructuredMemoryRepository } = h.load('prisma-memory.repository');
   const { StructuredMemoryService } = h.load('structured-memory.service');
-  const db = dbFactory(), f = h.harness(), ctx = h.context();
+  const f = h.harness(), db = f.db, ctx = h.context();
   const repo = new PrismaStructuredMemoryRepository(db, () => new Date(h.now));
   const user = { id: 'user-1', tenantId: 'tenant-1', isActive: true, isSaasAdmin: false, permissions: ['synthetic-memory-policy'], dataScope: 'all', locationScope: { mode: 'all', locationIds: [] } };
   let active = true;
@@ -35,7 +34,7 @@ test('server human consent persists a bound confirmation consumed by existing me
 test('human facade reads, modifies and deletes through current identity without caller scope', async () => {
   const { PersistentMemoryConsentService } = h.load('persistent-memory-consent.service');
   const { HumanMemoryModule } = h.load('human-memory.module');
-  const db = dbFactory(), f = h.harness();
+  const f = h.harness(), db = f.db;
   let active = true;
   const user = { id: 'user-1', tenantId: 'tenant-1', isActive: true, isSaasAdmin: false, permissions: ['synthetic-memory-policy'], dataScope: 'all', locationScope: { mode: 'all', locationIds: [] } };
   const ports = { db, authorization: f.authorization, clock: f.clock,

@@ -4,7 +4,8 @@ const test = require('node:test'), assert = require('node:assert/strict');
 const h = require('./fixtures/ai-native/knowledge-service.cjs');
 const { KnowledgeModule } = h.load('knowledge.module');
 const { validatorsFor } = require('./fixtures/ai-native/contract-consumer.cjs');
-const { AI_NATIVE_COMPONENT_SCHEMAS } = require('../apps/api/src/contracts/ai-native-schemas');
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { AI_NATIVE_COMPONENT_SCHEMAS } = load('@rental-os/ai-native-server/runtime/contracts/ai-native-schemas');
 const validators = validatorsFor(h.shared.AI_GATEWAY_DRAFT_SCHEMAS, AI_NATIVE_COMPONENT_SCHEMAS);
 const resultBase = intent => ({ draftVersion: h.shared.AI_GATEWAY_DRAFT_VERSION, requestId: intent.requestId, evidence: 'mock',
   actual: { configId: 'synthetic-config', configRevision: 1, credentialRef: 'synthetic-ref', protocol: 'synthetic', provider: 'synthetic', model: 'synthetic', tenantId: 'tenant-1', serviceMode: 'platform_managed', configurationScope: { kind: 'platform' } },
@@ -15,7 +16,7 @@ function fixture() {
   f.invocations = []; f.indexCalls = [];
   f.result = intent => ({ ...resultBase(intent), status: 'completed', text: 'Synthetic answer.', toolRequests: [] });
   f.gateway = { invoke: async (ctx, intent) => { assert.equal(validators.AiGatewayIntentDraft(intent), true, JSON.stringify(validators.AiGatewayIntentDraft.errors)); f.invocations.push(h.clone({ ctx, intent })); return f.result(intent); }, stream: async function* () { throw new Error('not used'); } };
-  f.modulePorts = { documents: f.ports, content: f.content, selection: f.selection, search: f.search,
+  f.modulePorts = { documents: f.ports, retention: f.retention, content: f.content, selection: f.selection, search: f.search,
     index: { apply: async input => { f.indexCalls.push(h.clone(input)); if (f.indexFailure) throw new Error('offline index failure'); } },
     memory: f.memoryPorts, gateway: f.gateway, cache: { maxEntries: 10, maxBytes: 65536, ttlMs: 1000 }, policy: { sceneCode: 'knowledge_answer', maxOutputTokens: 256 } };
   const definition = KnowledgeModule.register(f.modulePorts);

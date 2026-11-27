@@ -29,11 +29,15 @@ test('CAS prevents simultaneous versions; historical versions remain immutable a
   assert.deepEqual([...f.repo.versions.values()][0], original);
   await assert.rejects(f.documents.newVersion(ctx, 4, h.draft({ operationId: 'reuse-v1' })), { code: 'conflict' });
 });
-test('published -> withdrawn -> deleted tombstone retains audit and old chunks', async () => {
+test('published -> withdrawn -> deleted tombstone erases body while retaining original versions and receipts', async () => {
   const f = h.harness(), ctx = h.context(); await h.published(f);
   assert.equal((await f.publication.withdraw(ctx, mutation(4, 'withdraw'))).document.publication, 'withdrawn');
+  const versions = h.clone([...f.repo.versions.values()]), receipts = h.clone([...f.repo.receipts.values()]);
   assert.equal((await f.publication.delete(ctx, mutation(5, 'delete'))).document.publication, 'deleted');
-  assert.equal(f.repo.chunks.size, 1); assert.ok(f.repo.receipts.size >= 5);
+  assert.equal(f.repo.chunks.size, 0); assert.ok(f.repo.receipts.size >= 5);
+  assert.deepEqual([...f.repo.versions.values()], versions);
+  assert.deepEqual([...f.repo.receipts.values()].filter(row => receipts.some(original => original.id === row.id)), receipts);
+  assert.equal([...f.db.state.erasures.values()][0].state, 'erased');
   await assert.rejects(f.publication.publish(ctx, mutation(6, 'revive')), { code: 'conflict' });
   await assert.rejects(f.documents.newVersion(ctx, 6, h.draft({ documentVersion: 'v2', operationId: 'revive-v2' })), { code: 'conflict' });
 });
@@ -50,10 +54,19 @@ test('parse failure is safe evidence, no raw exception; explicit new operation r
   f.parseError = null;
   assert.equal((await f.documents.parseDocument(ctx, mutation(3, 'retry'))).document.parsing, 'parsed');
 });
-test('late parser cannot resurrect a tombstone or overwrite new version', async () => {
+test('pending parser fences deletion and version replacement; its settled receipt cannot resurrect a tombstone', async () => {
   const f = h.harness(), ctx = h.context(); await f.documents.create(ctx, h.draft());
-  f.files.read = async () => { await f.publication.delete(ctx, mutation(2, 'delete-during-parse')); return { mediaType: 'text/plain', bytes: Buffer.from('late') }; };
-  await assert.rejects(f.documents.parseDocument(ctx, mutation(1, 'parse')), { code: 'conflict' });
+  f.files.read = async () => {
+    const before = h.clone(f.db.state);
+    await assert.rejects(f.publication.delete(ctx, mutation(2, 'delete-during-parse')), { code: 'result_unknown' });
+    await assert.rejects(f.documents.newVersion(ctx, 2, h.draft({ documentVersion: 'v2', attachmentId: 'file-v2', operationId: 'replace-during-parse' })), { code: 'result_unknown' });
+    assert.deepEqual(f.db.state, before);
+    return { mediaType: 'text/plain', bytes: Buffer.from('late') };
+  };
+  const settled = await f.documents.parseDocument(ctx, mutation(1, 'parse'));
+  assert.equal(settled.document.parsing, 'parsed');
+  await f.publication.delete(ctx, mutation(settled.revision, 'delete-after-parse'));
+  assert.equal((await f.documents.parseDocument(ctx, mutation(1, 'parse'))).document.publication, 'deleted');
   assert.equal((await f.documents.read(ctx, 'doc-1')).document.publication, 'deleted'); assert.equal(f.repo.chunks.size, 0);
 });
 test('input cannot supply URL, path, credentials, public flag, scope or owner', async () => {

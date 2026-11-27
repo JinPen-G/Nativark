@@ -59,24 +59,104 @@ class MemoryRepository {
   }
   seed(record, chunks) { this.heads.set(key(record.document.scope, record.document.documentId), clone(record)); if (chunks) this.chunks.set(key(record.document.scope, record.document.documentId, record.document.documentVersion), clone(chunks)); }
 }
+
+// The original workspace lifecycle now deletes through its real relational
+// repository and source-retention participant. Only SQL execution is finite.
+function retainedRepository(h) {
+  const { dbFactory } = require('./knowledge-persistent-content.cjs');
+  const { createTaskInputStore } = require('./task-input-store.cjs');
+  const { PrismaKnowledgeRepository } = load('prisma-knowledge.repository');
+  const { createPrismaKnowledgeRetention } = load('prisma-knowledge-retention');
+  const { aiPersistenceScopeColumns } = loader.load(loader.resolveSource(from,
+    '@rental-os/ai-native-server/runtime/persistence-scope', true));
+  const source = createTaskInputStore({
+    aiScope: [{ id: 'knowledge-scope', ...aiPersistenceScopeColumns(scope) }],
+    aiTask: [], aiStep: [], aiRun: [], aiApprovalConsumption: [], aiTaskExecutionCharge: [],
+    aiBudgetReservation: [], aiInvocationAdmission: [], aiUsageReservation: [], aiGatewayInvocation: [], aiTaskActionInput: [],
+  });
+  const db = dbFactory();
+  for (const name of Object.keys(source.state)) {
+    if (db[name] === undefined) db[name] = source.db[name];
+  }
+  db.$queryRaw = (...args) => source.db.$queryRaw(...args);
+  db.aiKnowledgeChunk.deleteMany = async ({ where }) => {
+    let count = 0;
+    for (const [id, chunk] of db.state.chunks) {
+      const version = db.state.versions.get(chunk.versionId), document = db.state.documents.get(version?.documentId);
+      if (version?.documentId !== where.version.documentId || !document
+        || !Object.entries(where.version.document).every(([key, value]) => document[key] === value)) continue;
+      db.state.chunks.delete(id); count++;
+    }
+    return { count };
+  };
+  db.aiDataErasure.updateMany = async ({ where, data }) => {
+    const row = db.state.erasures.get(where.id);
+    if (!row || !Object.entries(where).every(([key, value]) => row[key] === value)) return { count: 0 };
+    for (const [key, value] of Object.entries(data)) row[key] = value && typeof value === 'object' && 'increment' in value
+      ? row[key] + value.increment : clone(value);
+    return { count: 1 };
+  };
+  const transaction = db.$transaction, queue = { tail: Promise.resolve() };
+  db.$transaction = work => {
+    const result = queue.tail.then(() => transaction(work));
+    queue.tail = result.catch(() => {});
+    return result;
+  };
+  const repository = new PrismaKnowledgeRepository(db, () => new Date(h.now));
+  h.db = db; h.retentionSource = source;
+  h.retention = createPrismaKnowledgeRetention(db, () => new Date(h.now));
+  return {
+    commits: 0,
+    read: repository.read.bind(repository), operation: repository.operation.bind(repository),
+    async commit(input) { const result = await repository.commit(input); if (result === 'committed') this.commits++; return result; },
+    get heads() { return new Map([...db.state.documents.values()].map(row => [key(row.state.document.scope, row.id), clone(row.state)])); },
+    get versions() { return db.state.versions; },
+    get receipts() { return db.state.operations; },
+    get chunks() {
+      const result = new Map();
+      for (const row of db.state.chunks.values()) {
+        const chunk = clone(row.state.chunk), id = key(chunk.scope, chunk.documentId, chunk.documentVersion);
+        if (!result.has(id)) result.set(id, []);
+        result.get(id).push(chunk);
+      }
+      return result;
+    },
+    seed(record) {
+      const row = db.state.documents.get(record.document.documentId);
+      assert.ok(row); assert.equal(row.tenantId, record.document.scope.tenantId); assert.equal(row.workspaceId, record.document.scope.workspaceId);
+      Object.assign(row, { state: clone(record), revision: record.revision, status: record.document.publication, title: record.document.title });
+    },
+  };
+}
 function harness() {
   const { KnowledgeDocumentService } = load('knowledge-document.service');
   const { KnowledgePublicationService } = load('knowledge-publication.service');
   const { actor } = load('knowledge-validation');
-  const h = { repo: new MemoryRepository(), now, denied: false, authCalls: [], policyRevision: 1, rule: () => true, fileCalls: 0, text: 'Synthetic paragraph.', parseError: null };
+  const h = { now, denied: false, authCalls: [], policyRevision: 1, rule: () => true, fileCalls: 0, text: 'Synthetic paragraph.', parseError: null };
+  h.repo = retainedRepository(h);
   h.authorization = { authorize: async (ctx, request) => {
     h.authCalls.push(clone(request));
     if (h.denied || !h.rule(ctx, request) || ctx.authorizedAt !== new Date(now).toISOString()) return null;
     return { scope: clone(ctx.scope), actor: actor(ctx), audience: ctx.audience, accessKey: key(actor(ctx), ctx.audience, h.policyRevision, ctx.access) };
   } };
-  h.files = { read: async () => { h.fileCalls++; return { mediaType: 'text/plain', bytes: Buffer.from(h.text) }; } };
+  const attachments = new Map(['attachment-1', 'file-v2', 'file-v3'].map(id => [id,
+    { documentId: 'doc-1', tenantId: scope.tenantId, workspaceId: scope.workspaceId }]));
+  h.files = {
+    read: async () => { h.fileCalls++; return { mediaType: 'text/plain', bytes: Buffer.from(h.text) }; },
+    assertBound: async (ctx, binding) => {
+      const attachment = attachments.get(binding.attachmentId);
+      assert.ok(attachment); assert.equal(binding.documentId, attachment.documentId);
+      assert.equal(ctx.scope.tenantId, attachment.tenantId); assert.equal(ctx.scope.workspaceId, attachment.workspaceId);
+      assert.equal(binding.workspaceId, attachment.workspaceId);
+    },
+  };
   h.parser = { parse: (d, f) => {
     if (h.parseError) throw h.parseError;
     return [{ draftVersion: shared.AI_KNOWLEDGE_DRAFT_VERSION, documentId: d.documentId, documentVersion: d.documentVersion, chunkId: 'chunk-1', scope: clone(d.scope), aclRevision: d.aclRevision, locator: { kind: 'section', sectionId: 'section-1', paragraph: 1 }, text: Buffer.from(f.bytes).toString('utf8'), trust: 'untrusted_data' }];
   } };
   h.clock = { now: () => h.now };
   h.ports = { repository: h.repo, authorization: h.authorization, clock: h.clock, files: h.files, parser: h.parser };
-  h.documents = new KnowledgeDocumentService(h.ports); h.publication = new KnowledgePublicationService(h.documents);
+  h.documents = new KnowledgeDocumentService(h.ports, h.retention); h.publication = new KnowledgePublicationService(h.documents);
   return h;
 }
 async function parsed(h, ctx = context(), input = draft()) {
