@@ -14,8 +14,9 @@ const slash = file => path.resolve(file).split(path.sep).join('/');
 const json = value => Buffer.from(JSON.stringify(value, null, 2) + '\n');
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const coreDirectory = 'packages/rental-core';
+const multiCoreApps = ['apps/example-multi-core-api', 'apps/example-multi-core-admin'];
 const rentalApps = ['apps/rental-api', 'apps/rental-admin', 'apps/tenant-website', 'apps/enterprise-portal',
-  'apps/miniprogram', 'apps/staff-miniprogram', 'apps/example-multi-core-api', 'apps/example-multi-core-admin'];
+  'apps/miniprogram', 'apps/staff-miniprogram', ...multiCoreApps];
 const layoutFile = 'rental.source.json';
 const publicAiAdapters = 'packages/rental-ai-adapters';
 const publicAiRuntime = 'public-ai-sdk';
@@ -66,8 +67,11 @@ function mapRentalSource(raw, layout, source) {
       || targets.has(entry.target) || sourceRoots.has(entry.source)) throw Error('Rental 源码映射越权或重复：' + entry.target);
     if (!Array.isArray(entry.required) || !entry.required.includes('package.json') || !entry.required.length)
       throw Error('每个源码工作区须声明必需文件');
-    if (!Array.isArray(entry.roles) || !entry.roles.length || entry.roles.some(role => !['domain', 'ai', 'mcp', 'host', 'client'].includes(role)))
+    if (!Array.isArray(entry.roles) || !entry.roles.length || entry.roles.some(role => !['domain', 'ai', 'mcp', 'host', 'client', 'multi-core'].includes(role)))
       throw Error('源码清单须声明实际领域/适配/宿主角色');
+    if (multiCoreApps.includes(entry.target) !== entry.roles.includes('multi-core')
+      || (entry.roles.includes('multi-core') && entry.roles.length !== 1))
+      throw Error('Rental 与工单示例宿主仅属于显式 multi-core 组合');
     targets.add(entry.target); sourceRoots.add(entry.source);
     const prefix = entry.source === '.' ? '' : entry.source + '/';
     for (const required of entry.required) {
@@ -268,8 +272,13 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
   if (rental.source.repository.toLowerCase() === platform.source.repository.toLowerCase())
     throw Error('Rental 开发来源须是独立仓库');
   const profile = options.profile ?? 'domain';
-  if (!['domain', 'host', 'full'].includes(profile)) throw Error('开发范围须为 domain、host 或 full');
+  if (!['domain', 'host', 'full', 'multi-core'].includes(profile)) throw Error('开发范围须为 domain、host、full 或 multi-core');
+  const multi = profile === 'multi-core';
+  // The legacy dual-Core AI host uses a different data contract from the fresh single-Rental chain.
+  if (multi && (rental.mode !== 'development' || options.ai || options.freshAi || options.mcp))
+    throw Error('multi-core 仅支持普通开发；原双 Core AI 请使用其固定历史组合');
   const required = profile === 'domain' ? [coreDirectory] : ['apps/rental-api', 'apps/rental-admin',
+    ...(multi ? multiCoreApps : []),
     ...(profile === 'full' ? ['apps/tenant-website', 'apps/enterprise-portal', 'apps/miniprogram', 'apps/staff-miniprogram'] : [])];
   // Older locked layouts predate independent web-client. Keep their original
   // projection only for the existing tags; new layouts must own this source.
@@ -286,6 +295,7 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
   if (freshMcp && (!freshHost?.mcpFiles || rental.mode !== 'development'))
     throw Error('新装 MCP 只接受实际提供选装宿主叶的固定双仓开发组合');
   const selectedRoles = ['domain', ...(profile === 'domain' ? [] : ['host']), ...(profile === 'full' ? ['client'] : []),
+    ...(multi ? ['multi-core'] : []),
     ...(options.ai ? ['ai'] : []), ...(options.mcp ? ['mcp'] : [])];
   const selected = rental.layout.paths.filter(entry => entry.roles.some(role => selectedRoles.includes(role))
     && entry.runtime === undefined && (!entry.roles.includes('ai') || options.ai) && (!entry.roles.includes('mcp') || options.mcp));
@@ -306,6 +316,7 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
   // Shared still forwards Rental contracts; it is compatibility support for
   // this composition, never part of the zero-Core platform profile.
   const extras = ['packages/shared', ...(historicalWeb ? ['packages/web-client'] : []), 'packages/ai-native-admin',
+    ...(multi ? ['packages/example-tickets-core'] : []),
     ...(options.ai || needsAiData ? ['packages/ai-native-data'] : []),
     ...(options.ai ? ['packages/ai-native-server'] : []),
     ...(options.mcp ? ['packages/mcp-server'] : [])];
@@ -380,6 +391,10 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
         'build:miniprogram': 'npm run build -w @rental-os/miniprogram',
         'build:staff-miniprogram': 'npm run build -w @rental-os/staff-miniprogram',
       } : {}),
+      ...(multi ? {
+        'build:example-multi-core-api': 'npm run build -w @rental-os/example-multi-core-api',
+        'build:example-multi-core-admin': 'npm run build -w @rental-os/example-multi-core-admin',
+      } : {}),
       'check:types': 'node scripts/check-selected-prisma-types.cjs --mode rental --config '
         + (profile === 'domain' ? coreDirectory : 'apps/rental-api') + '/tsconfig.json',
       'check:core': 'node scripts/check-selected-prisma-types.cjs --mode rental --config packages/rental-core/tsconfig.json',
@@ -424,6 +439,7 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
     `不需要维护者私有 docs、已有 dist、数据库或聊天记忆才能进行类型核查。\n\n` +
     (profile === 'domain' ? `当前仅领域源码，尚不包含独立宿主，不能据此启动完整服务。` : `实际生成所选 Client、构建、迁移准备和启动按 [Rental 宿主](apps/rental-api/README.md)执行。`) +
     (profile === 'full' ? `四端构建分别使用 \`npm run build:tenant-website\`、\`npm run build:enterprise-portal\`、\`npm run build:miniprogram\` 和 \`npm run build:staff-miniprogram\`；原宿主构建前置和标准包锁仍须满足。` : '') +
+    (multi ? `Rental 与工单的普通开发按[双 Core API](apps/example-multi-core-api/README.md)及[双 Core 后台](apps/example-multi-core-admin/README.md)准备同一部署锁。` : '') +
     `发布前将 Core 自己的改动提交并打版本标签，再按 [Core 构建与发行](packages/rental-core/README.md#使用与构建)` +
     `核固定底座/独立 Core 来源和归档。部署锁、租户授权与成员分配独立办理。\n\n` +
     `开发新 Core 从 [五步手册](packages/core-contracts/README.md#五步快速接入)开始；` +
@@ -453,7 +469,8 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
   const declaration = file => describe(file, files.get(file));
   files.set('development.workspace.json', json({
     format: 'nativark-core-development-source-2', profile, mode: rental.mode,
-    host: profile === 'domain' ? null : 'rental', coreIds: ['rental'], ai: Boolean(options.ai), mcp: Boolean(options.mcp),
+    host: profile === 'domain' ? null : multi ? 'example-multi-core' : 'rental',
+    coreIds: multi ? ['rental', 'example-tickets'] : ['rental'], ai: Boolean(options.ai), mcp: Boolean(options.mcp),
     platform: { version: platform.version, source: platform.source, layout: 'platform-source', packageRoot: '.' },
     ...(options.freshAi ? { installation: 'fresh-ai' } : {}),
     core: { version: rental.metadata.version, source: rental.source, tag: rental.tag,
@@ -493,7 +510,7 @@ function argumentsOf(args) {
     result[field] = value;
   }
   if (['repo', 'repository', 'commit', 'coreRepo', 'coreCommit', 'out'].some(name => !result[name]))
-    throw Error('用法：prepare-rental-workspace --repo <底座Git目录> --repository <GitHub地址> --commit <完整SHA> --core-repo <独立CoreGit目录> --core-commit <完整SHA> --out <新.tgz文件> [--mode development|release] [--profile domain|host|full] [--ai|--fresh-ai] [--mcp]');
+    throw Error('用法：prepare-rental-workspace --repo <底座Git目录> --repository <GitHub地址> --commit <完整SHA> --core-repo <独立CoreGit目录> --core-commit <完整SHA> --out <新.tgz文件> [--mode development|release] [--profile domain|host|full|multi-core] [--ai|--fresh-ai] [--mcp]');
   return result;
 }
 
