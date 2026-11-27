@@ -8,7 +8,8 @@ const { execFileSync } = require('node:child_process');
 const { createHash } = require('node:crypto');
 const { createRequire } = require('node:module');
 const { readBuildSnapshot, snapshotFromFiles, assertSourcePath } = require('./rental-build-snapshot.cjs');
-const { projectWorkspaceLock, mergeSourceLocks, lockedDependency } = require('./rental-host-lock.cjs');
+const { projectWorkspaceLock, mergeSourceLocks, lockedDependency, retentionSdk, retentionSdkLock,
+  isRetentionSdkDependency } = require('./rental-host-lock.cjs');
 const root = path.resolve(__dirname, '..');
 const slash = file => path.resolve(file).split(path.sep).join('/');
 const json = value => Buffer.from(JSON.stringify(value, null, 2) + '\n');
@@ -40,6 +41,7 @@ const needsHistoricalWeb = rental => !rental.layout.paths.some(entry => entry.ta
   && (rental.layoutKind === 'legacy-root' || /^0\.1\.(?:[0-9]|1[0-4])$/u.test(rental.metadata.version));
 const freshMcpHostFiles = ['src/mcp-bootstrap.ts', 'src/mcp-composition.ts', 'src/mcp-fresh-initialize.ts',
   'src/mcp-fresh-main.ts', 'src/mcp-host.ts', 'tsconfig.mcp.json'];
+const publicRetentionHostFiles = ['src/ai-public-retention-main.ts', 'tsconfig.public-retention.json'];
 
 function git(directory, args) {
   return execFileSync('git', ['--no-replace-objects', '--no-lazy-fetch', ...args],
@@ -105,6 +107,13 @@ function mapRentalSource(raw, layout, source) {
           && !entry.required.includes(file) && !entry.aiFiles.includes(file)))
         throw Error('新装 MCP 须逐文件声明固定的独立宿主入口');
     } else if (entry.mcpFiles !== undefined) throw Error('只有新装 Rental API 可声明 MCP 宿主叶');
+    if (entry.publicRetentionFiles !== undefined && (entry.target !== 'apps/rental-api' || !entry.aiFiles
+      || !Array.isArray(entry.publicRetentionFiles) || entry.publicRetentionFiles.length !== publicRetentionHostFiles.length
+      || !publicRetentionHostFiles.every(file => entry.publicRetentionFiles.includes(file) && raw.has(prefix + file)
+        && !entry.required.includes(file) && !entry.aiFiles.includes(file) && !entry.mcpFiles?.includes(file))))
+      throw Error('公共保留须单独登记两个固定新装宿主文件');
+    if (entry.target === 'apps/rental-api' && publicRetentionHostFiles.some(file => raw.has(prefix + file)
+      && !entry.publicRetentionFiles?.includes(file))) throw Error('独立宿主含未声明的公共保留文件');
     if (entry.target === 'apps/rental-api' && [...raw.keys()].some(name => name.startsWith(prefix)
       && /^(?:src\/mcp-[a-z.-]+\.ts|tsconfig\.mcp\.json)$/u.test(name.slice(prefix.length))
       && !entry.mcpFiles?.includes(name.slice(prefix.length))))
@@ -238,7 +247,7 @@ function selectRentalPublicAiAdapterSource(rental, runtime) {
 /** The fixed independent manifest is authoritative for local workspace identity.
  * Registry pins still come from the fixed locks; no installation, resolution or
  * read from a workspace's installed node_modules can construct that identity. */
-function bindIndependentWorkspaceLinks(lock, selected, workspaces, semver) {
+function bindIndependentWorkspaceLinks(lock, selected, workspaces, semver, publicRetention) {
   const packages = { ...lock.packages };
   for (const { target } of selected) {
     const metadata = workspaces.get(target);
@@ -254,6 +263,7 @@ function bindIndependentWorkspaceLinks(lock, selected, workspaces, semver) {
       .filter(([name]) => !metadata.peerDependenciesMeta?.[name]?.optional)),
       ...metadata.devDependencies, ...metadata.dependencies, ...metadata.optionalDependencies };
     for (const [name, version] of Object.entries(dependencies)) {
+      if (isRetentionSdkDependency({ packages }, target, name, version, publicRetention)) continue;
       const pinned = packages[lockedDependency({ packages }, target, name)];
       if (pinned?.link ? workspaces.get(pinned.resolved)?.version === version
         : pinned?.version && semver.satisfies(pinned.version, version)) continue;
@@ -294,6 +304,12 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
   const freshMcp = Boolean(options.freshAi && options.mcp);
   if (freshMcp && (!freshHost?.mcpFiles || rental.mode !== 'development'))
     throw Error('新装 MCP 只接受实际提供选装宿主叶的固定双仓开发组合');
+  const publicRetention = options.publicRetention;
+  const adapterSources = publicRetention && selectRentalPublicAiAdapterSource(rental, publicAiRuntime);
+  if (publicRetention && (!options.freshAi || freshMcp || rental.mode !== 'development' || !freshHost?.publicRetentionFiles
+    || publicRetention.source.commit !== platform.source.commit || publicRetention.source.repository !== platform.source.repository
+    || publicRetention.sha256 !== sha256(publicRetention.bytes)))
+    throw Error('公共保留只接受同次固定 SDK 的 18 条新装开发组合');
   const selectedRoles = ['domain', ...(profile === 'domain' ? [] : ['host']), ...(profile === 'full' ? ['client'] : []),
     ...(multi ? ['multi-core'] : []),
     ...(options.ai ? ['ai'] : []), ...(options.mcp ? ['mcp'] : [])];
@@ -309,6 +325,7 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
   }
   for (const directory of required) if (!selected.some(entry => entry.target === directory))
     throw Error('独立源码尚未交付所选范围：' + directory + '；禁止从底座旧业务目录补齐');
+  if (adapterSources) selected.push(rental.layout.paths.find(entry => entry.target === adapterSources.directory));
   const needsAiData = selected.some(({ target }) => {
     const metadata = JSON.parse(rental.snapshot.files.get(slash(path.join(root, target, 'package.json'))));
     return Object.hasOwn(metadata.dependencies ?? {}, '@rental-os/ai-native-data');
@@ -328,10 +345,14 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
   }
   for (const [absolute, bytes] of rental.snapshot.files) {
     const relative = path.relative(root, absolute).split(path.sep).join('/');
+    if (relative.startsWith(publicAiAdapters + '/')) continue;
     if (!options.freshAi && freshHost?.aiFiles.some(file => freshHost.target + '/' + file === relative)) continue;
     if (!freshMcp && freshHost?.mcpFiles?.some(file => freshHost.target + '/' + file === relative)) continue;
+    if (!publicRetention && freshHost?.publicRetentionFiles?.some(file => freshHost.target + '/' + file === relative)) continue;
     if (isSource(relative) && selected.some(entry => relative.startsWith(entry.target + '/'))) files.set(relative, bytes);
   }
+  if (adapterSources) for (const [file, bytes] of adapterSources.files)
+    files.set(adapterSources.directory + '/' + file, bytes);
   const workspaces = new Map();
   for (const directory of [...api.PLATFORM_SOURCE_WORKSPACES, ...extras, ...selected.map(entry => entry.target)]) {
     const packageFile = directory + '/package.json';
@@ -342,6 +363,13 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
       if (metadata[field]?.['@rental-os/rental-core']) metadata[field]['@rental-os/rental-core'] = rental.metadata.version;
     }
     if (metadata.scripts) metadata.scripts = Object.fromEntries(Object.entries(metadata.scripts).filter(([name]) => name !== 'test'));
+    if (publicRetention && directory === retentionSdk.owner) {
+      if (metadata.dependencies?.[retentionSdk.name] !== retentionSdk.version)
+        throw Error('Rental 适配声明没有选择固定的公共 SDK 版本');
+      metadata.dependencies[retentionSdk.name] = retentionSdk.spec;
+    }
+    if (publicRetention && directory === freshHost.target) metadata.dependencies = { ...metadata.dependencies,
+      '@rental-os/rental-ai-adapters': '0.1.0' };
     if (freshHost?.target === directory && !options.freshAi) {
       for (const name of Object.keys(metadata.scripts ?? {})) if (/:ai(?::|$)/u.test(name)) delete metadata.scripts[name];
       for (const name of Object.keys(metadata.exports ?? {})) if (freshAiHostExport(name)) delete metadata.exports[name];
@@ -410,7 +438,15 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
   const originalLockBytes = readBuildSnapshot(options.commit, options.repo, ['package-lock.json'])
     .files.get(slash(path.join(root, 'package-lock.json')));
   const originalLock = JSON.parse(originalLockBytes.toString('utf8'));
-  const mergedLock = mergeSourceLocks(originalLock, rental.dependencyLock);
+  let mergedLock = mergeSourceLocks(originalLock, rental.dependencyLock);
+  if (publicRetention) {
+    if (workspaces.get(retentionSdk.legacyDirectory)?.version !== retentionSdk.legacyVersion || mergedLock.packages[retentionSdk.install])
+      throw Error('公共保留必须保留独立的旧 SDK，且隔离安装路径不能有既有占用');
+    const lock = retentionSdkLock(publicRetention.metadata, publicRetention.bytes);
+    if (JSON.stringify(lock) !== JSON.stringify(publicRetention.lock)) throw Error('公共保留 SDK 字节与锁不一致');
+    mergedLock = { ...mergedLock, packages: { ...mergedLock.packages, [retentionSdk.install]: lock } };
+    files.set(retentionSdk.archive, publicRetention.bytes);
+  }
   const semverPin = mergedLock.packages['node_modules/semver'];
   const deps = path.resolve(options.deps ?? path.join(options.repo, 'node_modules'));
   const fromDeps = createRequire(path.join(deps, 'semver/package.json'));
@@ -418,9 +454,9 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
   if (!semverPin?.version || fromDeps(semverManifest).version !== semverPin.version
     || slash(semverManifest) !== slash(path.join(deps, 'semver/package.json')))
     throw Error('依赖范围核对须使用底座原锁中的 semver');
-  const compositionLock = bindIndependentWorkspaceLinks(mergedLock, selected, workspaces, fromDeps('semver'));
+  const compositionLock = bindIndependentWorkspaceLinks(mergedLock, selected, workspaces, fromDeps('semver'), publicRetention);
   const projected = projectWorkspaceLock(compositionLock, workspaces, developmentRoot,
-    { verifySpecifications: true });
+    { verifySpecifications: true, publicRetention });
   // 开发工作区继承固定底座的完整工具链，包括已锁定的可选开发 peer。
   // 运行包仍另做生产闭包投影，不能借该投影裁掉开发源码需要的依赖记录。
   const platformLock = JSON.parse(Buffer.from(platform.files.get('package-lock.json')).toString('utf8'));
@@ -465,6 +501,7 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
     files.set(file, Buffer.from(text));
   }
   const generated = new Set(['README.md', 'package.json', 'package-lock.json', 'platform.source.json']);
+  if (publicRetention) generated.add(retentionSdk.archive);
   const describe = (file, bytes) => ({ path: file, bytes: bytes.length, sha256: sha256(bytes) });
   const declaration = file => describe(file, files.get(file));
   files.set('development.workspace.json', json({
@@ -473,6 +510,7 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
     coreIds: multi ? ['rental', 'example-tickets'] : ['rental'], ai: Boolean(options.ai), mcp: Boolean(options.mcp),
     platform: { version: platform.version, source: platform.source, layout: 'platform-source', packageRoot: '.' },
     ...(options.freshAi ? { installation: 'fresh-ai' } : {}),
+    ...(publicRetention ? { publicRetention: publicRetention.receipt } : {}),
     core: { version: rental.metadata.version, source: rental.source, tag: rental.tag,
       checkoutRepository: rental.checkoutRepository, layout: rental.layoutKind,
       packageRoot: selected.find(entry => entry.target === coreDirectory).source, paths: selected },

@@ -49,7 +49,7 @@ const observations = createMysqlCoreDeploymentObservation({
 const catalogue = createCoreDeployedCatalogue({ lock, registrations: [tickets], observations });
 ```
 
-公共平台、Rental和工单宿主分别提供原迁移链与完整物理检查。[原账恢复回归](../../apps/rental-api/test/multi-core-recovery-cases.cjs)覆盖未知结果、未来所属迁移和可选能力读取失败；[宿主包回归](../../tests/rental-host-package.test.cjs)将原准备收据的底座更新、单Core更新候选重新构建并安装，用安装后的真实服务读取同一份授权、绑定和业务收据。版本候选及SQL/身份存储是明确夹具；内存安装和根模块构造不代表真实数据库迁移、服务启动或程序回退已经完成。
+公共平台、Rental 和工单宿主分别提供原迁移链与完整物理检查。[原账恢复回归](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/rental-api/test/multi-core-recovery-cases.cjs)覆盖未知结果、未来所属迁移和可选能力读取失败；在同一完整历史检出运行 `node tests/rental-host-package.test.cjs`，用原双 Core 宿主按原准备收据重建底座和单 Core 更新候选，再读取同一份授权、绑定和业务收据。版本候选及 SQL / 身份存储是明确夹具；内存安装和根模块构造不代表真实数据库迁移、服务启动或程序回退已经完成。
 
 ## 接原身份与事务
 

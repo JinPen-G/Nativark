@@ -454,7 +454,7 @@ node scripts/package-rental-host.cjs --ai disabled --deployment <原prepared目�
 
 打包核对原锁、完整包摘要、全部迁移原文、所选声明与schema，并沿实际启动入口检查正式运行出口。包内保留原固定Rental全部资产；其他工作区仅带已构建产物、公开说明、许可与公共数据材料，不带依赖目录、作者Client、环境文件或私有资料。原 npm v3 锁按所选宿主依赖闭包投影，保留第三方版本及完整性摘要。AI关闭时实际入口不得强制引用AI运行包，缺文件或错版直接拒绝。
 
-解包后由部署环境执行 `docker build --target runtime -t rental-host .`。Docker构建按原锁安装依赖，在目标Linux内由同一Prisma 5.22生成公共与Rental两个专属Client，避免携带Windows引擎；最终镜像只安装生产依赖并核实际Node解析。镜像不自动迁移；运行配置、原迁移账和物理观察继续由部署负责人办理。打包结果保持 `imageBuild=not-run`、`deployment=pending`，文件摘要记录在随包 `rental-host.context.json`。[离线打包回归](../../tests/rental-host-package.test.cjs)只在内存验证真实产物、固定包与CLI文件运输，不替代Docker、磁盘安装或业务验收。
+解包后由部署环境执行 `docker build --target runtime -t rental-host .`。Docker 构建按原锁安装依赖，在目标 Linux 内由同一 Prisma 5.22 生成公共与 Rental 两个专属 Client，避免携带 Windows 引擎；最终镜像只安装生产依赖并核实际 Node 解析。镜像不自动迁移；运行配置、原迁移账和物理观察继续由部署负责人办理。打包结果保持 `imageBuild=not-run`、`deployment=pending`，文件摘要记录在随包 `rental-host.context.json`。[原离线打包回归](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/tests/rental-host-package.test.cjs)需要该完整检出中的旧双 Core 宿主，只在内存验证真实产物、固定包与 CLI 文件运输，不替代 Docker、磁盘安装或业务验收。
 
 完整构建生成本包 JS/声明。根出口提供领域合同与常量，营业日和品类治理按子出口加载。服务端计价、器材及能力执行/条件子出口使用可选 peer `@nestjs/common`，沿用原 HTTP 异常类型，调用宿主和源码构建须提供兼容版本。核心聚合与换货批准子出口使用可选 peer @rental-os/platform-server 的正式 /request-identity，原Guard/API与Rental共用同一ALS实例；领域根出口不加载它。公共请求指纹从 `@rental-os/platform-contracts/request-fingerprint` 复用，已保存的条件 hash 沿用原算法。
 

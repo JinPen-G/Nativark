@@ -1,6 +1,0 @@
-{
-  "extends": "./tsconfig.json",
-  "compilerOptions": { "outDir": "dist-ai" },
-  "include": ["src/ai-*.ts"],
-  "exclude": ["dist", "dist-ai", "src/main.ts", "src/bootstrap.ts", "src/app.module.ts"]
-}

@@ -555,7 +555,10 @@ test('original confirmation resume rejects a rewritten lease deadline before fur
       'aiTaskExecutionPhaseStart', 'aiTaskExecutionPhaseReceipt', 'aiTaskResultArtifact', 'aiTaskRunPlan', 'aiTaskActionInput', 'rentalOrder']) {
       assert.deepEqual(after[table], before[table], table);
     }
-    assert.ok(after.aiTaskExecutionCharge.every(charge => charge.status === 'RESERVED'));
+    const stepCharges = after.aiTaskExecutionCharge.filter(charge => charge.stepId === receipt.stepId);
+    assert.deepEqual(stepCharges.map(charge => [charge.resource, charge.status]).sort(), [
+      ['ACTIVE_MS', 'RESERVED'], ['OUTPUT_BYTES', 'RESERVED'], ['STEPS', 'RESERVED']
+    ]);
     assert.equal(h.state.prepares, 0); assert.equal(after.rentalOrder.length, 0);
     assert.equal(after.aiTaskEvent.length, before.aiTaskEvent.length + 1);
     assert.deepEqual(after.aiTaskEvent.at(-1).payload.data, { from: 'waiting_confirmation', to: 'running', reason: 'resume' });

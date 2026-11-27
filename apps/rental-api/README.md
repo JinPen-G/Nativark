@@ -62,7 +62,7 @@ Core 包目录、预检、版本选择和候选准备的四个原 Controller 挂
 
 `createRentalDeploymentFiles` 与命令共用同一准备入口。省略 AI 数据包得到 162 模型；提供已核固定完整 AI 数据发行与包，得到 248 模型及按原顺序追加的 58 份迁移。命令的新迁移目录必须直接位于本宿主根目录，例如 `apps/rental-api/prisma-candidate`，且尚未存在；其中 schema 的 `../generated/client` 与本宿主编译、运行使用同一个 Client。准备只写新目录，失败清理本次候选，不覆盖有效部署。
 
-受控宿主可向 `composeRentalApplication` 提供 `additionalCores`，其集合必须与锁中的非 Rental 包逐项相同。[双 Core 宿主](../example-multi-core-api/README.md)静态组合原工单服务，通过 `RENTAL_HOST_ASSEMBLY` 取得同一绑定；其八条 HTTP、OpenAPI、迁移观察及包管理材料均来自原固定包。首期额外 Core 只接受 tenant 范围和 raw SQL，不接额外 Prisma Client、容器授权或公共外键扩展。准备函数的 `additionalCores: [{ pin, files }]` 保留原 SQL 字节及迁移账，工单不改变 Rental 的所选模型。CLI 在原 3/5 个位置参数后显式追加 `--additional-core <完整固定包绝对目录>`，最多八项，每项两次完整读取核同一摘要，不自动发现目录；新迁移目录仍位于 Rental 宿主根下。完整包准备不等于物理部署就绪。
+受控宿主可向 `composeRentalApplication` 提供 `additionalCores`，其集合必须与锁中的非 Rental 包逐项相同。[独立双 Core 宿主](https://github.com/JinPen-G/Zelo-rental-core/blob/main/workspace/apps/example-multi-core-api/README.md)静态组合原工单服务，通过 `RENTAL_HOST_ASSEMBLY` 取得同一绑定；其八条 HTTP、OpenAPI、迁移观察及包管理材料均来自原固定包。首期额外 Core 只接受 tenant 范围和 raw SQL，不接额外 Prisma Client、容器授权或公共外键扩展。准备函数的 `additionalCores: [{ pin, files }]` 保留原 SQL 字节及迁移账，工单不改变 Rental 的所选模型。旧 CLI 在原 3/5 个位置参数后显式追加 `--additional-core <完整固定包绝对目录>`，最多八项，每项两次完整读取核同一摘要，不自动发现目录；新迁移目录仍位于 Rental 宿主根下。完整包准备不等于物理部署就绪。
 
 公共、Core 管理、Core 包管理与 Rental 文档在唯一 OpenAPI 入口组合，操作均对应实际挂载处理器。客户头像读/写及员工检查证据绑定已采用同源媒体合同；无 AI 宿主的检查绑定保留明确 503。原未挂的品类选项路径保留为未挂说明；原宽泛合同按 `RENTAL_HTTP_SCHEMA_GAPS` 明确标为 `incomplete`。这些缺口不伪造请求/响应字段，也不将路由挂载视为当前部署或业务授权通过。
 
@@ -186,7 +186,7 @@ Agent/Copilot 的[原会话接口](../../packages/ai-native-server/src/runtime/c
 
 标准 Rental 与双 Core 镜像上下文均排除 `dist-mcp`；提前执行 MCP 构建也不会改变这两种标准组合的包内容。MCP 使用上面的显式选装入口及对应部署依赖。
 
-同一打包入口默认 `--host rental`；双 Core 组合显式使用 `--host example-multi-core --tickets-package <完整固定工单包目录>`，并提供对应双 Core 部署材料。`--ai disabled` 使用 `apps/example-multi-core-api/dist/main.js` 和 162 模型 Client；`--ai enabled` 还须完整 AI 数据包，使用 `apps/example-multi-core-api/dist-ai/ai-main.js` 和 248 模型 Client。打包从所选宿主的真实依赖闭包投影原锁，核两份 Core 完整包及同源公共产物。两个 Core 共用同一个所选 Client，工单仍没有 AI 工具。
+固定双仓打包选择单个 Rental 宿主。普通双 Core 开发从独立仓使用 `--profile multi-core` 准备。复建旧双 Core 镜像使用[完整历史检出 `46db0945…`](https://github.com/JinPen-G/Zelo/tree/46db0945dee92ac916f7265e95948943fc8b641d)的打包入口，显式传入 `--host example-multi-core --tickets-package <完整固定工单包目录>` 和对应部署材料。`--ai disabled` 使用该版 `apps/example-multi-core-api/dist/main.js` 和 162 模型 Client；`--ai enabled` 使用该版 `apps/example-multi-core-api/dist-ai/ai-main.js`、248 模型 Client 和完整 AI 数据包。历史打包核两份 Core 完整包及同源公共产物。两个 Core 共用同一个所选 Client，工单仍没有 AI 工具。
 
 AI 扩展宿主从正式出口 `@rental-os/rental-api/ai-app-module` 使用 `createRentalAiHostModule`，以 `additionalCores`、`additionalHttp` 和 `additionalOpenApi` 接入静态 Core。该出口同时提供 `RENTAL_HOST_ASSEMBLY`、`RentalAiHostAssembly` 和 `bootstrapRentalComposition`，使 HTTP 绑定及启动读取同一 `dist-ai` 产物中的令牌；普通入口使用独立的 `dist` 闭包。权限、Runtime、模型账和恢复仍由原 Rental AI 组合裁定，额外 Core 的普通授权不产生工具访问权。
 

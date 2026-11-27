@@ -33,7 +33,7 @@
 | 消费者 | 职责与依赖入口 |
 | --- | --- |
 | [零 Core](../../apps/platform-admin/README.md) | 以公共浏览器会话和空页面注册表组装公共应用，保留公共管理、设置与个人入口 |
-| [Rental](../../apps/rental-admin/README.md)、[双 Core](../../apps/example-multi-core-admin/README.md) | 宿主登记所选页面。两者共用 [Rental 浏览器装配](../rental-core/admin/browser/README.md)，由已验证会话提供经营范围、原深链接和业务通知。双 Core 另登记工单贡献 |
+| [Rental](../../apps/rental-admin/README.md)、[独立双 Core](https://github.com/JinPen-G/Zelo-rental-core/blob/main/workspace/apps/example-multi-core-admin/README.md) | 宿主登记所选页面。两者共用 [Rental 浏览器装配](../rental-core/admin/browser/README.md)，由已验证会话提供经营范围、原深链接和业务通知。双 Core 另登记工单贡献 |
 | [工单](../../apps/example-tickets-admin/README.md) | 公共浏览器会话加 [工单页面贡献](../example-tickets-core/admin/index.tsx)，页面与操作使用所属 Core 的绑定、就绪和访问状态 |
 | [原管理后台](../../apps/admin/src/app/App.tsx)、[原路由](../../apps/admin/src/app/AppRouter.tsx) | 保留原会话、路由和业务组合，逐项转接公共组件和 Rental 页面。原 AI 工作台与平台模型配置消费 [AI 呈现包](../ai-native-admin/README.md)，Operator/Copilot 的业务接点由 Rental 宿主提供 |
 

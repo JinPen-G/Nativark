@@ -95,7 +95,7 @@ SaaS 的原品类治理与能力目录在原开发预览开关启用时，通过
 
 公共应用、Rental Provider 和其他 Core 复用这一份会话与 QueryClient。工单使用自己的租户范围，Rental 页面按当前服务端目录和已验证会话取得经营空间；未选经营空间不影响获权工单和公共设置。Core、成员授权或会话变化后，原请求和导航继续复验当前范围。
 
-宿主按当前页面传入 `contextSwitcher`。`undefined` 使用 Rental 原经营空间选择器，`null` 显式留空，也可传入自己的公共上下文组件。同一个 Shell 和通知 Provider 持续挂载，切换页面或撤销其他 Core 时保留当前正文的原操作状态。完整双 Core 装配只需宿主入口、薄壳和固定部署锁。[双Core示范](../../../apps/example-multi-core-admin/README.md) · [单Rental宿主](../../../apps/rental-admin/README.md)
+宿主按当前页面传入 `contextSwitcher`。`undefined` 使用 Rental 原经营空间选择器，`null` 显式留空，也可传入自己的公共上下文组件。同一个 Shell 和通知 Provider 持续挂载，切换页面或撤销其他 Core 时保留当前正文的原操作状态。完整双 Core 装配只需宿主入口、薄壳和固定部署锁。[独立双 Core 示例](https://github.com/JinPen-G/Zelo-rental-core/blob/main/workspace/apps/example-multi-core-admin/README.md) · [单Rental宿主](../../../apps/rental-admin/README.md)
 
 ## 验证入口
 

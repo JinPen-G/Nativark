@@ -10,6 +10,7 @@ const assert = require('node:assert/strict');
 const { createRequire } = require('node:module');
 const { createHash } = require('node:crypto');
 const { selectedCompilerOptions } = require('./build-selected-prisma.cjs');
+const { mergeSourceLocks, retentionSdk } = require('./rental-host-lock.cjs');
 const root = path.resolve(__dirname, '..');
 const slash = file => path.resolve(file).split(path.sep).join('/');
 const inside = (directory, file) => file === directory || file.startsWith(directory + '/');
@@ -38,8 +39,15 @@ function createBuild(dependencyDirectory, settings = {}) {
     }
   }
   const lockFile = workspaceRoot + '/package-lock.json';
-  const lock = require('./rental-host-lock.cjs').mergeSourceLocks(
+  const lock = mergeSourceLocks(
     JSON.parse(snapshot ? snapshot.files.get(lockFile)?.toString('utf8') : ts.sys.readFile(lockFile)), snapshot?.dependencyLock);
+  const scoped = settings.publicRetention && { directory: workspaceRoot + '/' + retentionSdk.install,
+    metadata: settings.publicRetention.metadata };
+  if (scoped) {
+    assert.deepEqual(lock.packages[retentionSdk.install], settings.publicRetention.lock, '编译须使用适配包独立的公共保留锁');
+    for (const [file, bytes] of settings.publicRetention.files)
+      virtual.set(scoped.directory + '/' + file, Buffer.from(bytes).toString('utf8'));
+  }
   const dependencyPackages = new Map(), dependencyDirectories = new Set([deps]);
   for (const [name, metadata] of Object.entries(lock.packages || {})) {
     if (!name.startsWith('node_modules/') || metadata.link || !metadata.version) continue;
@@ -106,6 +114,7 @@ function createBuild(dependencyDirectory, settings = {}) {
     && /\/(?:dist(?:-[^/]+)?|generated)\/|\.tsbuildinfo$/u.test(file);
   const mapped = file => {
     file = slash(file);
+    if (scoped && inside(scoped.directory, file)) return file;
     const workspacePackage = /\/node_modules\/(@rental-os\/[^/]+)(\/.*)?$/u.exec(file);
     const pkg = workspacePackage && packages.get(workspacePackage[1]);
     if (pkg) return pkg.directory + (workspacePackage[2] || '');
@@ -145,9 +154,13 @@ function createBuild(dependencyDirectory, settings = {}) {
         files: entries.filter(([, dir]) => !dir).map(([name]) => name),
         directories: entries.filter(([, dir]) => dir).map(([name]) => name) }; }, file => slash(file))
     : directoryExists(directory) ? ts.sys.readDirectory(directory, extensions, excludes, includes, depth).filter(fileExists) : [];
-  function exported(name, runtime = false) {
+  function packageFor(name, from) {
+    return scoped && name === retentionSdk.name && from && inside(workspaceRoot + '/' + retentionSdk.owner, slash(from))
+      ? scoped : packages.get(name);
+  }
+  function exported(name, runtime = false, from) {
     const parts = name.split('/'), packageName = parts.slice(0, 2).join('/');
-    const pkg = packages.get(packageName);
+    const pkg = packageFor(packageName, from);
     if (!pkg) return undefined;
     const key = parts.length === 2 ? '.' : './' + parts.slice(2).join('/');
     let entry = pkg.metadata.exports?.[key], match;
@@ -223,12 +236,12 @@ function createBuild(dependencyDirectory, settings = {}) {
           if (own && inside(slash(options.rootDir), slash(own.resolvedFileName))) return own;
           throw Error('正式自引用配置越出本包 rootDir：' + name);
         }
-        const file = exported(name);
+        const file = exported(name, false, containing);
         if (!file || !fileExists(file)) throw Error(`前置包尚未构建：${name}（${path.relative(root, containing)}）`);
         if (!/\.[cm]?[jt]sx?$/u.test(file)) return undefined;
         const standard = ts.resolveModuleName(name, containing, options, host).resolvedModule;
         if (standard && mapped(standard.resolvedFileName) === file) return standard;
-        const packageName = name.split('/').slice(0, 2).join('/'), pkg = packages.get(packageName);
+        const packageName = name.split('/').slice(0, 2).join('/'), pkg = packageFor(packageName, containing);
         return { resolvedFileName: file, extension: file.endsWith('.d.ts') ? ts.Extension.Dts
           : file.endsWith('.tsx') ? ts.Extension.Tsx : ts.Extension.Ts, isExternalLibraryImport: true,
           packageId: { name: packageName, version: pkg.metadata.version,
@@ -274,16 +287,18 @@ function createBuild(dependencyDirectory, settings = {}) {
   function load(file) {
     file = slash(file);
     if (loaded.has(file)) return loaded.get(file).exports;
-    const text = outputs.get(file);
+    const hasScopedRuntime = scoped && inside(scoped.directory, file);
+    const text = outputs.get(file) ?? (hasScopedRuntime ? virtual.get(file) : undefined);
     if (text === undefined) throw Error('运行时不能读取未编译模块：' + file);
     const module = { exports: {} };
     loaded.set(file, module);
     const resolve = name => {
       if (runtimeAliases.has(name)) return runtimeAliases.get(name);
-      if (name.startsWith('@rental-os/')) return exported(name, true);
+      if (name.startsWith('@rental-os/')) return exported(name, true, file);
       if (name.startsWith('.')) {
         const target = slash(path.resolve(path.dirname(file), name));
-        const result = [target, target + '.js', target + '/index.js'].find(candidate => outputs.has(candidate));
+        const result = [target, target + '.js', target + '/index.js']
+          .find(candidate => outputs.has(candidate) || hasScopedRuntime && virtual.has(candidate));
         if (!result) throw Error('运行时构建依赖缺失：' + file + ' -> ' + name);
         return result;
       }

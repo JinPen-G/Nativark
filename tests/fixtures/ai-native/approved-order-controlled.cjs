@@ -40,6 +40,12 @@ async function controlledApprovedOrderHarness({ prepare = true, initializeOnly =
     };
     const db = {
       $queryRaw: async query => {
+        if (query.sql.replace(/\s+/g, ' ').trim() === 'SELECT id FROM Tenant WHERE id=? LOCK IN SHARE MODE') {
+          const tenants = records?.tenant, { values } = query;
+          if (!Array.isArray(tenants) || !Array.isArray(values) || values.length !== 1)
+            throw Error('tenant lock facts not configured');
+          return tenants.filter(row => row.id === values[0]).map(row => ({ id: row.id }));
+        }
         if (!query.sql.includes('FROM ai_approval_reprepares')) return [];
         await before('aiApprovalReprepare', 'read', query);
         const [scopeId, operationKey] = query.values;

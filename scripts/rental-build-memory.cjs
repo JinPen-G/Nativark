@@ -128,7 +128,7 @@ function createMemoryBuild(build) {
   const modules = new Map();
   const resolve = (name, from) => {
     if (build.runtimeAliases.has(name)) return build.runtimeAliases.get(name);
-    if (name.startsWith('@rental-os/')) return build.exported(name, true);
+    if (name.startsWith('@rental-os/')) return build.exported(name, true, from);
     if (name.startsWith('.') || path.isAbsolute(name)) {
       const target = path.resolve(path.dirname(from), name);
       const file = [target, target + '.js', target + '.cjs', target + '/index.js'].find(file => api.existsSync(file) && api.statSync(file).isFile());
