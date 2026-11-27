@@ -33,11 +33,16 @@ Domain applications plug into the base as standalone **Cores (business packages)
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset=".github/media/zelo-dashboard-dark.png">
-    <img src=".github/media/zelo-dashboard-light.png" alt="Zelo Admin Console — Shared Shell and Dashboard (auto Light/Dark)" width="100%">
+    <source media="(prefers-color-scheme: dark)" srcset=".github/media/zelo-agent-workbench-dark.png">
+    <img src=".github/media/zelo-agent-workbench-light.png" alt="Zelo AI Native Agent Workbench — Conversation, Governed Task Trace & Human Approval Gate (auto Light/Dark)" width="100%">
   </picture>
 </p>
-<p align="center"><em>Shared multi-tenant admin shell with built-in Light/Dark themes, Agent/Admin work mode switcher, and bilingual EN/ZH UI (the hero preview adapts automatically to your GitHub theme).</em></p>
+<p align="center"><em><b>AI Native Agent Workbench</b> — Dual-mode <code>Agent / Admin</code> workspace with tool calls, Model Gateway budget tracking, live governed execution trace, and human-in-the-loop Core approval gates (adapts automatically to your GitHub Light/Dark theme).</em></p>
+
+| Agent Capabilities, MCP Tools & Automations | Shared Multi-Tenant Admin Dashboard |
+| :---: | :---: |
+| ![Agent Capabilities and Automations](.github/media/zelo-agent-plugins-light.png) | ![Shared Admin Dashboard](.github/media/zelo-dashboard-light.png) |
+| *Permission-scoped Core capabilities, approval policies & scheduled agent workflows* | *Unified multi-tenant shell with KPI overview, priority task queue & built-in Light/Dark themes* |
 
 | Platform Base — Encrypted Service Providers | Business Core Example — Assets & Inventory |
 | :---: | :---: |
@@ -45,13 +50,16 @@ Domain applications plug into the base as standalone **Cores (business packages)
 | *Out-of-the-box SMTP, Stripe, S3/OSS/COS & SMS connectors with encrypted credentials* | *Vertical Core (`Rental Core`) mounted cleanly into Zelo's shared shell & data-table primitives* |
 
 <details>
-<summary>View Dark Mode screenshot explicitly</summary>
+<summary>View Dark Mode screenshots explicitly (Agent Workbench &amp; Admin Console)</summary>
+
+![Zelo Agent Workbench Dark Mode](.github/media/zelo-agent-workbench-dark.png)
 
 ![Zelo Admin Console Dark Mode](.github/media/zelo-dashboard-dark.png)
 
 </details>
 
 ---
+
 ## Why Zelo
 
 - **Zero-Core Standalone Runtime & One-Command Source Export**: Ships with standalone `platform-api` and `platform-admin` backed by 41 shared platform models and 14 base migrations. Run `npm run export:platform` to produce a clean base source archive containing zero industry business code.
