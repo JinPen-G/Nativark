@@ -1,13 +1,11 @@
 "use strict";
 const test = require("node:test"), assert = require("node:assert/strict");
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const h = require("./fixtures/ai-native/contract-consumer.cjs"); h.blockNetwork(test);
-const fs = require("node:fs"), path = require("node:path"), { createRequire } = require("node:module");
-const root = path.resolve(__dirname, ".."), apiRequire = createRequire(path.join(root, "apps/api/package.json"));
-assert.ok(fs.realpathSync(apiRequire.resolve("@prisma/client")).startsWith(fs.realpathSync(path.join(root, "apps/api/node_modules/@prisma/client")) + path.sep));
-require("ts-node").register({ transpileOnly: false, compilerOptions: { module: "commonjs", moduleResolution: "node", target: "es2022" } });
-const { AiTaskTransitionRepository } = require("../apps/api/src/modules/ai-native/ai-task-transition.repository");
-const { AiTaskRepositoryError } = require("../apps/api/src/modules/ai-native/ai-task.repository");
-const { aiPersistenceScopeColumns } = require("../apps/api/src/modules/ai-native/persistence-scope");
+// Client identity is checked by the explicit selected-source loader.
+const { AiTaskTransitionRepository } = load('@rental-os/ai-native-server/runtime/ai-task-transition.repository');
+const { AiTaskRepositoryError } = load('@rental-os/ai-native-server/runtime/ai-task.repository');
+const { aiPersistenceScopeColumns } = load('@rental-os/ai-native-server/runtime/persistence-scope');
 const now = new Date("2026-10-03T00:01:00Z");
 const command = { taskId: "task-1", expectedRevision: 3, to: "waiting_input", reason: "input_required", lease: { runId: "run-1", holderId: "worker-1", revision: 5, fencingToken: "9007199254740993" } };
 const step = (status = "PENDING", effect = "NONE", n = 1) => ({ id: `step-${n}`, runId: "run-1", sequence: n, revision: 1, actionId: `action-${n}`, status, effect });
@@ -109,7 +107,9 @@ test("worker transition fences the exact live lease and records the advanced rev
 for (const failure of ["task.update.1", "lease.update", "task.update.2", "event.create", "commit"]) test(`transaction failure at ${failure} exposes no success and the test store rolls back`, async () => {
   const { state, repository } = setup(), before = structuredClone(state.task);
   state.fail = failure;
-  await assert.rejects(repository.transition(command), code(["event.create", "commit"].includes(failure) ? "AI_STORAGE_UNAVAILABLE" : "AI_REVISION_CONFLICT"));
+  await assert.rejects(repository.transition(command), ["event.create", "commit"].includes(failure)
+    ? error => error.code === 'AI_RESULT_UNKNOWN' && error.retryable === false && error.nextAction === 'reconcile'
+    : code("AI_REVISION_CONFLICT"));
   assert.deepEqual(state.task, before); assert.equal(state.runRevision, 5); assert.equal(state.events.length, 0);
   assert.equal(state.commits, 0); assert.equal(state.rollbacks, 1);
   assert.equal(state.calls.filter(call => call.kind === "transaction").length, 1, "must not automatically retry ambiguous commits");
@@ -155,7 +155,7 @@ test("mixed completed steps allow partial completion without inventing business 
   const result = await repository.transition({ ...command, to: "partially_succeeded", reason: "completed" });
   assert.equal(result.event.data.to, "partially_succeeded");
   assert.equal("facts" in state.steps[0], false);
-  assert.deepEqual(Object.keys(only(state, "steps.read").select).sort(), ["actionId", "effect", "id", "revision", "runId", "sequence", "status"]);
+  assert.deepEqual(Object.keys(only(state, "steps.read").select).sort(), ["actionId", "effect", "id", "requestFingerprint", "revision", "runId", "sequence", "status"]);
 });
 
 test('held run lifecycle records its own terminal outcome without rewriting completed ancestors', async () => {

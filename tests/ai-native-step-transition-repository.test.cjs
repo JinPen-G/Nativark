@@ -90,9 +90,10 @@ for (const [label, mutate, expected] of [
 
 for (const kind of ['task.lock', 'step.read', 'run.lock', 'run.recheck', 'step.update', 'event.create', 'commit']) test(`failure at ${kind} rolls back the transaction double and never auto-retries`, async () => {
   const f = h.setup(), before = snapshot(f); f.state.fail = kind;
-  await assert.rejects(f.run(), kind === 'commit'
-    ? error => error.code === 'AI_RESULT_UNKNOWN' && error.retryable === false && error.nextAction === 'reconcile'
-    : h.code('AI_STORAGE_UNAVAILABLE'));
+  // Every injected failure follows the attempted Task CAS. The fixture can
+  // observe its rollback; the caller must still reconcile the original key.
+  await assert.rejects(f.run(), error => error.code === 'AI_RESULT_UNKNOWN'
+    && error.retryable === false && error.nextAction === 'reconcile');
   assert.deepEqual(snapshot(f), before); assert.equal(f.state.rollbacks, 1);
   assert.equal(f.state.calls.filter(c => c.kind === 'transaction').length, 1);
 });

@@ -1,12 +1,10 @@
 'use strict';
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const test = require('node:test'), assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { createRequire } = require('node:module'), path = require('node:path');
-const apiRequire = createRequire(path.resolve('apps/api/package.json'));
-const { Prisma } = apiRequire('@prisma/client');
-const { InvocationAdmissionService } = require('../apps/api/src/modules/ai-native/invocation-admission.service');
-const { PrismaAdmissionRepository } = require('../apps/api/src/modules/ai-native/invocation-admission.repository');
+const { prismaRuntime: Prisma } = load('@rental-os/platform-server/prisma-runtime');
+const { InvocationAdmissionService } = load('@rental-os/ai-native-server/runtime/invocation-admission.service');
+const { PrismaAdmissionRepository } = load('@rental-os/ai-native-server/runtime/invocation-admission.repository');
 const now = new Date('2026-10-03T12:00:00Z');
 const scope = { id: 'scope-1', kind: 'WORKSPACE', tenantId: 'tenant-1', workspaceId: 'space-1' };
 const input = () => ({ scope: structuredClone(scope), actorId: 'actor-1', callId: 'call-1', requestHash: 'a'.repeat(64), profileId: 'profile-1', expiresAt: new Date(now.getTime() + 60000) });
@@ -63,17 +61,21 @@ test('expiry during lookup blocks fresh creation', async () => {
   const f = setup(); f.state.rows = []; f.state.onGet = () => { f.state.now = new Date(now.getTime() + 60001); };
   await assert.rejects(f.service.admit(input()), e => e.code === 'INVALID_REQUEST'); assert.equal(f.state.creates, 0);
 });
-test('malformed request and unsupported platform/tenant storage fail before reads', async () => {
+test('malformed request and tenant-only storage fail before reads while platform attribution stays explicit', async () => {
   for (const patch of [{ actorId: '' }, { callId: 'x'.repeat(129) }, { requestHash: '' }, { expiresAt: new Date(NaN) }, { expiresAt: now }, { approved: true },
-    { scope: { id: 'platform', kind: 'PLATFORM' } }, { scope: { id: 'tenant', kind: 'TENANT', tenantId: 'tenant-1' } }]) {
+    { scope: { id: 'platform', kind: 'PLATFORM', tenantId: 'forged' } }, { scope: { id: 'tenant', kind: 'TENANT', tenantId: 'tenant-1' } }]) {
     const f = setup(); await assert.rejects(f.service.admit({ ...input(), ...patch }), e => e.code === 'INVALID_REQUEST'); assert.equal(f.state.gets, 0);
   }
+  const f = setup(), platform = { id: 'platform', kind: 'PLATFORM' };
+  f.state.rows[0].scope = platform;
+  assert.deepEqual((await f.service.admit({ ...input(), scope: platform })).scope, platform);
+  assert.equal(f.state.gets, 1);
   assert.throws(() => new InvocationAdmissionService({}), e => e.code === 'CONFIG_INVALID');
 });
 
 function dbSetup() {
   const record = row(), { scope: _, ...fields } = record;
-  const state = { row: { ...fields, tenantId: scope.tenantId, workspaceId: scope.workspaceId }, calls: [], scopeRow: { ...scope }, count: 1, failCommit: false };
+  const state = { row: { ...fields, scopeKind: scope.kind, platformDedupKey: null, tenantId: scope.tenantId, workspaceId: scope.workspaceId }, calls: [], scopeRow: { ...scope }, count: 1, failCommit: false };
   const scopes = { findFirst: async args => { state.calls.push(['scope', args]); return structuredClone(state.scopeRow); } };
   const matches = (r, where) => Object.entries(where).every(([k,v]) => v instanceof Date ? r[k]?.getTime() === v.getTime() : r[k] === v);
   const read = async (r, args) => { state.calls.push(['read', args]); return matches(r, args.where) ? structuredClone(r) : null; };
@@ -89,7 +91,7 @@ function dbSetup() {
 test('real Prisma adapter validates stored scope and preserves its ID instead of concatenation', async () => {
   const f = dbSetup(); const result = await f.repository.get(scope, 'call-1');
   assert.equal(result.scope.id, 'scope-1'); assert.equal(f.state.calls[0][1].where.kind, 'WORKSPACE');
-  assert.deepEqual(f.state.calls[1][1].where, { tenantId: 'tenant-1', workspaceId: 'space-1', callId: 'call-1' });
+  assert.deepEqual(f.state.calls[1][1].where, { scopeKind: 'WORKSPACE', tenantId: 'tenant-1', workspaceId: 'space-1', callId: 'call-1' });
   f.state.scopeRow.tenantId = 'other'; await assert.rejects(f.repository.get(scope, 'call-1'), e => e.code === 'CONFIG_INVALID');
 });
 test('malformed adapter scope never becomes an unfiltered query', async () => {

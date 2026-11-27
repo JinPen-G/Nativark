@@ -1,12 +1,12 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
-const { PrismaPlatformModelConnection } = require('../apps/api/src/modules/ai-native/platform-model-connection');
-const { SecretBox } = require('../apps/api/src/common/secret-box');
-const { RoutedModelTransport } = require('../apps/api/src/modules/ai-native/routed-model-transport');
-const { ChatCompletionsAdapter } = require('../apps/api/src/modules/ai-native/chat-completions.adapter');
-const { ProviderCapabilityService } = require('../apps/api/src/modules/ai-native/provider-capability.service');
+const { PrismaPlatformModelConnection } = load('@rental-os/ai-native-server/runtime/platform-model-connection');
+const { SecretBox } = load('@rental-os/platform-server/secret-box');
+const { RoutedModelTransport } = load('@rental-os/ai-native-server/runtime/routed-model-transport');
+const { ChatCompletionsAdapter } = load('@rental-os/ai-native-server/runtime/chat-completions.adapter');
+const { ProviderCapabilityService } = load('@rental-os/ai-native-server/runtime/provider-capability.service');
 const clone = value => structuredClone(value);
 const context = { tenantId: 'synthetic-tenant', workspaceId: 'synthetic-space', actorId: 'synthetic-user' };
 const profile = { id: 'synthetic-profile', scopeId: 'synthetic-platform', scopeKind: 'PLATFORM', profileKey: 'default', role: 'DEFAULT',
@@ -45,13 +45,14 @@ function harness() {
     });
     tail = result.catch(() => {}); return result;
   } };
-  const scopes = { resolveRoutingScopes: async () => ({ context: { actor: state.mode === 'manage' ? { kind: 'saas_admin', userId: 'synthetic-admin' } : { kind: 'user', userId: context.actorId },
+  const scopes = { resolveRoutingScopes: async () => ({ context: { contractVersion: load('@rental-os/shared').AI_CONTRACT_DRAFT_VERSION, actor: state.mode === 'manage' ? { kind: 'saas_admin', userId: 'synthetic-admin' } : { kind: 'user', userId: context.actorId },
     scope: state.mode === 'manage' ? { kind: 'platform' } : { kind: 'workspace', tenantId: context.tenantId, workspaceId: context.workspaceId },
     audience: 'operator', permissions: ['synthetic-explicit-test-authority'], requestId: 'synthetic-request', authorizedAt: '2026-10-05T00:00:00.000Z' },
     configurationScope: { id: profile.scopeId, kind: 'PLATFORM' } }) };
   const authority = { manage: async () => { state.managementCalls++; if (!state.management) throw Error(); },
     invoke: async received => { state.invokeCalls++; if (state.beforeInvoke) state.beforeInvoke(state.invokeCalls); if (!state.invocation || JSON.stringify(received) !== JSON.stringify(context)) throw Error(); } };
-  const secrets = new SecretBox({ get: name => name === 'INTEGRATION_ENCRYPTION_KEY' ? 'synthetic-encryption-key-only' : 'production' });
+  const secrets = new SecretBox({ get: name => name === 'INTEGRATION_ENCRYPTION_KEY'
+    ? 'synthetic-encryption-key-only-0123456789' : name === 'NODE_ENV' ? 'production' : undefined });
   const service = () => new PrismaPlatformModelConnection(db, scopes, authority, secrets);
   return { state, service, db, scopes, authority, secrets };
 }
@@ -101,7 +102,7 @@ async function configured() { const h = harness(); await h.service().save(input)
 test('platform vault persists ciphertext and reconstructs actual resolver without exposing secrets in save result', async () => {
   const h = await configured();
   assert.equal(h.state.profile.configRevision, h.state.row.configRevision);
-  assert.match(h.state.row.credentialsEncrypted, /^v1:/);
+  assert.match(h.state.row.credentialsEncrypted, /^v2:/);
   assert.equal(JSON.stringify(h.state.row).includes(input.secretChange.apiKey), false);
   const connection = await h.service().resolve(context, clone(h.state.profile));
   assert.equal(connection.credential, input.secretChange.apiKey);
@@ -159,7 +160,7 @@ test('commit acknowledgement loss is not retried; old revision refuses replay', 
   await assert.rejects(h.service().save(input));
   assert.equal(h.state.profile.configRevision, 2); assert.equal(h.state.row.configRevision, 2);
   h.state.fail = null;
-  await assert.rejects(h.service().save(input), rejects('CONFIG_INVALID'));
+  await assert.rejects(h.service().save(input), rejects('AI_REVISION_CONFLICT'));
   assert.equal(h.state.profile.configRevision, 2);
 });
 

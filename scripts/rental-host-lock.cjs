@@ -12,6 +12,26 @@ const retentionSdk = Object.freeze({
   archive: 'vendor/ai-native-server-public-0.2.1.tgz', spec: 'file:../../vendor/ai-native-server-public-0.2.1.tgz'
 });
 
+const publicDataSdk = Object.freeze({
+  owner: 'apps/rental-api', name: '@rental-os/public-ai-data', packageName: '@rental-os/ai-native-data', version: '0.2.3',
+  declaration: '0.2.3',
+  install: 'apps/rental-api/node_modules/@rental-os/public-ai-data',
+  archive: 'vendor/ai-native-data-public-0.2.3.tgz', spec: 'file:../../vendor/ai-native-data-public-0.2.3.tgz'
+});
+function publicDataSdkLock(metadata, bytes) {
+  if (metadata.name !== publicDataSdk.packageName || metadata.version !== publicDataSdk.version
+    || !(bytes instanceof Uint8Array) || !bytes.length) throw Error('新装读取器须为固定公共数据 SDK 0.2.3');
+  return { name: metadata.name, version: metadata.version, resolved: 'file:' + publicDataSdk.archive,
+    integrity: 'sha512-' + createHash('sha512').update(bytes).digest('base64'), license: metadata.license,
+    ...Object.fromEntries(dependencyFields.filter(field => metadata[field]).map(field => [field, metadata[field]])) };
+}
+function isPublicDataSdkDependency(lock, owner, name, specification, sdk) {
+  if (!sdk || owner !== publicDataSdk.owner || name !== publicDataSdk.name) return false;
+  if (specification !== publicDataSdk.spec || lockedDependency(lock, owner, name) !== publicDataSdk.install
+    || !isDeepStrictEqual(lock.packages[publicDataSdk.install], sdk.lock)) throw Error('新装读取器归档锁已变化');
+  return true;
+}
+
 /** Only the scoped, same-build SDK tar may enter a lock as a local artifact. */
 function retentionSdkLock(metadata, bytes) {
   if (metadata.name !== retentionSdk.name || metadata.version !== retentionSdk.version || !(bytes instanceof Uint8Array) || !bytes.length)
@@ -94,7 +114,8 @@ function selectWorkspaces(lock, readMetadata, aiMode, host = 'rental', options =
     for (const [name, version] of Object.entries(metadata.peerDependencies || {}))
       if (!metadata.peerDependenciesMeta?.[name]?.optional) required[name] = version;
     for (const name of Object.keys(required)) if (name.startsWith('@rental-os/')) {
-      if (isRetentionSdkDependency(lock, directory, name, required[name], options.publicRetention)) continue;
+      if (isRetentionSdkDependency(lock, directory, name, required[name], options.publicRetention)
+        || isPublicDataSdkDependency(lock, directory, name, required[name], options.publicAiDataSdk)) continue;
       const location = lockedDependency(lock, directory, name), link = lock.packages[location];
       if (!link?.link || !link.resolved) throw Error('缺少原工作区链接：' + name);
       queue.push(link.resolved);
@@ -132,7 +153,7 @@ function projectHostLock(lock, workspaces, aiMode, runtimePeers = [], host = 're
     if (root.dependencies[name] && root.dependencies[name] !== entry.version) throw Error('实际运行peer版本冲突：' + name);
     root.dependencies[name] = entry.version;
   }
-  return projectWorkspaceLock(lock, workspaces, root, { publicRetention: options.publicRetention });
+  return projectWorkspaceLock(lock, workspaces, root, { publicRetention: options.publicRetention, publicAiDataSdk: options.publicAiDataSdk });
 }
 
 /** 源码开发组合复用同一依赖闭包算法；root 明确列出所选工作区及构建工具。 */
@@ -168,7 +189,8 @@ function projectWorkspaceLock(lock, workspaces, root, options = {}) {
         throw Error('原锁缺少依赖：' + file + ' -> ' + name);
       }
       if (options.verifySpecifications && (file === '' || workspaces.has(file))
-        && !isRetentionSdkDependency(lock, file, name, dependencies[name], options.publicRetention)) {
+        && !isRetentionSdkDependency(lock, file, name, dependencies[name], options.publicRetention)
+        && !isPublicDataSdkDependency(lock, file, name, dependencies[name], options.publicAiDataSdk)) {
         const declared = dependencies[name], locked = lock.packages[target];
         const version = locked?.link ? workspaces.get(locked.resolved)?.version : locked?.version;
         const old = lock.packages[file];
@@ -195,6 +217,8 @@ function projectWorkspaceLock(lock, workspaces, root, options = {}) {
     if (!file || workspaces.has(file) || entry.link) continue;
     if (file === retentionSdk.install && options.publicRetention) {
       if (!isDeepStrictEqual(entry, options.publicRetention.lock)) throw Error('公共保留 SDK 运行锁已变化');
+    } else if (file === publicDataSdk.install && options.publicAiDataSdk) {
+      if (!isDeepStrictEqual(entry, options.publicAiDataSdk.lock)) throw Error('新装读取器运行锁已变化');
     } else {
       if (!entry.version || !/^https:\/\//u.test(entry.resolved || '') || !/^sha(?:256|384|512)-/u.test(entry.integrity || ''))
         throw Error('外部依赖缺少原锁定版本/HTTPS来源/摘要：' + file);
@@ -212,4 +236,4 @@ function projectWorkspaceLock(lock, workspaces, root, options = {}) {
 }
 
 module.exports = { selectWorkspaces, projectHostLock, projectWorkspaceLock, mergeSourceLocks, lockedDependency, hostDirectory,
-  retentionSdk, retentionSdkLock, isRetentionSdkDependency };
+  retentionSdk, retentionSdkLock, isRetentionSdkDependency, publicDataSdk, publicDataSdkLock, isPublicDataSdkDependency };

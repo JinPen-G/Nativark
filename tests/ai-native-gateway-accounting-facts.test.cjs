@@ -1,10 +1,10 @@
 'use strict';
 const test = require('node:test');
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-const { PrismaGatewayAccountingFacts } = require('../apps/api/src/modules/ai-native/budget/prisma-gateway-accounting-facts');
-const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+const { PrismaGatewayAccountingFacts } = load('@rental-os/ai-native-server/runtime/budget/prisma-gateway-accounting-facts');
+const { requestFingerprint } = load('@rental-os/platform-contracts/request-fingerprint');
 
 const time = new Date('2026-10-05T12:00:00Z');
 const config = { configId: 'profile', configRevision: 1, credentialRef: 'vault', protocol: 'openai_chat_completions', provider: 'synthetic', model: 'model', serviceMode: 'tenant_managed', tenantId: 'tenant', configurationScope: { kind: 'tenant', tenantId: 'tenant' } };
@@ -13,8 +13,8 @@ const call = { context: { actorId: 'actor', tenantId: 'tenant', workspaceId: 'wo
 
 for (const recoverAfterRotation of [false, true]) test(`real task budget authority binds the persisted invocation and rejects forged scope or revoked actor${recoverAfterRotation ? ' after price rotation' : ''}`, { timeout: 15000 }, async () => {
   const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
-  const { PrismaTaskBudgetAuthorizationSource } = require('../apps/api/src/modules/ai-native/budget/prisma-task-budget-authorization.source');
-  const { Prisma } = require('../apps/api/node_modules/@prisma/client');
+  const { PrismaTaskBudgetAuthorizationSource } = load('@rental-os/ai-native-server/runtime/budget/prisma-task-budget-authorization.source');
+  const { prismaRuntime: Prisma } = load('@rental-os/platform-server/prisma-runtime');
   const configuration = { ...config, tenantId: 'tenant-a', model: 'synthetic-model', configurationScope: { kind: 'tenant', tenantId: 'tenant-a' } };
   const scope = { kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'workspace-a' };
   const assoc = { ...association, runId: 'run-a', stepId: 'step-a', actionId: 'action-a', scope, config: configuration };
@@ -36,7 +36,7 @@ for (const recoverAfterRotation of [false, true]) test(`real task budget authori
   const current = await source.resolveContext();
   const grant = await source.authorize('reserve', current, { association: assoc });
   assert.match(grant.authorizationKey, /^task-budget:[a-f0-9]{64}$/u);
-  const { PrismaGatewayCallPricing } = require('../apps/api/src/modules/ai-native/budget/prisma-gateway-call-pricing');
+  const { PrismaGatewayCallPricing } = load('@rental-os/ai-native-server/runtime/budget/prisma-gateway-call-pricing');
   for (const policy of h.state.aiBudgetPolicy) policy.unitKind = 'calls';
   const pricing = new PrismaGatewayCallPricing(h.db, source.scopes, 'price', () => h.control.now);
   const command = { association: assoc, callId: 'call', sceneCode: 'synthetic-clarification', expiresAt: invocation.expiresAt };
@@ -50,7 +50,7 @@ for (const recoverAfterRotation of [false, true]) test(`real task budget authori
   h.state.aiBudgetPolicy[0].unitKind = 'money';
   await assert.rejects(pricing.quote(command, authorized), { code: 'UNAVAILABLE' });
   h.state.aiBudgetPolicy[0].unitKind = 'calls';
-  const { createAuthorizedPersistedGatewayBudget } = require('../apps/api/src/modules/ai-native/budget/gateway-budget.composition');
+  const { createAuthorizedPersistedGatewayBudget } = load('@rental-os/ai-native-server/runtime/budget/gateway-budget.composition');
   const root = createAuthorizedPersistedGatewayBudget({ ...h.authorization, db: h.db, pricing,
     guard: { canActivate: async () => false }, clock: () => h.control.now });
   const accountingCall = { context: { actorId: 'user-a', tenantId: 'tenant-a', workspaceId: 'workspace-a' },
@@ -89,7 +89,7 @@ for (const recoverAfterRotation of [false, true]) test(`real task budget authori
     h.control.now = new Date('2026-10-06T12:02:00Z');
     const nextPricing = new PrismaGatewayCallPricing(h.db, source.scopes, 'price-next', () => h.control.now);
     await assert.rejects(nextPricing.quote(command, authorized), { code: 'FORBIDDEN' });
-    const { composePersistedTaskCallAccountingRecovery } = require('../apps/api/src/modules/ai-native/task-model-gateway.composition');
+    const { composePersistedTaskCallAccountingRecovery } = load('@rental-os/ai-native-server/runtime/task-model-gateway.composition');
     const recovery = composePersistedTaskCallAccountingRecovery({ ...h.authorization, db: h.db,
       guard: { canActivate: async () => false }, taskId: 'task-a', callPriceVersion: 'price-next', clock: () => h.control.now });
     const before = await recovery.readCall({ callId: 'call' });
@@ -123,7 +123,7 @@ for (const recoverAfterRotation of [false, true]) test(`real task budget authori
     select: { reservation: { select: { status: true, actualCalls: true } } } });
   assert.equal(allocations.length, 3);
   assert.ok(allocations.every(row => row.reservation.status === 'settled' && row.reservation.actualCalls === 1));
-  const { PrismaBudgetRepository } = require('../apps/api/src/modules/ai-native/budget/prisma-budget.repository');
+  const { PrismaBudgetRepository } = load('@rental-os/ai-native-server/runtime/budget/prisma-budget.repository');
   const record = await new PrismaBudgetRepository(h.db).get(reserved.id, assoc);
   assert.equal(record.dispatched, true); // completed consumption is still an original dispatched fact, not permission to dispatch again
   assert.deepEqual(await pricing.quantity(record, { inputTokens: 2, outputTokens: 3 }), { unit: 'calls', value: 1 });
@@ -141,13 +141,13 @@ for (const recoverAfterRotation of [false, true]) test(`real task budget authori
 
 for (const unit of ['calls', 'tokens', 'money']) test(`customer persisted ${unit} gateway and original recovery share the authorized ledger`, { timeout: 30000 }, async () => {
   const { createTaskInputStore } = require('./fixtures/ai-native/task-input-store.cjs');
-  const { Prisma } = require('../apps/api/node_modules/@prisma/client');
-  const { SubscriptionService } = require('../apps/api/src/modules/subscription/subscription.service');
-  const { aiPersistenceScopeColumns } = require('../apps/api/src/modules/ai-native/persistence-scope');
-  const { composeClientMaterialTasks } = require('../apps/api/src/modules/ai-native/scenes/client-task.composition');
-  const { composePersistedClientTaskAuthorization } = require('../apps/api/src/modules/ai-native/scenes/client-task-execution.composition');
-  const { composeClientTaskModelConfiguration, composeClientTaskAccountingRecovery } = require('../apps/api/src/modules/ai-native/scenes/client-task-model-configuration.composition');
-  const { PrismaGatewayPricingRecords } = require('../apps/api/src/modules/ai-native/budget/prisma-gateway-pricing-records');
+  const { prismaRuntime: Prisma } = load('@rental-os/platform-server/prisma-runtime');
+  const { SubscriptionService } = load('@rental-os/platform-server/subscription');
+  const { aiPersistenceScopeColumns } = load('@rental-os/ai-native-server/runtime/persistence-scope');
+  const { composeClientMaterialTasks } = load('@rental-os/ai-native-server/runtime/scenes/client-task.composition');
+  const { composePersistedClientTaskAuthorization } = load('@rental-os/ai-native-server/runtime/scenes/client-task-execution.composition');
+  const { composeClientTaskModelConfiguration, composeClientTaskAccountingRecovery } = load('@rental-os/ai-native-server/runtime/scenes/client-task-model-configuration.composition');
+  const { PrismaGatewayPricingRecords } = load('@rental-os/ai-native-server/runtime/budget/prisma-gateway-pricing-records');
   const sceneCode = 'synthetic-client-pricing', sceneVersion = '1';
   let now = new Date('2026-10-06T12:00:00Z');
   const clock = () => new Date(now), expiresAt = new Date(now.getTime() + 60000);
@@ -191,7 +191,7 @@ for (const unit of ['calls', 'tokens', 'money']) test(`customer persisted ${unit
   const authorization = composePersistedClientTaskAuthorization(dependencies, command, loadMaterial, clock);
   const lease = await authorization.tasks.claimRun({ taskId: created.task.taskId, runId: created.task.runId, holderId: 'client-worker',
     expectedTaskRevision: 1, expectedRunRevision: 1, expectedFencingToken: '0', leaseMs: 100000 });
-  const { AiTaskTransitionRepository } = require('../apps/api/src/modules/ai-native/ai-task-transition.repository');
+  const { AiTaskTransitionRepository } = load('@rental-os/ai-native-server/runtime/ai-task-transition.repository');
   await new AiTaskTransitionRepository(db, authorization.authority, clock).transition({ taskId: created.task.taskId,
     expectedRevision: state.aiTask[0].revision, to: 'running', reason: 'start',
     lease: { runId: created.task.runId, holderId: 'client-worker', revision: lease.revision, fencingToken: lease.fencingToken } });
@@ -227,8 +227,8 @@ for (const unit of ['calls', 'tokens', 'money']) test(`customer persisted ${unit
     request: { ...call.request, callId: invocation.callId }, expiresAt };
   state.aiInvocationAdmission.push({ ...accountingCall.binding, ...accountingCall.context, scopeKind: 'WORKSPACE',
     status: 'admitted', revokedAt: null, completedAt: null, expiresAt });
-  const { PrismaClientTaskBudgetAuthorizationSource } = require('../apps/api/src/modules/ai-native/budget/prisma-client-task-budget-authorization.source');
-  const { PrismaGatewayInvocationBindings } = require('../apps/api/src/modules/ai-native/budget/prisma-gateway-invocation-bindings');
+  const { PrismaClientTaskBudgetAuthorizationSource } = load('@rental-os/ai-native-server/runtime/budget/prisma-client-task-budget-authorization.source');
+  const { PrismaGatewayInvocationBindings } = load('@rental-os/ai-native-server/runtime/budget/prisma-gateway-invocation-bindings');
   const budgetAuthority = new PrismaClientTaskBudgetAuthorizationSource({ ...dependencies, command });
   const binding = await new PrismaGatewayInvocationBindings(db, budgetAuthority.scopes, clock)
     .resolveForReserve(accountingCall.context, accountingCall.request);
@@ -239,7 +239,7 @@ for (const unit of ['calls', 'tokens', 'money']) test(`customer persisted ${unit
     reservationId = (await gateway.runtime.ports.budget.reserve(accountingCall)).id;
     await gateway.runtime.ports.budget.dispatch(accountingCall, reservationId);
   } else {
-    const { PrismaGatewayRecordedPricing } = require('../apps/api/src/modules/ai-native/budget/prisma-gateway-recorded-pricing');
+    const { PrismaGatewayRecordedPricing } = load('@rental-os/ai-native-server/runtime/budget/prisma-gateway-recorded-pricing');
     const pricing = new PrismaGatewayRecordedPricing(db, budgetAuthority.scopes, clock);
     const reserveCommand = { association: binding.association, callId: invocation.callId, sceneCode, expiresAt };
     await assert.rejects(pricing.quote(reserveCommand, { ...grant, context, entitled: true }), { code: 'UNAVAILABLE' });

@@ -1,8 +1,9 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 const { setup, command, clone } = require('./fixtures/ai-native/step-registration.cjs');
-const { AiTaskTransitionRepository } = require('../apps/api/src/modules/ai-native/ai-task-transition.repository');
-const { createAiTaskRunnerOutcomePort } = require('../apps/api/src/modules/ai-native/runner/ai-task-runner-outcome-adapter');
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { AiTaskTransitionRepository } = load('@rental-os/ai-native-server/runtime/ai-task-transition.repository');
+const { createAiTaskRunnerOutcomePort } = load('@rental-os/ai-native-server/runtime/runner/ai-task-runner-outcome-adapter');
 
 async function cancellation(outcomes) {
   const h = setup(); await h.run();

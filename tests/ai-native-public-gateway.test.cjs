@@ -1,18 +1,19 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 const base = require('./fixtures/ai-native/contract-consumer.cjs'); base.blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true } });
-require('./fixtures/ai-native/local-shared.cjs');
-const { PublicAiGatewayService, PublicAiGatewayModule } = require('../apps/api/src/modules/ai-native/public-ai-gateway.service');
-const { ModelGatewayError } = require('../apps/api/src/modules/ai-native/model-gateway.ports');
-const { isGatewayResult, isGatewayEvent } = require('../apps/api/src/modules/ai-native/gateway-contract-validation');
+const { createControllerSourceLoader } = require('../scripts/controller-sources.cjs');
+const publicLoader = createControllerSourceLoader(require('node:path').resolve(__dirname, '..'));
+const publicLoad = name => publicLoader.load(publicLoader.resolveSource(__filename, name, true));
+const { PublicAiGatewayService, PublicAiGatewayModule } = publicLoad('@rental-os/platform-server/ai-gateway');
+const { ModelGatewayError } = publicLoad('@rental-os/platform-server/ai-gateway');
+const { isGatewayResult, isGatewayEvent } = publicLoad('@rental-os/platform-server/ai-gateway').createGatewayContractValidators();
 const intent = () => ({ draftVersion: 'ain-c03-draft-2', requestId: 'request-1', sceneCode: 'order.explain', messages: [{ role: 'user', content: [{ kind: 'text', text: 'explain' }] }], requiredFeatures: ['text'], optionalFeatures: [], maxOutputTokens: 10 });
 const scenes = [{ sceneCode: 'order.explain', routeScene: 'chat', maxOutputTokens: 100 }];
 test('public media rechecks current attachment after reservation before dispatch', async () => {
   const {createHash}=require('node:crypto');
-  const {AuthorizedGatewayMediaAttachmentResolver}=require('../apps/api/src/modules/ai-native/gateway-media-attachment.resolver');
+  const {AuthorizedGatewayMediaAttachmentResolver}=require('./fixtures/ai-native/rental-compatibility-source.cjs').load('@rental-os/ai-native-server/runtime/gateway-media-attachment.resolver');
   for(const revoked of [false,true]) {
-    const f=setup(),bytes=Buffer.from('bounded-synthetic-image'),hash=createHash('sha256').update(bytes).digest('hex');
+    const f=setup(),bytes=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZioAAAAASUVORK5CYII=', 'base64'),hash=createHash('sha256').update(bytes).digest('hex');
     let active=true,checks=0;
     f.ports.media=new AuthorizedGatewayMediaAttachmentResolver({authorize:async(_context,ref)=>{
       checks++;return active?{...ref,mediaType:'image/png',sizeBytes:bytes.length,contentHash:hash,readBinding:{}}:null;
@@ -46,12 +47,14 @@ function setup(mode = 'platform_managed', timeout = 10000) {
   return { state, ports, runtime, events, context, service: new PublicAiGatewayService(runtime, scenes, timeout) };
 }
 test('core native successor consumes the original Task result through one guarded Gateway invocation', async () => {
-  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
-  const { nativeToolResultIntentFingerprint } = require('../apps/api/src/modules/ai-native/model-input/native-tool-result.ports');
+  const { requestFingerprint } = publicLoad('@rental-os/platform-contracts/request-fingerprint');
+  const { nativeToolResultIntentFingerprint } = publicLoad('@rental-os/platform-server/ai-gateway');
   // Protocol/evidence dependencies are explicit fixtures. The real public and
   // unified Gateway must own routing/admission/dispatch/recording throughout.
   for (const mode of ['normal', 'missing_transport', 'missing_resolver', 'changed_before_dispatch', 'changed_after_dispatch', 'configuration_changed', 'extra_text', 'native_unknown']) {
     const f = setup('tenant_managed'), calls = { ordinary: 0, native: 0, resolved: 0 }, receipts = [], reservations = [];
+    f.ports.toolPolicy = require('./fixtures/ai-native/rental-compatibility-source.cjs')
+      .load('@rental-os/ai-native-server/runtime/gateway-tool-policy').rentalGatewayToolResultPolicy;
     const scene = { ...scenes[0], orderExplainTool: true, nativeToolResults: true };
     const firstIntent = intent(); firstIntent.requiredFeatures = ['text', 'tools'];
     const ordinary = f.ports.transport.invoke;

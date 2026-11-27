@@ -1,23 +1,10 @@
 "use strict";
 const test = require("node:test"), assert = require("node:assert/strict");
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const h = require("./fixtures/ai-native/contract-consumer.cjs"); h.blockNetwork(test);
-const fs = require("node:fs"), path = require("node:path"), { createRequire } = require("node:module");
-const root = path.resolve(__dirname, ".."), apiRequire = createRequire(path.join(root, "apps/api/package.json"));
-const offlineClientRoot = process.env.AI_OFFLINE_PRISMA_CLIENT_ROOT;
-if (offlineClientRoot !== undefined) {
-  // The isolated validator must use its declared private Client, not rebuild or
-  // borrow the API workspace artifact. This exception is test-only and bounded.
-  assert.equal(process.env.DATABASE_URL, "mysql://offline:offline@127.0.0.1:1/rental_os_offline");
-  assert.ok(path.isAbsolute(offlineClientRoot));
-  const relative = path.relative(fs.realpathSync(path.join(root, "output")), fs.realpathSync(offlineClientRoot));
-  assert.ok(relative && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
-  assert.ok(fs.realpathSync(apiRequire.resolve("@prisma/client")).startsWith(fs.realpathSync(offlineClientRoot) + path.sep));
-} else {
-  assert.ok(fs.realpathSync(apiRequire.resolve("@prisma/client")).startsWith(fs.realpathSync(path.join(root, "apps/api/node_modules/@prisma/client")) + path.sep));
-}
-require("ts-node").register({ transpileOnly: false, compilerOptions: { module: "commonjs", moduleResolution: "node", target: "es2022" } });
-const { AiTaskRepository, AiTaskRepositoryError } = require("../apps/api/src/modules/ai-native/ai-task.repository");
-const { aiPersistenceScopeColumns } = require("../apps/api/src/modules/ai-native/persistence-scope");
+// Client identity is checked by the explicit selected-source loader.
+const { AiTaskRepository, AiTaskRepositoryError } = load('@rental-os/ai-native-server/runtime/ai-task.repository');
+const { aiPersistenceScopeColumns } = load('@rental-os/ai-native-server/runtime/persistence-scope');
 const now = new Date("2026-10-03T00:01:00Z");
 const row = { id: "task-1", status: "RUNNING", revision: 3, sceneCode: "order-explain", sceneVersion: "1", createdAt: now, updatedAt: now, cancelRequestedAt: null };
 const claim = { taskId: "task-1", runId: "run-1", holderId: "worker-1", expectedTaskRevision: 3, expectedRunRevision: 4, expectedFencingToken: "9007199254740993", leaseMs: 5000 };
@@ -34,10 +21,10 @@ const code = expected => error => error instanceof AiTaskRepositoryError && erro
 
 async function outcomeSampleFixture() {
   const { createTaskInputStore } = require('./fixtures/ai-native/task-input-store.cjs');
-  const { Prisma } = require('@prisma/client');
-  const { PrismaTaskTakeoverRepository } = require('../apps/api/src/modules/ai-native/runner/prisma-task-takeover.repository');
-  const { TaskPerformanceReader } = require('../apps/api/src/modules/ai-native/observability/task-performance.reader');
-  const { AI_TASK_DRAFT_VERSION } = require('@rental-os/shared');
+  const { prismaRuntime: Prisma } = load('@rental-os/platform-server/prisma-runtime');
+  const { PrismaTaskTakeoverRepository } = load('@rental-os/ai-native-server/runtime/runner/prisma-task-takeover.repository');
+  const { TaskPerformanceReader } = load('@rental-os/ai-native-server/runtime/observability/task-performance.reader');
+  const { AI_TASK_DRAFT_VERSION } = load('@rental-os/shared');
   const context = structuredClone(h.contexts[0]), wall = new Date('2026-11-09T12:00:00Z');
   const scope = { id: 'sample-scope', ...aiPersistenceScopeColumns(context.scope) };
   const tasks = ['SUCCEEDED', 'RUNNING', 'PARTIALLY_SUCCEEDED', 'CANCELLED'].map((status, index) => ({
@@ -51,7 +38,7 @@ async function outcomeSampleFixture() {
   const store = createTaskInputStore({ aiScope: [scope], aiTask: tasks, aiRun: [run], aiStep: [],
     aiTaskExecutionCharge: [], aiTaskRunPlan: [], operationLog: [] });
   const state = { context, denied: false }, actions = { resolve: async () => {
-    if (state.denied) throw Error('Synthetic current permission revoked'); return structuredClone(state.context);
+    if (state.denied) throw new AiTaskRepositoryError('AI_ACCESS_DENIED'); return structuredClone(state.context);
   } };
   const takeover = new PrismaTaskTakeoverRepository(store.db, actions, () => wall);
   await takeover.takeover({ taskId: tasks[1].id, runId: run.id, previousHolderId: 'old-worker', holderId: 'human-holder',
@@ -64,7 +51,7 @@ async function outcomeSampleFixture() {
 test('outcome sample measures terminal success and original human takeover without leases or finance', async () => {
   const f = await outcomeSampleFixture(), before = JSON.stringify(f.store.state, (_, value) => typeof value === 'bigint' ? value.toString() : value);
   const report = await f.reader.sample({ taskIds: f.taskIds });
-  const shared = require('@rental-os/shared');
+  const shared = load('@rental-os/shared');
   const validators = h.validatorsFor({ AiTaskOutcomeSampleDraft: shared.AI_TASK_PERFORMANCE_SCHEMAS.AiTaskOutcomeSampleDraft }, {});
   assert.equal(validators.AiTaskOutcomeSampleDraft(report), true, JSON.stringify(validators.AiTaskOutcomeSampleDraft.errors));
   assert.equal(report.sampleSize, 4); assert.equal(report.successRate.percent, '25.00');

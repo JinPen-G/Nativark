@@ -1,10 +1,10 @@
 "use strict";
 const test = require("node:test"), assert = require("node:assert/strict");
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const h = require("./fixtures/ai-native/contract-consumer.cjs"); h.blockNetwork(test);
-require("ts-node").register({ transpileOnly: false, compilerOptions: { module: "commonjs", moduleResolution: "node", target: "es2022" } });
-const { AiTaskEventRepository } = require("../apps/api/src/modules/ai-native/ai-task-event.repository");
-const { AiTaskRepositoryError } = require("../apps/api/src/modules/ai-native/ai-task.repository");
-const { aiPersistenceScopeColumns } = require("../apps/api/src/modules/ai-native/persistence-scope");
+const { AiTaskEventRepository } = load('@rental-os/ai-native-server/runtime/ai-task-event.repository');
+const { AiTaskRepositoryError } = load('@rental-os/ai-native-server/runtime/ai-task.repository');
+const { aiPersistenceScopeColumns } = load('@rental-os/ai-native-server/runtime/persistence-scope');
 const now = new Date("2026-10-03T00:01:00Z");
 const event = (cursor = 1n, taskRevision = 2) => ({ scopeId: "scope-1", taskId: "task-1", cursor, taskRevision, type: "task.transition", occurredAt: now, payload: { data: { from: "queued", to: "running", reason: "start" }, initiator: { actorId: "internal-actor", holderId: "internal-worker" }, privateAudit: "neverReturn" } });
 const input = { taskId: "task-1", after: "0", limit: 1 };
@@ -116,11 +116,14 @@ test("all declared event variants decode only their permitted wire fields", asyn
 test('event CHECK migration preserves exactly the frozen public event kinds', () => {
   const fs = require('node:fs'), path = require('node:path');
   const root = path.resolve(__dirname, '..');
-  const contract = fs.readFileSync(path.join(root, 'packages/shared/src/ai-task-draft.ts'), 'utf8')
+  const { createControllerSourceLoader } = require('../scripts/controller-sources.cjs');
+  const loader = createControllerSourceLoader(root);
+  const contract = fs.readFileSync(loader.resolveSource(__filename, '@rental-os/platform-contracts/ai-task', true), 'utf8')
     .split('export type AiTaskEventDraft =')[1].split('/** SSE')[0];
   const expected = [...contract.matchAll(/type: "([a-z._]+)"/gu)].map(match => match[1]).sort();
   assert.equal(expected.length, 6);
-  const sql = fs.readFileSync(path.join(root, 'apps/api/prisma/migrations/20261105230000_ai_task_event_contract_alignment/migration.sql'), 'utf8');
+  const sql = require('./fixtures/ai-native/prisma-offline.cjs').publicAiSchemaHistory()
+    .migration('20261105230000_ai_task_event_contract_alignment');
   const actual = [...sql.matchAll(/'([a-z._]+)'/gu)].map(match => match[1]).sort();
   assert.deepEqual(actual, expected);
   assert.match(sql, /ALTER TABLE `ai_task_events`\s+DROP CHECK `ai_task_events_type`,\s+ADD CONSTRAINT `ai_task_events_type` CHECK/u);

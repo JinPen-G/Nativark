@@ -3,8 +3,9 @@ const test = require('node:test'), assert = require('node:assert/strict');
 const { blockNetwork, validatorsFor, compileConsumer } = require('./fixtures/ai-native/contract-consumer.cjs'); blockNetwork(test);
 const h = require('./fixtures/ai-native/step-registration.cjs');
 const { code } = require('./fixtures/ai-native/step-repository.cjs');
-const { AI_TASK_DRAFT_COMPONENT_SCHEMAS: schemas } = require('../apps/api/src/contracts/ai-task-draft-schemas');
-const { AI_NATIVE_COMPONENT_SCHEMAS: foundation } = require('../apps/api/src/contracts/ai-native-schemas');
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { AI_TASK_DRAFT_COMPONENT_SCHEMAS: schemas } = load('@rental-os/ai-native-server/runtime/contracts/ai-task-draft-schemas');
+const { AI_NATIVE_COMPONENT_SCHEMAS: foundation } = load('@rental-os/ai-native-server/runtime/contracts/ai-native-schemas');
 // This suite checks the registration event, not the unrelated clarification
 // and approval HTTP contracts whose schema families have separate consumers.
 const validate = validatorsFor({ AiTaskEventDraft: schemas.AiTaskEventDraft }, foundation).AiTaskEventDraft;
@@ -30,7 +31,7 @@ test('registered event round-trips through real polling and remains distinct fro
   assert.deepEqual(page.events, [out.event]); assert.equal(page.nextCursor, '8');
   for (const secret of ['input-1', 'plan-action-1', 'policy:1']) assert.equal(JSON.stringify(page).includes(secret), false);
   assert.equal(page.events[0].type, 'step.registered'); assert.equal('reason' in page.events[0].data, false);
-  assert.deepEqual(compileConsumer('import type { AiTaskEventDraft } from "../packages/shared/src/ai-task-draft"; declare const e: AiTaskEventDraft; if (e.type === "step.registered") { const r: 1 = e.data.stepRevision; e.data.sequence; }'), []);
+  assert.deepEqual(compileConsumer('import type { AiTaskEventDraft } from "@rental-os/shared"; declare const e: AiTaskEventDraft; if (e.type === "step.registered") { const r: 1 = e.data.stepRevision; e.data.sequence; }', process.env.AI_NATIVE_TEST_SOURCE_ROOT), []);
   for (const patch of [{ stepRevision: 2 }, { sequence: 0 }, { sequence: 4294967296 }, { actorId: 'forged' }]) assert.equal(validate({ ...out.event, data: { ...out.event.data, ...patch } }), false);
 });
 
@@ -113,7 +114,9 @@ for (const [label, mutate, expected] of [
 
 for (const kind of ['task.lock', 'steps.read', 'run.lock', 'run.recheck', 'step.create', 'event.create', 'commit', 'id', 'unique']) test(`failure at ${kind} rolls back metadata and exposes no event`, async () => {
   const f = h.setup(); f.state.fail = kind; const before = snapshot(f);
-  await assert.rejects(f.run(), code(kind === 'unique' ? 'AI_REVISION_CONFLICT' : 'AI_STORAGE_UNAVAILABLE')); assert.deepEqual(snapshot(f), before);
+  await assert.rejects(f.run(), kind === 'unique' ? code('AI_REVISION_CONFLICT') : kind === 'id' ? code('AI_STORAGE_UNAVAILABLE')
+    : error => error.code === 'AI_RESULT_UNKNOWN' && error.retryable === false && error.nextAction === 'reconcile');
+  assert.deepEqual(snapshot(f), before);
   assert.equal(f.state.calls.filter(c => c.kind === 'transaction').length, 1);
 });
 
@@ -136,7 +139,8 @@ test('concurrent same-plan registration has one identity and one event in serial
 
 test('ambiguous commit is not automatically retried; an explicit replay finds the original step', async () => {
   const f = h.setup(); f.state.fail = 'commit_ack';
-  await assert.rejects(f.run(), code('AI_STORAGE_UNAVAILABLE')); assert.equal(f.state.steps.length, 1);
+  await assert.rejects(f.run(), error => error.code === 'AI_RESULT_UNKNOWN'
+    && error.retryable === false && error.nextAction === 'reconcile'); assert.equal(f.state.steps.length, 1);
   f.state.fail = null; const again = await f.run(); assert.equal(again.replayed, true); assert.equal(f.state.steps.length, 1); assert.equal(f.state.events.length, 1);
 });
 

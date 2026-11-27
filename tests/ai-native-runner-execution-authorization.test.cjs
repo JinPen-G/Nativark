@@ -1,9 +1,9 @@
 'use strict';
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'es2022' } });
 const { taskInputHarness } = require('./fixtures/ai-native/task-input-harness.cjs');
-const { composePersistentTaskRunner } = require('../apps/api/src/modules/ai-native/runner/persistent-task-runner.composition');
-const { PrismaTaskMeasuredEffects } = require('../apps/api/src/modules/ai-native/runner/prisma-task-measured-effects');
+const { composePersistentTaskRunner } = load('@rental-os/ai-native-server/runtime/runner/persistent-task-runner.composition');
+const { PrismaTaskMeasuredEffects } = load('@rental-os/ai-native-server/runtime/runner/prisma-task-measured-effects');
 
 // Only the execution policy is synthetic here; the runner, evidence and resource repositories are real.
 async function setup() {

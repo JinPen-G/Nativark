@@ -1,10 +1,10 @@
 'use strict';
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
-const { AiConnectionTestService } = require('../apps/api/src/modules/ai-native/connection-test.service');
-const { ModelGatewayError } = require('../apps/api/src/modules/ai-native/model-gateway.ports');
+const { AiConnectionTestService } = load('@rental-os/ai-native-server/runtime/connection-test.service');
+const { ModelGatewayError } = load('@rental-os/ai-native-server/runtime/model-gateway.ports');
 
 const profile = { id: 'profile-w10', scopeId: 'tenant-w10', scopeKind: 'TENANT', profileKey: 'default', role: 'DEFAULT', serviceMode: 'tenant_managed', protocol: 'openai_chat_completions', provider: 'synthetic', model: 'model', credentialRef: 'vault:synthetic', configRevision: 7, enabled: true, allowedCapabilities: ['text', 'tools'], disabledAt: null };
 const context = { tenantId: 'tenant-w10', workspaceId: 'space-w10', actorId: 'actor-w10' };
@@ -41,8 +41,8 @@ test('configuration revision is part of the evidence identity and changed probes
 // Database transactions and authorization/configuration ports are offline
 // substitutes; the immutable request repository itself is production code.
 function originalProbeHarness() {
-  const { PrismaTextProbeOriginalRequestRepository } = require('../apps/api/src/modules/ai-native/prisma-text-probe-original-request.repository');
-  const { AI_TOOL_DRAFT_VERSION } = require('@rental-os/shared');
+  const { PrismaTextProbeOriginalRequestRepository } = load('@rental-os/ai-native-server/runtime/prisma-text-probe-original-request.repository');
+  const { AI_TOOL_DRAFT_VERSION } = load('@rental-os/shared');
   const consumer = require('./fixtures/ai-native/contract-consumer.cjs');
   const now = new Date('2026-10-11T00:00:00Z');
   const ctx = structuredClone(consumer.contexts[0]); ctx.authorizedAt = now.toISOString();
@@ -95,7 +95,7 @@ test('probe original commit response loss is recoverable only by original key; r
 });
 
 test('persisted probe workflow cannot create or dispatch from a missing original and uses the configuration Guard', async () => {
-  const { composePersistedTextProbeWorkflow } = require('../apps/api/src/modules/ai-native/text-capability-probe-task.composition');
+  const { composePersistedTextProbeWorkflow } = load('@rental-os/ai-native-server/runtime/text-capability-probe-task.composition');
   const h = originalProbeHarness();
   let writes = 0, dispatches = 0, guards = 0;
   const failWrite = async () => { writes++; throw Error('unexpected write'); };
@@ -112,16 +112,16 @@ test('persisted probe workflow cannot create or dispatch from a missing original
       runHeldCurrent: async () => { dispatches++; throw Error('unexpected dispatch'); }, reconcileCurrent: async () => { throw Error('unexpected receipt'); } },
     host: { holderId: 'probe-host', leaseMs: 1000 }, sceneVersion: 'v1', priceVersion: 'server-price-1', clock: () => h.now });
   assert.equal(writes, 0); assert.equal(dispatches, 0); // composition itself is inert
-  // Existing task creation deliberately maps an unresolvable input authority
-  // to access denied, rather than revealing whether an input exists.
-  await assert.rejects(workflow.startOriginal({ creationKey: 'original-task', inputRef: 'missing-original' }), { code: 'AI_ACCESS_DENIED' });
-  await assert.rejects(workflow.requestCancellationOriginal({ creationKey: 'original-task', inputRef: 'missing-original', expectedRevision: 1 }), { code: 'AI_ACCESS_DENIED' });
+  // The original historical-input reader rechecks configuration authority
+  // before revealing whether a request or Task exists.
+  await assert.rejects(workflow.startOriginal({ creationKey: 'original-task', inputRef: 'missing-original' }), { code: 'FORBIDDEN' });
+  await assert.rejects(workflow.requestCancellationOriginal({ creationKey: 'original-task', inputRef: 'missing-original', expectedRevision: 1 }), { code: 'FORBIDDEN' });
   await assert.rejects(workflow.publishOriginal(h.command), { code: 'AI_ACCESS_DENIED' });
-  assert.equal(guards, 1); assert.equal(writes, 0); assert.equal(dispatches, 0); assert.equal(h.state.rows.length, 0);
+  assert.equal(guards, 3); assert.equal(writes, 0); assert.equal(dispatches, 0); assert.equal(h.state.rows.length, 0);
 });
 
 test('probe task cancellation uses current policy and CAS without calling the model or releasing accounting', async () => {
-  const { composeTextCapabilityProbeTask } = require('../apps/api/src/modules/ai-native/text-capability-probe-task.composition');
+  const { composeTextCapabilityProbeTask } = load('@rental-os/ai-native-server/runtime/text-capability-probe-task.composition');
   const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
   const h = await authorizedRunnerHarness({ aiTaskPlanPolicy: [], aiTaskActionInput: [] });
   let calls = 0;
@@ -144,14 +144,14 @@ test('probe task cancellation uses current policy and CAS without calling the mo
 });
 
 test('authorized original probe request lifecycle executes through persisted runner and one financial ledger', async () => {
-  const { composeAuthorizedPersistedTextProbeWorkflow } = require('../apps/api/src/modules/ai-native/text-capability-probe.composition');
-  const { PrismaTaskPlanPolicyRepository } = require('../apps/api/src/modules/ai-native/runner/prisma-task-plan-policy.repository');
+  const { composeAuthorizedPersistedTextProbeWorkflow } = load('@rental-os/ai-native-server/runtime/text-capability-probe.composition');
+  const { PrismaTaskPlanPolicyRepository } = load('@rental-os/ai-native-server/runtime/runner/prisma-task-plan-policy.repository');
   const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
-  const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
-  const { SecretBox } = require('../apps/api/src/common/secret-box');
-  const { tenantModelCredentialReference } = require('../apps/api/src/modules/ai-native/tenant-model-config.service');
-  const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
-  const { TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE } = require('../apps/api/src/modules/ai-native/text-capability-probe');
+  const { ApiAuthGuard } = load('@rental-os/ai-native-server/runtime/rental-adapters/api-auth.guard');
+  const { SecretBox } = load('@rental-os/platform-server/secret-box');
+  const { tenantModelCredentialReference } = load('@rental-os/ai-native-server/runtime/tenant-model-config.service');
+  const { capabilityProfileFingerprint } = load('@rental-os/ai-native-server/runtime/capability-verification');
+  const { TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE } = load('@rental-os/ai-native-server/runtime/text-capability-probe');
   const h = await authorizedRunnerHarness({ aiProviderProfile: [], aiPlatformModelConnection: [], aiTenantModelConfiguration: [],
     systemParameterSet: [], aiTaskOriginalRequest: [], aiTaskPlanPolicy: [], aiTaskActionInput: [], aiProviderCapabilityEvidence: [],
     aiBudgetReservation: [], aiBudgetAllocation: [], aiBudgetLedgerEntry: [], aiTextCapabilityReceipt: [] });
@@ -186,8 +186,8 @@ test('authorized original probe request lifecycle executes through persisted run
     host: { holderId: 'probe-host', leaseMs: 100000 }, sceneVersion: '1', priceVersion: 'price', clock, monotonic: () => h.control.tick };
   const root = composeAuthorizedPersistedTextProbeWorkflow(dependencies);
   const { credentials, ...httpDependencies } = dependencies;
-  const { TextCapabilityProbeModule } = require('../apps/api/src/modules/ai-native/text-capability-probe.module');
-  const { TextCapabilityProbeController, TEXT_CAPABILITY_PROBE_REQUESTS } = require('../apps/api/src/modules/ai-native/text-capability-probe.controller');
+  const { TextCapabilityProbeModule } = load('@rental-os/ai-native-server/runtime/text-capability-probe.module');
+  const { TextCapabilityProbeController, TEXT_CAPABILITY_PROBE_REQUESTS } = load('@rental-os/ai-native-server/runtime/text-capability-probe.controller');
   assert.deepEqual(TextCapabilityProbeModule.registerHttp().controllers, []);
   assert.throws(() => TextCapabilityProbeModule.registerHttp({ enabled: true }));
   const registered = TextCapabilityProbeModule.registerHttp({ enabled: true, dependencies: httpDependencies });
@@ -195,10 +195,10 @@ test('authorized original probe request lifecycle executes through persisted run
   const http = new TextCapabilityProbeController(factory);
   const header = (await credentials.current()).authorization;
   const request = () => ({ headers: { authorization: header } });
-  const { AI_TEXT_CAPABILITY_HTTP_DRAFT: routes } = require('../packages/shared/src');
-  const { requiredPermissions, UNMATCHED_ROUTE_PERMISSION } = require('../apps/api/src/common/api-auth.guard');
-  const { isStaffBusinessRouteAllowed } = require('../apps/api/src/common/staff-api-policy');
-  const { runWithRequestIdentity } = require('../apps/api/src/common/request-identity');
+  const { AI_TEXT_CAPABILITY_HTTP_DRAFT: routes } = load('@rental-os/shared');
+  const { requiredPermissions, UNMATCHED_ROUTE_PERMISSION } = load('@rental-os/rental-core/http-auth').createRentalAuthorization(load('@rental-os/shared'));
+  const { isStaffBusinessRouteAllowed } = load('@rental-os/ai-native-server/runtime/rental-adapters/staff-api-policy');
+  const { runWithRequestIdentity } = load('@rental-os/platform-server/request-identity');
   const { basePath, method, ...operations } = routes;
   const entryGuard = new ApiAuthGuard(dependencies.auth);
   const entry = path => runWithRequestIdentity({}, () => entryGuard.canActivate({ switchToHttp: () => ({ getRequest: () => ({
@@ -214,10 +214,10 @@ test('authorized original probe request lifecycle executes through persisted run
   h.identity.user.permissions.splice(permissionIndex, 1);
   await assert.rejects(entry(`/${basePath}/${routes.start}`));
   h.identity.user.permissions.splice(permissionIndex, 0, 'system:params:manage');
-  const components = require('../apps/api/src/contracts/ai-leaf-components').AI_LEAF_COMPONENT_SCHEMAS;
+  const components = load('@rental-os/ai-native-server/runtime/contracts/ai-leaf-components').AI_LEAF_COMPONENT_SCHEMAS;
   assert.ok(components.AiTextCapabilityHistoryResponseDraft);
   const key = { requestKey: 'probe-complete' };
-  const { AI_TEXT_CAPABILITY_HTTP_SCHEMAS: schemas } = require('../packages/shared/src/ai-text-capability-http-draft');
+  const { AI_TEXT_CAPABILITY_HTTP_SCHEMAS: schemas } = load('@rental-os/shared');
   const ajv = new (require('ajv'))({ strict: true });
   require('ajv-formats')(ajv);
   const checked = (name, value) => { const valid = ajv.compile(schemas[name]); assert.ok(valid(value), JSON.stringify(valid.errors)); return value; };
@@ -328,8 +328,8 @@ test('authorized original probe request lifecycle executes through persisted run
   // The fixed shared vocabulary permits selection, not invented protocol
   // support. This is the same production HTTP/original/task chain over offline
   // DB/identity substitutes, with zero native model evidence.
-  const { AI_CAPABILITY_PROBE_KINDS_DRAFT: kinds } = require('@rental-os/shared');
-  const probeContract = require('../apps/api/src/modules/ai-native/text-capability-probe');
+  const { AI_CAPABILITY_PROBE_KINDS_DRAFT: kinds } = load('@rental-os/shared');
+  const probeContract = load('@rental-os/ai-native-server/runtime/text-capability-probe');
   // The current text-only profile is not widened to pretend it supports eight
   // kinds. Missing local methods may be described, but still cannot invoke.
   const eightFactory = TextCapabilityProbeModule.registerHttp({ enabled: true,
@@ -356,7 +356,7 @@ test('authorized original probe request lifecycle executes through persisted run
     const command = payload.command;
     const preparation = await root.application.prepareCurrent(command);
     assert.equal(preparation.intent, null); assert.equal(preparation.expected, null);
-    assert.equal(payload.preparationHash, require('../apps/api/src/modules/rental-core/rental-idempotency.repository').requestFingerprint(preparation));
+    assert.equal(payload.preparationHash, load('@rental-os/platform-contracts/request-fingerprint').requestFingerprint(preparation));
     const taskState = () => JSON.stringify({ task: h.state.aiTask.find(value => value.id === task.taskId),
       run: h.state.aiRun.find(value => value.id === task.runId) }, (_key, value) => typeof value === 'bigint' ? value.toString() : value);
     const stateBeforeRun = taskState();
@@ -380,7 +380,7 @@ test('authorized original probe request lifecycle executes through persisted run
     const current = await root.application.currentRequest(), authority = root.application.authority(current.context, command);
     const route = await authority.resolve(current.context, probeContract.textProbeRequirements(command));
     await assert.rejects(authority.authorizeDispatch(current.context, {}, route.route), { code: 'CAPABILITY_UNSUPPORTED' });
-    const locator = { creationKey: require('../apps/api/src/modules/ai-native/text-capability-probe-task.composition').textProbeTaskCreationKey(originalKey.requestKey), inputRef: stored.inputRef };
+    const locator = { creationKey: load('@rental-os/ai-native-server/runtime/text-capability-probe-task.composition').textProbeTaskCreationKey(originalKey.requestKey), inputRef: stored.inputRef };
     assert.equal((await root.workflow.startOriginal(locator)).kind, 'not_started');
     assert.equal((await root.workflow.reconcileOriginal(locator)).kind, 'not_started');
     await assert.rejects(eightHttp.releaseUnsent(request(), originalKey), error => error.getStatus() === 409);
@@ -401,10 +401,10 @@ test('authorized original probe request lifecycle executes through persisted run
   const disabledProfile = h.state.aiProviderProfile.find(row => row.id === profile.id);
   disabledProfile.enabled = false; disabledProfile.disabledAt = new Date(h.control.now); disabledProfile.configRevision++;
   for (const row of h.state.aiTaskPlanPolicy) row.enabled = false;
-  const { AiTaskRepository } = require('../apps/api/src/modules/ai-native/ai-task.repository');
-  const { AiTaskCreationRepository } = require('../apps/api/src/modules/ai-native/ai-task-creation.repository');
-  const { ProviderCapabilityService } = require('../apps/api/src/modules/ai-native/provider-capability.service');
-  const { PrismaTextProbeOriginalRequestRepository } = require('../apps/api/src/modules/ai-native/prisma-text-probe-original-request.repository');
+  const { AiTaskRepository } = load('@rental-os/ai-native-server/runtime/ai-task.repository');
+  const { AiTaskCreationRepository } = load('@rental-os/ai-native-server/runtime/ai-task-creation.repository');
+  const { ProviderCapabilityService } = load('@rental-os/ai-native-server/runtime/provider-capability.service');
+  const { PrismaTextProbeOriginalRequestRepository } = load('@rental-os/ai-native-server/runtime/prisma-text-probe-original-request.repository');
   let writeAttempts = 0;
   const blocked = [[AiTaskRepository.prototype, 'claimRecoveryRun'], [AiTaskCreationRepository.prototype, 'create'],
     [ProviderCapabilityService.prototype, 'record'], [PrismaTextProbeOriginalRequestRepository.prototype, 'publish']]
@@ -417,7 +417,7 @@ test('authorized original probe request lifecycle executes through persisted run
     ? JSON.parse(historicalReceipt.observation) : structuredClone(historicalReceipt.observation);
   cachedObservation.usage.billingDetails = { cachedInputTokens: 1, cacheCreationInputTokens: 0 };
   historicalReceipt.observation = typeof historicalReceipt.observation === 'string' ? JSON.stringify(cachedObservation) : cachedObservation;
-  historicalReceipt.observationHash = require('../apps/api/src/modules/rental-core/rental-idempotency.repository').requestFingerprint(cachedObservation);
+  historicalReceipt.observationHash = load('@rental-os/platform-contracts/request-fingerprint').requestFingerprint(cachedObservation);
   const stateJson = () => JSON.stringify(h.state, (_key, value) => typeof value === 'bigint' ? value.toString() : value);
   try {
     const beforeHistory = stateJson(), beforeDecrypts = decrypts;
@@ -449,12 +449,12 @@ test('authorized original probe request lifecycle executes through persisted run
 
 test('native Responses reasoning crosses original HTTP task and single ledger without exporting thought text', async () => {
   const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
-  const { composeAuthorizedPersistedTextProbeWorkflow } = require('../apps/api/src/modules/ai-native/text-capability-probe.composition');
-  const { PrismaTaskPlanPolicyRepository } = require('../apps/api/src/modules/ai-native/runner/prisma-task-plan-policy.repository');
-  const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
-  const { SecretBox } = require('../apps/api/src/common/secret-box');
-  const { tenantModelCredentialReference } = require('../apps/api/src/modules/ai-native/tenant-model-config.service');
-  const { TEXT_PROBE_SCENE, TEXT_CAPABILITY_PROBE_TOOL, REASONING_PROBE_METHOD } = require('../apps/api/src/modules/ai-native/text-capability-probe');
+  const { composeAuthorizedPersistedTextProbeWorkflow } = load('@rental-os/ai-native-server/runtime/text-capability-probe.composition');
+  const { PrismaTaskPlanPolicyRepository } = load('@rental-os/ai-native-server/runtime/runner/prisma-task-plan-policy.repository');
+  const { ApiAuthGuard } = load('@rental-os/ai-native-server/runtime/rental-adapters/api-auth.guard');
+  const { SecretBox } = load('@rental-os/platform-server/secret-box');
+  const { tenantModelCredentialReference } = load('@rental-os/ai-native-server/runtime/tenant-model-config.service');
+  const { TEXT_PROBE_SCENE, TEXT_CAPABILITY_PROBE_TOOL, REASONING_PROBE_METHOD } = load('@rental-os/ai-native-server/runtime/text-capability-probe');
   const h = await authorizedRunnerHarness({ aiProviderProfile: [], aiPlatformModelConnection: [], aiTenantModelConfiguration: [],
     systemParameterSet: [], aiTaskOriginalRequest: [], aiTaskPlanPolicy: [], aiTaskActionInput: [], aiProviderCapabilityEvidence: [],
     aiBudgetReservation: [], aiBudgetAllocation: [], aiBudgetLedgerEntry: [], aiTextCapabilityReceipt: [] });
@@ -489,8 +489,8 @@ test('native Responses reasoning crosses original HTTP task and single ledger wi
         usage: { input_tokens: 5, output_tokens: 7, total_tokens: 12, output_tokens_details: { reasoning_tokens: 4 } } }) }; } },
     host: { holderId: 'reasoning-host', leaseMs: 100000 }, sceneVersion: '1', priceVersion: 'price', clock, monotonic: () => h.control.tick };
   const root = composeAuthorizedPersistedTextProbeWorkflow(dependencies), { credentials, ...httpDependencies } = dependencies;
-  const { TextCapabilityProbeModule } = require('../apps/api/src/modules/ai-native/text-capability-probe.module');
-  const { TextCapabilityProbeController } = require('../apps/api/src/modules/ai-native/text-capability-probe.controller');
+  const { TextCapabilityProbeModule } = load('@rental-os/ai-native-server/runtime/text-capability-probe.module');
+  const { TextCapabilityProbeController } = load('@rental-os/ai-native-server/runtime/text-capability-probe.controller');
   const http = new TextCapabilityProbeController(TextCapabilityProbeModule.registerHttp({ enabled: true,
     dependencies: { ...httpDependencies, probeCapabilities: ['text', 'reasoning'] } }).providers[0].useValue);
   const request = { headers: { authorization: (await credentials.current()).authorization } }, key = { requestKey: 'native-reasoning-original' };
@@ -513,10 +513,10 @@ test('native Responses reasoning crosses original HTTP task and single ledger wi
   assert.equal(JSON.stringify({ publicReceipt, stored }).includes('reasoning-native-1'), false);
   // Synthetic live marker tests ONLY the original verifier's coherent payload
   // boundary. It does not convert this mock execution into supplier evidence.
-  const { PrismaTextCapabilityReceiptRepository } = require('../apps/api/src/modules/ai-native/prisma-text-capability-receipt.repository');
-  const { textProbeEvidenceHash } = require('../apps/api/src/modules/ai-native/text-capability-probe');
-  const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
-  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  const { PrismaTextCapabilityReceiptRepository } = load('@rental-os/ai-native-server/runtime/prisma-text-capability-receipt.repository');
+  const { textProbeEvidenceHash } = load('@rental-os/ai-native-server/runtime/text-capability-probe');
+  const { capabilityProfileFingerprint } = load('@rental-os/ai-native-server/runtime/capability-verification');
+  const { requestFingerprint } = load('@rental-os/platform-contracts/request-fingerprint');
   // The generic in-memory insert delegate omits nullable DB columns. MySQL/
   // Prisma returns NULL for these schema-defined columns; model those defaults,
   // not missing usage, quantities or timestamps, before testing the real verifier.
@@ -548,14 +548,14 @@ test('native Responses reasoning crosses original HTTP task and single ledger wi
 
 test('native Embedding probe crosses original HTTP task and ledger with opaque vectors and zero generated tokens', async () => {
   const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
-  const { composeAuthorizedPersistedTextProbeWorkflow } = require('../apps/api/src/modules/ai-native/text-capability-probe.composition');
-  const { PrismaTaskPlanPolicyRepository } = require('../apps/api/src/modules/ai-native/runner/prisma-task-plan-policy.repository');
-  const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
-  const { SecretBox } = require('../apps/api/src/common/secret-box');
-  const { tenantModelCredentialReference } = require('../apps/api/src/modules/ai-native/tenant-model-config.service');
-  const { TEXT_PROBE_SCENE, TEXT_CAPABILITY_PROBE_TOOL, EMBEDDING_PROBE_METHOD, textProbeEvidenceHash } = require('../apps/api/src/modules/ai-native/text-capability-probe');
-  const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
-  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  const { composeAuthorizedPersistedTextProbeWorkflow } = load('@rental-os/ai-native-server/runtime/text-capability-probe.composition');
+  const { PrismaTaskPlanPolicyRepository } = load('@rental-os/ai-native-server/runtime/runner/prisma-task-plan-policy.repository');
+  const { ApiAuthGuard } = load('@rental-os/ai-native-server/runtime/rental-adapters/api-auth.guard');
+  const { SecretBox } = load('@rental-os/platform-server/secret-box');
+  const { tenantModelCredentialReference } = load('@rental-os/ai-native-server/runtime/tenant-model-config.service');
+  const { TEXT_PROBE_SCENE, TEXT_CAPABILITY_PROBE_TOOL, EMBEDDING_PROBE_METHOD, textProbeEvidenceHash } = load('@rental-os/ai-native-server/runtime/text-capability-probe');
+  const { capabilityProfileFingerprint } = load('@rental-os/ai-native-server/runtime/capability-verification');
+  const { requestFingerprint } = load('@rental-os/platform-contracts/request-fingerprint');
   const h = await authorizedRunnerHarness({ aiProviderProfile: [], aiPlatformModelConnection: [], aiTenantModelConfiguration: [],
     systemParameterSet: [], aiTaskOriginalRequest: [], aiTaskPlanPolicy: [], aiTaskActionInput: [], aiProviderCapabilityEvidence: [],
     aiBudgetReservation: [], aiBudgetAllocation: [], aiBudgetLedgerEntry: [], aiTextCapabilityReceipt: [] });
@@ -588,8 +588,8 @@ test('native Embedding probe crosses original HTTP task and ledger with opaque v
         usage: { prompt_tokens: 5, total_tokens: 5 } }) }; } },
     host: { holderId: 'embedding-host', leaseMs: 100000 }, sceneVersion: '1', priceVersion: 'price', clock, monotonic: () => h.control.tick };
   const root = composeAuthorizedPersistedTextProbeWorkflow(dependencies), { credentials, ...httpDependencies } = dependencies;
-  const { TextCapabilityProbeModule } = require('../apps/api/src/modules/ai-native/text-capability-probe.module');
-  const { TextCapabilityProbeController } = require('../apps/api/src/modules/ai-native/text-capability-probe.controller');
+  const { TextCapabilityProbeModule } = load('@rental-os/ai-native-server/runtime/text-capability-probe.module');
+  const { TextCapabilityProbeController } = load('@rental-os/ai-native-server/runtime/text-capability-probe.controller');
   const http = new TextCapabilityProbeController(TextCapabilityProbeModule.registerHttp({ enabled: true,
     dependencies: { ...httpDependencies, probeCapability: 'embedding', probeCapabilities: ['embedding'] } }).providers[0].useValue);
   const request = { headers: { authorization: (await credentials.current()).authorization } }, key = { requestKey: 'native-embedding-original' };
@@ -613,7 +613,7 @@ test('native Embedding probe crosses original HTTP task and ledger with opaque v
   // not native environment/provider evidence or a change to production facts.
   for (const row of h.state.aiBudgetReservation) for (const field of ['actualTokens', 'actualMoney', 'moneyCurrency']) if (row[field] === undefined) row[field] = null;
   for (const row of h.state.aiBudgetLedgerEntry) for (const field of ['inputTokens', 'outputTokens', 'moneyAmount', 'moneyCurrency', 'reason']) if (row[field] === undefined) row[field] = null;
-  const { PrismaTextCapabilityReceiptRepository } = require('../apps/api/src/modules/ai-native/prisma-text-capability-receipt.repository');
+  const { PrismaTextCapabilityReceiptRepository } = load('@rental-os/ai-native-server/runtime/prisma-text-capability-receipt.repository');
   const verifier = new PrismaTextCapabilityReceiptRepository(h.db, clock), oldObservation = stored().observation, oldHash = stored().observationHash;
   try {
     const live = { ...observation, transport: 'node_https' };
@@ -632,7 +632,7 @@ test('native Embedding probe crosses original HTTP task and ledger with opaque v
 
 test('text request host distinguishes an early response disconnect from normal body or response close', async () => {
   const { EventEmitter } = require('node:events');
-  const { TextCapabilityProbeController } = require('../apps/api/src/modules/ai-native/text-capability-probe.controller');
+  const { TextCapabilityProbeController } = load('@rental-os/ai-native-server/runtime/text-capability-probe.controller');
   for (const finished of [false, true]) {
     let signal, finish, closed = 0;
     // Transport-only unit substitute; not an authorization or runner proof.
@@ -651,7 +651,7 @@ test('text request host distinguishes an early response disconnect from normal b
 });
 
 test('authorized probe root is inert, binds its own financial evidence and refuses unconfigured original requests', async () => {
-  const { composeAuthorizedPersistedTextProbeWorkflow } = require('../apps/api/src/modules/ai-native/text-capability-probe.composition');
+  const { composeAuthorizedPersistedTextProbeWorkflow } = load('@rental-os/ai-native-server/runtime/text-capability-probe.composition');
   const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
   const h = await authorizedRunnerHarness({ aiProviderProfile: [], aiPlatformModelConnection: [],
     aiTenantModelConfiguration: [], systemParameterSet: [], aiTaskOriginalRequest: [], aiTaskPlanPolicy: [],

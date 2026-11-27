@@ -1,8 +1,8 @@
 'use strict';
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { AiProposalRepository } = require('../apps/api/src/modules/ai-native/ai-proposal-repository');
+const { AiProposalRepository } = load('@rental-os/ai-native-server/runtime/ai-proposal-repository');
 
 const payload = { contractVersion: 'ain-c05-draft-1', proposalId: 'proposal-r', taskId: 'task-r', revision: 1, audience: 'staff', scope: { kind: 'workspace', tenantId: 'tenant-r', workspaceId: 'workspace-r' }, actions: [{ actionId: 'action-r', toolCode: 'rental.order.explain', toolVersion: '1', input: { recordId: 'input-r', revision: 1, contentHash: 'a'.repeat(64) }, preview: { recordId: 'preview-r', revision: 1, contentHash: 'b'.repeat(64) }, target: { resourceType: 'order', resourceId: 'order-r', version: 'v1' } }], atomicity: 'single_action', failurePolicy: 'stop_and_reconcile', expiresAt: new Date(Date.now() + 60_000).toISOString() };
 

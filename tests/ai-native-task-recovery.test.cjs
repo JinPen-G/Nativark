@@ -1,12 +1,10 @@
 "use strict";
 const test = require("node:test"), assert = require("node:assert/strict");
 const h = require("./fixtures/ai-native/contract-consumer.cjs"); h.blockNetwork(test);
-const path = require("node:path"), fs = require("node:fs"), { createRequire } = require("node:module");
-const root = path.resolve(__dirname, ".."), apiRequire = createRequire(path.join(root, "apps/api/package.json"));
-assert.ok(fs.realpathSync(apiRequire.resolve("@prisma/client")).startsWith(fs.realpathSync(path.join(root, "apps/api/node_modules/@prisma/client")) + path.sep));
-require("ts-node").register({ transpileOnly: false, compilerOptions: { module: "commonjs", moduleResolution: "node", target: "es2022" } });
-const { AiTaskRepository, AiTaskRepositoryError } = require("../apps/api/src/modules/ai-native/ai-task.repository");
-const { aiPersistenceScopeColumns } = require("../apps/api/src/modules/ai-native/persistence-scope");
+// Persisted workspace recovery uses the fixed independent host selected by this helper.
+const { load } = require("./fixtures/ai-native/rental-compatibility-source.cjs");
+const { AiTaskRepository, AiTaskRepositoryError } = load("@rental-os/ai-native-server/runtime/ai-task.repository");
+const { aiPersistenceScopeColumns } = load("@rental-os/ai-native-server/runtime/persistence-scope");
 const { AI_TASK_DRAFT_VERSION } = require("./fixtures/ai-native/local-shared.cjs");
 const now = new Date("2026-10-03T00:01:00Z");
 const command = { taskId: "task-1", runId: "run-1", holderId: "worker-new", expectedTaskRevision: 3, expectedRunRevision: 4, expectedFencingToken: "9007199254740993", leaseMs: 5000 };

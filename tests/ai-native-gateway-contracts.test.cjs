@@ -1,8 +1,8 @@
 "use strict";
 const test = require("node:test"), assert = require("node:assert/strict"), h = require("./fixtures/ai-native/contract-consumer.cjs"); h.blockNetwork(test);
-require("ts-node").register({ transpileOnly: false, compilerOptions: { module: "commonjs", moduleResolution: "node" } });
-const { AI_NATIVE_COMPONENT_SCHEMAS: base } = require("../apps/api/src/contracts/ai-native-schemas");
-const { AI_GATEWAY_DRAFT_SCHEMAS: schemas } = require("../packages/shared/src/ai-gateway-draft-schemas"), f = require("./fixtures/ai-native/gateway-contracts.cjs");
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { AI_NATIVE_COMPONENT_SCHEMAS: base } = load('@rental-os/ai-native-server/runtime/contracts/ai-native-schemas');
+const { AI_GATEWAY_DRAFT_SCHEMAS: schemas } = load('@rental-os/shared'), f = require("./fixtures/ai-native/gateway-contracts.cjs");
 const validators = h.validatorsFor(schemas, base);
 const yes = (n, x) => assert.equal(validators[n](x), true, JSON.stringify(validators[n].errors));
 const no = (n, x) => assert.equal(validators[n](x), false, `${n} accepted invalid input`);
@@ -12,7 +12,7 @@ for (const assessment of f.assessments) test(`C03 capability ${assessment.status
   no("AiGatewayCapabilityAssessmentDraft", { ...assessment, connectionSucceeded: true });
   if (assessment.status === "unverified") no("AiGatewayCapabilityAssessmentDraft", { ...assessment, evidence: "live" });
   else { const incomplete = { ...assessment }; delete incomplete.checkedAt; no("AiGatewayCapabilityAssessmentDraft", incomplete); }
-  assert.deepEqual(h.compileConsumer(`import type { AiGatewayCapabilityAssessmentDraft } from "../packages/shared/src/ai-gateway-draft"; const assessment: AiGatewayCapabilityAssessmentDraft = ${JSON.stringify(assessment)};`), []);
+  assert.deepEqual(h.compileConsumer(`import type { AiGatewayCapabilityAssessmentDraft } from "@rental-os/shared"; const assessment: AiGatewayCapabilityAssessmentDraft = ${JSON.stringify(assessment)};`, process.env.AI_NATIVE_TEST_SOURCE_ROOT), []);
 });
 test("tenant-selected protocol and model are independent of requested expectation", () => { yes("AiGatewayCallDraft", f.call); yes("AiGatewayCapabilitiesDraft", f.capabilities); assert.notEqual(f.call.expectation.model, f.call.config.model); });
 test("C03 dual mode resolves platform ownership without asking Agent for a model", () => {
@@ -52,7 +52,7 @@ test("C03 bounds/versions/identity and secrets reject structurally", () => {
   for (const number of [NaN, Infinity, -1, 1.5]) no("AiGatewayUsageDraft", { kind: "reported", inputTokens: number, outputTokens: 0 });
 });
 test("C03 real TS consumers compile all unions and reject forged model authority", () => {
-  const source = `import type { AiGatewayCallDraft, AiGatewayCapabilitiesDraft, AiGatewayResultDraft, AiGatewayStreamEventDraft, AiGatewayUsageDraft } from "../packages/shared/src/ai-gateway-draft";
+  const source = `import type { AiGatewayCallDraft, AiGatewayCapabilitiesDraft, AiGatewayResultDraft, AiGatewayStreamEventDraft, AiGatewayUsageDraft } from "@rental-os/shared";
 const call: AiGatewayCallDraft = ${JSON.stringify(f.call)};
 const caps: AiGatewayCapabilitiesDraft = ${JSON.stringify(f.capabilities)};
 const results: AiGatewayResultDraft[] = ${JSON.stringify([f.completed, f.unknown, ...f.failures])};
@@ -66,5 +66,5 @@ const zero: AiGatewayUsageDraft = { kind: "unknown", reason: "not_returned", nex
 const key: AiGatewayCallDraft = { ...call, apiKey: "secret" };
 // @ts-expect-error stream cannot forge approval
 const approved: AiGatewayStreamEventDraft = { ...events[0], approved: true };
-`; assert.deepEqual(h.compileConsumer(source), []);
+`; assert.deepEqual(h.compileConsumer(source, process.env.AI_NATIVE_TEST_SOURCE_ROOT), []);
 });

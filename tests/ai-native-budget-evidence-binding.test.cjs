@@ -1,9 +1,9 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
-const { PrismaBudgetRepository } = require('../apps/api/src/modules/ai-native/budget/prisma-budget.repository');
-const { PersistedBudgetEvidenceAdapter, ServerBudgetAuthorityAdapter, SubscriptionBudgetEntitlementAdapter } = require('../apps/api/src/modules/ai-native/budget/budget-dependency-adapters');
-const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { PrismaBudgetRepository } = load('@rental-os/ai-native-server/runtime/budget/prisma-budget.repository');
+const { PersistedBudgetEvidenceAdapter, ServerBudgetAuthorityAdapter, SubscriptionBudgetEntitlementAdapter } = load('@rental-os/ai-native-server/runtime/budget/budget-dependency-adapters');
+const { requestFingerprint } = load('@rental-os/platform-contracts/request-fingerprint');
 const clone = structuredClone;
 const config = { configId: 'profile-1', configRevision: 3, credentialRef: 'vault-1', protocol: 'openai_chat_completions', provider: 'synthetic', model: 'model-1', tenantId: 'tenant-1', serviceMode: 'tenant_managed', configurationScope: { kind: 'tenant', tenantId: 'tenant-1' } };
 const association = { requestId: 'request-1', runId: 'run-1', stepId: 'step-1', actionId: 'action-1', idempotencyKey: 'call-1', priceVersion: 'price-1', scope: { kind: 'workspace', tenantId: 'tenant-1', workspaceId: 'workspace-1' }, config };

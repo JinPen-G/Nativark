@@ -1,11 +1,10 @@
 'use strict';
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-process.env.TS_NODE_COMPILER_OPTIONS = JSON.stringify({ module: 'CommonJS', moduleResolution: 'Node' });
-require('ts-node/register/transpile-only');
-const { PrismaBudgetRepository } = require('../apps/api/src/modules/ai-native/budget/prisma-budget.repository.ts');
-const { BudgetError } = require('../apps/api/src/modules/ai-native/budget/budget.ports.ts');
-const { Prisma } = require('../apps/api/node_modules/@prisma/client');
+const { PrismaBudgetRepository } = load('@rental-os/ai-native-server/runtime/budget/prisma-budget.repository');
+const { BudgetError } = load('@rental-os/ai-native-server/runtime/budget/budget.ports');
+const { prismaRuntime: Prisma } = load('@rental-os/platform-server/prisma-runtime');
 
 const association = {
   requestId: 'req', runId: 'run', stepId: 'step', actionId: 'action', idempotencyKey: 'call', priceVersion: 'price',

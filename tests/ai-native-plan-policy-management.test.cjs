@@ -1,9 +1,9 @@
 'use strict';
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'es2022', experimentalDecorators: true, emitDecoratorMetadata: true } });
 const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
-const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
-const { PrismaTaskPlanPolicyRepository } = require('../apps/api/src/modules/ai-native/runner/prisma-task-plan-policy.repository');
+const { ApiAuthGuard } = load('@rental-os/ai-native-server/runtime/rental-adapters/api-auth.guard');
+const { PrismaTaskPlanPolicyRepository } = load('@rental-os/ai-native-server/runtime/runner/prisma-task-plan-policy.repository');
 async function setup() {
   const h = await authorizedRunnerHarness({ aiTaskPlanPolicy: [] });
   h.identity.user.permissions.push('system:params:manage');
@@ -74,8 +74,8 @@ test('managed policy drives actual immutable input/plan proof and disabling inva
   // real Auth/Guard is retained, not a fixture policy success callback.
   const { createTaskInputStore } = require('./fixtures/ai-native/task-input-store.cjs');
   const store = createTaskInputStore(h.state);
-  const { composePersistedTaskAuthorization } = require('../apps/api/src/modules/ai-native/task-authorization.composition');
-  const { PrismaTaskPlanInputSource } = require('../apps/api/src/modules/ai-native/runner/prisma-task-plan-input.source');
+  const { composePersistedTaskAuthorization } = load('@rental-os/ai-native-server/runtime/task-authorization.composition');
+  const { PrismaTaskPlanInputSource } = load('@rental-os/ai-native-server/runtime/runner/prisma-task-plan-input.source');
   const { AI_TOOL_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
   const management = new PrismaTaskPlanPolicyRepository(store.db, h.input, () => new Date(h.control.now));
   await management.put({ ...h.command, enabled: true });

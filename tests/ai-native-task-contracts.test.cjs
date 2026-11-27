@@ -5,12 +5,12 @@ const fs = require("node:fs");
 const path = require("node:path");
 const net = require("node:net");
 const dns = require("node:dns");
-const { createRequire } = require("node:module");
 const test = require("node:test");
-const ts = require("typescript");
+const h = require("./fixtures/ai-native/contract-consumer.cjs");
 const Ajv = require("ajv");
 const addFormats = require("ajv-formats");
-const root = path.resolve(__dirname, "..");
+const root = process.env.AI_NATIVE_TEST_SOURCE_ROOT;
+const { load } = require("./fixtures/ai-native/rental-compatibility-source.cjs");
 let networkAttempts = 0;
 const originals = [net.Socket.prototype.connect, globalThis.fetch, dns.lookup, dns.promises.lookup];
 const denyNetwork = () => { networkAttempts++; throw new Error("C04 tests must stay offline"); };
@@ -19,14 +19,11 @@ test.after(() => {
   [net.Socket.prototype.connect, globalThis.fetch, dns.lookup, dns.promises.lookup] = originals;
   assert.equal(networkAttempts, 0);
 });
-const apiRequire = createRequire(path.join(root, "apps/api/package.json"));
-assert.ok(fs.realpathSync(apiRequire.resolve("@rental-os/shared")).startsWith(fs.realpathSync(path.join(root, "packages/shared")) + path.sep), "Use this worktree's shared build");
-const shared = apiRequire("@rental-os/shared");
-require("ts-node").register({ transpileOnly: true, compilerOptions: { module: "commonjs", moduleResolution: "node" } });
-const { AI_NATIVE_COMPONENT_SCHEMAS: foundation } = require("../apps/api/src/contracts/ai-native-schemas");
-const { AI_TASK_DRAFT_COMPONENT_SCHEMAS: schemas } = require("../apps/api/src/contracts/ai-task-draft-schemas");
-const { OPENAPI_DOCUMENT, API_CONTRACT_OPERATIONS } = require("../apps/api/src/contracts/openapi-document");
-const { AI_TASK_TRANSITIONS_DRAFT, evaluateAiTaskTransitionDraft: evaluate, evaluateAiStepTransitionDraft: evaluateStep, matchesAiRunLeaseDraft: matchesLease, isAiTaskEventPageConsistentDraft: consistentPage } = require("../apps/api/src/modules/ai-native/task-transition-draft");
+const shared = load('@rental-os/shared');
+const { AI_NATIVE_COMPONENT_SCHEMAS: foundation } = load('@rental-os/ai-native-server/runtime/contracts/ai-native-schemas');
+const { AI_TASK_DRAFT_COMPONENT_SCHEMAS: schemas } = load('@rental-os/ai-native-server/runtime/contracts/ai-task-draft-schemas');
+const { AI_HTTP_COMPONENT_SCHEMAS: publishedSchemas, AI_HTTP_OPERATIONS: API_CONTRACT_OPERATIONS } = load('@rental-os/ai-native-server/runtime/contracts/http-openapi');
+const { AI_TASK_TRANSITIONS_DRAFT, evaluateAiTaskTransitionDraft: evaluate, evaluateAiStepTransitionDraft: evaluateStep, matchesAiRunLeaseDraft: matchesLease, isAiTaskEventPageConsistentDraft: consistentPage } = load('@rental-os/ai-native-server/runtime/task-transition-draft');
 const ajv = new Ajv({ strict: true, allErrors: true });
 addFormats(ajv);
 function localRefs(value) {
@@ -72,15 +69,15 @@ const request = (from, to) => ({ contractVersion: version, taskId: "task1", expe
 for (const [name, outcome] of Object.entries(outcomes)) test(`step outcome ${name} compiles as a strict schema branch`, () => valid("AiStepOutcomeDraft", outcome));
 
 test("C04 component publication has no route-registration or worker side effects", () => {
-  for (const [name, schema] of Object.entries(schemas)) assert.deepEqual(OPENAPI_DOCUMENT.components.schemas[name], schema);
+  for (const [name, schema] of Object.entries(schemas)) assert.deepEqual(publishedSchemas[name], schema);
   // Existing authorized AI routes are valid. Publishing schema alone must not
   // register a route/worker; assert the schema module's actual imports instead
   // of the obsolete pre-implementation premise that the whole app has no AI.
-  const source = fs.readFileSync(path.join(root, 'apps/api/src/contracts/ai-task-draft-schemas.ts'), 'utf8');
+  const source = fs.readFileSync(path.join(root, 'packages/ai-native-server/src/runtime/contracts/ai-task-draft-schemas.ts'), 'utf8');
   assert.ok(!/@Controller|@Module|@Post|setInterval|createServer|\.listen\(/u.test(source));
   const imports = [...source.matchAll(/from\s+["']([^"']+)["']/gu)].map(match => match[1]);
-  assert.deepEqual(imports, ['@rental-os/shared', './openapi-document', '@rental-os/shared', './ai-leaf-openapi']);
-  assert.ok(/import type \{ SchemaObject \} from ["']\.\/openapi-document["']/u.test(source));
+  assert.deepEqual(imports, ['@rental-os/platform-contracts/ai-task', '@rental-os/shared', '@rental-os/rental-core/http-openapi', '@rental-os/shared', '@rental-os/rental-core/http-openapi']);
+  assert.ok(/import type \{ SchemaObject \} from ["']@rental-os\/rental-core\/http-openapi["']/u.test(source));
   assert.equal(API_CONTRACT_OPERATIONS.some(row => /\/ai-native\//u.test(row.path)), true);
   valid("AiTaskStateDraft", state());
   valid("AiTaskTransitionRequestDraft", request("running", "waiting_input"));
@@ -211,8 +208,9 @@ test("event pages reject duplicates, out-of-order revisions and cross-task repla
 });
 
 test("public task consumers and the real decision module type-check without emit", () => {
-  const file = path.join(root, "tests/__ai_task_types__.ts");
-  const source = `import type { AiStepOutcomeDraft, AiTaskStateDraft, AiRunLeaseDraft, AiTaskEventDraft } from "../packages/shared/src";
+  const source = `import type { AiStepOutcomeDraft, AiTaskStateDraft, AiRunLeaseDraft, AiTaskEventDraft } from "@rental-os/shared";
+import {} from "@rental-os/ai-native-server/runtime/task-transition-draft";
+import {} from "@rental-os/ai-native-server/runtime/contracts/ai-task-draft-schemas";
 const task: AiTaskStateDraft = ${JSON.stringify(state())};
 const lease: AiRunLeaseDraft = ${JSON.stringify(lease)};
 const event: AiTaskEventDraft = ${JSON.stringify(event())};
@@ -223,11 +221,5 @@ const empty: AiStepOutcomeDraft = { status: "succeeded", effect: "committed", fa
 // @ts-expect-error fencing tokens must retain string precision
 const numeric: AiRunLeaseDraft = { ...lease, fencingToken: 9007199254740993 };
 `;
-  const options = { strict: true, noEmit: true, skipLibCheck: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, moduleResolution: ts.ModuleResolutionKind.Node10, types: [] };
-  const host = ts.createCompilerHost(options), read = host.readFile.bind(host), exists = host.fileExists.bind(host);
-  host.readFile = name => path.resolve(name) === file ? source : read(name);
-  host.fileExists = name => path.resolve(name) === file || exists(name);
-  const program = ts.createProgram([file, path.join(root, "apps/api/src/modules/ai-native/task-transition-draft.ts"), path.join(root, "apps/api/src/contracts/ai-task-draft-schemas.ts")], options, host);
-  const diagnostics = ts.getPreEmitDiagnostics(program);
-  assert.equal(diagnostics.length, 0, ts.formatDiagnosticsWithColorAndContext(diagnostics, { getCanonicalFileName: name => name, getCurrentDirectory: () => root, getNewLine: () => "\n" }));
+  assert.deepEqual(h.compileConsumer(source, root), []);
 });

@@ -1,19 +1,19 @@
 'use strict';
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'es2022', lib: ['es2022'], experimentalDecorators: true, emitDecoratorMetadata: true } });
 const { taskInputHarness } = require('./fixtures/ai-native/task-input-harness.cjs');
 
 test('original native tool-result selectors bind encrypted calls and authorized receipts without dispatch', async () => {
   const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
-  const { composePersistedTaskAuthorization } = require('../apps/api/src/modules/ai-native/task-authorization.composition');
-  const { AiScopeRepository } = require('../apps/api/src/modules/ai-native/ai-scope.repository');
-  const { SecretBox } = require('../apps/api/src/common/secret-box');
-  const { PrismaNativeToolCallBindings } = require('../apps/api/src/modules/ai-native/model-input/prisma-native-tool-call-bindings');
-  const { OriginalNativeToolResultSource } = require('../apps/api/src/modules/ai-native/model-input/original-native-tool-result.source');
-  const { nativeToolResultReferenceSchema } = require('../apps/api/src/modules/ai-native/model-input/native-tool-result.ports');
-  const model = require('../apps/api/src/modules/ai-native/model-input/task-model-input');
-  const shared = require('@rental-os/shared');
-  const { requestFingerprint: hash } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  const { composePersistedTaskAuthorization } = load('@rental-os/ai-native-server/runtime/task-authorization.composition');
+  const { AiScopeRepository } = load('@rental-os/ai-native-server/runtime/ai-scope.repository');
+  const { SecretBox } = load('@rental-os/platform-server/secret-box');
+  const { PrismaNativeToolCallBindings } = load('@rental-os/ai-native-server/runtime/model-input/prisma-native-tool-call-bindings');
+  const { OriginalNativeToolResultSource } = load('@rental-os/ai-native-server/runtime/model-input/original-native-tool-result.source');
+  const { nativeToolResultReferenceSchema } = load('@rental-os/ai-native-server/runtime/model-input/native-tool-result.ports');
+  const model = load('@rental-os/ai-native-server/runtime/model-input/task-model-input');
+  const shared = load('@rental-os/shared');
+  const { requestFingerprint: hash } = load('@rental-os/platform-contracts/request-fingerprint');
   const h = await authorizedRunnerHarness(Object.fromEntries(['aiTaskActionInput', 'aiGatewayToolCallBinding',
     'aiProviderProfile', 'aiPlatformModelConnection', 'systemParameterSet', 'aiBudgetReservation',
     'aiBudgetAllocation', 'aiBudgetLedgerEntry', 'aiTextCapabilityReceipt', 'aiProviderCapabilityEvidence'].map(name => [name, []])));
@@ -154,8 +154,8 @@ test('original native tool-result selectors bind encrypted calls and authorized 
   h.state.aiStep.find(step => step.id === parent.id).status = 'UNKNOWN';
   await assert.rejects(source.resolve(narrow, reference, signal));
   assert.equal(h.state.aiGatewayToolCallBinding.length, 1); assert.ok(reads > 0);
-  const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
-  const { composePersistedTaskGateway } = require('../apps/api/src/modules/ai-native/task-model-gateway.composition');
+  const { ApiAuthGuard } = load('@rental-os/ai-native-server/runtime/rental-adapters/api-auth.guard');
+  const { composePersistedTaskGateway } = load('@rental-os/ai-native-server/runtime/task-model-gateway.composition');
   // Inert codec declaration exercises only the production constructor wiring.
   // It is never invoked and is not live capability/Provider evidence.
   let dispatches = 0;
@@ -164,7 +164,7 @@ test('original native tool-result selectors bind encrypted calls and authorized 
     guard: new ApiAuthGuard(h.authorization.auth, undefined, undefined, undefined, {}), secrets,
     taskId: 'task-a', platformProfileId: 'unused-platform', routeScene: 'chat',
     pricing: { kind: 'calls', priceVersion: 'native-price' }, nativeToolResults: true,
-    adapters: [new (require('../apps/api/src/modules/ai-native/chat-completions.adapter').ChatCompletionsAdapter)(
+    adapters: [new (load('@rental-os/ai-native-server/runtime/chat-completions.adapter').ChatCompletionsAdapter)(
       { post: async () => { dispatches++; throw Error('Inert assembly fixture must not dispatch'); } },
       { orderExplainTool: { name: 'rental_order_explain', version: shared.AI_TOOL_DRAFT_VERSION } })] });
   h.state.aiStep.find(step => step.id === parent.id).status = 'SUCCEEDED';
@@ -184,18 +184,18 @@ test('original native tool-result selectors bind encrypted calls and authorized 
 // only Prisma storage and the provider POST are offline substitutes.
 async function countingRequestHarness(mode = 'tenant_managed', native = false) {
   const { AsyncLocalStorage } = require('node:async_hooks');
-  const { AI_TOOL_DRAFT_VERSION, AI_GATEWAY_TOOL_RESULT_REFERENCE_VERSION } = require('@rental-os/shared');
+  const { AI_TOOL_DRAFT_VERSION, AI_GATEWAY_TOOL_RESULT_REFERENCE_VERSION } = load('@rental-os/shared');
   const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
-  const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
-  const { SecretBox } = require('../apps/api/src/common/secret-box');
-  const { composePersistedTaskAuthorization } = require('../apps/api/src/modules/ai-native/task-authorization.composition');
-  const { tenantModelCredentialReference } = require('../apps/api/src/modules/ai-native/tenant-model-config.service');
-  const { PrismaGatewayInvocationBindings } = require('../apps/api/src/modules/ai-native/budget/prisma-gateway-invocation-bindings');
-  const { PrismaGatewayPricingRecords } = require('../apps/api/src/modules/ai-native/budget/prisma-gateway-pricing-records');
-  const { countTokensSceneCode } = require('../apps/api/src/modules/ai-native/input-counting/input-count-tokens.receipt');
-  const { InputCountingRequestFactory } = require('../apps/api/src/modules/ai-native/input-counting/input-counting-request.factory');
-  const { requestFingerprint: hash } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
-  const model = require('../apps/api/src/modules/ai-native/model-input/task-model-input');
+  const { ApiAuthGuard } = load('@rental-os/ai-native-server/runtime/rental-adapters/api-auth.guard');
+  const { SecretBox } = load('@rental-os/platform-server/secret-box');
+  const { composePersistedTaskAuthorization } = load('@rental-os/ai-native-server/runtime/task-authorization.composition');
+  const { tenantModelCredentialReference } = load('@rental-os/ai-native-server/runtime/tenant-model-config.service');
+  const { PrismaGatewayInvocationBindings } = load('@rental-os/ai-native-server/runtime/budget/prisma-gateway-invocation-bindings');
+  const { PrismaGatewayPricingRecords } = load('@rental-os/ai-native-server/runtime/budget/prisma-gateway-pricing-records');
+  const { countTokensSceneCode } = load('@rental-os/ai-native-server/runtime/input-counting/input-count-tokens.receipt');
+  const { InputCountingRequestFactory } = load('@rental-os/ai-native-server/runtime/input-counting/input-counting-request.factory');
+  const { requestFingerprint: hash } = load('@rental-os/platform-contracts/request-fingerprint');
+  const model = load('@rental-os/ai-native-server/runtime/model-input/task-model-input');
   const h = await authorizedRunnerHarness(Object.fromEntries(['aiTaskPlanPolicy', 'aiTaskActionInput', 'aiProviderProfile', 'aiTenantModelConfiguration',
     'aiGatewayToolCallBinding', 'systemParameterSet', 'aiPlatformModelConnection', 'aiGatewayPriceRecord', 'aiGatewayInputBoundRecord',
     'aiBudgetReservation', 'aiBudgetAllocation', 'aiBudgetLedgerEntry', 'aiProviderCapability', 'aiProviderCapabilityEvidence',
@@ -294,10 +294,10 @@ async function countingRequestHarness(mode = 'tenant_managed', native = false) {
       effects.sent.push({ url: packet.url, body: packet.body }); return structuredClone(effects.reply); } } };
   const request = { headers: { authorization: (await h.authorization.credentials.current()).authorization } };
   if (native) {
-    const shared = require('@rental-os/shared');
-    const { AiTaskRepository } = require('../apps/api/src/modules/ai-native/ai-task.repository');
-    const { OriginalNativeToolResultSource } = require('../apps/api/src/modules/ai-native/model-input/original-native-tool-result.source');
-    const { AiOrderRouteContextAuthority } = require('../apps/api/src/modules/ai-native/order-route-context.authority');
+    const shared = load('@rental-os/shared');
+    const { AiTaskRepository } = load('@rental-os/ai-native-server/runtime/ai-task.repository');
+    const { OriginalNativeToolResultSource } = load('@rental-os/ai-native-server/runtime/model-input/original-native-tool-result.source');
+    const { AiOrderRouteContextAuthority } = load('@rental-os/ai-native-server/runtime/order-route-context.authority');
     server.configuration.nativeToolResults = true;
     const parentIntent = model.taskModelIntent('task-a', 'run-a', 'native-parent', sceneCode,
       { messages: [{ role: 'user', content: [{ kind: 'text', text: 'Original order question' }] }], maxOutputTokens: 32 }, undefined, true);
@@ -356,10 +356,10 @@ async function countingRequestHarness(mode = 'tenant_managed', native = false) {
 }
 
 test('standard counting factory binds encrypted dispatch, original receipt and history without redispatch', { timeout: 60000 }, async t => {
-  const { AiInputCountingController, AiInputCountingModule } = require('../apps/api/src/modules/ai-native/input-counting/input-counting-request.module');
-  const { composeStandardInputCounting } = require('../apps/api/src/modules/ai-native/input-counting/input-counting-standard.application');
+  const { AiInputCountingController, AiInputCountingModule } = load('@rental-os/ai-native-server/runtime/input-counting/input-counting-request.module');
+  const { composeStandardInputCounting } = load('@rental-os/ai-native-server/runtime/input-counting/input-counting-standard.application');
   const h = await countingRequestHarness();
-  const egress = require('../apps/api/src/modules/ai-native/model-egress.transport');
+  const egress = load('@rental-os/ai-native-server/runtime/model-egress.transport');
   t.mock.method(egress, 'createNativeModelEgressTransport', () => h.server.transport);
   const deps = { db: h.db, auth: h.server.auth, guard: h.server.guard, subscriptions: h.server.subscriptions,
     clock: h.server.clock, secrets: h.server.connectionConfiguration.secrets };
@@ -411,8 +411,8 @@ test('standard counting factory binds encrypted dispatch, original receipt and h
   assert.equal(costs.summary.groups[0].currency, null); assert.equal(costs.summary.groups[0].settledAtoms, '1');
   // The composite must recheck receipt absence after its summary await. This
   // simulates visibility of the SAME original receipt, not a new count/write.
-  const { InputCountTokensService } = require('../apps/api/src/modules/ai-native/input-counting/input-count-tokens.service');
-  const { CountTokensReceiptNotFoundError } = require('../apps/api/src/modules/ai-native/input-counting/input-count-tokens.receipt');
+  const { InputCountTokensService } = load('@rental-os/ai-native-server/runtime/input-counting/input-count-tokens.service');
+  const { CountTokensReceiptNotFoundError } = load('@rental-os/ai-native-server/runtime/input-counting/input-count-tokens.receipt');
   const originalReceiptRead = InputCountTokensService.prototype.readCountReceipt;
   let receiptInitiallyAbsent = false;
   const appearedReceipt = t.mock.method(InputCountTokensService.prototype, 'readCountReceipt', async function(command) {
@@ -483,11 +483,11 @@ test('standard counting factory binds encrypted dispatch, original receipt and h
     // Verify the actual mixed host supplies ONE resolver to both generation and
     // the fourth preparation argument, and that the actual counting composition
     // receives it. Construction is inert; this is not a full model host run.
-    const gatewayModule = require('../apps/api/src/modules/ai-native/task-model-gateway.composition');
-    const modelModule = require('../apps/api/src/modules/ai-native/model-input/persisted-task-model-input.composition');
-    const countModule = require('../apps/api/src/modules/ai-native/input-counting/input-count-tokens.composition');
-    const { composePersistedModelOrderTaskRunner } = require('../apps/api/src/modules/ai-native/model-input/persisted-model-order-runner.composition');
-    const { PrismaOriginalRequestRepository } = require('../apps/api/src/modules/ai-native/task-request/prisma-original-request.repository');
+    const gatewayModule = load('@rental-os/ai-native-server/runtime/task-model-gateway.composition');
+    const modelModule = load('@rental-os/ai-native-server/runtime/model-input/persisted-task-model-input.composition');
+    const countModule = load('@rental-os/ai-native-server/runtime/input-counting/input-count-tokens.composition');
+    const { composePersistedModelOrderTaskRunner } = load('@rental-os/ai-native-server/runtime/model-input/persisted-model-order-runner.composition');
+    const { PrismaOriginalRequestRepository } = load('@rental-os/ai-native-server/runtime/task-request/prisma-original-request.repository');
     const dependencies = { ...native.authorization, db: native.db, guard: native.server.guard,
       clock: native.server.clock, secrets: native.server.connectionConfiguration.secrets, taskId: 'task-a',
       platformProfileId: 'platform-default', routeScene: 'chat', nativeProtocol: 'anthropic_messages', nativeToolResults: true,
@@ -530,7 +530,7 @@ test('standard counting factory binds encrypted dispatch, original receipt and h
     // it must reach the real evidence reader and then refuse, never dispatch.
     const missing = await countingRequestHarness(mode, true);
     t.mock.method(egress, 'createNativeModelEgressTransport', () => missing.server.transport);
-    const { PrismaModelStepEvidenceAuthority } = require('../apps/api/src/modules/ai-native/model-input/prisma-model-step-evidence.authority');
+    const { PrismaModelStepEvidenceAuthority } = load('@rental-os/ai-native-server/runtime/model-input/prisma-model-step-evidence.authority');
     const originalRead = PrismaModelStepEvidenceAuthority.prototype.readCompletedEvidence;
     let completedReads = 0, coreReads = 0;
     const readMock = t.mock.method(PrismaModelStepEvidenceAuthority.prototype, 'readCompletedEvidence', async function (...args) {
@@ -547,14 +547,18 @@ test('standard counting factory binds encrypted dispatch, original receipt and h
     assert.ok(completedReads > 0, 'Request-local Guard/Auth wrappers reach the actual original model reader');
     assert.equal(coreReads, 0); assert.equal(missing.effects.sent.length, 0); assert.equal(missing.effects.nativeCreations, 0);
   }
-  const fs = require('node:fs'), app = fs.readFileSync(require('node:path').join(__dirname, '../apps/api/src/app.module.ts'), 'utf8');
-  assert.match(app, /controllers:\s*\[[\s\S]*?\bAiInputCountingController\b/u);
-  assert.match(app, /providers:\s*\[[\s\S]*?\bAI_NATIVE_INPUT_COUNTING_PROVIDER\b/u);
+  const fs = require('node:fs'), path = require('node:path');
+  const selectedRoot = process.env.AI_NATIVE_TEST_SOURCE_ROOT;
+  assert.ok(selectedRoot, 'Original HTTP registration must come from the selected Rental host');
+  const policy = fs.readFileSync(path.join(selectedRoot, 'apps/rental-api/src/ai-http-policy.ts'), 'utf8');
+  const composition = fs.readFileSync(path.join(selectedRoot, 'apps/rental-api/src/ai-composition.ts'), 'utf8');
+  assert.match(policy, /RENTAL_AI_CONTROLLERS\s*=\s*Object\.freeze\(\[[\s\S]*?\bAiInputCountingController\b/u);
+  assert.match(composition, /original\.AI_NATIVE_INPUT_COUNTING_PROVIDER\b/u);
 });
 
 test('standard counting refuses forged input and revoked or aborted request-local connections', { timeout: 60000 }, async () => {
-  const { AiInputCountingController } = require('../apps/api/src/modules/ai-native/input-counting/input-counting-request.module');
-  const { InputCountingRequestFactory } = require('../apps/api/src/modules/ai-native/input-counting/input-counting-request.factory');
+  const { AiInputCountingController } = load('@rental-os/ai-native-server/runtime/input-counting/input-counting-request.module');
+  const { InputCountingRequestFactory } = load('@rental-os/ai-native-server/runtime/input-counting/input-counting-request.factory');
   for (const mode of ['revoked', 'aborted']) {
     const h = await countingRequestHarness(), abort = new AbortController(), controller = new AiInputCountingController(h.factory);
     await assert.rejects(controller.count(h.request, { ...h.command, taskId: 'other-task' }), e => e.getStatus() === 400);
@@ -577,7 +581,7 @@ test('standard counting refuses forged input and revoked or aborted request-loca
   assert.equal(native.effects.nativeCreations, 1); assert.equal(native.effects.coreReads, 0);
   assert.equal(native.effects.sent.length, 0); assert.equal(native.state.aiBudgetReservation.length, 0);
   await assert.rejects(native.effects.nativeCredentials.current(), { code: 'FORBIDDEN' });
-  const { PrismaGatewayInvocationBindings } = require('../apps/api/src/modules/ai-native/budget/prisma-gateway-invocation-bindings');
+  const { PrismaGatewayInvocationBindings } = load('@rental-os/ai-native-server/runtime/budget/prisma-gateway-invocation-bindings');
   const saved = native.state.aiTaskActionInput.find(row => row.id === 'count-input');
   const unregistered = new PrismaGatewayInvocationBindings(native.db, native.taskAuthorization.scopes, native.server.clock,
     { sceneCode: 'order_explanation', maxOutputTokens: 32, orderExplainTool: true });
@@ -585,7 +589,7 @@ test('standard counting refuses forged input and revoked or aborted request-loca
     lease: { runId: 'run-a', holderId: 'count-worker', fencingToken: native.state.aiRun[0].fencingToken.toFixed(0) },
     intent: saved.payload.intent, configuration: saved.payload.configuration, priceVersion: 'generation-price', expiresAt: saved.expiresAt }), { code: 'FORBIDDEN' });
   assert.equal(native.state.aiGatewayInvocation.length, 1); assert.equal(native.effects.sent.length, 0);
-  const model = require('../apps/api/src/modules/ai-native/model-input/task-model-input');
+  const model = load('@rental-os/ai-native-server/runtime/model-input/task-model-input');
   const nativePolicy = { sceneCode: 'order_explanation', maxOutputTokens: 32, orderExplainTool: true, nativeToolResults: true };
   const registered = new PrismaGatewayInvocationBindings(native.db, native.taskAuthorization.scopes, native.server.clock, nativePolicy);
   for (const field of ['taskId', 'runId']) {
@@ -626,10 +630,10 @@ test('standard counting platform connection follows current tenant selection and
 
 async function recordedTaskHost(t, mode = 'observed', serviceMode = 'platform_managed') {
   const h = await countingRequestHarness(serviceMode);
-  const { composePersistedTaskModelHost, composePersistedTaskGateway } = require('../apps/api/src/modules/ai-native/task-model-gateway.composition');
-  const { AI_TOOL_DRAFT_VERSION } = require('@rental-os/shared');
-  const egress = require('../apps/api/src/modules/ai-native/model-egress.transport');
-  const capabilities = require('../apps/api/src/modules/ai-native/prisma-text-capability-receipt.repository');
+  const { composePersistedTaskModelHost, composePersistedTaskGateway } = load('@rental-os/ai-native-server/runtime/task-model-gateway.composition');
+  const { AI_TOOL_DRAFT_VERSION } = load('@rental-os/shared');
+  const egress = load('@rental-os/ai-native-server/runtime/model-egress.transport');
+  const capabilities = load('@rental-os/ai-native-server/runtime/prisma-text-capability-receipt.repository');
   // Explicit capability proof substitute: this exercises orchestration, not a live supplier probe.
   t.mock.method(capabilities, 'createPersistedTextCapabilityEvidence', () => ({ preflight: async (_profile, required) =>
     ({ allowed: true, required, missing: [], stale: [] }) }));
@@ -661,8 +665,8 @@ async function recordedTaskHost(t, mode = 'observed', serviceMode = 'platform_ma
   if (serviceMode === 'platform_managed') {
     // Declared synthetic SaaS price and approved tenant/space allowance. The
     // real platform path uses money; a token-unit policy cannot stand in for it.
-    const { Prisma } = require('@prisma/client');
-    const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+    const { prismaRuntime: Prisma } = load('@rental-os/platform-server/prisma-runtime');
+    const { requestFingerprint } = load('@rental-os/platform-contracts/request-fingerprint');
     const price = h.state.aiGatewayPriceRecord[0];
     price.payload.billing = { unit: 'money', currency: 'USD', scale: 6, inputPerMillion: '1.000000',
       outputPerMillion: '1.000000', rounding: 'ceil_total_micro_units' };
@@ -672,6 +676,43 @@ async function recordedTaskHost(t, mode = 'observed', serviceMode = 'platform_ma
     const policy = h.state.aiBudgetPolicy.find(row => row.scopeKind === 'PLATFORM' && row.sceneCode === 'order_explanation');
     policy.unitKind = 'money'; policy.moneyCurrency = 'USD'; policy.moneyLimit = new Prisma.Decimal('100.000000');
     policy.settingsJson.budget = { state: 'limited', quantity: { unit: 'money', amount: '100.000000', currency: 'USD', scale: 6 } };
+    // The current platform policy also bounds this Task's cumulative money.
+    policy.settingsJson.maxMoneyPerTask = { unit: 'money', amount: '100.000000', currency: 'USD', scale: 6 };
+    // Supply the two SQL aggregate projections from the SAME transaction rows.
+    // This fixture supports its one reserved money call; unknown shapes fail.
+    const transaction = h.db.$transaction.bind(h.db);
+    h.db.$transaction = work => transaction(async tx => {
+      const query = tx.$queryRaw.bind(tx);
+      tx.$queryRaw = async sql => {
+        if (!/task_money_(origin|sum)/u.test(sql.sql)) return query(sql);
+        assert.ok(sql.values.includes('scope-a'));
+        const rows = await tx.aiBudgetReservation.findMany({ where: { unitKind: 'money' } });
+        let used = new Prisma.Decimal(0);
+        for (const row of rows) {
+          assert.equal(row.scopeId, 'scope-a'); assert.equal(row.scopeKind, 'WORKSPACE');
+          assert.equal(row.tenantId, 'tenant-a'); assert.equal(row.workspaceId, 'workspace-a');
+          assert.equal(row.status, 'reserved'); assert.equal(row.moneyCurrency, 'USD');
+          const run = await tx.aiRun.findFirst({ where: { id: row.runId, scopeId: row.scopeId } });
+          const task = await tx.aiTask.findFirst({ where: { id: run.taskId, scopeId: row.scopeId } });
+          const invocation = await tx.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId: row.scopeId, callId: row.callId } } });
+          assert.equal(task.id, 'task-a'); assert.equal(row.actorId, task.ownerId); assert.equal(row.actorId, run.actorId);
+          for (const key of ['scopeId', 'actorId', 'runId', 'stepId', 'actionId', 'sceneCode', 'priceVersion', 'configurationHash'])
+            assert.equal(row[key], invocation[key]);
+          assert.equal(row.requestId, invocation.callId); assert.equal(row.idempotencyKey, invocation.callId);
+          assert.equal(row.billingMode, 'platform_managed');
+          assert.equal(row.configRevision, invocation.configuration.configRevision);
+          assert.equal(row.configurationHash, requestFingerprint(invocation.configuration));
+          assert.equal(row.reservedTokens, null); assert.equal(row.reservedCalls, null);
+          assert.equal(row.actualTokens, null); assert.equal(row.actualCalls, null); assert.equal(row.actualMoney, null);
+          used = used.plus(row.reservedMoney);
+        }
+        const count = String(rows.length);
+        return sql.sql.includes('task_money_origin')
+          ? [{ joinedRows: count, reservationRows: count, badRows: '0' }]
+          : [{ rowCount: count, amountCount: count, currencyErrors: '0', usedMoney: rows.length ? used : null }];
+      };
+      try { return await work(tx); } finally { tx.$queryRaw = query; }
+    });
   } else {
     // BYOK does not require a platform rate, amount allowance or input bound.
     h.state.aiGatewayPriceRecord.length = 0;
@@ -775,16 +816,16 @@ test('exhausted cumulative output prevents the next effect and records partial s
 // Actual runner/resource/evidence repositories; invocation preparation, provider
 // outcomes and financial dispatch reader are explicit offline doubles, not live I/O.
 async function countedModelHarness(mode = 'observed', maxCalls = 2) {
-  const { Prisma } = require('../apps/api/node_modules/@prisma/client');
-  const { requestFingerprint: hash } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
-  const { CountingTaskModelInvocationPreparation } = require('../apps/api/src/modules/ai-native/input-counting/input-count-tokens.task-bound');
-  const { PrismaCountTokensReceipts, countTokensCallId, countTokensSceneCode } = require('../apps/api/src/modules/ai-native/input-counting/input-count-tokens.receipt');
+  const { prismaRuntime: Prisma } = load('@rental-os/platform-server/prisma-runtime');
+  const { requestFingerprint: hash } = load('@rental-os/platform-contracts/request-fingerprint');
+  const { CountingTaskModelInvocationPreparation } = load('@rental-os/ai-native-server/runtime/input-counting/input-count-tokens.task-bound');
+  const { PrismaCountTokensReceipts, countTokensCallId, countTokensSceneCode } = load('@rental-os/ai-native-server/runtime/input-counting/input-count-tokens.receipt');
   const h = await taskInputHarness({ aiScope: [{ id: 'scope-a', kind: 'WORKSPACE', tenantId: 'tenant-a', workspaceId: 'workspace-a', scopeKey: 'workspace:8:tenant-a:11:workspace-a' }], aiBudgetReservation: [], aiTaskActionInput: [] });
   const abort = new AbortController(), counts = [], generations = [];
   const config = { configId: 'profile-a', configRevision: 1, credentialRef: 'synthetic-vault', protocol: 'anthropic_messages',
     provider: 'synthetic', model: 'synthetic-model', serviceMode: 'tenant_managed', tenantId: 'tenant-a', configurationScope: { kind: 'tenant', tenantId: 'tenant-a' } };
-  const { AI_TOOL_DRAFT_VERSION } = require('@rental-os/shared');
-  const model = require('../apps/api/src/modules/ai-native/model-input/task-model-input');
+  const { AI_TOOL_DRAFT_VERSION } = load('@rental-os/shared');
+  const model = load('@rental-os/ai-native-server/runtime/model-input/task-model-input');
   const policy = { sceneCode: 'synthetic-clarification', maxOutputTokens: 32 };
   const intent = model.taskModelIntent('task-a', 'run-a', 'clarify', policy.sceneCode,
     { messages: [{ role: 'user', content: [{ kind: 'text', text: 'Synthetic bounded input' }] }], maxOutputTokens: 32 });
@@ -855,12 +896,12 @@ async function countedModelHarness(mode = 'observed', maxCalls = 2) {
         actual: config, evidence: 'mock', status: 'completed', text: 'Synthetic response', toolRequests: [],
         usage: { kind: 'reported', inputTokens: 12, outputTokens: 2 } } };
     } }) } };
-  const { PrismaModelStepEvidenceAuthority } = require('../apps/api/src/modules/ai-native/model-input/prisma-model-step-evidence.authority');
-  const { AiStepTransitionRepository } = require('../apps/api/src/modules/ai-native/ai-step-transition.repository');
+  const { PrismaModelStepEvidenceAuthority } = load('@rental-os/ai-native-server/runtime/model-input/prisma-model-step-evidence.authority');
+  const { AiStepTransitionRepository } = load('@rental-os/ai-native-server/runtime/ai-step-transition.repository');
   configuration.transitions = new AiStepTransitionRepository(h.db,
     new PrismaModelStepEvidenceAuthority(h.db, h.taskAuthority, h.planAuthority, policy, configuration.financialEvidence,
       () => new Date(h.control.now)), () => new Date(h.control.now));
-  const root = require('../apps/api/src/modules/ai-native/runner/persistent-task-runner.composition').composePersistentTaskRunner(configuration);
+  const root = load('@rental-os/ai-native-server/runtime/runner/persistent-task-runner.composition').composePersistentTaskRunner(configuration);
   return { ...h, root, counts, generations, abort };
 }
 

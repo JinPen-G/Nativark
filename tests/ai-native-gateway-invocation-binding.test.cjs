@@ -1,11 +1,11 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
-const { Prisma } = require('../apps/api/node_modules/@prisma/client');
-const { PrismaGatewayInvocationBindings } = require('../apps/api/src/modules/ai-native/budget/prisma-gateway-invocation-bindings');
-const { BudgetGatewayAdapter } = require('../apps/api/src/modules/ai-native/budget/budget-gateway-adapter');
-const { prepareGatewayTextIntent } = require('../apps/api/src/modules/ai-native/gateway-intent');
-const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { prismaRuntime: Prisma } = load('@rental-os/platform-server/prisma-runtime');
+const { PrismaGatewayInvocationBindings } = load('@rental-os/ai-native-server/runtime/budget/prisma-gateway-invocation-bindings');
+const { BudgetGatewayAdapter } = load('@rental-os/ai-native-server/runtime/budget/budget-gateway-adapter');
+const { prepareGatewayTextIntent } = load('@rental-os/ai-native-server/runtime/gateway-intent');
+const { requestFingerprint } = load('@rental-os/platform-contracts/request-fingerprint');
 const now = new Date('2026-10-05T12:00:00Z');
 const intent = { draftVersion: 'ain-c03-draft-2', requestId: 'request-1', sceneCode: 'rental.order.explain', messages: [{ role: 'user', content: [{ kind: 'text', text: 'Explain the authorized order.' }] }], requiredFeatures: ['text'], optionalFeatures: [], maxOutputTokens: 64 };
 const config = { configId: 'profile-1', configRevision: 3, credentialRef: 'vault-1', protocol: 'openai_chat_completions', provider: 'synthetic', model: 'model-1', tenantId: 'tenant-1', serviceMode: 'tenant_managed', configurationScope: { kind: 'tenant', tenantId: 'tenant-1' } };
@@ -74,9 +74,9 @@ function harness() {
 }
 
 test('text probe binds frozen command separately from its generated challenge intent', async () => {
-  const { textProbeIntent, TEXT_CAPABILITY_PROBE_TOOL } = require('../apps/api/src/modules/ai-native/text-capability-probe');
-  const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
-  const { AI_TOOL_DRAFT_VERSION } = require('@rental-os/shared');
+  const { textProbeIntent, TEXT_CAPABILITY_PROBE_TOOL } = load('@rental-os/ai-native-server/runtime/text-capability-probe');
+  const { capabilityProfileFingerprint } = load('@rental-os/ai-native-server/runtime/capability-verification');
+  const { AI_TOOL_DRAFT_VERSION } = load('@rental-os/shared');
   const h = harness();
   Object.assign(h.state.rows.aiProviderProfile[0], { profileKey: 'default', role: 'DEFAULT', allowedCapabilities: ['text'] });
   const command = { operationId: 'probe-operation', profileKey: 'default',
@@ -118,8 +118,8 @@ test('customer invocation binds CUSTOMER task and run without borrowing a same-i
   h.state.rows.aiRun[0].actorKind = 'CUSTOMER';
   assert.equal((await h.source().register(h.input())).replayed, false);
   assert.equal((await h.source().resolveForReserve(narrow, request)).actorId, 'actor-1');
-  const { PrismaGatewayCallPricing } = require('../apps/api/src/modules/ai-native/budget/prisma-gateway-call-pricing');
-  const { aiPersistenceScopeColumns } = require('../apps/api/src/modules/ai-native/persistence-scope');
+  const { PrismaGatewayCallPricing } = load('@rental-os/ai-native-server/runtime/budget/prisma-gateway-call-pricing');
+  const { aiPersistenceScopeColumns } = load('@rental-os/ai-native-server/runtime/persistence-scope');
   const policies = [];
   for (const [index, scope] of [{ kind: 'platform' }, { kind: 'tenant', tenantId: 'tenant-1' },
     { kind: 'workspace', tenantId: 'tenant-1', workspaceId: 'workspace-1' }].entries()) {
@@ -146,7 +146,7 @@ test('customer invocation binds CUSTOMER task and run without borrowing a same-i
 });
 
 test('runner invocation preparation uses the real binding repository and refuses replay as fresh readiness', async () => {
-  const { PrismaTaskGatewayInvocationPreparation } = require('../apps/api/src/modules/ai-native/runner/prisma-task-gateway-invocation.preparation');
+  const { PrismaTaskGatewayInvocationPreparation } = load('@rental-os/ai-native-server/runtime/runner/prisma-task-gateway-invocation.preparation');
   const h = harness(); const ref = { registered: { stepId: 'step-1' } };
   const held = { taskId: 'task-1', runId: 'run-1', holderId: 'worker-1', revision: 7, fencingToken: '2', expiresAt: new Date(now.getTime() + 60_000).toISOString() };
   const adapter = new PrismaTaskGatewayInvocationPreparation(h.source(), { resolve: async () => h.input() });
@@ -156,7 +156,7 @@ test('runner invocation preparation uses the real binding repository and refuses
 });
 
 test('runner invocation preparation cannot repair stale holder/configuration with invented associations', async () => {
-  const { PrismaTaskGatewayInvocationPreparation } = require('../apps/api/src/modules/ai-native/runner/prisma-task-gateway-invocation.preparation');
+  const { PrismaTaskGatewayInvocationPreparation } = load('@rental-os/ai-native-server/runtime/runner/prisma-task-gateway-invocation.preparation');
   for (const mode of ['holder', 'step', 'config', 'expiry', 'lost-commit']) {
     const h = harness(); const ref = { registered: { stepId: 'step-1' } };
     const held = { taskId: 'task-1', runId: 'run-1', holderId: 'worker-1', revision: 7, fencingToken: '2', expiresAt: new Date(now.getTime() + 60_000).toISOString() };

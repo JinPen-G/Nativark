@@ -1,7 +1,8 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'es2022', experimentalDecorators: true, emitDecoratorMetadata: true } });
-const { PrismaTaskActionPolicyRepository } = require('../apps/api/src/modules/ai-native/prisma-task-action-policy.repository');
+// These workspace policies belong to the explicitly selected independent Rental host.
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { PrismaTaskActionPolicyRepository } = load('@rental-os/ai-native-server/runtime/prisma-task-action-policy.repository');
 
 const start = new Date('2026-10-06T12:00:00.000Z');
 const context = { contractVersion: 'ain-c01-c02-draft-1', requestId: 'policy-request', authorizedAt: start.toISOString(), audience: 'operator',

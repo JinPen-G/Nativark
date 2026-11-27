@@ -10,7 +10,7 @@ const assert = require('node:assert/strict');
 const { createRequire } = require('node:module');
 const { createHash } = require('node:crypto');
 const { selectedCompilerOptions } = require('./build-selected-prisma.cjs');
-const { mergeSourceLocks, retentionSdk } = require('./rental-host-lock.cjs');
+const { mergeSourceLocks, retentionSdk, publicDataSdk } = require('./rental-host-lock.cjs');
 const root = path.resolve(__dirname, '..');
 const slash = file => path.resolve(file).split(path.sep).join('/');
 const inside = (directory, file) => file === directory || file.startsWith(directory + '/');
@@ -41,13 +41,13 @@ function createBuild(dependencyDirectory, settings = {}) {
   const lockFile = workspaceRoot + '/package-lock.json';
   const lock = mergeSourceLocks(
     JSON.parse(snapshot ? snapshot.files.get(lockFile)?.toString('utf8') : ts.sys.readFile(lockFile)), snapshot?.dependencyLock);
-  const scoped = settings.publicRetention && { directory: workspaceRoot + '/' + retentionSdk.install,
-    metadata: settings.publicRetention.metadata };
-  if (scoped) {
-    assert.deepEqual(lock.packages[retentionSdk.install], settings.publicRetention.lock, '编译须使用适配包独立的公共保留锁');
-    for (const [file, bytes] of settings.publicRetention.files)
-      virtual.set(scoped.directory + '/' + file, Buffer.from(bytes).toString('utf8'));
-  }
+  const scoped = [[retentionSdk, settings.publicRetention], [publicDataSdk, settings.publicAiDataSdk]]
+    .filter(([, sdk]) => sdk).map(([definition, sdk]) => {
+      assert.deepEqual(lock.packages[definition.install], sdk.lock, '编译须使用同次固定的局部 SDK 锁');
+      const directory = workspaceRoot + '/' + definition.install;
+      for (const [file, bytes] of sdk.files) virtual.set(directory + '/' + file, Buffer.from(bytes).toString('utf8'));
+      return { directory, metadata: sdk.metadata, definition };
+    });
   const dependencyPackages = new Map(), dependencyDirectories = new Set([deps]);
   for (const [name, metadata] of Object.entries(lock.packages || {})) {
     if (!name.startsWith('node_modules/') || metadata.link || !metadata.version) continue;
@@ -114,7 +114,7 @@ function createBuild(dependencyDirectory, settings = {}) {
     && /\/(?:dist(?:-[^/]+)?|generated)\/|\.tsbuildinfo$/u.test(file);
   const mapped = file => {
     file = slash(file);
-    if (scoped && inside(scoped.directory, file)) return file;
+    if (scoped.some(pkg => inside(pkg.directory, file))) return file;
     const workspacePackage = /\/node_modules\/(@rental-os\/[^/]+)(\/.*)?$/u.exec(file);
     const pkg = workspacePackage && packages.get(workspacePackage[1]);
     if (pkg) return pkg.directory + (workspacePackage[2] || '');
@@ -155,8 +155,8 @@ function createBuild(dependencyDirectory, settings = {}) {
         directories: entries.filter(([, dir]) => dir).map(([name]) => name) }; }, file => slash(file))
     : directoryExists(directory) ? ts.sys.readDirectory(directory, extensions, excludes, includes, depth).filter(fileExists) : [];
   function packageFor(name, from) {
-    return scoped && name === retentionSdk.name && from && inside(workspaceRoot + '/' + retentionSdk.owner, slash(from))
-      ? scoped : packages.get(name);
+    return scoped.find(pkg => name === pkg.definition.name && from
+      && inside(workspaceRoot + '/' + pkg.definition.owner, slash(from))) ?? packages.get(name);
   }
   function exported(name, runtime = false, from) {
     const parts = name.split('/'), packageName = parts.slice(0, 2).join('/');
@@ -287,7 +287,7 @@ function createBuild(dependencyDirectory, settings = {}) {
   function load(file) {
     file = slash(file);
     if (loaded.has(file)) return loaded.get(file).exports;
-    const hasScopedRuntime = scoped && inside(scoped.directory, file);
+    const hasScopedRuntime = scoped.some(pkg => inside(pkg.directory, file));
     const text = outputs.get(file) ?? (hasScopedRuntime ? virtual.get(file) : undefined);
     if (text === undefined) throw Error('运行时不能读取未编译模块：' + file);
     const module = { exports: {} };

@@ -1,17 +1,18 @@
 'use strict';
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const test = require('node:test'), assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'es2022', lib: ['es2022'], experimentalDecorators: true, emitDecoratorMetadata: true } });
-const { AuthService } = require('../apps/api/src/modules/auth/auth.service');
-const { ApiAuthGuard, requiredPermissions } = require('../apps/api/src/common/api-auth.guard');
+const { RentalAuthService: AuthService } = load('@rental-os/rental-core/auth-service');
+const { ApiAuthGuard } = load('@rental-os/ai-native-server/runtime/rental-adapters/api-auth.guard');
+const { requiredPermissions } = load('@rental-os/rental-core/http-auth').createRentalAuthorization(load('@rental-os/shared'));
 const { ExecutionContextHost } = require('@nestjs/core/helpers/execution-context-host');
-const { runWithRequestIdentity } = require('../apps/api/src/common/request-identity');
+const { runWithRequestIdentity } = load('@rental-os/platform-server/request-identity');
 const { user } = require('./fixtures/ai-native/authorization-baseline.cjs');
-const { PlatformModelConfigurationAuthority } = require('../apps/api/src/modules/ai-native/platform-model-config.authority');
-const { AiOrderRouteContextAuthority } = require('../apps/api/src/modules/ai-native/order-route-context.authority');
-const { createAuthorizedPlatformModelConfiguration } = require('../apps/api/src/modules/ai-native/platform-model-config.composition');
-const { SecretBox } = require('../apps/api/src/common/secret-box');
-const { aiPersistenceScopeColumns } = require('../apps/api/src/modules/ai-native/persistence-scope');
+const { PlatformModelConfigurationAuthority } = load('@rental-os/ai-native-server/runtime/platform-model-config.authority');
+const { AiOrderRouteContextAuthority } = load('@rental-os/ai-native-server/runtime/order-route-context.authority');
+const { createAuthorizedPlatformModelConfiguration } = load('@rental-os/ai-native-server/runtime/platform-model-config.composition');
+const { SecretBox } = load('@rental-os/platform-server/secret-box');
+const { aiPersistenceScopeColumns } = load('@rental-os/ai-native-server/runtime/persistence-scope');
 const path = '/api/platform/ai/providers/synthetic-profile';
 function setup() {
   const state = { user: user(), active: true, workspace: 'workspace-a', audience: 'operator' };
@@ -33,8 +34,8 @@ function setup() {
   return { state, auth, guard, credentials, activate, invocation, authority };
 }
 test('standard platform probe is inert and keeps current-authorized history when new execution is disabled', async () => {
-  const { composeStandardPlatformProbe } = require('../apps/api/src/modules/ai-native/platform-capability-probe/platform-capability-standard.application');
-  const { PlatformCapabilityProbeController } = require('../apps/api/src/modules/ai-native/platform-capability-probe/platform-capability-probe.controller');
+  const { composeStandardPlatformProbe } = load('@rental-os/ai-native-server/runtime/platform-capability-probe/platform-capability-standard.application');
+  const { PlatformCapabilityProbeController } = load('@rental-os/ai-native-server/runtime/platform-capability-probe/platform-capability-probe.controller');
   const { createTaskInputStore } = require('./fixtures/ai-native/task-input-store.cjs');
   const h = setup(); h.state.user.permissions = ['system:ai-provider:view'];
   const scope = { id: 'platform-scope', ...aiPersistenceScopeColumns({ kind: 'platform' }) };
@@ -65,14 +66,17 @@ test('standard platform probe is inert and keeps current-authorized history when
   assert.ok(store.trace.every(line => !/\.(create|update|upsert|createMany)$/u.test(line)));
   assert.throws(() => composeStandardPlatformProbe(input, { ...settings, enabled: true }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
   assert.throws(() => composeStandardPlatformProbe(input, { ...settings, tenantId: 'forged' }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
-  const fs = require('node:fs'), source = fs.readFileSync(require('node:path').join(__dirname, '../apps/api/src/app.module.ts'), 'utf8');
-  assert.match(source, /controllers:\s*\[[\s\S]*?\bPlatformCapabilityProbeController\b/u);
-  assert.match(source, /providers:\s*\[[\s\S]*?\bAI_NATIVE_PLATFORM_PROBE_PROVIDER\b/u);
+  const fs = require('node:fs'), path = require('node:path'), selectedRoot = process.env.AI_NATIVE_TEST_SOURCE_ROOT;
+  assert.ok(selectedRoot);
+  const policy = fs.readFileSync(path.join(selectedRoot, 'apps/rental-api/src/ai-http-policy.ts'), 'utf8');
+  const composition = fs.readFileSync(path.join(selectedRoot, 'apps/rental-api/src/ai-composition.ts'), 'utf8');
+  assert.match(policy, /RENTAL_AI_CONTROLLERS\s*=\s*Object\.freeze\(\[[\s\S]*?\bPlatformCapabilityProbeController\b/u);
+  assert.match(composition, /original\.AI_NATIVE_PLATFORM_PROBE_PROVIDER\b/u);
 });
 
 test('standard platform probe uses the default task audit without assembly IO or granting execution', async () => {
-  const { composeStandardPlatformProbe } = require('../apps/api/src/modules/ai-native/platform-capability-probe/platform-capability-standard.application');
-  const { PlatformCapabilityProbeController } = require('../apps/api/src/modules/ai-native/platform-capability-probe/platform-capability-probe.controller');
+  const { composeStandardPlatformProbe } = load('@rental-os/ai-native-server/runtime/platform-capability-probe/platform-capability-standard.application');
+  const { PlatformCapabilityProbeController } = load('@rental-os/ai-native-server/runtime/platform-capability-probe/platform-capability-probe.controller');
   const h = platformAuditHarness();
   h.state.user.permissions = ['system:ai-provider:view', 'system:ai-provider:manage'];
   h.store.db.aiPlatformModelConnection.update = async () => assert.fail('assembly cannot update platform connection');
@@ -105,7 +109,7 @@ test('standard platform probe uses the default task audit without assembly IO or
 });
 
 test('standard platform probe refuses missing default audit storage and malformed explicit sinks without IO', () => {
-  const { composeStandardPlatformProbe } = require('../apps/api/src/modules/ai-native/platform-capability-probe/platform-capability-standard.application');
+  const { composeStandardPlatformProbe } = load('@rental-os/ai-native-server/runtime/platform-capability-probe/platform-capability-standard.application');
   const h = platformAuditHarness(), settings = { enabled: true, platformProfileId: 'synthetic-profile', sceneVersion: '1',
     priceVersion: 'synthetic-price-version', host: { holderId: 'synthetic-holder', leaseMs: 30000 } };
   const input = { db: h.store.db, guard: h.guard, secrets: { decrypt() { assert.fail('assembly cannot decrypt'); } } };
@@ -233,17 +237,17 @@ test('tenant administrators and SaaS tenant-management permission cannot adminis
 // No MySQL or provider is contacted; reserved evidence is deliberately unknown.
 function platformAuditHarness(mode = 'invoke') {
   const { createTaskInputStore } = require('./fixtures/ai-native/task-input-store.cjs');
-  const { AiScopeRepository } = require('../apps/api/src/modules/ai-native/ai-scope.repository');
-  const { PrismaGatewayAccountingFacts } = require('../apps/api/src/modules/ai-native/budget/prisma-gateway-accounting-facts');
-  const { PrismaPlatformGatewayAudit } = require('../apps/api/src/modules/ai-native/prisma-platform-gateway-audit');
-  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
-  const { AI_TASK_DRAFT_VERSION } = require('@rental-os/shared');
+  const { AiScopeRepository } = load('@rental-os/ai-native-server/runtime/ai-scope.repository');
+  const { PrismaGatewayAccountingFacts } = load('@rental-os/ai-native-server/runtime/budget/prisma-gateway-accounting-facts');
+  const { PrismaPlatformGatewayAudit } = load('@rental-os/ai-native-server/runtime/prisma-platform-gateway-audit');
+  const { requestFingerprint } = load('@rental-os/platform-contracts/request-fingerprint');
+  const { AI_TASK_DRAFT_VERSION } = load('@rental-os/shared');
   const h = setup(), actorId = h.state.user.id, expiresAt = new Date(Date.now() + 600000);
   const owner = { id: 'platform-scope', ...aiPersistenceScopeColumns({ kind: 'platform' }) };
   const profile = { id: 'synthetic-profile', scopeId: owner.id, scopeKind: 'PLATFORM', profileKey: 'default', role: 'DEFAULT',
     serviceMode: 'platform_managed', protocol: 'openai_chat_completions', provider: 'synthetic', model: 'synthetic-model',
     credentialRef: 'synthetic-vault-reference', configRevision: 1, enabled: true, disabledAt: null, allowedCapabilities: ['text'] };
-  const configuration = require('../apps/api/src/modules/ai-native/text-capability-probe').textProbeConfiguration(profile, { kind: 'platform' });
+  const configuration = load('@rental-os/ai-native-server/runtime/text-capability-probe').textProbeConfiguration(profile, { kind: 'platform' });
   const common = { scopeId: owner.id, taskId: 'audit-task', actorId, callId: 'audit-call', runId: 'audit-run',
     stepId: 'audit-step', actionId: 'audit-action', sceneCode: 'ai.capability.text', priceVersion: 'synthetic-price-version' };
   const requestHash = 'a'.repeat(64), intentHash = 'b'.repeat(64), configurationHash = requestFingerprint(configuration);
@@ -349,7 +353,7 @@ test('platform budget-denial audit is not release evidence and refuses an existi
 });
 
 test('platform audit keeps lost COMMIT unknown, observes a unique winner once and sanitizes read failures', async () => {
-  const { Prisma } = require('../apps/api/node_modules/@prisma/client');
+  const { prismaRuntime: Prisma } = load('@rental-os/platform-server/prisma-runtime');
   const lost = platformAuditHarness();
   lost.store.control.beforeWrite = table => { if (table === 'operationLog') lost.store.control.loseReply = true; };
   await assert.rejects(lost.audit.prepare(lost.preparation), { code: 'ACCOUNTING_PENDING' });
@@ -400,8 +404,8 @@ test('platform audit keeps lost COMMIT unknown, observes a unique winner once an
 });
 
 test('authorized platform composition binds its default audit to the original task and SAME accounting facts without IO', () => {
-  const { composeAuthorizedPlatformCapabilityProbe } = require('../apps/api/src/modules/ai-native/platform-capability-probe/platform-capability-probe.composition');
-  const { PrismaPlatformGatewayAudit } = require('../apps/api/src/modules/ai-native/prisma-platform-gateway-audit');
+  const { composeAuthorizedPlatformCapabilityProbe } = load('@rental-os/ai-native-server/runtime/platform-capability-probe/platform-capability-probe.composition');
+  const { PrismaPlatformGatewayAudit } = load('@rental-os/ai-native-server/runtime/prisma-platform-gateway-audit');
   const h = platformAuditHarness();
   // Required storage surface is present, but unused writes never fake success.
   h.store.db.aiPlatformModelConnection.update = async () => assert.fail('assembly cannot update platform connection');
@@ -417,7 +421,7 @@ test('authorized platform composition binds its default audit to the original ta
 });
 
 test('platform audit three commands retain original committed observations on late revocation identity change and cancellation', async () => {
-  const { requestFingerprint: hash } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  const { requestFingerprint: hash } = load('@rental-os/platform-contracts/request-fingerprint');
   const command = (h, operation, signal) => operation === 'prepared' ? h.audit.prepare(h.preparation, signal)
     : operation === 'admitted' ? h.audit.append(h.entry)
       : h.audit.budgetDenied({ call: h.call, code: 'BUDGET_UNAVAILABLE' }, signal);

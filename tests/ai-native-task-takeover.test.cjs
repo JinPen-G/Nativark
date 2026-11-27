@@ -1,10 +1,9 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { PrismaTaskTakeoverRepository } = require('../apps/api/src/modules/ai-native/runner/prisma-task-takeover.repository');
-const { AiTaskRepository } = require('../apps/api/src/modules/ai-native/ai-task.repository');
-const apiRequire = require('node:module').createRequire(require('node:path').resolve(__dirname, '../apps/api/package.json'));
-const { AI_CONTRACT_DRAFT_VERSION, AI_TASK_DRAFT_VERSION } = apiRequire('@rental-os/shared');
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { PrismaTaskTakeoverRepository } = load('@rental-os/ai-native-server/runtime/runner/prisma-task-takeover.repository');
+const { AiTaskRepository } = load('@rental-os/ai-native-server/runtime/ai-task.repository');
+const { AI_CONTRACT_DRAFT_VERSION, AI_TASK_DRAFT_VERSION } = load('@rental-os/shared');
 const now = new Date('2026-10-06T10:00:00Z');
 const input = { taskId: 'task-a', runId: 'run-a', previousHolderId: 'worker-a', holderId: 'human-a', expectedTaskRevision: 1,
   expectedRunRevision: 1, expectedFencingToken: '1', leaseMs: 30000 };
@@ -67,13 +66,16 @@ test('competing takeovers have exactly one winner and one audit', async () => {
 test('audit failure and current permission revocation roll back the fencing write', async () => {
   for (const mode of ['audit', 'revoked']) {
     const h = harness(); h.control.failAudit = mode === 'audit'; h.control.revokeAt = mode === 'revoked' ? 3 : 0;
-    await assert.rejects(h.make().takeover(input), e => e.code === (mode === 'audit' ? 'AI_STORAGE_UNAVAILABLE' : 'AI_ACCESS_DENIED'));
+    await assert.rejects(h.make().takeover(input), e => mode === 'audit'
+      ? e.code === 'AI_RESULT_UNKNOWN' && e.retryable === false && e.nextAction === 'read_takeover_receipt'
+      : e.code === 'AI_ACCESS_DENIED');
     assert.equal(h.state.run.fencingToken, '1'); assert.equal(h.state.logs.length, 0);
   }
 });
 test('lost commit reply retains the new holder; restart cannot replay old CAS into another lease', async () => {
   const h = harness(); h.control.loseReply = true;
-  await assert.rejects(h.make().takeover(input), e => e.code === 'AI_STORAGE_UNAVAILABLE');
+  await assert.rejects(h.make().takeover(input), e => e.code === 'AI_RESULT_UNKNOWN'
+    && e.retryable === false && e.nextAction === 'read_takeover_receipt');
   assert.equal(h.state.run.leaseOwnerId, 'human-a');
   await assert.rejects(h.make().takeover(input), e => e.code === 'AI_REVISION_CONFLICT'); assert.equal(h.state.logs.length, 1);
 });

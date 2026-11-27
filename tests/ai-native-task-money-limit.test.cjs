@@ -1,11 +1,11 @@
 'use strict';
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-require('ts-node').register({ skipProject: true, transpileOnly: true, compilerOptions: { module: 'commonjs', target: 'es2022' } });
-const { Prisma } = require('../apps/api/node_modules/@prisma/client');
-const { PrismaBudgetRepository } = require('../apps/api/src/modules/ai-native/budget/prisma-budget.repository');
-const { platformCreditScene } = require('../apps/api/src/modules/ai-native/budget/platform-credit-policy');
-const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+const { prismaRuntime: Prisma } = load('@rental-os/platform-server/prisma-runtime');
+const { PrismaBudgetRepository } = load('@rental-os/ai-native-server/runtime/budget/prisma-budget.repository');
+const { platformCreditScene } = load('@rental-os/ai-native-server/runtime/budget/platform-credit-policy');
+const { requestFingerprint } = load('@rental-os/platform-contracts/request-fingerprint');
 const money = (amount, currency = 'CNY') => ({ unit: 'money', amount, currency, scale: 6 });
 
 function fixture({ tenant, workspace, prior = '0.000000' } = {}) {

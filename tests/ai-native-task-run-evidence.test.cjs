@@ -1,34 +1,35 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { Prisma } = require('../apps/api/node_modules/@prisma/client');
-const { PrismaTaskRunEvidenceRepository } = require('../apps/api/src/modules/ai-native/runner/prisma-task-run-evidence.repository');
-const { PrismaTaskExecutionBudgetRepository } = require('../apps/api/src/modules/ai-native/runner/prisma-task-execution-budget.repository');
-const { PrismaTaskRunnerResourceSource } = require('../apps/api/src/modules/ai-native/runner/prisma-task-runner-resource.source');
-const { PersistentTaskRunnerResourceGate } = require('../apps/api/src/modules/ai-native/runner/persistent-task-runner-resource-gate');
-const { PrismaTaskMeasuredEffects } = require('../apps/api/src/modules/ai-native/runner/prisma-task-measured-effects');
-const { aiTaskAccessFromContext } = require('../apps/api/src/modules/ai-native/ai-task.repository');
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { prismaRuntime: Prisma } = load('@rental-os/platform-server/prisma-runtime');
+const { PrismaTaskRunEvidenceRepository } = load('@rental-os/ai-native-server/runtime/runner/prisma-task-run-evidence.repository');
+const { PrismaTaskExecutionBudgetRepository } = load('@rental-os/ai-native-server/runtime/runner/prisma-task-execution-budget.repository');
+const { PrismaTaskRunnerResourceSource } = load('@rental-os/ai-native-server/runtime/runner/prisma-task-runner-resource.source');
+const { PersistentTaskRunnerResourceGate } = load('@rental-os/ai-native-server/runtime/runner/persistent-task-runner-resource-gate');
+const { PrismaTaskMeasuredEffects } = load('@rental-os/ai-native-server/runtime/runner/prisma-task-measured-effects');
+const { aiTaskAccessFromContext } = load('@rental-os/ai-native-server/runtime/ai-task.repository');
 const { AI_CONTRACT_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
 const syntheticExecutionContext = { contractVersion: AI_CONTRACT_DRAFT_VERSION, requestId: 'synthetic-evidence-test',
   authorizedAt: '2026-10-06T12:00:00Z', audience: 'operator', actor: { kind: 'user', userId: 'user-a' },
   scope: { kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'workspace-a' },
   access: { permissions: ['rental-os:order:view'], dataScope: 'all', locationScope: { mode: 'all', locationIds: [] } } };
 const syntheticExecutionAuthorization = { authorize: async () => structuredClone(syntheticExecutionContext) };
-const { PrismaGatewayAccountingFacts } = require('../apps/api/src/modules/ai-native/budget/prisma-gateway-accounting-facts');
-const { PersistedPlanResourcePolicySource } = require('../apps/api/src/modules/ai-native/runner/persisted-plan-resource-policy.source');
-const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
-const { offlinePrismaSchema } = require('./fixtures/ai-native/prisma-offline.cjs');
+const { PrismaGatewayAccountingFacts } = load('@rental-os/ai-native-server/runtime/budget/prisma-gateway-accounting-facts');
+const { PersistedPlanResourcePolicySource } = load('@rental-os/ai-native-server/runtime/runner/persisted-plan-resource-policy.source');
+const { requestFingerprint } = load('@rental-os/platform-contracts/request-fingerprint');
+const { offlinePrismaSchema, publicAiSchemaHistory, prismaDatamodel } = require('./fixtures/ai-native/prisma-offline.cjs');
+const { checkedPath } = require('../scripts/controller-sources.cjs');
 const fs = require('node:fs'), path = require('node:path');
 const now = new Date('2026-10-06T12:00:00Z'), lease = { taskId: 'task-a', runId: 'run-a', holderId: 'worker-a', revision: 1, fencingToken: '1', expiresAt: '2026-10-06T12:01:00Z' };
 const plan = { taskId: 'task-a', runId: 'run-a', taskRevision: 1, steps: [{ registrationRef: 'registration-a', operation: 'readonly', toolCode: 'rental.order.explain', toolVersion: '1' }],
   limits: { maxSteps: 3, maxCalls: 3, maxTotalMs: 1000, maxStepMs: 100, maxOutputBytes: 1000, maxConcurrent: 1 } };
 test('confirmation phase schema binds original evidence and preserves append-only receipt structure', () => {
   const root = path.resolve(__dirname, '..');
-  const schema = fs.readFileSync(path.join(root, 'apps/api/prisma/schema.prisma'), 'utf8');
+  const schema = fs.readFileSync(checkedPath(process.env.AI_NATIVE_TEST_SOURCE_ROOT, process.env.AI_NATIVE_TEST_SCHEMA), 'utf8');
   const before = schema.replace(/^model AiTaskExecutionPhase(?:Start|Receipt) \{[\s\S]*?^\}\r?\n/gmu, '')
     .split(/\r?\n/u).filter(line => !/\bAiTaskExecutionPhase(?:Start|Receipt)\b/u.test(line)
       && !line.includes('"ai_approvals_scope_task_id"')).join('\n');
-  const migration = fs.readFileSync(path.join(root, 'apps/api/prisma/migrations/20261008120000_ai_task_execution_phases/migration.sql'), 'utf8');
+  const migration = publicAiSchemaHistory().migration('20261008120000_ai_task_execution_phases');
   const result = offlinePrismaSchema(schema, before);
   assert.equal(result.violations, '');
   const statements = value => value.replace(/--[^\n]*(?:\n|$)/gu, '').split(';').map(s => s.replace(/\s+/gu, ' ').trim()).filter(Boolean);
@@ -41,7 +42,7 @@ test('confirmation phase schema binds original evidence and preserves append-onl
   assert.match(migration, /UNIQUE INDEX `ai_exec_phase_start_previous_key`\(`scopeId`, `taskId`, `previousReceiptId`\)/u);
   assert.match(migration, /`sequence` = 2 AND `previousReceiptId` IS NOT NULL AND `decisionRef` IS NOT NULL/u);
   assert.match(migration, /BINARY `kind` IN \('confirmation', 'succeeded', 'failed', 'unknown'\)/u);
-  const models = Prisma.dmmf.datamodel.models;
+  const models = prismaDatamodel(schema).models;
   const start = models.find(m => m.name === 'AiTaskExecutionPhaseStart');
   const receipt = models.find(m => m.name === 'AiTaskExecutionPhaseReceipt');
   assert.ok(start); assert.ok(receipt);
@@ -242,7 +243,7 @@ test('saved-plan policy cannot manufacture limits for missing plans or foreign t
   await assert.rejects(new PersistedPlanResourcePolicySource(tasks, h.make()).resolve('task-a', lease), e => e.code === 'AI_ACCESS_DENIED');
 });
 test('original Run preparation reserves before publication and preserves cumulative debt through recovery', async () => {
-  const { PrismaTaskRunPreparation, taskPreparationNonEffectChargeIds } = require('../apps/api/src/modules/ai-native/runner/prisma-task-run-preparation');
+  const { PrismaTaskRunPreparation, taskPreparationNonEffectChargeIds } = load('@rental-os/ai-native-server/runtime/runner/prisma-task-run-preparation');
   const create = async () => {
     const h = harness(); h.state.aiStep[0].status = 'PENDING';
     const evidence = h.make(), preparation = new PrismaTaskRunPreparation(h.db, evidence, h.authority, () => now, () => h.control.tick);
@@ -306,7 +307,7 @@ test('original Run preparation reserves before publication and preserves cumulat
 });
 
 test('successor preparation preserves original debt and rejects broken lineage or phase replacement', async () => {
-  const { PrismaTaskRunPreparation } = require('../apps/api/src/modules/ai-native/runner/prisma-task-run-preparation');
+  const { PrismaTaskRunPreparation } = load('@rental-os/ai-native-server/runtime/runner/prisma-task-run-preparation');
   const { createTaskInputStore } = require('./fixtures/ai-native/task-input-store.cjs');
   const fixture = createTaskInputStore({ businessWorkspace: ['ACTIVE', 'FROZEN', 'DISABLED']
     .map(status => ({ id: status, tenantId: 'tenant-a', status })) });
@@ -410,7 +411,7 @@ test('successor preparation preserves original debt and rejects broken lineage o
 });
 
 test('original preparation reservation subtracts admission time before any callback window', async () => {
-  const { PrismaTaskRunPreparation } = require('../apps/api/src/modules/ai-native/runner/prisma-task-run-preparation');
+  const { PrismaTaskRunPreparation } = load('@rental-os/ai-native-server/runtime/runner/prisma-task-run-preparation');
   const create = async delay => {
     const h = harness(); h.state.aiStep[0].status = 'PENDING';
     const evidence = h.make(), preparation = new PrismaTaskRunPreparation(h.db, evidence, h.authority, () => now, () => h.control.tick);
@@ -654,16 +655,16 @@ test('missing invocation input preparation denies model resource planning, not a
   await assert.rejects(source.charges(ref, lease)); assert.equal(h.state.aiTaskExecutionCharge.length, 0);
 });
 test('appended plan/result schema validates offline and has scoped compound foreign keys', () => {
-  const schema = fs.readFileSync(path.join(__dirname, '../apps/api/prisma/schema.prisma'), 'utf8');
+  const schema = fs.readFileSync(checkedPath(process.env.AI_NATIVE_TEST_SOURCE_ROOT, process.env.AI_NATIVE_TEST_SCHEMA), 'utf8');
   const before = require('node:child_process').execFileSync('git', ['show', '77d05769:apps/api/prisma/schema.prisma'], { encoding: 'utf8' });
   const result = offlinePrismaSchema(schema, before); assert.equal(result.violations, '');
   assert.match(result.diff, /CREATE TABLE `ai_task_run_plans`/); assert.match(result.diff, /CREATE TABLE `ai_task_result_artifacts`/);
   assert.doesNotMatch(result.diff, /DROP TABLE/);
-  const sql = fs.readFileSync(path.join(__dirname, '../apps/api/prisma/migrations/20261006010000_ai_task_plan_result_evidence/migration.sql'), 'utf8');
+  const sql = publicAiSchemaHistory().migration('20261006010000_ai_task_plan_result_evidence');
   for (const name of ['ai_task_run_plans_run_fkey', 'ai_task_result_artifacts_step_fkey', 'ai_result_artifact_step_generation_key']) {
     assert.ok(result.diff.includes('`' + name + '`')); assert.ok(sql.includes('`' + name + '`'));
   }
-  const models = Prisma.dmmf.datamodel.models;
+  const models = prismaDatamodel(schema).models;
   assert.deepEqual(models.find(m => m.name === 'AiTaskRunPlan').primaryKey.fields, ['scopeId', 'taskId', 'runId']);
   assert.deepEqual(models.find(m => m.name === 'AiTaskResultArtifact').fields.find(f => f.name === 'step').relationFromFields, ['scopeId', 'taskId', 'stepId']);
 });

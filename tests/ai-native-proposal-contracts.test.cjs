@@ -1,15 +1,12 @@
 "use strict";
 const test = require("node:test"), assert = require("node:assert/strict");
 const h = require("./fixtures/ai-native/contract-consumer.cjs"); h.blockNetwork(test);
-const path = require("node:path"), fs = require("node:fs"), ts = require("typescript"), { createRequire } = require("node:module");
-const root = path.resolve(__dirname, ".."), apiRequire = createRequire(path.join(root, "apps/api/package.json"));
-assert.ok(fs.realpathSync(apiRequire.resolve("@rental-os/shared")).startsWith(fs.realpathSync(path.join(root, "packages/shared")) + path.sep));
-require("ts-node").register({ transpileOnly: true, compilerOptions: { module: "commonjs", moduleResolution: "node", experimentalDecorators: true, emitDecoratorMetadata: true } });
-const shared = apiRequire("@rental-os/shared");
-const { AI_NATIVE_COMPONENT_SCHEMAS: base } = require("../apps/api/src/contracts/ai-native-schemas");
-const { fingerprintAiProposalDraft: fingerprint, checkAiApprovalBindingDraft: check } = require("../apps/api/src/modules/ai-native/proposal-binding-draft");
-const { requestFingerprint: coreFingerprint } = require("../apps/api/src/modules/rental-core/rental-idempotency.repository");
-const { OPENAPI_DOCUMENT } = require("../apps/api/src/contracts/openapi-document");
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const shared = load('@rental-os/shared');
+const { AI_NATIVE_COMPONENT_SCHEMAS: base } = load('@rental-os/ai-native-server/runtime/contracts/ai-native-schemas');
+const { fingerprintAiProposalDraft: fingerprint, checkAiApprovalBindingDraft: check } = load('@rental-os/ai-native-server/runtime/proposal-binding-draft');
+const { requestFingerprint: coreFingerprint } = load('@rental-os/platform-contracts/request-fingerprint');
+const { AI_HTTP_COMPONENT_SCHEMAS: publishedSchemas } = load('@rental-os/ai-native-server/runtime/contracts/http-openapi');
 const validators = h.validatorsFor(shared.AI_PROPOSAL_DRAFT_SCHEMAS, base);
 const yes = (name, value) => assert.equal(validators[name](value), true, JSON.stringify(validators[name].errors));
 const no = (name, value) => assert.equal(validators[name](value), false, `${name} accepted invalid input`);
@@ -29,7 +26,7 @@ test("proposal, review decision and persisted approval are distinct strict contr
   for (const field of ["actor", "scope", "tenantId", "audience", "expiresAt", "approved", "approvalId", "apiKey"]) no("AiProposalDecisionRequestDraft", { ...decision, [field]: "forged" });
   no("AiApprovalRecordDraft", { ...approval(), actor: h.contexts[4].actor, audience: "automation" });
   no("AiApprovalRecordDraft", { ...approval(), audience: "client" });
-  for (const name of Object.keys(shared.AI_PROPOSAL_DRAFT_SCHEMAS)) assert.ok(OPENAPI_DOCUMENT.components.schemas[name]);
+  for (const name of Object.keys(shared.AI_PROPOSAL_DRAFT_SCHEMAS)) assert.ok(publishedSchemas[name]);
 });
 
 test("fingerprint reuses Core canonicalization and preserves operation order", () => {
@@ -113,19 +110,15 @@ test("malformed records and ordinary messages do not become usable approvals", (
 });
 
 test("public C05 types and actual binding module compile without emitting", () => {
-  const file = path.join(root, "tests/__ai_proposal_types__.ts");
-  const source = `import type { AiProposalPayloadDraft, AiApprovalRecordDraft, AiApprovalConsumptionDraft } from "../packages/shared/src";
+  const nodeTypes = require("node:path").resolve(__dirname, "../node_modules/@types/node/index.d.ts").split(require("node:path").sep).join("/");
+  const source = `/// <reference path="${nodeTypes}" />
+  import type { AiProposalPayloadDraft, AiApprovalRecordDraft, AiApprovalConsumptionDraft } from "@rental-os/shared";
+  import {} from "@rental-os/ai-native-server/runtime/proposal-binding-draft";
   const payload: AiProposalPayloadDraft = ${JSON.stringify(payload)};
   const approval: AiApprovalRecordDraft = ${JSON.stringify(approval())};
   // @ts-expect-error automation is not a human confirmation actor
   const forged: AiApprovalRecordDraft = { ...approval, actor: { kind: "automation", subjectId: "job", policyId: "p", policyRevision: 1, expiresAt: "${payload.expiresAt}" } };
   // @ts-expect-error unknown business outcomes cannot be retried blindly
   const retry: AiApprovalConsumptionDraft = { contractVersion: "${version}", approvalId: "a", proposalId: "p", proposalRevision: 1, actionId: "x", actionFingerprint: "x", businessIdempotencyKey: "x", status: "unknown", retryable: true, nextAction: "reconcile" };`;
-  const options = { strict: true, noEmit: true, skipLibCheck: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, moduleResolution: ts.ModuleResolutionKind.Node10, experimentalDecorators: true, emitDecoratorMetadata: true, esModuleInterop: true };
-  const host = ts.createCompilerHost(options), read = host.readFile.bind(host), exists = host.fileExists.bind(host);
-  host.readFile = name => path.resolve(name) === file ? source : read(name);
-  host.fileExists = name => path.resolve(name) === file || exists(name);
-  const program = ts.createProgram([file, path.join(root, "apps/api/src/modules/ai-native/proposal-binding-draft.ts")], options, host);
-  const diagnostics = ts.getPreEmitDiagnostics(program);
-  assert.equal(diagnostics.length, 0, ts.formatDiagnosticsWithColorAndContext(diagnostics, { getCanonicalFileName: name => name, getCurrentDirectory: () => root, getNewLine: () => "\n" }));
+  assert.deepEqual(h.compileConsumer(source, process.env.AI_NATIVE_TEST_SOURCE_ROOT), []);
 });

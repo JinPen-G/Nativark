@@ -7,7 +7,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { registerHooks } = require('node:module');
 const { pathToFileURL, fileURLToPath } = require('node:url');
-const ts = require('typescript');
+const { createBuild } = require('../../../scripts/check-rental-package-build.cjs');
 
 const root = path.resolve(__dirname, '../../..');
 const base = path.resolve(__dirname, '..');
@@ -15,20 +15,20 @@ const base = path.resolve(__dirname, '..');
 const sqlMaterialCommit = '907c199c2648f24b522d40dd3ce1ef11f41b8490';
 
 function memoryPackage() {
-  const config = ts.readConfigFile(path.join(base, 'tsconfig.json'), ts.sys.readFile);
-  assert.equal(config.error, undefined);
-  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, base);
-  const program = ts.createProgram(parsed.fileNames, parsed.options);
-  const errors = [...parsed.errors, ...ts.getPreEmitDiagnostics(program)];
-  assert.equal(errors.length, 0, ts.formatDiagnostics(errors, {
-    getCanonicalFileName: file => file, getCurrentDirectory: () => root, getNewLine: () => '\n'
-  }));
+  // Consume this build's formal public exports, never stale dist from another
+  // release. The existing build helper selects MCP's locked TypeScript version.
+  const build = createBuild(path.join(root, 'node_modules'), { quiet: true });
+  for (const name of ['platform-contracts', 'core-contracts', 'core-host'])
+    build.compile(`packages/${name}/tsconfig.json`);
+  const observer = path.join(root, 'packages/platform-core-host/tsconfig.mcp-test.json').split(path.sep).join('/');
+  build.virtual.set(observer, JSON.stringify({ extends: './tsconfig.json',
+    files: ['src/mysql-structure.ts', 'src/mysql-physical.ts'], include: [] }));
+  build.compile(observer);
+  build.compileMcp();
   const files = new Map();
-  const result = program.emit(undefined, (file, content) => {
-    files.set(path.relative(base, file).split(path.sep).join('/'), Buffer.from(content));
-  });
-  assert.equal(result.emitSkipped, false);
-  assert.equal(result.diagnostics.length, 0);
+  for (const [file, content] of build.outputs)
+    if (file.startsWith(base.split(path.sep).join('/') + '/dist/'))
+      files.set(path.relative(base, file).split(path.sep).join('/'), Buffer.from(content));
   for (const file of ['package.json', 'README.md', 'data-contribution.json', 'prisma/schema.prisma'])
     files.set(file, fs.readFileSync(path.join(base, file)));
   files.set('LICENSE', fs.readFileSync(path.join(root, 'LICENSE')));
@@ -36,7 +36,7 @@ function memoryPackage() {
   // Git 原字节用于复现发行，Windows 工作区可能转换了 SQL 换行。
   for (const item of contribution.sql)
     files.set(item.file, execFileSync('git', ['show', `${sqlMaterialCommit}:packages/mcp-server/${item.file}`], { cwd: root }));
-  return files;
+  return { files, build };
 }
 
 function physicalRows(tables) {
@@ -58,7 +58,7 @@ function physicalRows(tables) {
 }
 
 test('MCP 能力包、原结构和原迁移账共同控制准入', async () => {
-  const files = memoryPackage();
+  const { files, build } = memoryPackage();
   const metadata = JSON.parse(files.get('package.json'));
   // 按包的实际 exports 载入内存构建产物，不覆盖本树现有 dist。
   const hooks = registerHooks({
@@ -68,8 +68,18 @@ test('MCP 能力包、原结构和原迁移账共同控制准入', async () => {
         const target = metadata.exports[key]?.import;
         if (target) return { url: pathToFileURL(path.join(base, target)).href, shortCircuit: true };
       }
-      if (specifier === './data-capability.js' && context.parentURL === pathToFileURL(path.join(base, 'dist/mysql-data.js')).href)
-        return { url: pathToFileURL(path.join(base, 'dist/data-capability.js')).href, shortCircuit: true };
+      if (specifier.startsWith('@rental-os/')) {
+        const target = build.exported(specifier, true);
+        assert(build.outputs.has(target), `missing current public build export: ${specifier}`);
+        return { url: pathToFileURL(target).href, shortCircuit: true };
+      }
+      if (specifier.startsWith('.') && context.parentURL?.startsWith('file:')
+        && build.outputs.has(fileURLToPath(context.parentURL).split(path.sep).join('/'))) {
+        const target = path.resolve(path.dirname(fileURLToPath(context.parentURL)), specifier).split(path.sep).join('/');
+        const built = [target, target + '.js', target + '/index.js'].find(file => build.outputs.has(file));
+        assert(built, `missing current relative build export: ${specifier}`);
+        return { url: pathToFileURL(built).href, shortCircuit: true };
+      }
       return next(specifier, context);
     },
     load(url, context, next) {
@@ -77,6 +87,9 @@ test('MCP 能力包、原结构和原迁移账共同控制准入', async () => {
         const name = path.relative(base, fileURLToPath(url)).split(path.sep).join('/');
         if (name.startsWith('dist/') && files.has(name) && name.endsWith('.js'))
           return { format: 'module', source: files.get(name), shortCircuit: true };
+        const built = build.outputs.get(fileURLToPath(url).split(path.sep).join('/'));
+        if (built !== undefined && url.endsWith('.js'))
+          return { format: 'commonjs', source: built, shortCircuit: true };
       }
       return next(url, context);
     }
@@ -95,7 +108,8 @@ test('MCP 能力包、原结构和原迁移账共同控制准入', async () => {
     const release = capability.createMcpDataRelease({ files, source });
     console.log(`内存候选完整包 SHA-256 ${release.sha256}；${files.size} 文件；来源为测试夹具`);
     assert.equal(release.id, 'mcp');
-    assert.equal(release.version, '0.1.0');
+    assert.equal(release.version, '0.1.1');
+    assert.equal(release.data.version, '0.1.0');
     assert.deepEqual(release.data.migrations.map(item => item.id), [
       'mcp.0001-oauth', 'mcp.0002-read-budget', 'mcp.0003-catalog-goal', 'mcp.0004-catalog-intent', 'mcp.0005-catalog-adoption'
     ]);
@@ -145,8 +159,28 @@ test('MCP 能力包、原结构和原迁移账共同控制准入', async () => {
     const version = { minInclusive: '0.1.9', maxExclusive: '0.1.10' };
     const platform = { data: { version: '0.1.9', readable: version, migrations: [] }, migrationNames: [],
       async readPhysical() { return { version: '0.1.9', observedAt: '2026-11-26T00:00:00.000Z', sha256: 'f'.repeat(64) }; } };
-    const lock = { lockVersion: 1, platform: { versions: { platform: '0.1.17', contract: '0.1.1', node: '24.13.0', capabilities: {} },
+    const lock = { lockVersion: 1, platform: { versions: { platform: '0.2.0', contract: '0.1.1', node: '24.13.0', capabilities: {} },
       source, sha256: 'b'.repeat(64), data: platform.data }, cores: [], dataCapabilities: [release] };
+    const { checkPlatformDataCapabilities } = require('@rental-os/core-contracts');
+    assert.deepEqual(release.compatibility.platform, { minInclusive: '0.1.0', maxExclusive: '0.3.0' });
+    assert.deepEqual(checkPlatformDataCapabilities(lock), []);
+    const previousRange = structuredClone(lock);
+    previousRange.dataCapabilities[0].compatibility.platform.maxExclusive = '0.2.0';
+    assert(checkPlatformDataCapabilities(previousRange).some(issue => issue.code === 'platform_version'),
+      'the former range must still refuse the new platform');
+    for (const version of ['0.1.0', '0.1.17']) {
+      const prior = structuredClone(lock); prior.platform.versions.platform = version;
+      assert.deepEqual(checkPlatformDataCapabilities(prior), [], 'existing platform compatibility remains available');
+    }
+    for (const version of ['0.0.9', '0.3.0']) {
+      const outside = structuredClone(lock); outside.platform.versions.platform = version;
+      assert(checkPlatformDataCapabilities(outside).some(issue => issue.code === 'platform_version'));
+      assert.throws(() => createCoreMigrationDeployment({ lock: outside, platform: [], cores: new Map(),
+        dataCapabilities: new Map([['mcp', files]]) }), /compatibility.platform/);
+    }
+    const wrongData = structuredClone(lock); wrongData.platform.data.version = '0.1.10';
+    assert(checkPlatformDataCapabilities(wrongData).some(issue => issue.code === 'platform_data_version'),
+      'a supported platform release does not authorize a different data baseline');
     const deployment = createCoreMigrationDeployment({ lock, platform: [], cores: new Map(), dataCapabilities: new Map([['mcp', files]]) });
     release.data.migrations.forEach((migration, at) => {
       const output = deployment.get(`migrations/${plan.migrationNames[at]}/migration.sql`);

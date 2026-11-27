@@ -171,7 +171,9 @@ public-client 登记 / 审查由原当前 SaaS 管理身份办理。通知与准
 
 `@rental-os/mcp-server/data-capability` 的 `createMcpDataRelease({ files, source })` 从同一完整构建包生成 `CorePlatformDataCapabilityRelease`。`files` 是包内相对路径到原字节的 Map，须包含包元数据、README、LICENSE、本版全部 JS / 类型构建文件（含未直接导出的内部模块）、材料清单、schema 和五份 SQL；`source` 是该构建包实际固定的仓库与提交。发行的 `sha256` 是整个包经 `createCoreArchive(files)` 得到的归档摘要，`files[]` 则逐项固定文件摘要，不能用五份 SQL 的指纹代替。`readMcpDataPackage(files, release)` 和 `requireMcpDataPackage(directory, release)` 复用公共完整包及逐文件核验。已解析的数据材料、包和候选锁都不代表已经安装或执行。[能力包入口](src/data-capability.ts) · [公共合同](../core-contracts/src/data-capability.ts)
 
-本版能力实现及数据版本均为 `0.1.0`，数据可读范围为 `[0.1.0, 0.1.1)`；兼容平台 `[0.1.0, 0.2.0)`、Core 合同 `[0.1.1, 0.2.0)`、Node `[22.0.0, 25.0.0)`。已核定的公共数据前置为 `[0.1.9, 0.1.10)`，五份 DDL 不要求其他 Core 数据。需要该能力的 Core 可在原 `requires` 声明 `{ capability: "mcp", version: { minInclusive: "0.1.0", maxExclusive: "0.1.1" } }`；它只参与能力与数据准入，不授予 MCP 业务权。原 Auth、审计、业务读取、率桶和其他运行依赖仍由各自宿主提供。
+本版包及能力实现版本为 `0.1.1`，数据版本仍为 `0.1.0`，数据可读范围为 `[0.1.0, 0.1.1)`；兼容平台 `[0.1.0, 0.3.0)`、Core 合同 `[0.1.1, 0.2.0)`、Node `[22.0.0, 25.0.0)`。`0.1.1` 修正底座 `0.2.0` 的兼容声明，保留原平台下界；没有新增 SQL、表或数据版本。已核定的公共数据前置仍为 `[0.1.9, 0.1.10)`，底座发行版本升级不能代替这项数据前置。五份 DDL 不要求其他 Core 数据。需要本版能力的 Core 可在原 `requires` 声明 `{ capability: "mcp", version: { minInclusive: "0.1.1", maxExclusive: "0.1.2" } }`；它只参与能力与数据准入，不授予 MCP 业务权。原 Auth、审计、业务读取、率桶和其他运行依赖仍由各自宿主提供。
+
+升级时须重新构建并锁定 `0.1.1` 完整包、实际来源与归档摘要；旧 `0.1.0` 资产、Tag 和部署锁保持原字节及原兼容范围，不可改写为新候选。五份迁移的 ID、名称和 checksum 不变，已有库继续核同一原账与物理结构，不重跑初始化或补成功记录。
 
 固定 [schema.prisma](prisma/schema.prisma) 只包含说明，不向宿主追加 Prisma 模型或关系；它的原字节 SHA-256 为 `8c3ad36c896693d3d056a9d1b067bf8c26cf222ed5aeadf7a1e367ae30fe7a63`。数据继续由原 SQL store 访问。正式新链的迁移 ID 和 Prisma 账名依次为：
 

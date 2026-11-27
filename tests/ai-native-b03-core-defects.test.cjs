@@ -1,13 +1,12 @@
 'use strict';
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
+const { publicAiSchemaHistory } = require('./fixtures/ai-native/prisma-offline.cjs');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { InvocationAdmissionService } = require('../apps/api/src/modules/ai-native/invocation-admission.service');
-const { UsageAccountingService } = require('../apps/api/src/modules/ai-native/usage-accounting.service');
-const { UnifiedAiGatewayService } = require('../apps/api/src/modules/ai-native/unified-ai-gateway.service');
+const { InvocationAdmissionService } = load('@rental-os/ai-native-server/runtime/invocation-admission.service');
+const { UsageAccountingService } = load('@rental-os/ai-native-server/runtime/usage-accounting.service');
+const { UnifiedAiGatewayService } = load('@rental-os/ai-native-server/runtime/unified-ai-gateway.service');
 const scope = { id: 'scope-a', kind: 'WORKSPACE', tenantId: 'tenant-a', workspaceId: 'space-a' };
 // Default mode is a characterization run, NOT security acceptance. Set the
 // strict flag to execute the intended requirements and obtain failing evidence.
@@ -15,7 +14,7 @@ const strict = process.argv.includes('--strict-b03') || process.env.AIN_B03_STRI
 function gap(name, body) { test(name, strict ? {} : { todo: 'KNOWN GAP: awaiting coordinator production patch' }, body); }
 
 test('W01 migration must create referenced tables before adding their foreign keys', () => {
-  const sql = fs.readFileSync(path.join(__dirname, '../apps/api/prisma/migrations/20261003160000_ai_provider_profiles/migration.sql'), 'utf8');
+  const sql = publicAiSchemaHistory().migration('20261003160000_ai_provider_profiles');
   const local = new Set([...sql.matchAll(/CREATE TABLE `([^`]+)`/g)].map(match => match[1]));
   const created = new Set();
   for (const match of sql.matchAll(/CREATE TABLE `([^`]+)`\s*\(([\s\S]*?)\) DEFAULT CHARACTER SET/g)) {

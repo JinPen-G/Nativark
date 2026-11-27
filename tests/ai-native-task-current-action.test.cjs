@@ -1,9 +1,10 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
-const { AuthService } = require('../apps/api/src/modules/auth/auth.service');
-const { AiTaskCurrentActionAuthority } = require('../apps/api/src/modules/ai-native/task-current-action.authority');
-const { AiTaskRepository } = require('../apps/api/src/modules/ai-native/ai-task.repository');
+// These workspace policies belong to the explicitly selected independent Rental host.
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { RentalAuthService: AuthService } = load('@rental-os/rental-core/auth-service');
+const { AiTaskCurrentActionAuthority } = load('@rental-os/ai-native-server/runtime/task-current-action.authority');
+const { AiTaskRepository } = load('@rental-os/ai-native-server/runtime/ai-task.repository');
 const samples = require('./fixtures/ai-native/authorization-baseline.cjs');
 
 function setup(audience = 'operator') {
@@ -12,13 +13,15 @@ function setup(audience = 'operator') {
   const auth = new AuthService({ getAuthSession: async () => state.session ? { id: 'session-a', userId: state.user.id, audience, currentWorkspaceId: state.workspace } : undefined,
     findUserById: async () => state.user, findWorkspaceScopedUser: async () => state.member ? state.user : undefined, listUserWorkspaces: async () => [] },
   { get: key => key === 'AUTH_TOKEN_SECRET' ? 'synthetic-action-secret' : undefined });
-  const credentials = { current: async () => ({ requestId: 'action-request', audience, authorization: `Bearer ${auth.signAccessToken({ sub: state.user.id, tid: state.user.tenantId, sid: 'session-a', aud: audience, exp: Math.floor(Date.now() / 1000) + 600 })}` }) };
+  // One request keeps its original signed workspace even if the session changes.
+  const authorization = `Bearer ${auth.signAccessToken({ sub: state.user.id, tid: state.user.tenantId, sid: 'session-a', wid: state.workspace, aud: audience, exp: Math.floor(Date.now() / 1000) + 600 })}`;
+  const credentials = { current: async () => ({ requestId: 'action-request', audience, authorization }) };
   const actions = [];
   const policies = { resolve: async (taskId, operation) => {
     actions.push(operation); if (state.revoke) { state.revoke(state); state.revoke = null; }
     return state.policy ? { taskId, operation, revision: 1, expiresAt: new Date(now.getTime() + 60000).toISOString(), requiredPermissions: [operation === 'takeover_run' ? 'rental-os:order:operate' : 'rental-os:order:view'] } : null;
   } };
-  return { state, actions, authority: new AiTaskCurrentActionAuthority(auth, credentials, policies, () => now), now };
+  return { state, actions, auth, authority: new AiTaskCurrentActionAuthority(auth, credentials, policies, () => now), now };
 }
 
 for (const audience of ['operator', 'staff']) for (const action of ['read_step_terminal', 'takeover_run', 'request_input', 'submit_input', 'resume_input']) test(`actual AuthService verifies ${audience}/${action} using a versioned injected policy`, async () => {
@@ -47,9 +50,16 @@ test('step replay bridge uses the exact action and owner query never widens to a
   assert.deepEqual(access.where.scope.is.workspaceId, 'workspace-a');
 });
 
-test('SaaS identity and missing location scope do not acquire workspace task authority', async () => {
+test('SaaS identity and missing location scope do not acquire workspace task authority', async t => {
   const h = setup(); h.state.user.isSaasAdmin = true;
   await assert.rejects(h.authority.resolve('task-a', 'read_metadata'), error => error.code === 'AI_ACCESS_DENIED');
   h.state.user.isSaasAdmin = false; h.state.user.locationScope = undefined;
+  // Current Auth projects the effective business scope. Remove that projection
+  // after the real signature/session checks to exercise the missing-scope gate.
+  const resolve = h.auth.resolveAccessContext.bind(h.auth);
+  t.mock.method(h.auth, 'resolveAccessContext', async (...args) => {
+    const access = await resolve(...args);
+    return access && { ...access, businessLocationScope: undefined };
+  });
   await assert.rejects(h.authority.resolve('task-a', 'read_metadata'), error => error.code === 'AI_ACCESS_DENIED');
 });

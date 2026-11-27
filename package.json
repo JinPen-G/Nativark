@@ -1,6 +1,6 @@
 {
   "name": "zelo",
-  "version": "0.1.18",
+  "version": "0.2.0",
   "private": true,
   "license": "MIT",
   "workspaces": [
@@ -91,7 +91,7 @@
     "test:ops-upgrade": "node tests/ops-upgrade-drill.test.cjs",
     "ops:mysql:backup": "powershell -ExecutionPolicy Bypass -File scripts/backup-mysql.ps1",
     "ops:mysql:restore": "powershell -ExecutionPolicy Bypass -File scripts/restore-mysql.ps1",
-    "test:admin": "node scripts/ops/legacy-checkout.cjs",
+    "test:admin": "node scripts/validate-react-admin.cjs --source-root . --mode public --admin-root packages/platform-admin/src --host-root apps/platform-admin --server-root packages/platform-server/src --manifest package.json --manifest package-lock.json --manifest apps/platform-admin/package.json",
     "test:saas-foundation": "node scripts/ops/legacy-checkout.cjs",
     "test:saas-subscription-db": "node scripts/ops/legacy-checkout.cjs",
     "test:saas-subscription": "node scripts/ops/legacy-checkout.cjs",

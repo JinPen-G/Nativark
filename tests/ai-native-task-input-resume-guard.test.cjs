@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { AiTaskTransitionRepository } = require('../apps/api/src/modules/ai-native/ai-task-transition.repository');
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { AiTaskTransitionRepository } = load('@rental-os/ai-native-server/runtime/ai-task-transition.repository');
 const { AI_TASK_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
 const { contexts } = require('./fixtures/ai-native/contract-consumer.cjs');
 const now = new Date('2026-10-06T10:00:00Z');

@@ -1,8 +1,9 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'es2022', experimentalDecorators: true, emitDecoratorMetadata: true } });
-const { PrismaTaskActionPolicyRepository } = require('../apps/api/src/modules/ai-native/prisma-task-action-policy.repository');
+// These workspace policies belong to the explicitly selected independent Rental host.
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { PrismaTaskActionPolicyRepository } = load('@rental-os/ai-native-server/runtime/prisma-task-action-policy.repository');
 
 const now = new Date('2026-10-06T12:00:00.000Z');
 const context = { contractVersion: 'ain-c01-c02-draft-1', requestId: 'req-1', authorizedAt: now.toISOString(), audience: 'operator', actor: { kind: 'user', userId: 'user-1' }, scope: { kind: 'workspace', tenantId: 'tenant-1', workspaceId: 'workspace-1' }, access: { permissions: ['rental-os:policy:write'], dataScope: 'all', locationScope: { mode: 'all', locationIds: [] } } };
@@ -69,8 +70,8 @@ test('revision exhaustion and unknown clear operations fail before mutation', as
 });
 
 function managedPolicyHarness() {
-  const { composeTaskActionPolicyManagement } = require('../apps/api/src/modules/ai-native/task-action-policy-management.composition');
-  const { enterRequestIdentity } = require('../apps/api/src/common/request-identity');
+  const { composeTaskActionPolicyManagement } = load('@rental-os/ai-native-server/runtime/task-action-policy-management.composition');
+  const { enterRequestIdentity } = load('@rental-os/platform-server/request-identity');
   const h = setup();
   h.state.task = { id: 'task-1', scopeId: 'scope-1', revision: 1, ownerKind: 'USER', ownerId: 'user-1', audience: 'OPERATOR', archivedAt: null };
   h.db.aiScope = { findFirst: async ({ where }) => ({ id: 'scope-1', ...where }) };

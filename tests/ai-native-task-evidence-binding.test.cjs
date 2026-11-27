@@ -1,8 +1,8 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { Prisma } = require('../apps/api/node_modules/@prisma/client');
-const { PrismaTaskRunEvidenceRepository } = require('../apps/api/src/modules/ai-native/runner/prisma-task-run-evidence.repository');
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { prismaRuntime: Prisma } = load('@rental-os/platform-server/prisma-runtime');
+const { PrismaTaskRunEvidenceRepository } = load('@rental-os/ai-native-server/runtime/runner/prisma-task-run-evidence.repository');
 const lease = { taskId: 'task-a', runId: 'run-a', holderId: 'worker-a', revision: 1, fencingToken: '1', expiresAt: '2099-01-01T00:00:00Z' };
 const plan = { taskId: 'task-a', runId: 'run-a', taskRevision: 1, steps: [{ registrationRef: 'step-a', toolCode: 'rental.order.explain', toolVersion: '1', operation: 'readonly' }],
   limits: { maxSteps: 1, maxCalls: 1, maxTotalMs: 100, maxStepMs: 100, maxOutputBytes: 100, maxConcurrent: 1 } };

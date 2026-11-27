@@ -1,12 +1,10 @@
 'use strict';
 const { clone, matches, contexts, now, AiStepTransitionRepository } = require('./step-repository.cjs');
-const { createRequire } = require('node:module');
-const path = require('node:path');
-const apiRequire = createRequire(path.resolve(__dirname, '../../../apps/api/package.json'));
-const { Prisma } = apiRequire('@prisma/client');
-const { AiStepRegistrationRepository } = require('../../../apps/api/src/modules/ai-native/ai-step-registration.repository');
-const { AiTaskEventRepository } = require('../../../apps/api/src/modules/ai-native/ai-task-event.repository');
-const { aiPersistenceScopeColumns } = require('../../../apps/api/src/modules/ai-native/persistence-scope');
+const { load } = require('./rental-compatibility-source.cjs');
+const { prismaRuntime: Prisma } = load('@rental-os/platform-server/prisma-runtime');
+const { AiStepRegistrationRepository } = load('@rental-os/ai-native-server/runtime/ai-step-registration.repository');
+const { AiTaskEventRepository } = load('@rental-os/ai-native-server/runtime/ai-task-event.repository');
+const { aiPersistenceScopeColumns } = load('@rental-os/ai-native-server/runtime/persistence-scope');
 const command = { taskId: 'task-1', registrationRef: 'plan-action-1', expectedTaskRevision: 3,
   lease: { runId: 'run-1', holderId: 'worker-1', revision: 5, fencingToken: '9007199254740993' } };
 const project = (row, select) => row && clone(Object.fromEntries(Object.keys(select).map(k => [k, row[k]])));

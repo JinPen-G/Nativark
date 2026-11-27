@@ -1,17 +1,17 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'es2022', lib: ['es2022'], experimentalDecorators: true, emitDecoratorMetadata: true } });
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 require('./fixtures/ai-native/local-shared.cjs');
 const { taskInputHarness } = require('./fixtures/ai-native/task-input-harness.cjs');
-const { PrismaTaskStepEvidenceAuthority } = require('../apps/api/src/modules/ai-native/runner/prisma-task-step-evidence.authority');
-const { AiStepTransitionRepository } = require('../apps/api/src/modules/ai-native/ai-step-transition.repository');
-const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+const { PrismaTaskStepEvidenceAuthority } = load('@rental-os/ai-native-server/runtime/runner/prisma-task-step-evidence.authority');
+const { AiStepTransitionRepository } = load('@rental-os/ai-native-server/runtime/ai-step-transition.repository');
+const { requestFingerprint } = load('@rental-os/platform-contracts/request-fingerprint');
 async function setup() {
   const h = await taskInputHarness();
   const authority = new PrismaTaskStepEvidenceAuthority(h.db, h.taskAuthority, h.planAuthority, () => new Date(h.control.now));
   const transitions = new AiStepTransitionRepository(h.db, authority, () => new Date(h.control.now));
   h.compose = () => {
-    const { composePersistentTaskRunner } = require('../apps/api/src/modules/ai-native/runner/persistent-task-runner.composition');
+    const { composePersistentTaskRunner } = load('@rental-os/ai-native-server/runtime/runner/persistent-task-runner.composition');
     return composePersistentTaskRunner({ ...h.configuration(), transitions });
   };
   return { ...h, authority, commands: h.configuration().commands };
@@ -34,7 +34,7 @@ async function completed() {
   lease.revision = registered.runRevision;
   let ref = { plan: p, registered };
   const start = h.commands.transition('start', ref, lease, null);
-  const { AiStepTransitionRepository } = require('../apps/api/src/modules/ai-native/ai-step-transition.repository');
+  const { AiStepTransitionRepository } = load('@rental-os/ai-native-server/runtime/ai-step-transition.repository');
   const transitioned = await new AiStepTransitionRepository(h.db, h.authority, () => new Date(h.control.now)).transition(start);
   lease.revision = transitioned.runRevision;
   ref.registered.taskRevision = transitioned.event.taskRevision;
@@ -65,7 +65,7 @@ for (const [label, mutate] of [
   ['old holder', h => { h.artifact.leaseOwnerId = 'old'; }],
   ['wrong byte count', h => { h.artifact.outputBytes += 1n; }],
   ['cross-scope charge', h => { h.state.aiTaskExecutionCharge[0].scopeId = 'other'; }],
-  ['old charge fence', h => { h.state.aiTaskExecutionCharge[0].fencingToken = new (require('../apps/api/node_modules/@prisma/client').Prisma.Decimal)(999); }],
+  ['old charge fence', h => { h.state.aiTaskExecutionCharge[0].fencingToken = new (load('@rental-os/platform-server/prisma-runtime').prismaRuntime.Decimal)(999); }],
   ['missing resource evidence', h => { h.state.aiTaskExecutionCharge.length = 0; }],
   ['write plan without Core receipt', h => { h.state.aiTaskRunPlan[0].payload.steps[0].operation = 'idempotent';
     h.state.aiTaskRunPlan[0].planHash = requestFingerprint(h.state.aiTaskRunPlan[0].payload); }],
@@ -83,8 +83,8 @@ for (const [label, mutate] of [
 });
 
 test('probe crash marker converges to unknown without inventing a Gateway result or financial release', async () => {
-  const { PrismaTextProbeStepEvidenceAuthority } = require('../apps/api/src/modules/ai-native/prisma-text-probe-step-evidence.authority');
-  const { TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE, textProbeIntent, textProbeConfiguration } = require('../apps/api/src/modules/ai-native/text-capability-probe');
+  const { PrismaTextProbeStepEvidenceAuthority } = load('@rental-os/ai-native-server/runtime/prisma-text-probe-step-evidence.authority');
+  const { TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE, textProbeIntent, textProbeConfiguration } = load('@rental-os/ai-native-server/runtime/text-capability-probe');
   const { AI_TOOL_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
   const h = await completed(), step = h.state.aiStep[0], plan = h.state.aiTaskRunPlan[0];
   const command = { operationId: 'crashed-probe', profileKey: 'default', profileFingerprint: 'a'.repeat(64) };
@@ -151,7 +151,7 @@ test('identity changed during evidence read is rejected before any event', async
 
 test('explicit assembly uses actual AuthService, stored action policy and persisted step evidence', async () => {
   const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
-  const { composeAuthorizedReadonlyPersistentTaskInputRunner } = require('../apps/api/src/modules/ai-native/runner/authorized-persistent-task-input.composition');
+  const { composeAuthorizedReadonlyPersistentTaskInputRunner } = load('@rental-os/ai-native-server/runtime/runner/authorized-persistent-task-input.composition');
   const h = await authorizedRunnerHarness();
   const { transitionAuthority: _syntheticTransition, ...input } = h.configuration();
   const root = composeAuthorizedReadonlyPersistentTaskInputRunner(input);
@@ -161,7 +161,7 @@ test('explicit assembly uses actual AuthService, stored action policy and persis
 });
 test('stored action policy withdrawal prevents the next effect in actual assembly', async () => {
   const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
-  const { composeAuthorizedReadonlyPersistentTaskInputRunner } = require('../apps/api/src/modules/ai-native/runner/authorized-persistent-task-input.composition');
+  const { composeAuthorizedReadonlyPersistentTaskInputRunner } = load('@rental-os/ai-native-server/runtime/runner/authorized-persistent-task-input.composition');
   const h = await authorizedRunnerHarness();
   const { transitionAuthority: _syntheticTransition, ...input } = h.configuration();
   const root = composeAuthorizedReadonlyPersistentTaskInputRunner(input);

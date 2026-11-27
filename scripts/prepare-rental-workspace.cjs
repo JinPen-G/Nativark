@@ -1,6 +1,7 @@
 'use strict';
-/** 从固定底座和独立 Rental Git 提交准备开发源码工作区。
- * 保留原源码、所选构建脚本和 npm 锁；不读取环境、安装依赖、生成 Client 或执行部署。
+/** 从固定底座和独立 Rental Git 提交准备显式开发或发行工作区。
+ * 保留原源码、所选构建脚本和 npm 锁；新装公共读取器在安装前按固定源码编成 vendor。
+ * 不读取环境、安装依赖、生成 Client 或执行部署。
  * 输出与零 Core 底座发行分开，Core 可在自己的仓库单独提交、打标签和重新准备。
  */
 const path = require('node:path');
@@ -9,7 +10,7 @@ const { createHash } = require('node:crypto');
 const { createRequire } = require('node:module');
 const { readBuildSnapshot, snapshotFromFiles, assertSourcePath } = require('./rental-build-snapshot.cjs');
 const { projectWorkspaceLock, mergeSourceLocks, lockedDependency, retentionSdk, retentionSdkLock,
-  isRetentionSdkDependency } = require('./rental-host-lock.cjs');
+  isRetentionSdkDependency, publicDataSdk, publicDataSdkLock, isPublicDataSdkDependency } = require('./rental-host-lock.cjs');
 const root = path.resolve(__dirname, '..');
 const slash = file => path.resolve(file).split(path.sep).join('/');
 const json = value => Buffer.from(JSON.stringify(value, null, 2) + '\n');
@@ -21,6 +22,9 @@ const rentalApps = ['apps/rental-api', 'apps/rental-admin', 'apps/tenant-website
 const layoutFile = 'rental.source.json';
 const publicAiAdapters = 'packages/rental-ai-adapters';
 const publicAiRuntime = 'public-ai-sdk';
+const publicAiReaderBuilds = new WeakMap();
+const readerBuildIdentity = sdk => sha256(json({ metadata: sdk.metadata, lock: sdk.lock, source: sdk.source, receipt: sdk.receipt,
+  archive: sha256(sdk.bytes), files: [...sdk.files].map(([file, bytes]) => [file, sha256(bytes)]) }));
 // These are the complete legacy Rental dependencies, not the public AI SDKs.
 // A declared snapshot belongs to Rental; it must never be filled from Zelo.
 const compatibilityPackages = ['packages/shared', 'packages/ai-native-server',
@@ -333,7 +337,7 @@ function selectRentalPublicAiAdapterSource(rental, runtime) {
 /** The fixed independent manifest is authoritative for local workspace identity.
  * Registry pins still come from the fixed locks; no installation, resolution or
  * read from a workspace's installed node_modules can construct that identity. */
-function bindIndependentWorkspaceLinks(lock, selected, workspaces, semver, publicRetention) {
+function bindIndependentWorkspaceLinks(lock, selected, workspaces, semver, publicRetention, publicAiDataSdk) {
   const packages = { ...lock.packages };
   for (const { target } of selected) {
     const metadata = workspaces.get(target);
@@ -349,7 +353,8 @@ function bindIndependentWorkspaceLinks(lock, selected, workspaces, semver, publi
       .filter(([name]) => !metadata.peerDependenciesMeta?.[name]?.optional)),
       ...metadata.devDependencies, ...metadata.dependencies, ...metadata.optionalDependencies };
     for (const [name, version] of Object.entries(dependencies)) {
-      if (isRetentionSdkDependency({ packages }, target, name, version, publicRetention)) continue;
+      if (isRetentionSdkDependency({ packages }, target, name, version, publicRetention)
+        || isPublicDataSdkDependency({ packages }, target, name, version, publicAiDataSdk)) continue;
       const pinned = packages[lockedDependency({ packages }, target, name)];
       if (pinned?.link ? workspaces.get(pinned.resolved)?.version === version
         : pinned?.version && semver.satisfies(pinned.version, version)) continue;
@@ -393,14 +398,20 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
     .every(file => freshHost?.aiFiles.includes(file)) || !freshHost.aiFiles.some(file => /^prisma\/ai-extension\/\d{14}-initial\.sql$/u.test(file))))
     throw Error('固定独立仓缺少新装 AI 宿主或原扩展 SQL，不能从底座补齐');
   const freshMcp = Boolean(options.freshAi && options.mcp);
-  if (freshMcp && (!freshHost?.mcpFiles || rental.mode !== 'development'))
-    throw Error('新装 MCP 只接受实际提供选装宿主叶的固定双仓开发组合');
+  if (freshMcp && !freshHost?.mcpFiles)
+    throw Error('新装 MCP 只接受实际提供选装宿主叶的固定双仓组合');
   const publicRetention = options.publicRetention;
   const adapterSources = publicRetention && selectRentalPublicAiAdapterSource(rental, publicAiRuntime);
-  if (publicRetention && (!options.freshAi || freshMcp || rental.mode !== 'development' || !freshHost?.publicRetentionFiles
+  if (publicRetention && (!options.freshAi || freshMcp || !freshHost?.publicRetentionFiles
     || publicRetention.source.commit !== platform.source.commit || publicRetention.source.repository !== platform.source.repository
     || publicRetention.sha256 !== sha256(publicRetention.bytes)))
-    throw Error('公共保留只接受同次固定 SDK 的 18 条新装开发组合');
+    throw Error('公共保留只接受同次固定 SDK 的 18 条新装组合');
+  const publicAiDataSdk = options.freshAi ? (options.publicAiDataSdk ?? compilePublicAiReaderSdk(options, platform)) : undefined;
+  if (options.publicAiDataSdk && !options.freshAi) throw Error('公共数据读取器只用于显式新装 AI');
+  if (publicAiDataSdk && (publicAiReaderBuilds.get(publicAiDataSdk) !== readerBuildIdentity(publicAiDataSdk)
+    || publicAiDataSdk.source.commit !== platform.source.commit
+    || publicAiDataSdk.source.repository !== platform.source.repository || sha256(publicAiDataSdk.bytes) !== publicAiDataSdk.sha256))
+    throw Error('公共数据读取器与固定底座来源不一致');
   const selectedRoles = ['domain', ...(profile === 'domain' ? [] : ['host']), ...(profile === 'full' ? ['client'] : []),
     ...(multi ? ['multi-core'] : []),
     ...(options.ai ? ['ai'] : []), ...(options.mcp ? ['mcp'] : [])];
@@ -480,6 +491,15 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
     }
     if (publicRetention && directory === freshHost.target) metadata.dependencies = { ...metadata.dependencies,
       '@rental-os/rental-ai-adapters': '0.1.0' };
+    if (directory === publicDataSdk.owner) {
+      if (publicAiDataSdk) {
+        if (metadata.peerDependencies?.[publicDataSdk.name] !== publicDataSdk.declaration)
+          throw Error('宿主没有声明本版公共数据读取器');
+        metadata.dependencies = { ...metadata.dependencies, [publicDataSdk.name]: publicDataSdk.spec };
+      }
+      delete metadata.peerDependencies?.[publicDataSdk.name];
+      delete metadata.peerDependenciesMeta?.[publicDataSdk.name];
+    }
     if (freshHost?.target === directory && !options.freshAi) {
       for (const name of Object.keys(metadata.scripts ?? {})) if (/:ai(?::|$)/u.test(name)) delete metadata.scripts[name];
       for (const name of Object.keys(metadata.exports ?? {})) if (freshAiHostExport(name)) delete metadata.exports[name];
@@ -558,6 +578,13 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
     mergedLock = { ...mergedLock, packages: { ...mergedLock.packages, [retentionSdk.install]: lock } };
     files.set(retentionSdk.archive, publicRetention.bytes);
   }
+  if (publicAiDataSdk) {
+    if (mergedLock.packages[publicDataSdk.install]) throw Error('公共数据 SDK 安装路径已有占用');
+    const lock = publicDataSdkLock(publicAiDataSdk.metadata, publicAiDataSdk.bytes);
+    if (JSON.stringify(lock) !== JSON.stringify(publicAiDataSdk.lock)) throw Error('公共数据 SDK 字节与锁不一致');
+    mergedLock = { ...mergedLock, packages: { ...mergedLock.packages, [publicDataSdk.install]: lock } };
+    files.set(publicDataSdk.archive, publicAiDataSdk.bytes);
+  }
   const semverPin = mergedLock.packages['node_modules/semver'];
   const deps = path.resolve(options.deps ?? path.join(options.repo, 'node_modules'));
   const fromDeps = createRequire(path.join(deps, 'semver/package.json'));
@@ -565,9 +592,9 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
   if (!semverPin?.version || fromDeps(semverManifest).version !== semverPin.version
     || slash(semverManifest) !== slash(path.join(deps, 'semver/package.json')))
     throw Error('依赖范围核对须使用底座原锁中的 semver');
-  const compositionLock = bindIndependentWorkspaceLinks(mergedLock, selected, workspaces, fromDeps('semver'), publicRetention);
+  const compositionLock = bindIndependentWorkspaceLinks(mergedLock, selected, workspaces, fromDeps('semver'), publicRetention, publicAiDataSdk);
   const projected = projectWorkspaceLock(compositionLock, workspaces, developmentRoot,
-    { verifySpecifications: true, publicRetention });
+    { verifySpecifications: true, publicRetention, publicAiDataSdk });
   // 开发工作区继承固定底座的完整工具链，包括已锁定的可选开发 peer。
   // 运行包仍另做生产闭包投影，不能借该投影裁掉开发源码需要的依赖记录。
   const platformLock = JSON.parse(Buffer.from(platform.files.get('package-lock.json')).toString('utf8'));
@@ -619,6 +646,7 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
   }
   const generated = new Set(['README.md', 'package.json', 'package-lock.json', 'platform.source.json']);
   if (publicRetention) generated.add(retentionSdk.archive);
+  if (publicAiDataSdk) generated.add(publicDataSdk.archive);
   const describe = (file, bytes) => ({ path: file, bytes: bytes.length, sha256: sha256(bytes) });
   const declaration = file => describe(file, files.get(file));
   files.set('development.workspace.json', json({
@@ -632,6 +660,7 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
     platform: { version: platform.version, source: platform.source, layout: 'platform-source', packageRoot: '.' },
     ...(options.freshAi ? { installation: 'fresh-ai' } : {}),
     ...(publicRetention ? { publicRetention: publicRetention.receipt } : {}),
+    ...(publicAiDataSdk ? { publicAiDataSdk: publicAiDataSdk.receipt } : {}),
     core: { version: rental.metadata.version, source: rental.source, tag: rental.tag,
       checkoutRepository: rental.checkoutRepository, layout: rental.layoutKind,
       packageRoot: selected.find(entry => entry.target === coreDirectory).source, paths: selected },
@@ -649,7 +678,46 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
           && (file.endsWith('.md') || file.endsWith('/package.json')),
       }) })),
   }));
-  return { files, platform, rental };
+  return { files, platform, rental, ...(publicAiDataSdk ? { publicAiDataSdk } : {}) };
+}
+
+/** Build the public reader from the fixed platform, as an npm alias tarball.
+ * The compatibility package and its old exports keep their original identity. */
+function compilePublicAiReaderSdk(options, platform) {
+  const { createBuild } = require('./check-rental-package-build.cjs');
+  const directory = 'packages/ai-native-data', absolute = file => slash(path.join(root, file));
+  const fixed = readBuildSnapshot(options.commit, options.repo, [directory]);
+  const seed = new Map([...platform.files].map(([file, bytes]) => [absolute(file), bytes]));
+  for (const [file, bytes] of fixed.files) seed.set(file, bytes);
+  const build = createBuild(options.deps ?? path.join(options.repo, 'node_modules'), {
+    snapshot: snapshotFromFiles(options.commit, seed), quiet: true });
+  for (const name of ['platform-contracts', 'core-contracts', 'platform-server', 'core-host', 'platform-core-host'])
+    build.compile('packages/' + name + '/tsconfig.json');
+  const emitted = build.compile(directory + '/tsconfig.public.json').emitted;
+  const metadata = JSON.parse(fixed.files.get(absolute(directory + '/package.public.json')));
+  if (metadata.name !== publicDataSdk.packageName || metadata.version !== publicDataSdk.version)
+    throw Error('固定底座没有本版公共数据 SDK');
+  const files = new Map([['package.json', fixed.files.get(absolute(directory + '/package.public.json'))]]);
+  for (const [file, bytes] of fixed.files) {
+    const relative = file.slice(absolute(directory).length + 1);
+    if (relative === 'LICENSE' || relative === 'README.public.md' || relative.startsWith('prisma-public/'))
+      files.set(relative === 'README.public.md' ? 'README.md' : relative, bytes);
+  }
+  for (const [file, bytes] of emitted) {
+    const prefix = absolute(directory + '/dist-public') + '/';
+    if (file.startsWith(prefix)) files.set('dist/' + file.slice(prefix.length), Buffer.from(bytes));
+  }
+  const api = build.load(build.exported('@rental-os/core-contracts/archive', true));
+  const { bytes, sha256 } = api.createCoreArchive(new Map([...files].map(([file, body]) => ['package/' + file, body])));
+  const unpacked = api.readCoreArchive(bytes, sha256).files;
+  if (unpacked.size !== files.size || [...files].some(([file, body]) => !Buffer.from(unpacked.get('package/' + file) ?? []).equals(body)))
+    throw Error('公共数据 SDK 归档回读不一致');
+  const lock = publicDataSdkLock(metadata, bytes), source = platform.source;
+  const sdk = { files, metadata, bytes, sha256, lock, source, projects: build.stages,
+    receipt: { name: metadata.name, alias: publicDataSdk.name, version: metadata.version, source,
+      archive: publicDataSdk.archive, install: publicDataSdk.install, sha256, integrity: lock.integrity } };
+  publicAiReaderBuilds.set(sdk, readerBuildIdentity(sdk));
+  return sdk;
 }
 
 async function createRentalDevelopmentWorkspace(options, api) {
@@ -707,6 +775,6 @@ async function main(args) {
 }
 
 if (require.main === module) main(process.argv.slice(2)).catch(error => { console.error(error.message); process.exitCode = 1; });
-module.exports = { readIndependentRentalSource, mapRentalSource, composeRentalBuildSnapshot,
+module.exports = { compilePublicAiReaderSdk, readIndependentRentalSource, mapRentalSource, composeRentalBuildSnapshot,
   selectRentalPublicAiAdapterSource, createRentalDevelopmentWorkspace, projectRentalDevelopmentWorkspace,
   compileFixedPlatformContracts, argumentsOf, main };

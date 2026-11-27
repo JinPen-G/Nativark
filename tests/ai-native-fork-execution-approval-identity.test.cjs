@@ -1,8 +1,8 @@
 'use strict';
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { AiApprovalService, PrismaAiApprovalRepository } = require('../apps/api/src/modules/ai-native/ai-approval-repository');
-const { fingerprintAiProposalDraft } = require('../apps/api/src/modules/ai-native/proposal-binding-draft');
+const { AiApprovalService, PrismaAiApprovalRepository } = load('@rental-os/ai-native-server/runtime/ai-approval-repository');
+const { fingerprintAiProposalDraft } = load('@rental-os/ai-native-server/runtime/proposal-binding-draft');
 
 function request() {
   const payload = { contractVersion: 'ain-c05-draft-1', proposalId: 'proposal-a', taskId: 'task-a', revision: 1, audience: 'staff', scope: { kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'workspace-a' }, actions: [{ actionId: 'action-a', toolCode: 'rental.order.explain', toolVersion: '1', input: { recordId: 'input-a', revision: 1, contentHash: 'a'.repeat(64) }, preview: { recordId: 'preview-a', revision: 1, contentHash: 'b'.repeat(64) }, target: { resourceType: 'order', resourceId: 'order-a', version: 'v1' } }], atomicity: 'single_action', failurePolicy: 'stop_and_reconcile', expiresAt: '2099-01-01T00:00:00.000Z' };

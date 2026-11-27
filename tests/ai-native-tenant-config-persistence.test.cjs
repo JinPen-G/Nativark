@@ -1,14 +1,14 @@
 'use strict';
 const test = require('node:test');
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
-const { Prisma } = require('../apps/api/node_modules/@prisma/client');
-const { PrismaTenantModelConfigRepository } = require('../apps/api/src/modules/ai-native/tenant-model-config.repository');
-const { createPersistedTenantModelConfiguration, createScopeBoundTenantModelConnection } = require('../apps/api/src/modules/ai-native/tenant-model-config.composition');
-const { SecretBox } = require('../apps/api/src/common/secret-box');
-const { PlatformModelConfigService } = require('../apps/api/src/modules/ai-native/platform-model-config.service');
-const { AI_CONTRACT_DRAFT_VERSION } = require('../packages/shared/src/ai-native');
+const { prismaRuntime: Prisma } = load('@rental-os/platform-server/prisma-runtime');
+const { PrismaTenantModelConfigRepository } = load('@rental-os/ai-native-server/runtime/tenant-model-config.repository');
+const { createPersistedTenantModelConfiguration, createScopeBoundTenantModelConnection } = load('@rental-os/ai-native-server/runtime/tenant-model-config.composition');
+const { SecretBox } = load('@rental-os/platform-server/secret-box');
+const { PlatformModelConfigService } = load('@rental-os/ai-native-server/runtime/platform-model-config.service');
+const { AI_CONTRACT_DRAFT_VERSION } = load('@rental-os/shared');
 const context = { tenantId: 'synthetic-tenant', workspaceId: 'synthetic-space', actorId: 'synthetic-user' };
 const settings = { protocol: 'openai_chat_completions', baseUrl: 'https://synthetic-model.example.test/v1', model: 'synthetic/model', enabled: true };
 const secret = 'synthetic-secret-test-only';
@@ -60,7 +60,8 @@ function setup() {
       catch (error) { state.rows = rows; state.profiles = profiles; throw error; }
     }); tail = result.catch(() => {}); return result;
   };
-  const secrets = new SecretBox({ get: name => name === 'INTEGRATION_ENCRYPTION_KEY' ? 'synthetic-encryption-key-only' : 'production' });
+  const secrets = new SecretBox({ get: name => name === 'INTEGRATION_ENCRYPTION_KEY'
+    ? 'synthetic-encryption-key-only-0123456789' : name === 'NODE_ENV' ? 'production' : undefined });
   const authorize = async requested => {
     if (!state.authority || requested.actorId !== context.actorId || requested.tenantId !== context.tenantId || requested.workspaceId !== context.workspaceId) throw Error('synthetic revoked authority');
   };
@@ -70,7 +71,7 @@ function setup() {
 
 test('new tenant remains platform/not_verified without implicit activation or persistence', async () => {
   const h = setup();
-  assert.deepEqual(await h.service().get(context), { mode: 'platform_managed', serviceName: 'Rental OS AI', revision: 0, availability: 'not_verified' });
+  assert.deepEqual(await h.service().get(context), { mode: 'platform_managed', serviceName: 'Rental OS AI', revision: 0, enabled: false, availability: 'not_verified' });
   assert.equal(h.state.rows.length, 0);
   await assert.rejects(h.service().profile(context), rejected('PROVIDER_UNAVAILABLE'));
 });
@@ -80,7 +81,7 @@ test('actual config service and repository retain ciphertext and recover configu
   const saved = await h.service().save(context, { ...settings, expectedRevision: 0, apiKey: secret });
   assert.equal(saved.keyConfigured, true);
   const cipher = h.state.rows[0].credentialsEncrypted;
-  assert.match(cipher, /^v1:/);
+  assert.match(cipher, /^v2:/);
   assert.equal(JSON.stringify(h.state.rows).includes(secret), false);
   await h.service().changeMode(context, { mode: 'platform_managed', expectedRevision: 1 });
   assert.equal(h.state.rows[0].credentialsEncrypted, cipher, 'mode switch retains exact ciphertext');
@@ -100,8 +101,12 @@ test('saving a retained BYOK draft while platform mode is selected does not comm
   assert.equal(saved.mode, 'platform_managed', 'saving BYOK draft does not implicitly switch active mode');
   assert.equal(saved.revision, 2);
   assert.equal(h.state.rows[0].mode, 'platform_managed');
-  assert.match(h.state.rows[0].credentialsEncrypted, /^v1:/);
+  assert.match(h.state.rows[0].credentialsEncrypted, /^v2:/);
   await facade.switchMode(context, 'tenant_managed', 2);
+  const disabled = await facade.tenantProfile(context);
+  assert.equal(disabled.enabled, false, 'mode selection retains the independent service switch');
+  await assert.rejects(facade.tenantCredential(disabled.credentialRef, context), rejected('CREDENTIAL_UNAVAILABLE'));
+  await facade.saveTenantService(context, { ...settings, expectedRevision: 3, secretChange: { operation: 'retain' } });
   assert.equal(await facade.tenantCredential((await facade.tenantProfile(context)).credentialRef, context), secret);
 });
 

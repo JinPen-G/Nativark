@@ -1,7 +1,7 @@
 'use strict';
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'es2022' } });
-const { AiTaskRunner } = require('../apps/api/src/modules/ai-native/runner/ai-task-runner.service');
+const { AiTaskRunner } = load('@rental-os/ai-native-server/runtime/runner/ai-task-runner.service');
 
 const input = { taskId: 'task-1', runId: 'run-1', holderId: 'worker-1', expectedTaskRevision: 3, expectedRunRevision: 4, expectedFencingToken: '8', leaseMs: 1000 };
 function setup(options = {}) {
@@ -112,7 +112,7 @@ test('runner waits for deferred model resources after start and cannot execute a
 });
 
 test('persistent composition rejects missing current-authority, plan or effect dependencies at assembly', () => {
-  const { composePersistentTaskRunner } = require('../apps/api/src/modules/ai-native/runner/persistent-task-runner.composition');
+  const { composePersistentTaskRunner } = load('@rental-os/ai-native-server/runtime/runner/persistent-task-runner.composition');
   assert.throws(() => composePersistentTaskRunner({}), /AI_RESOURCE_UNAVAILABLE/);
   assert.throws(() => composePersistentTaskRunner({ db: { $transaction() {} }, tasks: {} }), /AI_RESOURCE_UNAVAILABLE/);
 });

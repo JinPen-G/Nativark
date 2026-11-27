@@ -1,5 +1,5 @@
-/** Independent fresh-install archive. The workspace also builds the legacy
- * reader, but none of its migrations or entry points belong to this release. */
+/** Independent fresh-install archive. Older public releases retain their exact
+ * package identity and compatibility range when read by the current SDK. */
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { CorePlatformDataCapabilityReleaseSchema, type CorePlatformDataCapabilityRelease } from "@rental-os/core-contracts";
@@ -8,7 +8,7 @@ import { readPlatformDataCapabilityPackage, requirePlatformDataCapabilityFiles }
 import { createPublicAiDataContribution, PUBLIC_AI_DATA_FILES, PUBLIC_AI_DATA_OWNER,
   PUBLIC_AI_DATA_PREREQUISITES, type PublicAiDataContribution } from "./public-data";
 
-export const PUBLIC_AI_DATA_PACKAGE_VERSION = "0.2.0";
+export const PUBLIC_AI_DATA_PACKAGE_VERSION = "0.2.2";
 const entries = ["public-data", "public-data-package", "public-mysql-data"] as const;
 const entry = (name: typeof entries[number]) => ({ types: `./dist/${name}.d.ts`, default: `./dist/${name}.js` });
 const manifest = {
@@ -18,13 +18,15 @@ const manifest = {
   typesVersions: { "*": Object.fromEntries(entries.map(name => [name, [`dist/${name}.d.ts`]])) },
   dependencies: { "@rental-os/core-contracts": "0.1.0", "@rental-os/platform-core-host": "0.1.0", "@rental-os/core-host": "0.1.0" }
 };
-const packageJson = Buffer.from(JSON.stringify(manifest, null, 2) + "\n");
+const packageJson = (version: string) => Buffer.from(JSON.stringify({ ...manifest, version }, null, 2) + "\n");
 const packageFiles = ["package.json", "README.md", "LICENSE", ...PUBLIC_AI_DATA_FILES.map(asset => asset.file),
   ...entries.flatMap(name => [`dist/${name}.js`, `dist/${name}.d.ts`])];
 
-function releaseMetadata(contribution: PublicAiDataContribution) {
-  return { id: PUBLIC_AI_DATA_OWNER.id, version: PUBLIC_AI_DATA_PACKAGE_VERSION,
-    compatibility: { platform: { minInclusive: "0.1.0", maxExclusive: "0.2.0" },
+function releaseMetadata(contribution: PublicAiDataContribution, version = PUBLIC_AI_DATA_PACKAGE_VERSION) {
+  if (version !== "0.2.0" && version !== PUBLIC_AI_DATA_PACKAGE_VERSION)
+    throw new Error("公共 AI 数据发行版本不受本读取器支持");
+  return { id: PUBLIC_AI_DATA_OWNER.id, version,
+    compatibility: { platform: { minInclusive: "0.1.0", maxExclusive: version === "0.2.0" ? "0.2.0" : "0.3.0" },
       contract: { minInclusive: "0.1.1", maxExclusive: "0.2.0" } },
     runtime: { node: { minInclusive: "22.0.0", maxExclusive: "25.0.0" } },
     schema: PUBLIC_AI_DATA_FILES[0], data: contribution.data, prerequisites: PUBLIC_AI_DATA_PREREQUISITES };
@@ -37,7 +39,7 @@ export function createPublicAiDataRelease(input: {
 }) {
   const files = new Map<string, Uint8Array>();
   for (const file of packageFiles) {
-    const bytes = file === "package.json" ? packageJson : input.files.get(file === "README.md" ? "README.public.md" : file);
+    const bytes = file === "package.json" ? packageJson(PUBLIC_AI_DATA_PACKAGE_VERSION) : input.files.get(file === "README.md" ? "README.public.md" : file);
     if (!(bytes instanceof Uint8Array) || !bytes.byteLength) throw new Error(`公共 AI 发行缺少构建材料：${file}`);
     files.set(file, Uint8Array.from(bytes));
   }
@@ -51,11 +53,11 @@ export function createPublicAiDataRelease(input: {
 
 function readVerified(files: ReadonlyMap<string, Uint8Array>, release: CorePlatformDataCapabilityRelease) {
   if (files.size !== packageFiles.length || packageFiles.some(file => !files.get(file)?.byteLength)
-    || !packageJson.equals(files.get("package.json")!)) throw new Error("公共 AI 发行含非本版包文件或缺少正式构建入口");
+    || !packageJson(release.version).equals(files.get("package.json")!)) throw new Error("公共 AI 发行含非本版包文件或缺少正式构建入口");
   const contribution = createPublicAiDataContribution(files);
   const { source: _source, sha256: _sha256, files: _files, ...metadata } = release;
   // Zod returns mutable arrays while fixed metadata is readonly in TypeScript.
-  if (!isDeepStrictEqual(metadata, releaseMetadata(contribution))) throw new Error("公共 AI 发行版本、数据或前置与本版不一致");
+  if (!isDeepStrictEqual(metadata, releaseMetadata(contribution, release.version))) throw new Error("公共 AI 发行版本、数据或前置与本版不一致");
   return { release, contribution };
 }
 

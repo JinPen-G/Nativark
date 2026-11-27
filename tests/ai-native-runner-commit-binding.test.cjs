@@ -1,12 +1,13 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 const { setup, command, clone } = require('./fixtures/ai-native/step-registration.cjs');
-const { createAiTaskRunnerRepositoryPorts } = require('../apps/api/src/modules/ai-native/runner/ai-task-runner.repository-adapter');
-const { AiTaskTransitionRepository } = require('../apps/api/src/modules/ai-native/ai-task-transition.repository');
-const { createAiTaskRunnerOutcomePort } = require('../apps/api/src/modules/ai-native/runner/ai-task-runner-outcome-adapter');
-const { AiTaskRunner } = require('../apps/api/src/modules/ai-native/runner/ai-task-runner.service');
-const { AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION } = require('../packages/shared/src/index.ts');
-const { evaluateAiTaskTransitionDraft, evaluateAiTaskConfirmationTransitionDraft } = require('../apps/api/src/modules/ai-native/task-transition-draft');
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { createAiTaskRunnerRepositoryPorts } = load('@rental-os/ai-native-server/runtime/runner/ai-task-runner.repository-adapter');
+const { AiTaskTransitionRepository } = load('@rental-os/ai-native-server/runtime/ai-task-transition.repository');
+const { createAiTaskRunnerOutcomePort } = load('@rental-os/ai-native-server/runtime/runner/ai-task-runner-outcome-adapter');
+const { AiTaskRunner } = load('@rental-os/ai-native-server/runtime/runner/ai-task-runner.service');
+const { AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION } = load('@rental-os/shared');
+const { evaluateAiTaskTransitionDraft, evaluateAiTaskConfirmationTransitionDraft } = load('@rental-os/ai-native-server/runtime/task-transition-draft');
 
 for (const [name, mutate] of [
   ['task', result => { result.event.taskId = 'other-task'; }],

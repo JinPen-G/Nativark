@@ -14,8 +14,8 @@ export function createTicketsManifest(source: CoreManifest["source"]): CoreManif
     source,
     license: "MIT",
     compatibility: {
-      // 标准SQL宿主复用当前事务部署观察，最低底座版本与真实接点一致。
-      platform: { minInclusive: "0.1.10", maxExclusive: "0.2.0" },
+      // 同一公共合同接点支持底座0.1.10起的0.1/0.2系列；更高次版本须另行核定。
+      platform: { minInclusive: "0.1.10", maxExclusive: "0.3.0" },
       contract: compatible
     },
     runtime: { node: { minInclusive: "22.12.0", maxExclusive: "25.0.0" } },

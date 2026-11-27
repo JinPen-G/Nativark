@@ -2,8 +2,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { setup, command, clone } = require('./fixtures/ai-native/step-registration.cjs');
-const { createAiTaskRunnerRepositoryPorts } = require('../apps/api/src/modules/ai-native/runner/ai-task-runner.repository-adapter');
-const { AiTaskRunner } = require('../apps/api/src/modules/ai-native/runner/ai-task-runner.service');
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { createAiTaskRunnerRepositoryPorts } = load('@rental-os/ai-native-server/runtime/runner/ai-task-runner.repository-adapter');
+const { AiTaskRunner } = load('@rental-os/ai-native-server/runtime/runner/ai-task-runner.service');
 
 test('actual registration adapter preserves the run CAS revision for the next transition', async () => {
   const h = setup();
@@ -34,7 +35,8 @@ function harness(result, clock, release) {
   const claim = async value => { assert.equal(Object.hasOwn(value, 'recovery'), false, 'strict persistence input excludes orchestration flag'); return lease; };
   const runner = new AiTaskRunner({ clock, leases: {
     readMetadata: async () => ({ taskId: input.taskId, revision: 3, status: 'running', cancelRequestedAt: null }),
-    claimRun: claim, claimRecoveryRun: claim, releaseRun: release ?? (async value => { assert.equal(value.expectedRunRevision, expectedRevision); return { released: true, revision: expectedRevision + 1 }; })
+    claimRun: claim, claimRecoveryRun: async value => ({ ...await claim(value), purpose: 'recovery_only' }),
+    releaseRun: release ?? (async value => { assert.equal(value.expectedRunRevision, expectedRevision); return { released: true, revision: expectedRevision + 1 }; })
   }, plan: { resolve: async () => ({ taskId: input.taskId, runId: input.runId, taskRevision: 3,
     limits: { maxSteps: 1, maxTotalMs: 1000, maxStepMs: 100, maxOutputBytes: 100, maxConcurrent: 1, maxCalls: 1 },
     steps: [{ registrationRef: 's1', operation: 'readonly', toolCode: 'orders.read', toolVersion: '1' }] }) },

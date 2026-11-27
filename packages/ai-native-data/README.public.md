@@ -1,6 +1,8 @@
 # 公共 AI Native 数据
 
-公共运行 SDK 为 `0.2.1`；数据能力发行与原迁移身份保持 `0.2.0`。公共数据发行提供 74 个 AI 模型和 15 个枚举，包括模型配置、用量账、任务、会话、审批、知识和保留记录。它支持公共数据 `0.1.8` 至 `<0.1.10`，无需安装业务 Core。以公共数据 `0.1.9` 为底，组合 schema 共 115 个模型。
+本数据 SDK 为 `0.2.3`，新数据能力发行是 `0.2.2`，数据版本仍为 `0.2.0`。数据发行支持底座 `0.1.0` 至 `<0.3.0`，Core 合同仍须 `0.1.1` 至 `<0.2.0`，Node 须 `22.0.0` 至 `<25.0.0`。公共数据发行提供 74 个 AI 模型和 15 个枚举，包括模型配置、用量账、任务、会话、审批、知识和保留记录。它支持公共数据 `0.1.8` 至 `<0.1.10`，无需安装业务 Core。以公共数据 `0.1.9` 为底，组合 schema 共 115 个模型。
+
+数据发行号与 SDK 版本分别固定其包文件和摘要。`0.2.1` 已用于原数据 SDK，因此新数据发行使用 `0.2.2`，更新后的 SDK 使用 `0.2.3`。新读取器继续接受原公共数据发行 `0.2.0` 的固定包及其原 `<0.2.0` 底座范围；旧包不能据新范围直接运行于底座 `0.2.0`。既有部署须先通过原更新预检选择新的数据包，保留原 schema、SQL、迁移 ID 与收据。
 
 - `@rental-os/ai-native-data/public-data` 从 `prisma-public/` 的固定字节读取贡献，给公共 `Tenant` 添加四条关系。`createPublicAiDataPreparation` 返回 `prepared / pending` 的 schema 和迁移材料，使用宿主自己的 Prisma Client。
 - `@rental-os/ai-native-data/public-data-package` 的 `createPublicAiDataRelease` 从同一固定源码构建取得三个公共 JS 和类型入口、三份数据材料、`README.public.md` 与 `LICENSE`，返回完整文件集合、确定性归档和部署锁发行资料。`source` 指向实际构建提交。`readPublicAiDataPackage` 和 `requirePublicAiDataPackage` 分别核固定字节快照和已安装目录。

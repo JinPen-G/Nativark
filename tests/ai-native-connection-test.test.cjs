@@ -1,9 +1,10 @@
 'use strict';
-const test = require('node:test'), assert = require('node:assert/strict'); require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test); require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
-const { AiConnectionTestService } = require('../apps/api/src/modules/ai-native/connection-test.service'); const profile = { id: 'profile-test', scopeId: 'tenant-a', scopeKind: 'TENANT', profileKey: 'default', role: 'DEFAULT', serviceMode: 'tenant_managed', protocol: 'openai_chat_completions', provider: 'synthetic', model: 'model', credentialRef: 'vault:test', configRevision: 4, enabled: true, allowedCapabilities: ['text', 'tools'], disabledAt: null }, context = { tenantId: 'tenant-a', workspaceId: 'space-a', actorId: 'actor-a' };
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { prismaRuntime: Prisma } = load('@rental-os/platform-server/prisma-runtime');
+const test = require('node:test'), assert = require('node:assert/strict'); require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test); const { AiConnectionTestService } = load('@rental-os/ai-native-server/runtime/connection-test.service'); const profile = { id: 'profile-test', scopeId: 'tenant-a', scopeKind: 'TENANT', profileKey: 'default', role: 'DEFAULT', serviceMode: 'tenant_managed', protocol: 'openai_chat_completions', provider: 'synthetic', model: 'model', credentialRef: 'vault:test', configRevision: 4, enabled: true, allowedCapabilities: ['text', 'tools'], disabledAt: null }, context = { tenantId: 'tenant-a', workspaceId: 'space-a', actorId: 'actor-a' };
 test('text-only connection probe cannot certify capability or live evidence', async () => { const calls = [], records = []; const service = new AiConnectionTestService({ invoke: async (_c, request) => { calls.push(request); return { text: 'synthetic success' }; } }, { record: async input => { records.push(input); return input; } }); const result = await service.run(context, profile, ['text', 'tools', 'text']); assert.deepEqual(result.map(row => row.status), ['unverified', 'unverified']); assert.equal(result[1].errorCode, 'INVALID_RESPONSE'); assert.equal(calls.length, 2); assert.deepEqual(calls[1].features, ['tools']); assert.equal(records.every(row => row.source === 'connection_test'), true); });
 test('local capability preflight rejection remains unverified without a provider dispatch', async () => {
-  const { ProviderRouterService } = require('../apps/api/src/modules/ai-native/provider-router.service');
+  const { ProviderRouterService } = load('@rental-os/ai-native-server/runtime/provider-router.service');
   const records = [], preflights = [];
   let dispatches = 0;
   const router = new ProviderRouterService({
@@ -60,17 +61,17 @@ test('probe refuses changed identity or profile while awaiting the original Gate
     assert.equal(calls[0].request.model,profile.model);
   }
 });
-test('unattested capability rejection remains unverified alongside transport failures', async () => { const records = []; const service = new AiConnectionTestService({ invoke: async (_c, request) => { if (request.features?.[0] === 'tools') throw new (require('../apps/api/src/modules/ai-native/model-gateway.ports').ModelGatewayError)('CAPABILITY_UNSUPPORTED'); throw new Error('synthetic transport failure'); } }, { record: async input => { records.push(input); return input; } }); const result = await service.run(context, profile, ['tools', 'text']); assert.deepEqual(result.map(row => [row.capability, row.status, row.errorCode]), [['tools', 'unverified', 'CAPABILITY_UNSUPPORTED'], ['text', 'unverified', 'PROVIDER_FAILED']]); assert.equal(records.length, 2); });
+test('unattested capability rejection remains unverified alongside transport failures', async () => { const records = []; const service = new AiConnectionTestService({ invoke: async (_c, request) => { if (request.features?.[0] === 'tools') throw new (load('@rental-os/ai-native-server/runtime/model-gateway.ports').ModelGatewayError)('CAPABILITY_UNSUPPORTED'); throw new Error('synthetic transport failure'); } }, { record: async input => { records.push(input); return input; } }); const result = await service.run(context, profile, ['tools', 'text']); assert.deepEqual(result.map(row => [row.capability, row.status, row.errorCode]), [['tools', 'unverified', 'CAPABILITY_UNSUPPORTED'], ['text', 'unverified', 'PROVIDER_FAILED']]); assert.equal(records.length, 2); });
 test('probe never exposes credential fields to the gateway request', async () => { let request; const service = new AiConnectionTestService({ invoke: async (_c, value) => { request = value; return { text: 'ok' }; } }, { record: async input => input }); await service.run(context, profile, ['text']); assert.equal(Object.hasOwn(request, 'apiKey'), false); assert.equal(JSON.stringify(request).includes('vault:test'), false); });
 
 test('versioned text challenge and unregistered probe cannot grant dispatch or live provenance', async () => {
-  const { textProbeIntent, TEXT_PROBE_SCENE } = require('../apps/api/src/modules/ai-native/text-capability-probe');
-  const { ChatCompletionsAdapter } = require('../apps/api/src/modules/ai-native/chat-completions.adapter');
-  const { RoutedModelTransport } = require('../apps/api/src/modules/ai-native/routed-model-transport');
-  const { prepareGatewayTextIntent } = require('../apps/api/src/modules/ai-native/gateway-intent');
-  const { TextCapabilityProbeApplication } = require('../apps/api/src/modules/ai-native/text-capability-probe.application');
+  const { textProbeIntent, TEXT_PROBE_SCENE } = load('@rental-os/ai-native-server/runtime/text-capability-probe');
+  const { ChatCompletionsAdapter } = load('@rental-os/ai-native-server/runtime/chat-completions.adapter');
+  const { RoutedModelTransport } = load('@rental-os/ai-native-server/runtime/routed-model-transport');
+  const { prepareGatewayTextIntent } = load('@rental-os/ai-native-server/runtime/gateway-intent');
+  const { TextCapabilityProbeApplication } = load('@rental-os/ai-native-server/runtime/text-capability-probe.application');
   assert.equal(typeof TextCapabilityProbeApplication, 'function');
-  const { TextCapabilityProbeModule } = require('../apps/api/src/modules/ai-native/text-capability-probe.module');
+  const { TextCapabilityProbeModule } = load('@rental-os/ai-native-server/runtime/text-capability-probe.module');
   assert.deepEqual(Reflect.getMetadata('controllers', TextCapabilityProbeModule) ?? [], []);
   const inert = TextCapabilityProbeModule.register({});
   assert.equal(inert.controllers, undefined);
@@ -93,10 +94,10 @@ test('versioned text challenge and unregistered probe cannot grant dispatch or l
 });
 
 test('eight-kind selection keeps missing objective methods unverified without executable descriptors or text fallback', async () => {
-  const { AI_CAPABILITY_PROBE_KINDS_DRAFT: kinds } = require('@rental-os/shared');
+  const { AI_CAPABILITY_PROBE_KINDS_DRAFT: kinds } = load('@rental-os/shared');
   const { textProbeCommandSchema, textProbeDescriptorSchema, textProbePreparation, textProbeIntent,
-    textProbeMethod, textProbeRequirements } = require('../apps/api/src/modules/ai-native/text-capability-probe');
-  const { PrismaTextCapabilityReceiptRepository } = require('../apps/api/src/modules/ai-native/prisma-text-capability-receipt.repository');
+    textProbeMethod, textProbeRequirements } = load('@rental-os/ai-native-server/runtime/text-capability-probe');
+  const { PrismaTextCapabilityReceiptRepository } = load('@rental-os/ai-native-server/runtime/prisma-text-capability-receipt.repository');
   assert.deepEqual(kinds, ['text', 'streaming', 'vision', 'audio', 'structured_output', 'tools', 'embedding', 'reasoning']);
   for (const capability of kinds) assert.equal(textProbeCommandSchema.safeParse({ operationId: 'probe',
     profileKey: 'default', profileFingerprint: 'a'.repeat(64), capability }).success, true);
@@ -116,12 +117,12 @@ test('eight-kind selection keeps missing objective methods unverified without ex
     assert.notEqual(prepared.intentHash, textProbeIntent('probe', 'scope').intentHash);
     assert.notEqual(prepared.intentHash, textProbePreparation('another-probe', 'scope', capability).intentHash);
     if (capability === 'embedding') {
-      const { prepareGatewayEmbeddingProbeIntent } = require('../apps/api/src/modules/ai-native/gateway-intent');
+      const { prepareGatewayEmbeddingProbeIntent } = load('@rental-os/ai-native-server/runtime/gateway-intent');
       assert.throws(() => prepareGatewayEmbeddingProbeIntent(textProbeIntent('probe', 'scope', capability).intent,
         { sceneCode: 'ai.capability.text', maxOutputTokens: 32 }), { code: 'CAPABILITY_UNSUPPORTED' });
     }
     else {
-      const { prepareGatewayTextIntent } = require('../apps/api/src/modules/ai-native/gateway-intent');
+      const { prepareGatewayTextIntent } = load('@rental-os/ai-native-server/runtime/gateway-intent');
       // A native template is not a grant to use it on an ordinary text scene.
       assert.throws(() => prepareGatewayTextIntent(textProbeIntent('probe', 'scope', capability).intent,
         { sceneCode: 'ai.capability.text', maxOutputTokens: 32 }, 'invoke'), { code: 'CAPABILITY_UNSUPPORTED' });
@@ -139,9 +140,9 @@ test('eight-kind selection keeps missing objective methods unverified without ex
   assert.equal(reads, 0);
   // Explicit platform attribution uses the production authority/application;
   // Guard/profile/DB ports here are offline substitutes, not native authorization.
-  const { PlatformCapabilityProbeAuthority } = require('../apps/api/src/modules/ai-native/platform-capability-probe/platform-probe.authority');
-  const { ModelGatewayError } = require('../apps/api/src/modules/ai-native/model-gateway.ports');
-  const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
+  const { PlatformCapabilityProbeAuthority } = load('@rental-os/ai-native-server/runtime/platform-capability-probe/platform-probe.authority');
+  const { ModelGatewayError } = load('@rental-os/ai-native-server/runtime/model-gateway.ports');
+  const { capabilityProfileFingerprint } = load('@rental-os/ai-native-server/runtime/capability-verification');
   const selected = { ...profile, id: 'platform-profile', scopeId: 'platform-scope', scopeKind: 'PLATFORM',
     serviceMode: 'platform_managed', allowedCapabilities: ['text'] };
   const platformContext = { actorId: context.actorId, scopeKind: 'platform' };
@@ -179,9 +180,9 @@ test('eight-kind selection keeps missing objective methods unverified without ex
 });
 
 test('Responses reasoning channel requires native items and original counters, never a final text echo', async () => {
-  const { ResponsesAdapter, AnthropicMessagesAdapter } = require('../apps/api/src/modules/ai-native/native-messages.adapter');
-  const { textProbeIntent, textProbePreparation, REASONING_PROBE_METHOD } = require('../apps/api/src/modules/ai-native/text-capability-probe');
-  const { ModelGatewayError, modelAdapterSupportsCapabilities, modelRequestSchema } = require('../apps/api/src/modules/ai-native/model-gateway.ports');
+  const { ResponsesAdapter, AnthropicMessagesAdapter } = load('@rental-os/ai-native-server/runtime/native-messages.adapter');
+  const { textProbeIntent, textProbePreparation, REASONING_PROBE_METHOD } = load('@rental-os/ai-native-server/runtime/text-capability-probe');
+  const { ModelGatewayError, modelAdapterSupportsCapabilities, modelRequestSchema } = load('@rental-os/ai-native-server/runtime/model-gateway.ports');
   const prepared = textProbeIntent('native-reasoning', 'scope', 'reasoning');
   assert.deepEqual(textProbePreparation('native-reasoning', 'scope', 'reasoning', 'openai_responses'), prepared);
   assert.equal(textProbePreparation('native-reasoning', 'scope', 'reasoning', 'openai_chat_completions').intent, null);
@@ -220,11 +221,11 @@ test('Responses reasoning channel requires native items and original counters, n
 });
 
 test('native embedding probe returns bounded vector evidence and input-only usage, never text JSON or a loose grant', async () => {
-  const { createNativeModelAdapter } = require('../apps/api/src/modules/ai-native/native-model-adapters');
-  const { textProbeIntent, textProbePreparation, EMBEDDING_PROBE_METHOD } = require('../apps/api/src/modules/ai-native/text-capability-probe');
-  const { modelRequestSchema, ModelGatewayError, modelAdapterSupportsCapabilities } = require('../apps/api/src/modules/ai-native/model-gateway.ports');
-  const { prepareGatewayEmbeddingProbeIntent, prepareGatewayTextIntent } = require('../apps/api/src/modules/ai-native/gateway-intent');
-  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  const { createNativeModelAdapter } = load('@rental-os/ai-native-server/runtime/native-model-adapters');
+  const { textProbeIntent, textProbePreparation, EMBEDDING_PROBE_METHOD } = load('@rental-os/ai-native-server/runtime/text-capability-probe');
+  const { modelRequestSchema, ModelGatewayError, modelAdapterSupportsCapabilities } = load('@rental-os/ai-native-server/runtime/model-gateway.ports');
+  const { prepareGatewayEmbeddingProbeIntent, prepareGatewayTextIntent } = load('@rental-os/ai-native-server/runtime/gateway-intent');
+  const { requestFingerprint } = load('@rental-os/platform-contracts/request-fingerprint');
   const prepared = textProbeIntent('native-embedding', 'scope', 'embedding');
   assert.deepEqual(textProbePreparation('native-embedding', 'scope', 'embedding', 'openai_chat_completions'), prepared);
   assert.equal(textProbePreparation('native-embedding', 'scope', 'embedding', 'openai_responses').intent, null);
@@ -271,7 +272,7 @@ test('native embedding probe returns bounded vector evidence and input-only usag
 // Construct the real application (including private one-shot execution state).
 // Unreplaced external/database ports fail closed, rather than fake success.
 function probeApplicationWithBoundaryPorts() {
-  const { TextCapabilityProbeApplication } = require('../apps/api/src/modules/ai-native/text-capability-probe.application');
+  const { TextCapabilityProbeApplication } = load('@rental-os/ai-native-server/runtime/text-capability-probe.application');
   const unavailable = async () => { throw Error('unexpected offline boundary'); };
   const delegate = { findFirst: unavailable, findUnique: unavailable, findMany: unavailable,
     create: unavailable, updateMany: unavailable, upsert: unavailable };
@@ -284,7 +285,7 @@ function probeApplicationWithBoundaryPorts() {
 }
 
 test('current probe host derives identity and rejects changed authority after waiting', async () => {
-  const { TextCapabilityProbeApplication } = require('../apps/api/src/modules/ai-native/text-capability-probe.application');
+  const { TextCapabilityProbeApplication } = load('@rental-os/ai-native-server/runtime/text-capability-probe.application');
   const app = probeApplicationWithBoundaryPorts();
   let actor = 'actor-a', change = false;
   app.input = { scopes: { resolveCurrent: async () => ({ scope: { id: 'scope', kind: 'WORKSPACE', tenantId: 'tenant-a', workspaceId: 'space-a' },
@@ -298,9 +299,9 @@ test('current probe host derives identity and rejects changed authority after wa
 });
 
 test('text capability probe resolves the platform-managed profile without tenant fallback', async () => {
-  const { TextCapabilityProbeAuthority } = require('../apps/api/src/modules/ai-native/text-capability-probe.authority');
-  const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
-  const { textProbeConfiguration } = require('../apps/api/src/modules/ai-native/text-capability-probe');
+  const { TextCapabilityProbeAuthority } = load('@rental-os/ai-native-server/runtime/text-capability-probe.authority');
+  const { capabilityProfileFingerprint } = load('@rental-os/ai-native-server/runtime/capability-verification');
+  const { textProbeConfiguration } = load('@rental-os/ai-native-server/runtime/text-capability-probe');
   const platformProfile = { ...profile, id: 'platform-profile', scopeId: 'platform-a', scopeKind: 'PLATFORM',
     serviceMode: 'platform_managed' };
   const command = { operationId: 'platform-probe', profileKey: 'default', profileFingerprint: capabilityProfileFingerprint(platformProfile) };
@@ -323,8 +324,8 @@ test('text capability probe resolves the platform-managed profile without tenant
 });
 
 test('probe validates execution before occupying operation key and never redispatches original registration', async () => {
-  const { TextCapabilityProbeApplication } = require('../apps/api/src/modules/ai-native/text-capability-probe.application');
-  const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
+  const { TextCapabilityProbeApplication } = load('@rental-os/ai-native-server/runtime/text-capability-probe.application');
+  const { capabilityProfileFingerprint } = load('@rental-os/ai-native-server/runtime/capability-verification');
   const command = { operationId: 'original-probe', profileKey: profile.profileKey, profileFingerprint: capabilityProfileFingerprint(profile) };
   const execution = { stepId: 'step', lease: { runId: 'run', holderId: 'holder', fencingToken: '1' }, priceVersion: 'price-1', expiresAt: new Date('2026-10-12T00:00:00Z') };
   // Exercise the real application's orchestration with boundary ports replaced;
@@ -347,8 +348,8 @@ test('probe validates execution before occupying operation key and never redispa
 });
 
 test('platform probe requires its explicit vault resolver before preparation or new invocation writes', async () => {
-  const { TextCapabilityProbeApplication } = require('../apps/api/src/modules/ai-native/text-capability-probe.application');
-  const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
+  const { TextCapabilityProbeApplication } = load('@rental-os/ai-native-server/runtime/text-capability-probe.application');
+  const { capabilityProfileFingerprint } = load('@rental-os/ai-native-server/runtime/capability-verification');
   const selected = { ...profile, scopeKind: 'PLATFORM', scopeId: 'platform-a', serviceMode: 'platform_managed' };
   const command = { operationId: 'platform-operation', profileKey: selected.profileKey, profileFingerprint: capabilityProfileFingerprint(selected) };
   const app = probeApplicationWithBoundaryPorts();
@@ -369,8 +370,8 @@ test('platform probe requires its explicit vault resolver before preparation or 
 });
 
 test('runner-owned probe registration reaches the original receipt once without a second registration', async () => {
-  const { TextCapabilityProbeApplication } = require('../apps/api/src/modules/ai-native/text-capability-probe.application');
-  const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
+  const { TextCapabilityProbeApplication } = load('@rental-os/ai-native-server/runtime/text-capability-probe.application');
+  const { capabilityProfileFingerprint } = load('@rental-os/ai-native-server/runtime/capability-verification');
   const app = probeApplicationWithBoundaryPorts();
   app.input = { db: { aiTaskExecutionCharge: { findMany: async ({ where }) => {
     assert.equal(where.gatewayInvocationId, 'invocation'); assert.equal(where.resource, 'CALLS');
@@ -396,10 +397,10 @@ test('runner-owned probe registration reaches the original receipt once without 
 });
 
 test('owned probe returns the real public Gateway envelope, not the capability summary', async () => {
-  const { ChatCompletionsAdapter } = require('../apps/api/src/modules/ai-native/chat-completions.adapter');
-  const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
-  const { textProbeIntent } = require('../apps/api/src/modules/ai-native/text-capability-probe');
-  const { isGatewayResult } = require('../apps/api/src/modules/ai-native/gateway-contract-validation');
+  const { ChatCompletionsAdapter } = load('@rental-os/ai-native-server/runtime/chat-completions.adapter');
+  const { capabilityProfileFingerprint } = load('@rental-os/ai-native-server/runtime/capability-verification');
+  const { textProbeIntent } = load('@rental-os/ai-native-server/runtime/text-capability-probe');
+  const { isGatewayResult } = load('@rental-os/ai-native-server/runtime/gateway-contract-validation');
   // Actual application/Public/Unified/transport/adapter; only DB, authorization,
   // accounting lifecycle and protocol IO are explicit offline boundary ports.
   for (const scenario of ['reported', 'missing_usage', 'lost_response']) {
@@ -454,7 +455,7 @@ test('owned probe returns the real public Gateway envelope, not the capability s
 });
 
 test('probe receipt cache usage retains original categories without adding them to input tokens', () => {
-  const { probeUsageSchema } = require('../apps/api/src/modules/ai-native/text-capability-probe');
+  const { probeUsageSchema } = load('@rental-os/ai-native-server/runtime/text-capability-probe');
   const original = { inputTokens: 3, outputTokens: 2, billingDetails: { cachedInputTokens: 1, cacheCreationInputTokens: 1 } };
   assert.equal(probeUsageSchema.safeParse(original).success, true);
   assert.deepEqual(probeUsageSchema.parse(original), original);
@@ -464,11 +465,11 @@ test('probe receipt cache usage retains original categories without adding them 
 });
 
 test('persisted text verifier consumes original settlement and rejects mock, missing or changed receipts', async () => {
-  const { PrismaTextCapabilityReceiptRepository } = require('../apps/api/src/modules/ai-native/prisma-text-capability-receipt.repository');
-  const { ProviderCapabilityService } = require('../apps/api/src/modules/ai-native/provider-capability.service');
-  const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
-  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
-  const { textProbeIntent, textProbeConfiguration, textDigest, textProbeEvidenceHash, TEXT_PROBE_METHOD, TEXT_PROBE_TTL_MS } = require('../apps/api/src/modules/ai-native/text-capability-probe');
+  const { PrismaTextCapabilityReceiptRepository } = load('@rental-os/ai-native-server/runtime/prisma-text-capability-receipt.repository');
+  const { ProviderCapabilityService } = load('@rental-os/ai-native-server/runtime/provider-capability.service');
+  const { capabilityProfileFingerprint } = load('@rental-os/ai-native-server/runtime/capability-verification');
+  const { requestFingerprint } = load('@rental-os/platform-contracts/request-fingerprint');
+  const { textProbeIntent, textProbeConfiguration, textDigest, textProbeEvidenceHash, TEXT_PROBE_METHOD, TEXT_PROBE_TTL_MS } = load('@rental-os/ai-native-server/runtime/text-capability-probe');
   const now = new Date('2026-10-11T12:00:00.000Z'), prepared = textProbeIntent('probe-operation', 'probe-scope');
   const fingerprint = capabilityProfileFingerprint(profile), configuration = textProbeConfiguration(profile, { kind: 'workspace', tenantId: context.tenantId });
   const descriptor = { command: { operationId: 'probe-operation', profileKey: profile.profileKey, profileFingerprint: fingerprint },
@@ -524,7 +525,7 @@ test('persisted text verifier consumes original settlement and rejects mock, mis
   }, findUnique: async () => evidenceRows[0] ?? null, upsert: async ({ create }) => {
     evidenceRows = [structuredClone(create)]; return structuredClone(create);
   } };
-  const { createPersistedTextCapabilityEvidence } = require('../apps/api/src/modules/ai-native/prisma-text-capability-receipt.repository');
+  const { createPersistedTextCapabilityEvidence } = load('@rental-os/ai-native-server/runtime/prisma-text-capability-receipt.repository');
   const capabilities = createPersistedTextCapabilityEvidence(db, () => now);
   assert.equal((await capabilities.record(input())).status, 'supported');
   assert.equal((await capabilities.preflight(profile, ['text'])).allowed, true);
@@ -536,7 +537,7 @@ test('persisted text verifier consumes original settlement and rejects mock, mis
     assert.equal((await capabilities.preflight(profile, ['text'])).allowed, false);
   }
   ledger = originalLedger;
-  for (const patch of [{ actualCalls: 1 }, { actualMoney: new (require('@prisma/client').Prisma.Decimal)('0.000000') }, { moneyCurrency: 'USD' }]) {
+  for (const patch of [{ actualCalls: 1 }, { actualMoney: new (Prisma.Decimal)('0.000000') }, { moneyCurrency: 'USD' }]) {
     Object.assign(rows.aiBudgetReservation, originalReservation, patch);
     assert.equal(await verifier.verify(input()), false, 'a terminal token record must not contain another unit');
   }
@@ -577,14 +578,14 @@ test('persisted text verifier consumes original settlement and rejects mock, mis
   Object.assign(rows.aiBudgetReservation, { billingMode: 'platform_managed', unitKind: 'money', actualTokens: null,
     actualCalls: null, moneyCurrency: 'USD', configurationHash: descriptor.configurationHash });
   for (const amount of ['0.123456', '0.000000']) {
-    const money = new (require('@prisma/client').Prisma.Decimal)(amount); rows.aiBudgetReservation.actualMoney = money;
+    const money = new (Prisma.Decimal)(amount); rows.aiBudgetReservation.actualMoney = money;
     const event = { ...originalLedger[0], inputTokens: null, moneyAmount: money, moneyCurrency: 'USD',
       evidenceHash: requestFingerprint({ usageHash: rows.aiGatewayAccountingReceipt.usageHash, priceVersion: 'price',
         quantity: { unit: 'money', amount, currency: 'USD', scale: 6 } }) };
     const moneyInput = () => ({ ...input(), profile: platformProfile, details: { receiptId: 'proof', verification: {
       evidence: 'live', methodVersion: TEXT_PROBE_METHOD, capability: 'text', profileFingerprint: platformFingerprint } } });
     ledger = [event]; assert.equal(await verifier.verify(moneyInput()), true);
-    for (const patch of [{ moneyAmount: null }, { moneyAmount: new (require('@prisma/client').Prisma.Decimal)('0.999999') },
+    for (const patch of [{ moneyAmount: null }, { moneyAmount: new (Prisma.Decimal)('0.999999') },
       { moneyCurrency: 'EUR' }, { inputTokens: 1n }, { calls: 1 }]) {
       ledger = [{ ...event, ...patch }]; assert.equal(await verifier.verify(moneyInput()), false);
     }

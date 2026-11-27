@@ -39,7 +39,7 @@ npm run start -w @rental-os/platform-api
 
 ## 选装公共 AI 管理
 
-默认入口没有 AI。需要在零 Core 环境管理平台模型、费率、预算和额度时，使用同一固定组合的公共 AI 服务 SDK `0.2.1`、数据 SDK `0.2.1` 和独立数据包 `0.2.0`。从原公共 schema 与锁定的数据包生成此宿主的 115 模型 Client，再运行 `npm run build:ai -w @rental-os/platform-api`。选装工程不使用默认 Client 或旧混合 SDK。[服务包构建配置](../../packages/ai-native-server/tsconfig.public.json) · [数据包工厂](../../packages/ai-native-data/src/public-data-package.ts)
+默认入口没有 AI。需要在零 Core 环境管理平台模型、费率、预算和额度时，使用同一固定组合的公共 AI 服务 SDK `0.2.1`、数据 SDK `0.2.3` 和独立数据包 `0.2.2`。从原公共 schema 与锁定的数据包生成此宿主的 115 模型 Client，再运行 `npm run build:ai -w @rental-os/platform-api`。选装工程不使用默认 Client 或旧混合 SDK。[服务包构建配置](../../packages/ai-native-server/tsconfig.public.json) · [数据包工厂](../../packages/ai-native-data/src/public-data-package.ts)
 
 `start:ai` 使用原 `CORE_DEPLOYMENT_LOCK_FILE`、新安装的 `PLATFORM_AI_DATA_PACKAGE_DIR` 两个绝对路径，以及服务端固定的 `PLATFORM_AI_PROFILE_ID`。锁只能包含公共底座和一个公共 AI 数据包，包目录、版本、摘要及所选 Client 均须匹配。此入口不会安装包、应用迁移、建立默认模型或发起模型调用。实际接口走原 Guard、同一数据库/事务和原账观察；使用者仍须具有 `system:ai-provider:view` 或 `system:ai-provider:manage`，选装入口不会给默认角色授权。[显式启动与装配](src/ai-main.ts)
 

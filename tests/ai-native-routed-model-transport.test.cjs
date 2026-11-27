@@ -1,14 +1,14 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 const base = require('./fixtures/ai-native/contract-consumer.cjs'); base.blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true } });
-const { RoutedModelTransport, TenantModelConnectionResolver } = require('../apps/api/src/modules/ai-native/routed-model-transport');
-const { ChatCompletionsAdapter } = require('../apps/api/src/modules/ai-native/chat-completions.adapter');
-const { TenantModelConfigService } = require('../apps/api/src/modules/ai-native/tenant-model-config.service');
-const { SecretBox } = require('../apps/api/src/common/secret-box');
-const { PublicAiGatewayModule } = require('../apps/api/src/modules/ai-native/public-ai-gateway.service');
-const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
-const { ModelGatewayError } = require('../apps/api/src/modules/ai-native/model-gateway.ports');
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { RoutedModelTransport, TenantModelConnectionResolver } = load('@rental-os/ai-native-server/runtime/routed-model-transport');
+const { ChatCompletionsAdapter } = load('@rental-os/ai-native-server/runtime/chat-completions.adapter');
+const { TenantModelConfigService } = load('@rental-os/ai-native-server/runtime/tenant-model-config.service');
+const { SecretBox } = load('@rental-os/platform-server/secret-box');
+const { PublicAiGatewayModule } = load('@rental-os/ai-native-server/runtime/public-ai-gateway.service');
+const { capabilityProfileFingerprint } = load('@rental-os/platform-server/ai-gateway');
+const { ModelGatewayError } = load('@rental-os/platform-server/ai-gateway');
 const context = { tenantId: 'tenant-test', workspaceId: 'space-test', actorId: 'actor-test' };
 const request = () => ({ callId: 'call-test', model: 'selected-model', messages: [{ role: 'user', content: 'hello' }], maxOutputTokens: 10 });
 function setup(mode = 'tenant_managed') {
@@ -64,7 +64,7 @@ const encodedCredential = value => [...new Set([Buffer.from(value).toString('bas
   Buffer.from(value).toString('hex'), Buffer.from(value).toString('hex').toUpperCase(),
   encodeURIComponent(value), JSON.stringify(value).slice(1, -1)])];
 test('encoded credential output is rejected by native codecs and routed result projections without losing original usage', async () => {
-  const { AnthropicMessagesAdapter, ResponsesAdapter } = require('../apps/api/src/modules/ai-native/native-messages.adapter');
+  const { AnthropicMessagesAdapter, ResponsesAdapter } = load('@rental-os/ai-native-server/runtime/native-messages.adapter');
   const credential = 'synthetic-"secret-a/b?c=1';
   for (const encoded of encodedCredential(credential)) {
     for (const [Adapter, raw] of [
@@ -90,7 +90,7 @@ test('encoded credential output is rejected by native codecs and routed result p
   }
 });
 test('encoded credential fragments are withheld by routed and native streams before any secret prefix is delivered', async () => {
-  const { AnthropicMessagesAdapter, ResponsesAdapter } = require('../apps/api/src/modules/ai-native/native-messages.adapter');
+  const { AnthropicMessagesAdapter, ResponsesAdapter } = load('@rental-os/ai-native-server/runtime/native-messages.adapter');
   const credential = 'synthetic-"secret-a/b?c=1';
   const frame = value => Buffer.from(`data: ${JSON.stringify(value)}\n\n`);
   for (const encoded of encodedCredential(credential)) {
@@ -143,14 +143,14 @@ test('encoded credential fragments are withheld by routed and native streams bef
       assert.equal(calls, 1); assert.equal(closed, 1); assert.equal(frameCount, frames.length);
     }
   }
-  const { ModelResponseSecretGuard } = require('../apps/api/src/modules/ai-native/model-response-secret');
+  const { ModelResponseSecretGuard } = load('@rental-os/platform-server/ai-gateway');
   const maximum = 'z'.repeat(8191) + '?', guard = new ModelResponseSecretGuard(maximum);
   assert.equal(guard.releaseLength('ordinary ' + maximum.slice(0, -1)), 'ordinary '.length);
   assert.equal(guard.releaseLength('ordinary ' + maximum), null);
 });
 
 test('encoded directory credentials never become model IDs or metadata candidates', async () => {
-  const { discoverProviderMetadata } = require('../apps/api/src/modules/ai-native/provider-discovery.service');
+  const { discoverProviderMetadata } = load('@rental-os/ai-native-server/runtime/provider-discovery.service');
   const credential = 'synthetic-"secret-a/b?c=1';
   const variants = [...new Set([Buffer.from(credential).toString('base64url'), ...encodedCredential(credential)])];
   for (const protocol of ['openai_chat_completions', 'openai_responses', 'anthropic_messages']) {
@@ -176,7 +176,7 @@ test('encoded directory credentials never become model IDs or metadata candidate
 });
 
 test('native non-stream usage requires a terminal response before recording', async () => {
-  const { AnthropicMessagesAdapter, ResponsesAdapter } = require('../apps/api/src/modules/ai-native/native-messages.adapter');
+  const { AnthropicMessagesAdapter, ResponsesAdapter } = load('@rental-os/ai-native-server/runtime/native-messages.adapter');
   const usage = { input_tokens: 2, output_tokens: 3 }, credential = 'synthetic-secret';
   const cases = [
     [ResponsesAdapter, { status: 'in_progress', output: [], usage }],
@@ -212,7 +212,7 @@ test('native non-stream usage requires a terminal response before recording', as
 });
 
 test('native stream usage requires a consistent terminal state', async () => {
-  const { AnthropicMessagesAdapter, ResponsesAdapter } = require('../apps/api/src/modules/ai-native/native-messages.adapter');
+  const { AnthropicMessagesAdapter, ResponsesAdapter } = load('@rental-os/ai-native-server/runtime/native-messages.adapter');
   const responseStart = { type: 'response.created', sequence_number: 0, response: { id: 'response', output: [] } };
   const messageStart = { type: 'message_start', message: { id: 'message', type: 'message', role: 'assistant', content: [], usage: { input_tokens: 2, output_tokens: 0 } } };
   const cases = [
@@ -350,7 +350,7 @@ test('failed Chat stream terminals retain original counters without completing d
 });
 
 test('failed Chat stream follows both Gateway modes into the original budget receipt and reconciliation', async () => {
-  const { PersistentGatewayBudget } = require('../apps/api/src/modules/ai-native/budget/persistent-gateway-budget');
+  const { PersistentGatewayBudget } = load('@rental-os/ai-native-server/runtime/budget/persistent-gateway-budget');
   for (const mode of ['platform_managed', 'tenant_managed']) for (const lostReceipt of [false, true]) {
     const f = setup(mode), current = structuredClone(base.contexts[0]), events = [], receipts = [];
     current.actor = { kind: 'user', userId: context.actorId }; current.scope = { kind: 'workspace', tenantId: context.tenantId, workspaceId: context.workspaceId };
@@ -412,7 +412,7 @@ test('credential characters escaped by JSON cannot bypass result scanning in tex
   }
 });
 test('native decoded Messages and Responses reject credentials containing quotes or backslashes', async () => {
-  const { AnthropicMessagesAdapter, ResponsesAdapter } = require('../apps/api/src/modules/ai-native/native-messages.adapter');
+  const { AnthropicMessagesAdapter, ResponsesAdapter } = load('@rental-os/ai-native-server/runtime/native-messages.adapter');
   for (const credential of ['synthetic-"secret', 'synthetic-\\secret']) {
     for (const [Adapter, raw] of [[AnthropicMessagesAdapter, { type: 'message', role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: credential }] }],
       [ResponsesAdapter, { status: 'completed', output: [{ type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: credential }] }] }]]) {
@@ -464,11 +464,11 @@ test('public module composes real protocol transport with public C03 and existin
 // are explicit doubles. Public/Unified Gateway, original result resolver,
 // Routed transport and all three protocol codecs are the actual source modules.
 async function nativeCoreFixture(protocol, mode = 'tenant_managed') {
-  const { createNativeModelAdapter } = require('../apps/api/src/modules/ai-native/native-model-adapters');
-  const { PublicAiGatewayService } = require('../apps/api/src/modules/ai-native/public-ai-gateway.service');
-  const { OriginalNativeToolResultSource } = require('../apps/api/src/modules/ai-native/model-input/original-native-tool-result.source');
-  const model = require('../apps/api/src/modules/ai-native/model-input/task-model-input');
-  const { requestFingerprint: hash } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  const { createNativeModelAdapter } = load('@rental-os/ai-native-server/runtime/native-model-adapters');
+  const { PublicAiGatewayService } = load('@rental-os/ai-native-server/runtime/public-ai-gateway.service');
+  const { OriginalNativeToolResultSource } = load('@rental-os/ai-native-server/runtime/model-input/original-native-tool-result.source');
+  const model = load('@rental-os/ai-native-server/runtime/model-input/task-model-input');
+  const { requestFingerprint: hash } = load('@rental-os/platform-contracts/request-fingerprint');
   const f = setup(mode), current = structuredClone(base.contexts[0]);
   current.actor = { kind: 'user', userId: context.actorId }; current.scope = { kind: 'workspace', tenantId: context.tenantId, workspaceId: context.workspaceId };
   f.profile.protocol = protocol; f.profile.allowedCapabilities = ['text', 'tools'];
@@ -609,7 +609,7 @@ test('native core rejects changed authority input bindings missing real methods 
 });
 
 test('native private call retention preserves existing format-only public tool results', async () => {
-  const { createNativeModelAdapter } = require('../apps/api/src/modules/ai-native/native-model-adapters');
+  const { createNativeModelAdapter } = load('@rental-os/ai-native-server/runtime/native-model-adapters');
   for (const protocol of ['openai_chat_completions', 'openai_responses', 'anthropic_messages']) {
     const f = setup('platform_managed'), current = structuredClone(base.contexts[0]);
     current.actor = { kind: 'user', userId: context.actorId }; current.scope = { kind: 'workspace', tenantId: context.tenantId, workspaceId: context.workspaceId };
@@ -636,11 +636,11 @@ test('native private call retention preserves existing format-only public tool r
 
 async function nativeCountingFixture(mode = 'tenant_managed', missingNative = false) {
   const f = await nativeCoreFixture('anthropic_messages', mode);
-  const { InputCountTokensService } = require('../apps/api/src/modules/ai-native/input-counting/input-count-tokens.service');
-  const { PrismaCountTokensReceipts } = require('../apps/api/src/modules/ai-native/input-counting/input-count-tokens.receipt');
-  const { PrismaGatewayPricingRecords } = require('../apps/api/src/modules/ai-native/budget/prisma-gateway-pricing-records');
-  const { aiPersistenceScopeColumns } = require('../apps/api/src/modules/ai-native/persistence-scope');
-  const { nativeToolResultIntentFingerprint } = require('../apps/api/src/modules/ai-native/model-input/native-tool-result.ports');
+  const { InputCountTokensService } = load('@rental-os/ai-native-server/runtime/input-counting/input-count-tokens.service');
+  const { PrismaCountTokensReceipts } = load('@rental-os/ai-native-server/runtime/input-counting/input-count-tokens.receipt');
+  const { PrismaGatewayPricingRecords } = load('@rental-os/ai-native-server/runtime/budget/prisma-gateway-pricing-records');
+  const { aiPersistenceScopeColumns } = load('@rental-os/ai-native-server/runtime/persistence-scope');
+  const { nativeToolResultIntentFingerprint } = load('@rental-os/ai-native-server/runtime/model-input/native-tool-result.ports');
   const { createTaskInputStore } = require('./fixtures/ai-native/task-input-store.cjs');
   const now = new Date(), expiry = new Date(now.getTime() + 600000), scope = { id: 'consumer', ...aiPersistenceScopeColumns(f.current.scope) };
   const owner = { id: f.f.profile.scopeId, ...aiPersistenceScopeColumns(f.first.actual.configurationScope) };
@@ -699,7 +699,7 @@ async function nativeCountingFixture(mode = 'tenant_managed', missingNative = fa
 }
 
 function nativeApiCountingSource(h, afterCreate) {
-  const { composeRequestNativeCountingSource } = require('../apps/api/src/modules/ai-native/input-counting/input-counting-request.factory');
+  const { composeRequestNativeCountingSource } = load('@rental-os/ai-native-server/runtime/input-counting/input-counting-request.factory');
   const { routeScene: _route, ...scenePolicy } = h.f.policy;
   let active = true, current = h.f.current, creations = 0;
   const guard = { canActivate: async () => assert.fail('Bridge must reuse, not invoke a fabricated Guard') };
@@ -727,13 +727,13 @@ function nativeApiCountingSource(h, afterCreate) {
 }
 
 test('native counted input uses original Core result and matches generation wire in both modes', async () => {
-  const { CountTokensGatewayPricingEvidenceSource } = require('../apps/api/src/modules/ai-native/input-counting/input-count-tokens.composition');
-  const { countTokensMaterialHash, prepareCountTokensMaterial, messagesGenerationInputHash } = require('../apps/api/src/modules/ai-native/input-counting/count-tokens.protocol');
-  const { ChatProtocolPolicy } = require('../apps/api/src/modules/ai-native/chat-completions.adapter');
+  const { CountTokensGatewayPricingEvidenceSource } = load('@rental-os/ai-native-server/runtime/input-counting/input-count-tokens.composition');
+  const { countTokensMaterialHash, prepareCountTokensMaterial, messagesGenerationInputHash } = load('@rental-os/ai-native-server/runtime/input-counting/count-tokens.protocol');
+  const { ChatProtocolPolicy } = load('@rental-os/ai-native-server/runtime/chat-completions.adapter');
   for (const mode of ['platform_managed', 'tenant_managed']) {
     const h = await nativeCountingFixture(mode), bridge = nativeApiCountingSource(h);
     assert.equal(bridge.creations(), 0, 'Request-local native source must be inert before frozen selection');
-    const service = new (require('../apps/api/src/modules/ai-native/input-counting/input-count-tokens.service').InputCountTokensService)({ ...h.dependencies, nativeToolResults: bridge.source });
+    const service = new (load('@rental-os/ai-native-server/runtime/input-counting/input-count-tokens.service').InputCountTokensService)({ ...h.dependencies, nativeToolResults: bridge.source });
     const result = await service.taskCount({ invocationId: h.frozen.invocation.id });
     assert.equal(bridge.creations(), 1);
     assert.equal(result.state, 'observed'); assert.equal(result.inputTokens, 7); assert.equal(result.admission.status, 'settled');
@@ -747,7 +747,7 @@ test('native counted input uses original Core result and matches generation wire
     assert.equal(bound.maxInputTokens, 7); assert.equal(bound.countRequestHash, countTokensMaterialHash({ body: h.wires[0].body, pathname: '/messages/count_tokens' }));
     const answer = await h.f.invoke(); assert.equal(answer.status, 'completed'); assert.equal(h.f.f.state.wire.length, 2);
     assert.equal(h.f.reservations[1].request.countRequestHash, bound.countRequestHash);
-    const original = await new (require('../apps/api/src/modules/ai-native/input-counting/input-count-tokens.service').InputCountTokensService)({ ...h.dependencies, nativeToolResults: undefined, frozen: undefined, resolvers: undefined, transport: undefined }).readCountReceipt({ invocationId: h.frozen.invocation.id });
+    const original = await new (load('@rental-os/ai-native-server/runtime/input-counting/input-count-tokens.service').InputCountTokensService)({ ...h.dependencies, nativeToolResults: undefined, frozen: undefined, resolvers: undefined, transport: undefined }).readCountReceipt({ invocationId: h.frozen.invocation.id });
     assert.equal(original.inputTokens, 7); assert.equal(h.wires.length, 1);
     assert.equal(h.events.filter(value => value.kind === 'count.dispatched').length, 1); assert.equal(h.events.filter(value => value.kind === 'count.settled').length, 1);
     assert.equal(JSON.stringify(result).includes(h.f.call.id), false); assert.equal(JSON.stringify(bound).includes('ORIGINAL_CORE_FACT'), false);
@@ -759,7 +759,7 @@ test('native counted input uses original Core result and matches generation wire
 });
 
 test('original count receipt survives revoked delivery, late response and a lost storage reply in both modes', async () => {
-  const { InputCountTokensService } = require('../apps/api/src/modules/ai-native/input-counting/input-count-tokens.service');
+  const { InputCountTokensService } = load('@rental-os/ai-native-server/runtime/input-counting/input-count-tokens.service');
   const tick = () => new Promise(resolve => setImmediate(resolve));
   for (const mode of ['platform_managed', 'tenant_managed']) for (const window of ['facts-changed', 'configuration-changed', 'cancelled-response', 'late-response', 'unreadable-write-reply']) {
     const h = await nativeCountingFixture(mode), controller = new AbortController();
@@ -815,7 +815,7 @@ test('original count receipt survives revoked delivery, late response and a lost
 });
 
 test('native counting fails closed on absent evidence and changed originals while factory requires real codec methods', async () => {
-  const { createNativeModelAdapter } = require('../apps/api/src/modules/ai-native/native-model-adapters');
+  const { createNativeModelAdapter } = load('@rental-os/ai-native-server/runtime/native-model-adapters');
   for (const protocol of ['openai_chat_completions', 'openai_responses', 'anthropic_messages']) {
     const transport = { post: async () => assert.fail('Registry inspection cannot dispatch') };
     const adapter = createNativeModelAdapter(protocol, { orderExplainTool: { name: 'rental_order_explain', version: 'draft-1' }, nativeToolResults: true }, transport);
@@ -861,7 +861,7 @@ test('native counting fails closed on absent evidence and changed originals whil
     assert.deepEqual(h.events, []); assert.deepEqual(h.wires, []);
     assert.equal(h.f.f.state.wire.length, 1);
   }
-  const { InputCountingRequestFactory } = require('../apps/api/src/modules/ai-native/input-counting/input-counting-request.factory');
+  const { InputCountingRequestFactory } = load('@rental-os/ai-native-server/runtime/input-counting/input-counting-request.factory');
   const server = { db: { $transaction: async () => assert.fail('No factory IO'), aiScope: { findFirst: async () => null } },
     auth: { resolveAccessContext: async () => assert.fail('No factory IO') }, guard: { canActivate: async () => assert.fail('No factory IO') },
     subscriptions: { readCategoryCommercialContext: async () => assert.fail('No factory IO') },

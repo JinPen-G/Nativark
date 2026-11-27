@@ -15,6 +15,7 @@ const packageShapes = new Map([
   ['26ca72466491f81e793101c349bc291f34935aa73f902c9eaa5f7ea32707ae6a', '5b83831e3b469e8efc453870873f5bf9c443ee551d27da1414cfb3b57edb37f9'],
   ['2d6b422be72a6d4f1373ad8de3f1f491e9a40d9450e1a54c944b7d3b164f3e3b', 'ecd9f801f0e9d5f871ad95782942f794645b523282490ceabb23192f2e04c4d6'],
   ['691cd5e26ab2a7c4699fceecd34eb70fbf4eae0e15192b875511fb13c05e447d', '25d80b0e0fbeae7dfbf8cfc889d52e33772cb36f43a700156bf5c082042a07ca'],
+  ['971ae3b1967475d8c9df84c972a8679db691e3f2f8c2577763e4806d0a913508', 'ecd9f801f0e9d5f871ad95782942f794645b523282490ceabb23192f2e04c4d6'],
 ]);
 const migrations = [
   { id: 'mcp.0001-oauth', file: 'mysql-oauth-schema.sql', sha256: 'aa8f6004c1be402bd6adeda56bba9275d820cfdea43d52483429e684b5ddded4', requires: [] },
@@ -24,7 +25,7 @@ const migrations = [
   { id: 'mcp.0005-catalog-adoption', file: 'mysql-catalog-goal-adoption-schema.sql', sha256: '1b3e6d471224bf49c77da04d6970829634979cc340786907f1348e2ec098e929', requires: ['mysql-catalog-goal-intent-schema.sql'] }
 ] as const;
 
-export const MCP_DATA_CAPABILITY_VERSION = '0.1.0';
+export const MCP_DATA_CAPABILITY_VERSION = '0.1.1';
 
 /** 本数据版仅声明已核定的公共数据基线；运行时业务依赖仍由原宿主提供。 */
 export function mcpDataPrerequisites(): CorePlatformDataCapabilityRelease['prerequisites'] {
@@ -34,7 +35,7 @@ export function mcpDataPrerequisites(): CorePlatformDataCapabilityRelease['prere
 function releaseMetadata(): Omit<CorePlatformDataCapabilityRelease, 'source' | 'sha256' | 'files'> {
   return {
     id: 'mcp', version: MCP_DATA_CAPABILITY_VERSION,
-    compatibility: { platform: { minInclusive: '0.1.0', maxExclusive: '0.2.0' },
+    compatibility: { platform: { minInclusive: '0.1.0', maxExclusive: '0.3.0' },
       contract: { minInclusive: '0.1.1', maxExclusive: '0.2.0' } },
     runtime: { node: { minInclusive: '22.0.0', maxExclusive: '25.0.0' } },
     schema: { ...schema },

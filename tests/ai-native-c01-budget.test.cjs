@@ -1,13 +1,12 @@
 'use strict';
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-process.env.TS_NODE_COMPILER_OPTIONS = JSON.stringify({ module: 'CommonJS', moduleResolution: 'Node' });
-require('ts-node/register/transpile-only');
-const { BudgetService } = require('../apps/api/src/modules/ai-native/budget/budget.service.ts');
-const { BudgetError } = require('../apps/api/src/modules/ai-native/budget/budget.ports.ts');
-const { quantityAtoms } = require('../apps/api/src/modules/ai-native/budget/budget-quantity.ts');
-const { validateBudgetSettings } = require('../apps/api/src/modules/ai-native/budget/budget-settings.ts');
-const { assertBudgetSettingsPermit } = require('../apps/api/src/modules/ai-native/budget/budget-settings.ts');
+const { BudgetService } = load('@rental-os/ai-native-server/runtime/budget/budget.service');
+const { BudgetError } = load('@rental-os/ai-native-server/runtime/budget/budget.ports');
+const { quantityAtoms } = load('@rental-os/ai-native-server/runtime/budget/budget-quantity');
+const { validateBudgetSettings } = load('@rental-os/ai-native-server/runtime/budget/budget-settings');
+const { assertBudgetSettingsPermit } = load('@rental-os/ai-native-server/runtime/budget/budget-settings');
 
 const now = new Date('2026-10-04T12:00:00.000Z');
 const association = {
@@ -74,8 +73,8 @@ test('reserve is durable at the port, binds association and rejects changed idem
 });
 
 test('deterministic BYOK and platform-credit policy keys bind the original business scene without accepting arbitrary namespaces', async () => {
-  const { byokMeterScene } = require('../apps/api/src/modules/ai-native/budget/byok-usage-meter');
-  const { platformCreditScene } = require('../apps/api/src/modules/ai-native/budget/platform-credit-policy');
+  const { byokMeterScene } = load('@rental-os/ai-native-server/runtime/budget/byok-usage-meter');
+  const { platformCreditScene } = load('@rental-os/ai-native-server/runtime/budget/platform-credit-policy');
   for (const mode of ['tenant_managed', 'platform_managed']) {
     const request = command(); request.association.config.serviceMode = mode;
     if (mode === 'platform_managed') Object.assign(request.association.config, { tenantId: undefined, configurationScope: { kind: 'platform' } });
@@ -102,11 +101,11 @@ test('deterministic BYOK and platform-credit policy keys bind the original busin
 });
 
 test('namespaced admission still reaches original repository locks, policies and platform allowance', async () => {
-  const { Prisma } = require('../apps/api/node_modules/@prisma/client');
-  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
-  const { PrismaBudgetRepository } = require('../apps/api/src/modules/ai-native/budget/prisma-budget.repository');
-  const { byokMeterScene } = require('../apps/api/src/modules/ai-native/budget/byok-usage-meter');
-  const { platformCreditScene } = require('../apps/api/src/modules/ai-native/budget/platform-credit-policy');
+  const { prismaRuntime: Prisma } = load('@rental-os/platform-server/prisma-runtime');
+  const { requestFingerprint } = load('@rental-os/platform-contracts/request-fingerprint');
+  const { PrismaBudgetRepository } = load('@rental-os/ai-native-server/runtime/budget/prisma-budget.repository');
+  const { byokMeterScene } = load('@rental-os/ai-native-server/runtime/budget/byok-usage-meter');
+  const { platformCreditScene } = load('@rental-os/ai-native-server/runtime/budget/platform-credit-policy');
   for (const mode of ['tenant_managed', 'platform_managed']) {
     const request = command(); request.association.config.serviceMode = mode;
     request.association.requestId = request.callId; request.association.idempotencyKey = request.callId;

@@ -1,9 +1,10 @@
 'use strict';
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'es2022', experimentalDecorators: true, emitDecoratorMetadata: true } });
 const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
-const { composeAuthorizedReadonlyPersistentTaskInputRunner } = require('../apps/api/src/modules/ai-native/runner/authorized-persistent-task-input.composition');
-const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+const { composeAuthorizedReadonlyPersistentTaskInputRunner } = load('@rental-os/ai-native-server/runtime/runner/authorized-persistent-task-input.composition');
+const { requestFingerprint } = load('@rental-os/platform-contracts/request-fingerprint');
+const { withAiTaskHeldPreparationDefinition } = load('@rental-os/platform-server/ai-runtime');
 const { AI_TASK_INPUT_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
 const query = { taskId: 'task-a', runId: 'run-a' }, host = { holderId: 'application-worker', leaseMs: 100000 };
 const noWrites = (h, start) => assert.equal(h.trace.slice(start).some(entry => /\.(create|update|upsert)$/u.test(entry) || entry === 'row.lock'), false);
@@ -19,14 +20,22 @@ async function make(status = 'QUEUED') {
 test('server held preparation publishes before effects under the one acknowledged lease', async () => {
   const { h, root } = await make(), plans = h.clone(h.state.aiTaskRunPlan), originalFence = h.state.aiRun[0].fencingToken;
   h.state.aiTaskRunPlan = []; let calls = 0;
-  const app = root.createApplication(host, async ({ lease, taskRevision, signal }) => {
+  const { taskRevision: _revision, ...definition } = plans[0].payload;
+  definition.bindingHash = requestFingerprint(definition);
+  // This registered synthetic producer owns the unpublished definition. The
+  // actual preparation ledger still checks its bound lease, origin and limits.
+  h.planAuthority.authorizePreparation = async (value, lease) => {
+    assert.deepEqual(value, definition); assert.equal(lease.holderId, host.holderId);
+    return h.planAuthority.authorize();
+  };
+  const app = root.createApplication(host, withAiTaskHeldPreparationDefinition(async ({ lease, taskRevision, signal }) => {
     calls++; assert.equal(h.state.aiTask[0].status, 'RUNNING');
     assert.equal(h.state.aiRun[0].status, 'RUNNING');
     assert.equal(taskRevision, h.state.aiTask[0].revision);
     assert.equal(lease.holderId, host.holderId); assert.equal(lease.fencingToken, originalFence.add(1).toFixed(0));
     assert.equal(signal.aborted, false); assert.deepEqual(h.executions, []);
     h.state.aiTaskRunPlan = h.clone(plans); // Synthetic plan producer; actual application/runner and lease CAS.
-  });
+  }, definition));
   const result = await app.start(query);
   assert.equal(result.outcome.status, 'succeeded'); assert.equal(calls, 1);
   assert.equal(h.state.aiRun[0].fencingToken.toFixed(0), originalFence.add(1).toFixed(0));
@@ -129,7 +138,7 @@ for (const phase of ['claim', 'start_transition']) test(`an uncertain ${phase} a
   } else h.storeControl.beforeCommit = async draft => {
     if (draft.aiTask[0].status === 'RUNNING' && !draft.aiStep.length) { attempts++; h.storeControl.loseReply = true; }
   };
-  await assert.rejects(app.start(query), e => e.code === 'AI_STORAGE_UNAVAILABLE');
+  await assert.rejects(app.start(query), e => e.code === (phase === 'claim' ? 'AI_STORAGE_UNAVAILABLE' : 'AI_RESULT_UNKNOWN'));
   assert.equal(attempts, 1); assert.equal(h.state.aiTask[0].status, phase === 'claim' ? 'QUEUED' : 'RUNNING');
   assert.equal(h.state.aiRun[0].leaseOwnerId, host.holderId); assert.equal(h.state.aiStep.length, 0);
   assert.deepEqual(h.executions, []);
@@ -260,11 +269,32 @@ for (const complete of [true, false]) test(`application reconcile uses its held 
   // the held original operation and reconcile; never report a clean rollback.
   await assert.rejects(app.start(query), e => e.code === 'AI_RESULT_UNKNOWN'); h.storeControl.beforeWrite = null;
   assert.equal(h.state.aiRun[0].leaseOwnerId, host.holderId);
-  const fence = h.state.aiRun[0].fencingToken.toFixed(0), artifacts = h.clone(h.state.aiTaskResultArtifact), charges = h.state.aiTaskExecutionCharge.map(c => c.chargeId);
+  const fence = h.state.aiRun[0].fencingToken.toFixed(0), artifacts = h.clone(h.state.aiTaskResultArtifact);
+  const charges = h.clone(h.state.aiTaskExecutionCharge), overhead = h.clone(h.state.aiTaskRunOverhead);
+  const chargeIds = new Set(charges.map(row => row.chargeId));
   const result = await app.reconcile(query);
-  assert.equal(result.kind, 'run_outcome'); assert.equal(result.outcome.status, complete ? 'succeeded' : 'unknown');
+  assert.equal(result.kind, 'run_outcome'); assert.equal(result.outcome.status, complete ? 'unavailable' : 'unknown');
+  if (complete) assert.equal(result.outcome.nextAction, 'manual_handoff');
   assert.equal(h.state.aiRun[0].fencingToken.toFixed(0), fence); assert.equal(h.state.aiRun[0].leaseOwnerId, null);
-  assert.deepEqual(h.state.aiTaskResultArtifact, artifacts); assert.deepEqual(h.state.aiTaskExecutionCharge.map(c => c.chargeId), charges);
+  assert.deepEqual(h.state.aiTaskResultArtifact, artifacts);
+  assert.deepEqual(h.state.aiTaskRunOverhead.filter(row => overhead.some(original => original.id === row.id)), overhead);
+  assert.deepEqual(h.state.aiTaskExecutionCharge.filter(row => row.stepId === null && chargeIds.has(row.chargeId)),
+    charges.filter(row => row.stepId === null));
+  const step = h.state.aiStep[0], stepCharges = h.state.aiTaskExecutionCharge.filter(row => row.stepId === step.id);
+  assert.deepEqual(stepCharges.map(row => row.chargeId), charges.filter(row => row.stepId === step.id).map(row => row.chargeId));
+  assert.deepEqual(stepCharges.map(row => row.resource).sort(), ['ACTIVE_MS', 'OUTPUT_BYTES', 'STEPS']);
+  assert.ok(stepCharges.every(row => row.status === (complete ? 'RECORDED' : 'UNKNOWN') && row.actionId === step.actionId));
+  const observed = h.state.aiTaskExecutionCharge.filter(row => !chargeIds.has(row.chargeId));
+  assert.ok(observed.length > 0);
+  assert.ok(observed.every(row => row.resource === 'ACTIVE_MS' && row.stepId === null && row.actionId === null
+    && row.stepFingerprint === null && row.gatewayInvocationId === null && row.taskId === query.taskId && row.runId === query.runId
+    && row.leaseOwnerId === host.holderId && row.fencingToken.toFixed(0) === fence && row.status === 'RECORDED'
+    && h.state.aiTaskRunOverhead.some(original => original.id === row.chargeId && original.completedAt && original.activeMs === row.actualAmount)));
+  const time = h.state.aiTaskExecutionCharge.filter(row => row.resource === 'ACTIVE_MS');
+  assert.equal(h.state.aiTaskExecutionBudget[0].consumedActiveMs,
+    time.filter(row => row.status === 'RECORDED').reduce((n, row) => n + row.actualAmount, 0n));
+  assert.equal(h.state.aiTaskExecutionBudget[0].reservedActiveMs,
+    time.filter(row => row.status !== 'RECORDED').reduce((n, row) => n + row.amount, 0n));
   assert.equal(h.state.aiTaskExecutionBudget[0].consumedSteps, complete ? 1n : 0n);
   assert.equal(h.state.aiTaskExecutionBudget[0].reservedSteps, complete ? 0n : 1n); assert.deepEqual(h.executions, ['input-clarify']);
 });

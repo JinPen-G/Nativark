@@ -1,14 +1,14 @@
 'use strict';
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const test = require('node:test'), assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { PrismaAdmissionRepository } = require('../apps/api/src/modules/ai-native/invocation-admission.repository');
-const { InvocationDispatchService } = require('../apps/api/src/modules/ai-native/invocation-dispatch.service');
-const { UnifiedAiGatewayService } = require('../apps/api/src/modules/ai-native/unified-ai-gateway.service');
+const { PrismaAdmissionRepository } = load('@rental-os/ai-native-server/runtime/invocation-admission.repository');
+const { InvocationDispatchService } = load('@rental-os/ai-native-server/runtime/invocation-dispatch.service');
+const { UnifiedAiGatewayService } = load('@rental-os/ai-native-server/runtime/unified-ai-gateway.service');
 const scope = { id: 'scope-1', kind: 'WORKSPACE', tenantId: 'tenant-1', workspaceId: 'workspace-1' };
 const binding = () => ({ scope: { ...scope }, id: 'admission-1', actorId: 'actor-1', callId: 'call-1', requestHash: 'hash-1', profileId: 'profile-1', dispatchId: 'dispatch-1' });
 function setup() {
-  const state = { row: { id: 'admission-1', tenantId: scope.tenantId, workspaceId: scope.workspaceId, actorId: 'actor-1', callId: 'call-1', requestHash: 'hash-1', profileId: 'profile-1', status: 'admitted', dispatchId: null, unknownReason: null, expiresAt: new Date(Date.now() + 60000), admittedAt: new Date(), updatedAt: new Date(), revokedAt: null, completedAt: null }, writes: [], transactions: [], loseAck: false };
+  const state = { row: { id: 'admission-1', scopeKind: scope.kind, platformDedupKey: null, tenantId: scope.tenantId, workspaceId: scope.workspaceId, actorId: 'actor-1', callId: 'call-1', requestHash: 'hash-1', profileId: 'profile-1', status: 'admitted', dispatchId: null, unknownReason: null, expiresAt: new Date(Date.now() + 60000), admittedAt: new Date(), updatedAt: new Date(), revokedAt: null, completedAt: null }, writes: [], transactions: [], loseAck: false };
   const matches = (row, where) => Object.entries(where).every(([key, value]) => value && typeof value === 'object' && 'gt' in value ? row[key] > value.gt : row[key] instanceof Date ? +row[key] === +value : row[key] === value);
   let queue = Promise.resolve();
   const db = { $transaction: (run, options) => {

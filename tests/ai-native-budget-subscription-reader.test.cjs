@@ -1,10 +1,10 @@
 'use strict';
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
-const { SubscriptionService } = require('../apps/api/src/modules/subscription/subscription.service');
-const { PrismaSubscriptionBudgetReader } = require('../apps/api/src/modules/ai-native/budget/prisma-subscription-budget-reader');
-const { createPersistedBudgetSubsystem } = require('../apps/api/src/modules/ai-native/budget/budget.module');
-const { SubscriptionBudgetEntitlementAdapter, ServerBudgetAuthorityAdapter } = require('../apps/api/src/modules/ai-native/budget/budget-dependency-adapters');
+const { SubscriptionService } = load('@rental-os/platform-server/subscription');
+const { PrismaSubscriptionBudgetReader } = load('@rental-os/ai-native-server/runtime/budget/prisma-subscription-budget-reader');
+const { createPersistedBudgetSubsystem } = load('@rental-os/ai-native-server/runtime/budget/budget.module');
+const { SubscriptionBudgetEntitlementAdapter, ServerBudgetAuthorityAdapter } = load('@rental-os/ai-native-server/runtime/budget/budget-dependency-adapters');
 const now = new Date('2026-10-05T12:00:00Z'), code = 'ai.native.use';
 const clone = structuredClone;
 const context = { contractVersion: 'ain-c01-c02-draft-1', requestId: 'auth-1', authorizedAt: now.toISOString(), audience: 'operator', actor: { kind: 'user', userId: 'actor-1' }, scope: { kind: 'workspace', tenantId: 'tenant-1', workspaceId: 'workspace-1' }, access: { permissions: ['ai:use'], dataScope: 'all', locationScope: { mode: 'all', locationIds: [] } } };
@@ -29,7 +29,7 @@ test('reader uses actual SubscriptionService catalog rules and only returns the 
   const before = clone(h.state.subscription);
   assert.deepEqual(await h.reader.read('tenant-1', code), { revision: 4, entitlements: [{ code, available: true }] });
   assert.deepEqual(h.state.subscription, before);
-  assert.equal(h.state.transactions[0].isolationLevel, 'Serializable');
+  assert.equal(h.state.transactions[0].isolationLevel, 'RepeatableRead');
   assert.deepEqual(h.state.reads.find(([name]) => name === 'features')[1].where, { code: { in: [code] } });
   assert.equal(h.state.reads.some(([name]) => name === 'prices'), false);
 });

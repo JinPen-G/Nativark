@@ -1,9 +1,9 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'es2022' } });
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const { AI_TASK_INPUT_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
-const { PrismaTaskInputRepository } = require('../apps/api/src/modules/ai-native/task-input/prisma-task-input.repository');
-const { composePersistentTaskInputRunner } = require('../apps/api/src/modules/ai-native/task-input/persistent-task-input.composition');
+const { PrismaTaskInputRepository } = load('@rental-os/ai-native-server/runtime/task-input/prisma-task-input.repository');
+const { composePersistentTaskInputRunner } = load('@rental-os/ai-native-server/runtime/task-input/persistent-task-input.composition');
 const { taskInputHarness } = require('./fixtures/ai-native/task-input-harness.cjs');
 const contract = { draftVersion: AI_TASK_INPUT_DRAFT_VERSION, code: 'synthetic-clarification', version: '1', fields: [
   { fieldId: 'clarification_text', kind: 'text', label: 'Additional context', required: true, maxLength: 100 }
@@ -30,7 +30,7 @@ async function setup() {
 
 test('parameter proof binds exact answers and task basis before durable consumption', async () => {
   const h = await setup(); await h.run();
-  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  const { requestFingerprint } = load('@rental-os/platform-contracts/request-fingerprint');
   h.source.validateAnswers = async (binding, contract, answers) => ({ disposition: 'business_parameters',
     planHash: binding.planHash, inputRef: binding.inputRef, inputHash: binding.inputHash,
     contractHash: requestFingerprint(contract), answersHash: '0'.repeat(64), bindingHash: requestFingerprint(binding) });
@@ -304,7 +304,7 @@ test('cancellation racing an answer has only one task-revision winner and preser
 });
 
 test('real takeover fences a lost waiting response and rejects old input and holder writes', async () => {
-  const { PrismaTaskTakeoverRepository } = require('../apps/api/src/modules/ai-native/runner/prisma-task-takeover.repository');
+  const { PrismaTaskTakeoverRepository } = load('@rental-os/ai-native-server/runtime/runner/prisma-task-takeover.repository');
   const h = await setup();
   h.storeControl.beforeWrite = async name => { if (name === 'aiTaskInputRequest') h.storeControl.loseReply = true; };
   await assert.rejects(h.run()); h.storeControl.beforeWrite = null;

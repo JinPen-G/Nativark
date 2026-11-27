@@ -1,11 +1,10 @@
 'use strict';
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-process.env.TS_NODE_COMPILER_OPTIONS = JSON.stringify({ module: 'CommonJS', moduleResolution: 'Node' });
-require('ts-node/register/transpile-only');
-const { PrismaBudgetRepository } = require('../apps/api/src/modules/ai-native/budget/prisma-budget.repository.ts');
-const { quantityAtoms } = require('../apps/api/src/modules/ai-native/budget/budget-quantity.ts');
-const { BudgetError } = require('../apps/api/src/modules/ai-native/budget/budget.ports.ts');
+const { PrismaBudgetRepository } = load('@rental-os/ai-native-server/runtime/budget/prisma-budget.repository');
+const { quantityAtoms } = load('@rental-os/ai-native-server/runtime/budget/budget-quantity');
+const { BudgetError } = load('@rental-os/ai-native-server/runtime/budget/budget.ports');
 
 test('token quantity never exceeds the representable shared number boundary', () => {
   assert.equal(quantityAtoms({ unit: 'tokens', value: Number.MAX_SAFE_INTEGER }), 9007199254740991n);

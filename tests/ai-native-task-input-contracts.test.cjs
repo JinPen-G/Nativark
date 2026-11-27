@@ -1,8 +1,8 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'es2022' } });
-const api = require('../packages/shared/src/ai-task-input-draft');
-const { AI_TASK_INPUT_DRAFT_SCHEMAS: schemas } = require('../packages/shared/src/ai-task-input-draft-schemas');
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const api = load('@rental-os/shared');
+const { AI_TASK_INPUT_DRAFT_SCHEMAS: schemas } = load('@rental-os/shared');
 const h = require('./fixtures/ai-native/contract-consumer.cjs');
 const validators = h.validatorsFor(schemas, {});
 const version = api.AI_TASK_INPUT_DRAFT_VERSION;
@@ -15,7 +15,7 @@ const answers = () => [{ fieldId: 'customer_selection', value: 'candidate-a' }, 
 const submission = () => ({ draftVersion: version, taskId: 'task-a', requestId: 'request-a', expectedRevision: 4, submissionKey: 'answer-a', answers: answers() });
 
 test('input schemas are published as OpenAPI components', () => {
-  const { AI_LEAF_COMPONENT_SCHEMAS } = require('../apps/api/src/contracts/ai-leaf-components');
+  const { AI_LEAF_COMPONENT_SCHEMAS } = load('@rental-os/ai-native-server/runtime/contracts/ai-leaf-components');
   for (const name of Object.keys(schemas)) assert.ok(AI_LEAF_COMPONENT_SCHEMAS[name], name);
 });
 
@@ -35,7 +35,7 @@ test('closed clarification schemas and semantic validators accept the same bound
   assert.equal(api.validateAiTaskInputAnswersDraft(offered, selected), true);
   assert.equal(api.validateAiTaskInputAnswersDraft(offered,
     [...answers(), { fieldId: 'fulfillment_selection', value: 'delivery' }]), false);
-  const { AI_LEAF_COMPONENT_SCHEMAS } = require('../apps/api/src/contracts/ai-leaf-components');
+  const { AI_LEAF_COMPONENT_SCHEMAS } = load('@rental-os/ai-native-server/runtime/contracts/ai-leaf-components');
   assert.ok(AI_LEAF_COMPONENT_SCHEMAS.AiSceneModelInputRefreshDraft);
   const usage = { draftVersion: version, code: 'original_quote_parameters', version: '1', fields: [
     { fieldId: 'usage_quantity', kind: 'text', required: true, label: 'Explicit planned usage', maxLength: 32 }

@@ -1,13 +1,14 @@
 "use strict";
 const test = require("node:test"), assert = require("node:assert/strict");
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const h = require("./fixtures/ai-native/contract-consumer.cjs"); h.blockNetwork(test);
-const fs = require("node:fs"), path = require("node:path"), { execFileSync } = require("node:child_process"), { createRequire } = require("node:module");
-const root = path.resolve(__dirname, ".."), apiRequire = createRequire(path.join(root, "apps/api/package.json"));
-const { Prisma } = apiRequire("@prisma/client");
-require("ts-node").register({ transpileOnly: false, compilerOptions: { module: "commonjs", moduleResolution: "node", target: "es2022", experimentalDecorators: true, emitDecoratorMetadata: true } });
-const { AiTaskCreationRepository } = require("../apps/api/src/modules/ai-native/ai-task-creation.repository");
-const { AiTaskRepositoryError } = require("../apps/api/src/modules/ai-native/ai-task.repository");
-const { offlinePrismaSchema } = require("./fixtures/ai-native/prisma-offline.cjs");
+const fs = require("node:fs"), path = require("node:path"), { execFileSync } = require("node:child_process");
+const root = path.resolve(__dirname, "..");
+const { prismaRuntime: Prisma } = load('@rental-os/platform-server/prisma-runtime');
+const { AiTaskCreationRepository } = load('@rental-os/ai-native-server/runtime/ai-task-creation.repository');
+const { AiTaskRepositoryError } = load('@rental-os/ai-native-server/runtime/ai-task.repository');
+const { offlinePrismaSchema, publicAiSchemaHistory } = require("./fixtures/ai-native/prisma-offline.cjs");
+const { checkedPath } = require("../scripts/controller-sources.cjs");
 const now = new Date("2026-10-03T00:01:00Z");
 const input = { creationKey: "client-operation-1", sceneCode: "order-explain", inputRef: "frozen-input-1" };
 const duplicate = () => new Prisma.PrismaClientKnownRequestError("private unique detail", { code: "P2002", clientVersion: "5.22.0" });
@@ -65,7 +66,7 @@ test("creation-key migration is additive and independently reproducible without 
   const schema = execFileSync("git", ["show", "616ff60:apps/api/prisma/schema.prisma"], { cwd: root, encoding: "utf8" });
   const result = offlinePrismaSchema(schema, before);
   assert.equal(result.violations, "");
-  const sql = fs.readFileSync(path.join(root, "apps/api/prisma/migrations/20261003070000_ai_task_creation_identity/migration.sql"), "utf8");
+  const sql = publicAiSchemaHistory().migration("20261003070000_ai_task_creation_identity");
   const checks = fs.readFileSync(path.join(__dirname, "fixtures/ai-native/task-creation-checks.sql"), "utf8");
   assert.equal(normal(sql), normal("-- AIN-03/S06 creation identity; additive and unapplied.\n" + result.diff + "\n" + checks));
   assert.match(sql, /CREATE UNIQUE INDEX `ai_tasks_creation_key` ON `ai_tasks`\(`scopeId`, `audience`, `ownerKind`, `ownerId`, `creationKey`\)/u);
@@ -74,7 +75,7 @@ test("creation-key migration is additive and independently reproducible without 
 });
 
 test("current schema remains independently validated as later migrations evolve", { timeout: 120000 }, () => {
-  const current = fs.readFileSync(path.join(root, "apps/api/prisma/schema.prisma"), "utf8");
+  const current = fs.readFileSync(checkedPath(process.env.AI_NATIVE_TEST_SOURCE_ROOT, process.env.AI_NATIVE_TEST_SCHEMA), "utf8");
   const result = offlinePrismaSchema(current);
   assert.match(result.validation, /schema.*valid/iu);
   assert.equal(result.violations, "");

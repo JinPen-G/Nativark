@@ -1,10 +1,10 @@
 'use strict';
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'es2022', experimentalDecorators: true, emitDecoratorMetadata: true } });
 const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
-const { composeAuthorizedReadonlyPersistentTaskInputRunner } = require('../apps/api/src/modules/ai-native/runner/authorized-persistent-task-input.composition');
-const { PrismaTaskTakeoverRepository } = require('../apps/api/src/modules/ai-native/runner/prisma-task-takeover.repository');
-const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+const { composeAuthorizedReadonlyPersistentTaskInputRunner } = load('@rental-os/ai-native-server/runtime/runner/authorized-persistent-task-input.composition');
+const { PrismaTaskTakeoverRepository } = load('@rental-os/ai-native-server/runtime/runner/prisma-task-takeover.repository');
+const { requestFingerprint } = load('@rental-os/platform-contracts/request-fingerprint');
 const cancel = (h, root) => root.taskTransitions.transition({ taskId: 'task-a', expectedRevision: h.state.aiTask[0].revision, to: 'cancel_requested', reason: 'cancel_requested' });
 
 // Real persisted authorization, result authority and runner; only storage, plan/input sources and executor are synthetic.
@@ -149,8 +149,9 @@ test('cancelled recovery preserves a recovered result but does not invent an unr
   const { h, root, lease } = await stoppedAfterCancellation('success', true);
   const before = h.clone(h.state), artifacts = h.clone(h.state.aiTaskResultArtifact);
   const chargeIds = h.state.aiTaskExecutionCharge.filter(c => c.stepId !== null).map(c => c.chargeId);
-  assert.deepEqual(await root.runner.recover(lease), { status: 'unavailable', completedSteps: 1,
-    cleanupFailed: 0, nextAction: 'manual_handoff' });
+  // The original-only reader stops at the absent tail before aggregate finish.
+  // Original time debt remains checked below and cannot authorize a new Step.
+  assert.deepEqual(await root.runner.recover(lease), { status: 'unavailable', completedSteps: 1, cleanupFailed: 0 });
   assert.equal(h.state.aiTask[0].status, 'CANCEL_REQUESTED'); assert.equal(h.state.aiStep.length, 1);
   assert.equal(h.state.aiStep[0].status, 'SUCCEEDED'); assert.equal(h.state.aiStep[0].resultRef, artifacts[0].id);
   assert.equal(h.state.aiRun[0].fencingToken.toFixed(0), lease.fencingToken); assert.equal(h.state.aiRun[0].leaseOwnerId, null);
@@ -184,9 +185,9 @@ test('cancelled recovery rejects changed original time provenance before reservi
 // does not include its post-read execution-admission check. Storage and this
 // bounded Core page are explicit offline substitutes, not native acceptance.
 async function closedReadCancellation(mode) {
-  const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
-  const { getRequestIdentity } = require('../apps/api/src/common/request-identity');
-  const { composePersistedReadonlyBusinessTaskHost } = require('../apps/api/src/modules/ai-native/runner/persisted-catalog-runner.composition');
+  const { ApiAuthGuard } = load('@rental-os/ai-native-server/runtime/rental-adapters/api-auth.guard');
+  const { getRequestIdentity } = load('@rental-os/platform-server/request-identity');
+  const { composePersistedReadonlyBusinessTaskHost } = load('@rental-os/ai-native-server/runtime/runner/persisted-catalog-runner.composition');
   const h = await authorizedRunnerHarness({ aiTaskPlanPolicy: [], aiTaskActionInput: [] });
   h.state.aiTaskRunPlan.length = 0;
   h.state.aiTask[0].status = 'QUEUED'; h.state.aiRun[0].status = 'QUEUED';

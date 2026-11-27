@@ -1,7 +1,8 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 const { setup, command, clone, AiStepRegistrationRepository } = require('./fixtures/ai-native/step-registration.cjs');
-const { createAiTaskRunnerRepositoryPorts } = require('../apps/api/src/modules/ai-native/runner/ai-task-runner.repository-adapter');
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { createAiTaskRunnerRepositoryPorts } = load('@rental-os/ai-native-server/runtime/runner/ai-task-runner.repository-adapter');
 
 async function harness() {
   const h = setup(); const registered = await h.run();

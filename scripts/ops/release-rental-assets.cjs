@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { isFullCommit, isSha256, readJson, sha256 } = require("./release-composition.cjs");
 const { requireReleaseTag } = require("./release-image-pair.cjs");
+const { withReleaseDependencies } = require("./release-dependencies.cjs");
 
 const PLATFORM_SOURCE = "https://github.com/JinPen-G/Nativark";
 const RENTAL_SOURCE = "https://github.com/JinPen-G/nativark-rental-core";
@@ -25,10 +26,14 @@ function requireCheckout(directory, commit) {
   }
 }
 
-function fixedPackage(directory, commit, role) {
+function fixedPackage(directory, commit, role, publishedVersion, versions) {
   const metadata = readJson(git(directory, "show", `${commit}:package.json`), `${role} 固定包清单`);
-  const version = metadata.version;
-  if (typeof version !== "string" || !/^0\.1\.(?:0|[1-9]\d*)$/u.test(version)) throw new Error(`${role} 须明确采用兼容范围内的新发布版本`);
+  const parsed = versions.CoreReleaseVersionSchema.safeParse(metadata.version);
+  if (!parsed.success) throw new Error(`${role} 须使用三段数字稳定发行版本`);
+  const version = parsed.data;
+  if (versions.compareCoreReleaseVersions(version, publishedVersion) <= 0) {
+    throw new Error(`${role} 须使用高于已公开 ${publishedVersion} 的新版本`);
+  }
   return version;
 }
 
@@ -42,14 +47,6 @@ async function prepareAssets(args) {
   if (repo === coreRepo || out !== path.resolve(outputDirectory) || fs.readdirSync(out).length) throw new Error("须提供两个独立检出及本次普通空输出目录");
   requireCheckout(repo, platformCommit);
   requireCheckout(coreRepo, rentalCommit);
-  const platformVersion = fixedPackage(repo, platformCommit, "底座"), rentalVersion = fixedPackage(coreRepo, rentalCommit, "Rental");
-  if (Number(platformVersion.split(".")[2]) <= 17 || Number(rentalVersion.split(".")[2]) <= 14) {
-    throw new Error("已发行 v0.1.17 与 v0.1.14 保持原字节，须先固定两仓的新版本");
-  }
-  const platformSource = { repository: PLATFORM_SOURCE, commit: platformCommit };
-  const rentalSource = { repository: RENTAL_SOURCE, commit: rentalCommit };
-  requireReleaseTag(platformSource, platformVersion, "platform");
-  requireReleaseTag(rentalSource, rentalVersion, "rental");
   for (const tool of tools) {
     const relative = `scripts/${tool}.cjs`, filename = path.join(repo, relative);
     if (!fs.lstatSync(filename).isFile() || !fs.readFileSync(filename).equals(git(repo, "show", `${platformCommit}:${relative}`))) {
@@ -57,23 +54,33 @@ async function prepareAssets(args) {
     }
   }
   const deps = path.join(repo, "node_modules");
-  const { compileFixedPlatformContracts, readIndependentRentalSource } = require(path.join(repo, "scripts/prepare-rental-workspace.cjs"));
+  const { compileFixedPlatformContracts, readIndependentRentalSource, createRentalDevelopmentWorkspace } = require(path.join(repo, "scripts/prepare-rental-workspace.cjs"));
+  const contracts = compileFixedPlatformContracts(repo, platformCommit, deps, true);
+  const versions = contracts.load(contracts.exported("@rental-os/core-contracts", true));
+  const platformVersion = fixedPackage(repo, platformCommit, "底座", "0.1.18", versions);
+  const rentalVersion = fixedPackage(coreRepo, rentalCommit, "Rental", "0.1.15", versions);
+  const platformSource = { repository: PLATFORM_SOURCE, commit: platformCommit };
+  const rentalSource = { repository: RENTAL_SOURCE, commit: rentalCommit };
+  requireReleaseTag(platformSource, platformVersion, "platform");
+  requireReleaseTag(rentalSource, rentalVersion, "rental");
   const rental = readIndependentRentalSource(coreRepo, rentalCommit, { mode: "release" });
   if (rental.source.repository !== RENTAL_SOURCE || rental.metadata.version !== rentalVersion) throw new Error("Rental 发行来源或版本与原稳定身份不一致");
-  const contracts = compileFixedPlatformContracts(repo, platformCommit, deps, true);
   const load = name => contracts.load(contracts.exported(`@rental-os/core-contracts/${name}`, true));
   const platformApi = load("platform-source"), archiveApi = load("archive");
   const platform = await platformApi.readPlatformSourceFromGit(repo, platformSource);
+  const workspace = await createRentalDevelopmentWorkspace({ repo, repository: PLATFORM_SOURCE, commit: platformCommit,
+    coreRepo, coreCommit: rentalCommit, mode: "release", profile: "host" }, platformApi);
   const pack = require(path.join(repo, "scripts/package-rental-host.cjs"));
   const platformAsset = `platform-source-${platformVersion}.tgz`, rentalAsset = `rental-${rentalVersion}.tgz`;
   const platformFile = path.join(out, platformAsset), rentalFile = path.join(out, rentalAsset);
   const platformArchive = platformApi.packPlatformSource(platform);
   pack.writeArchive(platformFile, platformArchive.bytes);
-  const portable = execFileSync(process.execPath, ["--no-compilation-cache", "--max-old-space-size=6144", "--require",
+  const portable = await withReleaseDependencies(workspace, out, dependencyDirectory => execFileSync(process.execPath,
+    ["--no-compilation-cache", "--max-old-space-size=6144", "--require",
     path.join(repo, "tests/fixtures/ai-native/prisma-offline-preload.cjs"), path.join(repo, "scripts/verify-rental-distribution.cjs"),
-    "--portable", "--build-repo", repo, "--deps", deps, "--commit", platformCommit, "--platform-commit", platformCommit,
+    "--portable", "--build-repo", repo, "--deps", dependencyDirectory, "--commit", platformCommit, "--platform-commit", platformCommit,
     "--source-repository", PLATFORM_SOURCE, "--core-repo", coreRepo, "--core-commit", rentalCommit, "--out", rentalFile],
-  { cwd: repo, encoding: "utf8", timeout: 900000, maxBuffer: 4 * 1024 * 1024 });
+  { cwd: repo, encoding: "utf8", timeout: 900000, maxBuffer: 4 * 1024 * 1024 }));
   const receipt = readJson(Buffer.from(portable.trimEnd().split(/\r?\n/u).at(-1)), "Rental 原发行回执");
   const describe = (file, name, expected) => {
     if (!isSha256(expected)) throw new Error("发行回执缺少归档摘要");

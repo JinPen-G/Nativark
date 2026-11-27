@@ -6,7 +6,9 @@ test('actual BudgetService and Prisma repository allow only one last-unit reserv
   const results = await Promise.allSettled([f.service.reserve(f.command('a')), f.service.reserve(f.command('b'))]);
   assert.equal(results.filter(row => row.status === 'fulfilled').length, 1);
   const failed = results.find(row => row.status === 'rejected'); assert.equal(failed.reason.code, 'EXHAUSTED');
-  assert.equal(f.rows().reservations.length, 1); assert.equal(f.rows().allocations.length, 1);
+  assert.equal(f.rows().reservations.length, 1); assert.equal(f.rows().allocations.length, 3);
+  assert.deepEqual(f.rows().allocations.map(row => [row.reservationId, row.policyId, row.policyRevision]),
+    ['platform', 'tenant', 'workspace'].map(kind => [f.rows().reservations[0].id, `policy-${kind}`, 1]));
   assert.equal(f.control.locks, 2); assert.deepEqual(f.networkAttempts(), []);
 });
 test('allocation failure rolls back the actual reservation write and remains unknown to the service', async () => {

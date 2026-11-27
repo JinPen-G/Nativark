@@ -1,11 +1,11 @@
 'use strict';
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const test = require('node:test'), assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
-const { Prisma } = require('../apps/api/node_modules/@prisma/client');
-const { PrismaProviderCapabilityEvidenceRepository } = require('../apps/api/src/modules/ai-native/provider-capability.repository');
-const { ProviderCapabilityService } = require('../apps/api/src/modules/ai-native/provider-capability.service');
-const { capabilityProfileFingerprint, capabilityNameSchema } = require('../apps/api/src/modules/ai-native/capability-verification');
+const { prismaRuntime: Prisma } = load('@rental-os/platform-server/prisma-runtime');
+const { PrismaProviderCapabilityEvidenceRepository } = load('@rental-os/ai-native-server/runtime/provider-capability.repository');
+const { ProviderCapabilityService } = load('@rental-os/ai-native-server/runtime/provider-capability.service');
+const { capabilityProfileFingerprint, capabilityNameSchema } = load('@rental-os/ai-native-server/runtime/capability-verification');
 const profile = { id: 'synthetic-profile', scopeId: 'synthetic-tenant', scopeKind: 'TENANT', profileKey: 'default', role: 'DEFAULT',
   serviceMode: 'tenant_managed', protocol: 'openai_chat_completions', provider: 'synthetic', model: 'synthetic/model', credentialRef: 'synthetic-vault',
   configRevision: 2, enabled: true, disabledAt: null, allowedCapabilities: ['text'] };

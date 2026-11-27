@@ -1,11 +1,9 @@
 'use strict';
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const test = require('node:test'), assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: {
-  module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true
-} });
-const { aiTaskHasUnresolvedEffects } = require('../apps/api/src/modules/ai-native/task-unresolved-effects');
-const { inspectRetentionSource } = require('../apps/api/src/modules/ai-native/privacy/retention-model-sources');
+const { aiTaskHasUnresolvedEffects } = load('@rental-os/ai-native-server/runtime/task-unresolved-effects');
+const { inspectRetentionSource } = load('@rental-os/ai-native-server/runtime/privacy/retention-model-sources');
 const { isOriginalB02MigrationChain, prepareOriginalB02ScopeProjection } = require('../scripts/ops/ai-native-b02-upgrade-core.cjs');
 const owner = { tenantId: 'tenant-b02-test', workspaceId: 'workspace-b02-test' };
 function fixture(status = 'unknown', patch = {}, count = 1) {
@@ -20,7 +18,10 @@ function fixture(status = 'unknown', patch = {}, count = 1) {
     aiTask: { findFirst: async () => null, findMany: async () => [] },
     aiStep: { findFirst: async () => null, findMany: async () => [] },
     aiTaskExecutionCharge: { findFirst: async () => null, findMany: async () => [] },
-    aiApprovalConsumption: { findFirst: async () => null },
+    aiApprovalConsumption: { findFirst: async () => null, findMany: async ({ where, take }) => {
+      assert.deepEqual(where, { scopeId: 'scope-test', status: { in: ['RESERVED', 'UNKNOWN'] } });
+      assert.equal(take, 51); return [];
+    } },
     aiRun: { findMany: async () => [{ id: 'original-run' }] },
     aiGatewayInvocation: { findMany: async () => [{ callId: original.callId }], findUnique: async () => null },
     aiBudgetReservation: { findFirst: async () => null, findMany: async () => [] },

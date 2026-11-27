@@ -1,15 +1,15 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
-const { Prisma } = require('../apps/api/node_modules/@prisma/client');
-const { AI_CONTRACT_DRAFT_VERSION } = require('@rental-os/shared');
-const { createPersistedTenantModelConfiguration, createScopeBoundTenantModelConnection } = require('../apps/api/src/modules/ai-native/tenant-model-config.composition');
-const { SecretBox } = require('../apps/api/src/common/secret-box');
-const { aiPersistenceScopeColumns } = require('../apps/api/src/modules/ai-native/persistence-scope');
-const { PrismaTenantModelProfileRepository } = require('../apps/api/src/modules/ai-native/tenant-model-profile.repository');
-const { PrismaProviderProfileRepository } = require('../apps/api/src/modules/ai-native/provider-profile.repository');
-const { ProviderCapabilityService } = require('../apps/api/src/modules/ai-native/provider-capability.service');
+const { prismaRuntime: Prisma } = load('@rental-os/platform-server/prisma-runtime');
+const { AI_CONTRACT_DRAFT_VERSION } = load('@rental-os/shared');
+const { createPersistedTenantModelConfiguration, createScopeBoundTenantModelConnection } = load('@rental-os/ai-native-server/runtime/tenant-model-config.composition');
+const { SecretBox } = load('@rental-os/platform-server/secret-box');
+const { aiPersistenceScopeColumns } = load('@rental-os/ai-native-server/runtime/persistence-scope');
+const { PrismaTenantModelProfileRepository } = load('@rental-os/ai-native-server/runtime/tenant-model-profile.repository');
+const { PrismaProviderProfileRepository } = load('@rental-os/ai-native-server/runtime/provider-profile.repository');
+const { ProviderCapabilityService } = load('@rental-os/ai-native-server/runtime/provider-capability.service');
 const clone = value => structuredClone(value);
 const context = { tenantId: 'synthetic-tenant', workspaceId: 'synthetic-space', actorId: 'synthetic-user' };
 const settings = { protocol: 'openai_chat_completions', baseUrl: 'https://synthetic-model.example.test/v1', model: 'synthetic/model', enabled: true, expectedRevision: 0, apiKey: 'synthetic-secret-only' };
@@ -276,10 +276,14 @@ test('mode/configuration changed during the final canonical scope recheck reject
   const selected = clone(h.state.profiles[0]); let reads = 0;
   const scopes = { resolveRoutingScopes: async () => {
     if (++reads === 2) { await h.service().changeMode(context, { mode: 'platform_managed', expectedRevision: 1 }); }
-    return { context: { actor: { kind: 'user', userId: context.actorId }, scope: { kind: 'workspace', tenantId: context.tenantId, workspaceId: context.workspaceId } },
+    return { context: { contractVersion: AI_CONTRACT_DRAFT_VERSION, requestId: 'synthetic-final-scope',
+      authorizedAt: '2026-10-05T00:00:00Z', audience: 'operator', actor: { kind: 'user', userId: context.actorId },
+      scope: { kind: 'workspace', tenantId: context.tenantId, workspaceId: context.workspaceId },
+      access: { permissions: ['system:params:manage'], dataScope: 'all', locationScope: { mode: 'all', locationIds: [] } } },
       configurationScope: { id: h.state.scope.id, kind: 'TENANT', tenantId: context.tenantId } };
   } };
   await assert.rejects(createScopeBoundTenantModelConnection(h.service(), scopes).resolve(context, selected), code('CONFIG_INVALID'));
+  assert.equal(reads, 2, 'the rejection follows the final scope wait and actual mode change');
 });
 
 test('generic Profile CAS cannot independently change a configuration-owned tenant or platform revision', async () => {

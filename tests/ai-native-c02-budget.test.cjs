@@ -1,14 +1,13 @@
 'use strict';
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-process.env.TS_NODE_COMPILER_OPTIONS = JSON.stringify({ module: 'CommonJS', moduleResolution: 'Node' });
-require('ts-node/register/transpile-only');
-const { Prisma } = require('@prisma/client');
-const { PrismaBudgetRepository } = require('../apps/api/src/modules/ai-native/budget/prisma-budget.repository.ts');
-const { PersistedBudgetEvidenceAdapter, ServerBudgetAuthorityAdapter, SubscriptionBudgetEntitlementAdapter } = require('../apps/api/src/modules/ai-native/budget/budget-dependency-adapters.ts');
-const { BudgetError } = require('../apps/api/src/modules/ai-native/budget/budget.ports.ts');
-const { BudgetService } = require('../apps/api/src/modules/ai-native/budget/budget.service.ts');
-const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+const { prismaRuntime: Prisma } = load('@rental-os/platform-server/prisma-runtime');
+const { PrismaBudgetRepository } = load('@rental-os/ai-native-server/runtime/budget/prisma-budget.repository');
+const { PersistedBudgetEvidenceAdapter, ServerBudgetAuthorityAdapter, SubscriptionBudgetEntitlementAdapter } = load('@rental-os/ai-native-server/runtime/budget/budget-dependency-adapters');
+const { BudgetError } = load('@rental-os/ai-native-server/runtime/budget/budget.ports');
+const { BudgetService } = load('@rental-os/ai-native-server/runtime/budget/budget.service');
+const { requestFingerprint } = load('@rental-os/platform-contracts/request-fingerprint');
 
 const association = { requestId: 'req', runId: 'run', stepId: 'step', actionId: 'action', idempotencyKey: 'idem', priceVersion: 'price',
   scope: { kind: 'workspace', tenantId: 'tenant', workspaceId: 'workspace' }, config: { configId: 'cfg', configRevision: 2, credentialRef: 'vault', protocol: 'openai-compatible', provider: 'synthetic', model: 'model', tenantId: 'tenant', serviceMode: 'tenant_managed', configurationScope: { kind: 'tenant', tenantId: 'tenant' } } };
@@ -65,9 +64,8 @@ test('budget settings and indexed unit/currency projections commit together with
   assert.equal(row.moneyCurrency, 'USD'); assert.equal(row.moneyLimit, '10.250000'); assert.equal(row.unitKind, 'money');
   db.aiBudgetPolicy.findMany = async ({ where }) => row.scopeKind === where.scopeKind && row.enabled === where.enabled
     && row.unitKind === where.unitKind && row.moneyCurrency !== null ? [{ moneyCurrency: row.moneyCurrency }] : [];
-  const { AiCreditService } = require('../apps/api/src/modules/ai-native/budget/ai-credit.service');
-  const credits = new AiCreditService(db, {});
-  assert.deepEqual(await credits.currencies(), ['USD'], 'the actual credit currency reader discovers the just-saved indexed currency');
+  const { readCreditCurrencies } = load('@rental-os/ai-native-server/runtime/budget/platform-credit-administration');
+  assert.deepEqual(await readCreditCurrencies(db), ['USD'], 'the actual credit currency reader discovers the just-saved indexed currency');
   assert.equal((await repository.settings(key)).settings.budget.quantity.currency, 'USD');
   const disabled = { ...settings, gates: { ...settings.gates, scene: { enabled: false, revision: 2 } } };
   await repository.saveSettings(key, disabled, 1, async () => {});
@@ -90,11 +88,11 @@ test('budget settings and indexed unit/currency projections commit together with
 function platformSettingsHarness() {
   const { createTaskInputStore } = require('./fixtures/ai-native/task-input-store.cjs');
   const { user } = require('./fixtures/ai-native/authorization-baseline.cjs');
-  const { AuthService } = require('../apps/api/src/modules/auth/auth.service');
-  const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
-  const { aiPersistenceScopeColumns } = require('../apps/api/src/modules/ai-native/persistence-scope');
-  const { composeRequestBoundBudgetManagement } = require('../apps/api/src/modules/ai-native/budget/budget-management.application');
-  const { AiBudgetManagementController } = require('../apps/api/src/modules/ai-native/budget/budget-management.module');
+  const { RentalAuthService: AuthService } = load('@rental-os/rental-core/auth-service');
+  const { ApiAuthGuard } = load('@rental-os/ai-native-server/runtime/rental-adapters/api-auth.guard');
+  const { aiPersistenceScopeColumns } = load('@rental-os/ai-native-server/runtime/persistence-scope');
+  const { composeRequestBoundBudgetManagement } = load('@rental-os/ai-native-server/runtime/budget/budget-management.application');
+  const { AiBudgetManagementController } = load('@rental-os/ai-native-server/runtime/budget/budget-management.module');
   const state = { user: user(), active: true };
   state.user.isSaasAdmin = true; state.user.permissions = ['system:ai-provider:view', 'system:ai-provider:manage'];
   const auth = new AuthService({
@@ -120,12 +118,12 @@ function platformSettingsHarness() {
 
 function tenantSettingsHarness(mode = 'platform_managed') {
   const { createTaskInputStore } = require('./fixtures/ai-native/task-input-store.cjs');
-  const { aiPersistenceScopeColumns } = require('../apps/api/src/modules/ai-native/persistence-scope');
-  const { SubscriptionService } = require('../apps/api/src/modules/subscription/subscription.service');
-  const { SecretBox } = require('../apps/api/src/common/secret-box');
-  const { tenantModelCredentialReference } = require('../apps/api/src/modules/ai-native/tenant-model-config.service');
-  const { composeRequestBoundBudgetManagement } = require('../apps/api/src/modules/ai-native/budget/budget-management.application');
-  const { AiBudgetManagementController } = require('../apps/api/src/modules/ai-native/budget/budget-management.module');
+  const { aiPersistenceScopeColumns } = load('@rental-os/ai-native-server/runtime/persistence-scope');
+  const { SubscriptionService } = load('@rental-os/platform-server/subscription');
+  const { SecretBox } = load('@rental-os/platform-server/secret-box');
+  const { tenantModelCredentialReference } = load('@rental-os/ai-native-server/runtime/tenant-model-config.service');
+  const { composeRequestBoundBudgetManagement } = load('@rental-os/ai-native-server/runtime/budget/budget-management.application');
+  const { AiBudgetManagementController } = load('@rental-os/ai-native-server/runtime/budget/budget-management.module');
   const h = platformSettingsHarness(), now = new Date();
   h.state.user.isSaasAdmin = false; h.state.user.isPlatformAdmin = true;
   h.state.user.permissions = ['system:params:view', 'system:params:manage'];
@@ -211,7 +209,7 @@ test('tenant budget first configuration refuses BYOK money budgets and keeps mis
 // These are committed-configuration fixtures, not real rotation, capability or
 // MySQL evidence. Rebinding must retain the original budget and financial rows.
 test('tenant budget configuration lifecycle preserves original money, held rows and receipts across modes and revisions', async () => {
-  const { tenantModelCredentialReference } = require('../apps/api/src/modules/ai-native/tenant-model-config.service');
+  const { tenantModelCredentialReference } = load('@rental-os/ai-native-server/runtime/tenant-model-config.service');
   const money = { state: 'limited', quantity: { unit: 'money', amount: '1.000001', currency: 'USD', scale: 6 } };
   for (const scope of ['tenant', 'workspace']) {
     const h = tenantSettingsHarness('tenant_managed'), configuration = () => h.store.state.aiTenantModelConfiguration[0];
@@ -453,7 +451,7 @@ test('settled actual usage remains in the durable budget aggregate', async () =>
 
 test('BYOK configuration and price rotation retain original concurrency and Run call limits', async () => {
   const { createTaskInputStore, clone } = require('./fixtures/ai-native/task-input-store.cjs');
-  const { byokMeterScene, ensureByokMeterPolicy } = require('../apps/api/src/modules/ai-native/budget/byok-usage-meter');
+  const { byokMeterScene, ensureByokMeterPolicy } = load('@rental-os/ai-native-server/runtime/budget/byok-usage-meter');
   const now = new Date('2026-10-04T12:00:00Z');
   for (const scenario of [
     { status: 'pending_reconciliation', count: 4 },
@@ -563,8 +561,8 @@ function callHistoryMatches(row, where) {
   return !where.configuration || row.configuration.serviceMode === where.configuration.equals;
 }
 function callHistoryHarness(rows = [callHistoryRow()]) {
-  const { AiCreditService } = require('../apps/api/src/modules/ai-native/budget/ai-credit.service');
-  const { AiCreditController } = require('../apps/api/src/modules/ai-native/budget/ai-credit.controller');
+  const { AiCreditService } = load('@rental-os/ai-native-server/runtime/budget/ai-credit.service');
+  const { AiCreditController } = load('@rental-os/ai-native-server/runtime/budget/ai-credit.controller');
   const trace = [], current = { user: { id: 'manager', tenantId: 'tenant', isActive: true, isSaasAdmin: false,
     isPlatformAdmin: false, permissions: ['system:params:manage'] }, tenantUser: { isPlatformAdmin: true, permissions: ['system:params:manage'] },
     hasWorkspaces: true, workspaceValid: true, workspaceId: 'workspace' };
@@ -617,7 +615,7 @@ function callHistoryHarness(rows = [callHistoryRow()]) {
 const callHistoryError = code => error => error.getResponse?.().code === code;
 
 function callHistoryCount(parent, receiptState = 'observed', settled = true) {
-  const count = require('../apps/api/src/modules/ai-native/input-counting/input-count-tokens.receipt');
+  const count = load('@rental-os/ai-native-server/runtime/input-counting/input-count-tokens.receipt');
   parent.configuration.protocol = 'anthropic_messages'; parent.configurationHash = requestFingerprint(parent.configuration);
   parent.accountingReceipts[0].reservation.configurationHash = parent.configurationHash;
   refreshCallHistoryEvidence(parent);
@@ -650,8 +648,8 @@ function callHistoryCount(parent, receiptState = 'observed', settled = true) {
 
 function creditCommandHarness(platform = false) {
   const { createTaskInputStore } = require('./fixtures/ai-native/task-input-store.cjs');
-  const { AiCreditService } = require('../apps/api/src/modules/ai-native/budget/ai-credit.service');
-  const { AiCreditController } = require('../apps/api/src/modules/ai-native/budget/ai-credit.controller');
+  const { AiCreditService } = load('@rental-os/ai-native-server/runtime/budget/ai-credit.service');
+  const { AiCreditController } = load('@rental-os/ai-native-server/runtime/budget/ai-credit.controller');
   const h = platformSettingsHarness();
   h.state.user.isSaasAdmin = platform; h.state.user.isPlatformAdmin = !platform;
   h.state.user.permissions = platform ? ['system:ai-provider:view', 'system:ai-provider:manage'] : ['system:params:manage'];
@@ -924,7 +922,7 @@ test('tenant call history uses original money/calls/tokens evidence and never di
 });
 
 test('counted requests reach tenant call history without becoming Tokens or platform money', async () => {
-  const schemas = require('../apps/api/src/contracts/ai-credit').AI_CREDIT_COMPONENT_SCHEMAS;
+  const schemas = load('@rental-os/ai-native-server/runtime/contracts/ai-credit').AI_CREDIT_COMPONENT_SCHEMAS;
   const validators = require('./fixtures/ai-native/contract-consumer.cjs').validatorsFor(schemas, {});
   for (const mode of ['platform_managed', 'tenant_managed']) {
     const parent = callHistoryRow('model-counted', mode, mode === 'platform_managed' ? 'money' : 'calls');
