@@ -329,7 +329,7 @@ function createBuild(dependencyDirectory, settings = {}) {
     stages.push(selected.stages.at(-1));
   }
   return { ts, outputs, virtual, packages, stages, runtimeAliases, selectedClients, compile, compileMcp, exported, load, requireDeps, deps,
-    snapshot, sourceRead, readDirectory, quiet: settings.quiet };
+    snapshot, sourceRead, readDirectory, dependencyPath, quiet: settings.quiet };
 }
 
 function verifyContracts(build) {

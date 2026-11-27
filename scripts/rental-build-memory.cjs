@@ -1,6 +1,6 @@
 'use strict';
-/** 核验适配器：真实构建器在 memfs 中执行原文件操作，源码和依赖只读。
- * 仅用于无落盘验证；不把内存安装描述为操作系统安装或部署。
+/** 固定源码的内存构建适配器：产物与打包写入 memfs，所选锁定依赖只读。
+ * 复用构建器的依赖边界；不执行操作系统安装或部署，不借活动源码补缺件。
  */
 const fs = require('node:fs');
 const path = require('node:path');
@@ -74,8 +74,15 @@ function createMemoryBuild(build) {
   if (build.snapshot) for (const [file, bytes] of build.snapshot.files) put(file, bytes);
   memory.mkdirSync(key(task), { recursive: true });
   const api = { ...fs };
-  const readable = file => exists(file) || !generated(file)
-    && !(build.snapshot && inside(workspaceRoot, slash(file)) && !inside(workspaceRoot + '/node_modules', slash(file)));
+  // 正式安装的 deps 可位于工作树 output 下；沿构建器同一锁/版本/真实路径校验读取，
+  // 不把它当作缺失的 Git 源码，也不开放其它临时目录或默认生成 Client。
+  const readable = file => {
+    if (exists(file)) return true;
+    const target = slash(mapped(file));
+    if (inside(build.deps, target)) return build.dependencyPath(target);
+    return !generated(file)
+      && !(build.snapshot && inside(workspaceRoot, slash(file)) && !inside(workspaceRoot + '/node_modules', slash(file)));
+  };
   for (const name of ['readFileSync', 'statSync', 'lstatSync', 'accessSync']) api[name] = (file, ...args) => {
     if (name === 'readFileSync' && typeof file === 'number') return memory.readFileSync(file, ...args);
     if (exists(file)) return memory[name](key(file), ...args);
@@ -90,8 +97,7 @@ function createMemoryBuild(build) {
   api.realpathSync.native = api.realpathSync;
   api.readdirSync = (file, options) => {
     const found = new Map();
-    if (!(build.snapshot && inside(workspaceRoot, slash(file)) && !inside(workspaceRoot + '/node_modules', slash(file)))
-      && readable(file) && fs.existsSync(mapped(file))) {
+    if (readable(file) && fs.existsSync(mapped(file))) {
       for (const entry of fs.readdirSync(mapped(file), options)) found.set(typeof entry === 'string' ? entry : entry.name, entry);
     }
     if (exists(file)) for (const entry of memory.readdirSync(key(file), options))
