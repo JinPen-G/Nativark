@@ -89,6 +89,14 @@ function readFixedMcp(repo, commit) {
   return { commit, manifestSha256: sha256(files.get(MCP_MANIFEST)), entries };
 }
 
+function inspectPair(evidenceDir, digest) {
+  const receipt = path.join(evidenceDir, "image-pair.json");
+  const observer = path.join(__dirname, "deployment", "hourly-update.py");
+  return readJson(execFileSync(process.platform === "win32" ? "python" : "python3",
+    ["-B", observer, "--observe-pair", receipt, digest],
+    { timeout: 270000, maxBuffer: 65536, stdio: ["ignore", "pipe", "inherit"], windowsHide: true }), "实际镜像观察");
+}
+
 function main(args) {
   const [mode, ...values] = args;
   const scope = { releaseApproved: false, databaseChecked: false };
@@ -111,18 +119,25 @@ function main(args) {
     const candidate = readFixedMcp(values[0], values[2]);
     return { scope: "mcp-source-comparison", ...scope, previous, candidate, changes: compareEntries(previous.entries, candidate.entries) };
   }
-  if (mode === "paired-review" && values.length === 5) {
+  if (mode === "paired-review" && (values.length === 5 || (values.length === 6 && values[5] === "--local-images"))) {
     const [directory, digest, baseline, baselineDigest, evidenceDir] = values;
     const candidate = readPrepared(directory, digest, { requireFixedBuild: true });
     const previous = baseline === "legacy-combined" ? baseline : readPrepared(baseline, baselineDigest);
     const read = name => readOrdinary(path.join(evidenceDir, name));
     const { reviewPairedUpdate } = require("./release-build-evidence.cjs");
-    return reviewPairedUpdate(previous, candidate, readJson(read("policy.json"), "固定 CI 核收策略"), {
-      run: readJson(read("run.json"), "GitHub CI 运行证据"), buildRecord: read("image-pair.json"),
-      inspectedImageIds: readJson(read("images.json"), "实际镜像观察"),
-    });
+    const policy = readJson(read("policy.json"), "固定 CI 核收策略");
+    const run = readJson(read("run.json"), "GitHub CI 运行证据");
+    const buildRecord = read("image-pair.json");
+    const inspect = values.length === 6;
+    // 先核完整候选和 CI，再读取本机 Docker。留存核收仍可传入独立观察。
+    const recorded = inspect ? readJson(buildRecord, "双镜像构建记录").imageIds : readJson(read("images.json"), "实际镜像观察");
+    const result = reviewPairedUpdate(previous, candidate, policy, { run, buildRecord, inspectedImageIds: recorded });
+    if (!inspect) return result;
+    const observed = inspectPair(evidenceDir, policy.buildRecordSha256);
+    return { ...reviewPairedUpdate(previous, candidate, policy, { run, buildRecord, inspectedImageIds: observed }),
+      runtimeImageIds: observed.runtimeImageIds };
   }
-  throw new Error("用法：release-verify.cjs candidate <候选目录> <收据SHA256>，prepared <基线目录> <基线收据SHA256> <候选目录> <候选收据SHA256>，mcp <Git目录> <基线SHA> <候选SHA>，或 paired-review <候选目录> <收据SHA256> <基线目录或legacy-combined> <基线收据SHA256或-> <证据目录>");
+  throw new Error("用法：release-verify.cjs candidate <候选目录> <收据SHA256>，prepared <基线目录> <基线收据SHA256> <候选目录> <候选收据SHA256>，mcp <Git目录> <基线SHA> <候选SHA>，或 paired-review <候选目录> <收据SHA256> <基线目录或legacy-combined> <基线收据SHA256或-> <证据目录> [--local-images]");
 }
 
 if (require.main === module) {
