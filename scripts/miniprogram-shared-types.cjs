@@ -19,6 +19,18 @@ function inside(root, target) {
   const relative = path.relative(root, target);
   return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 }
+// The offline guard may own an outer task containing a complete projection.
+// Compiler intermediates still belong to this projection's task-temp child;
+// the guard's write boundary is not itself the intermediate directory.
+function preparationParent(root, name) {
+  const tempRoot = path.join(root, 'output', '.tmp');
+  const writeRoot = process.env.AI_OFFLINE_WRITE_ROOT && path.resolve(process.env.AI_OFFLINE_WRITE_ROOT);
+  const parent = writeRoot && inside(tempRoot, writeRoot) && writeRoot !== tempRoot
+    ? writeRoot : path.join(tempRoot, name);
+  if (writeRoot && !inside(writeRoot, parent))
+    throw Error('Private build preparation leaves its offline write root');
+  return parent;
+}
 function checkPath(root, target, scan = false) {
   target = path.resolve(target);
   if (!inside(root, target) || target === root) throw Error('Mini-program build path leaves its workspace');
@@ -569,9 +581,7 @@ function prepareMiniprogramSharedTypes(appRoot, args = []) {
   const root = workspace(appRoot);
   const installed = selectMiniprogramRentalPackage(root, args);
   if (installedRentalPackages.has(root)) throw Error('This process already owns a Rental package preparation');
-  const parent = process.env.AI_OFFLINE_WRITE_ROOT ? path.resolve(process.env.AI_OFFLINE_WRITE_ROOT)
-    : path.join(root, 'output', '.tmp', 'miniprogram-build');
-  if (!inside(path.join(root, 'output', '.tmp'), parent) || parent === path.join(root, 'output', '.tmp')) throw Error('Private shared declarations require a task-temp root');
+  const parent = preparationParent(root, 'miniprogram-build');
   checkPath(root, parent);
   const parentCreated = !fs.existsSync(parent);
   fs.mkdirSync(parent, { recursive: true });
@@ -611,6 +621,14 @@ function rentalNativeDeclarationFiles(root, destination, compiled) {
     file = path.resolve(file);
     if (inside(path.join(nativeDirectory, 'src'), file)) {
       const canonical = path.join(declarations, 'packages/rental-core', path.relative(nativeDirectory, file));
+      if (fs.existsSync(canonical)) return canonical;
+    }
+    // Inferred import types may name the original workspace module instead of
+    // its public alias. Relocate only sources in this actual compiler program
+    // with an emitted declaration, never package arbitrary source references.
+    const source = inside(path.join(root, 'packages'), file) && compiled.program.getSourceFile(file);
+    if (source && !source.isDeclarationFile && file.endsWith('.ts')) {
+      const canonical = path.join(declarations, path.relative(root, file)).replace(/\.ts$/u, '.d.ts');
       if (fs.existsSync(canonical)) return canonical;
     }
     return file;
@@ -685,12 +703,10 @@ function buildRentalNativeClients(packageRoot, args = []) {
   if (output !== path.join(packageRoot, 'dist-clients')
     && (!inside(tempRoot, output) || path.relative(tempRoot, output).split(path.sep).length < 2))
     throw Error('Native SDK output must be dist-clients or a task-temp child');
-  const parent = process.env.AI_OFFLINE_WRITE_ROOT ? path.resolve(process.env.AI_OFFLINE_WRITE_ROOT)
-    : path.join(tempRoot, 'native-client-build');
-  if (!inside(tempRoot, parent) || parent === tempRoot)
-    throw Error('Native SDK preparation requires a task-temp root');
-  if (process.env.AI_OFFLINE_WRITE_ROOT && !checkOnly && (!inside(parent, output) || parent === output))
-    throw Error('Offline Native SDK output must remain inside its task temp');
+  const parent = preparationParent(root, 'native-client-build');
+  const writeRoot = process.env.AI_OFFLINE_WRITE_ROOT && path.resolve(process.env.AI_OFFLINE_WRITE_ROOT);
+  if (writeRoot && !checkOnly && (!inside(writeRoot, output) || writeRoot === output))
+    throw Error('Offline Native SDK output must remain inside its write root');
   checkPath(root, parent, true);
   checkPath(root, output, true);
   const parentCreated = !fs.existsSync(parent);
