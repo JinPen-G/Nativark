@@ -31,3 +31,5 @@ export * from "./core-package-audit";
 export * from "./core-package-assembly";
 export * from "./core-package-deployment";
 export * from "./core-packages/openapi";
+
+export { readMysqlHistory, type MysqlHistoryObservation, type MysqlHistoryRow } from "./mysql-history";

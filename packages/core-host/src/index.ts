@@ -4,3 +4,4 @@ export * from "./binding";
 export * from "./deployment";
 export * from "./deployment-admission";
 export * from "./removal";
+export { type CoreHistoricalDataObservation, type CoreHistoricalDataSource } from "./historical-deployment";

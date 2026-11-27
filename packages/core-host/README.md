@@ -92,3 +92,7 @@ npm run build -w @rental-os/core-host
 [正式出口](src/index.ts) → [部署目录](src/deployment.ts) / [授权服务](src/access.ts) / [绑定服务](src/binding.ts) → [原账与结构观察](src/mysql-deployment.ts) / [授权MySQL](src/mysql.ts) / [绑定MySQL](src/mysql-bindings.ts) → [公共宿主迁移](../../apps/platform-api/prisma/migrations)。输入/输出复用[公共生命周期合同](../core-contracts/src/lifecycle.ts)，实际原身份与部署接线由所选宿主提供。
 
 验证输入应使用真实授权生产者、所选部署锁和原迁移名称；离线事务替身仅核参数、调用顺序和拒绝行为。真实数据库锁、HTTP/UI、绑定初始化与缓存通知分别验收，不能以离线授权替身证明生产准入。
+
+### 显式历史迁移账
+
+[部署目录](src/deployment.ts)支持互斥的普通 `observations` 与 `historical` 受控来源。后者沿[历史合同](src/historical-deployment.ts)读取完整原账身份、实际追加迁移及每个数据所有者的当前物理证据，分别核所选平台/Core/能力合同；不把历史等价写成新装迁移已执行。只有具体宿主已核定旧来源、全部原账和物理映射时才显式装配，普通宿主不会自动降级。历史观察不属于原v1更新预检输入，旧库宿主必须停用该更新材料来源，直到有对应的旧账升级计划。

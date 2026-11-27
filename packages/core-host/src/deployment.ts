@@ -9,6 +9,7 @@ import {
   type CoreServerRegistration, type CoreDataContract, type CoreHttpContribution, type CoreHttpRegistry
 } from "@rental-os/core-contracts";
 import { CoreAccessError, type CoreDeploymentAvailability } from "./access";
+import { requireHistoricalDataContract, type CoreHistoricalDataSource } from "./historical-deployment";
 
 export interface CoreDeploymentObservationSource {
   /** 准入读取平台与目标Core，省略目标时供升级预检读取全组合；不从包清单推导应用状态。 */
@@ -66,10 +67,14 @@ function dataAvailable(data: CoreDataContract, observation: CoreDataObservation[
 export function createCoreDeployedCatalogue(input: {
   lock: CoreDeploymentLock;
   registrations: readonly CoreServerRegistration[];
-  observations: CoreDeploymentObservationSource;
+  observations?: CoreDeploymentObservationSource;
+  /** 明确选择旧账桥接；不得同时提供新装观察，升级预检仍须专用旧账方案。 */
+  historical?: CoreHistoricalDataSource;
   /** 当前已装配Controller的同源政策；未提供HTTP的Core可以省略，缺政策的路由仍默认拒绝。 */
   http?: readonly CoreHttpContribution[];
 }): CoreDeployedCatalogue {
+  if (Boolean(input.observations) === Boolean(input.historical))
+    throw new CoreAccessError("core_unavailable", "必须且只能选择一种真实迁移账读取器");
   const lock = CoreDeploymentLockSchema.parse(input.lock);
   const capabilityIssues = checkPlatformDataCapabilities(lock);
   if (capabilityIssues.length) throw new CoreAccessError("core_unavailable", capabilityIssues.map(issue => `${issue.owner}:${issue.field} ${issue.message}`).join("\n"));
@@ -110,7 +115,16 @@ export function createCoreDeployedCatalogue(input: {
     async requireDataCapabilityAvailable(capabilityId) {
       const release = capabilities.get(capabilityId);
       if (!release) throw new CoreAccessError("core_unavailable", "该数据能力未在当前部署选择");
-      requireCapabilityData(release, CoreDataObservationSchema.parse(await input.observations.read()));
+      if (input.historical) {
+        const observed = await input.historical.read();
+        requireHistoricalDataContract(observed, "platform", lock.platform.data);
+        requireHistoricalDataContract(observed, `capability:${release.id}`, release.data);
+        for (const prerequisite of release.prerequisites.cores) {
+          const pin = pins.get(prerequisite.coreId);
+          if (!pin) throw new CoreAccessError("core_unavailable", "旧账桥接缺少能力依赖的Core");
+          requireHistoricalDataContract(observed, `core:${prerequisite.coreId}`, pin.manifest.data);
+        }
+      } else requireCapabilityData(release, CoreDataObservationSchema.parse(await input.observations!.read()));
     },
     get registrations() {
       // ReadonlyMap只约束类型；返回隔离清单，调用方改副本不能改本次部署。
@@ -126,8 +140,22 @@ export function createCoreDeployedCatalogue(input: {
           const release = capabilities.get(requirement.capability);
           return release ? [release] : [];
         });
+        if (input.historical) {
+          const observed = await input.historical.read();
+          requireHistoricalDataContract(observed, "platform", lock.platform.data);
+          requireHistoricalDataContract(observed, `core:${coreId}`, pin.manifest.data);
+          for (const release of required) {
+            requireHistoricalDataContract(observed, `capability:${release.id}`, release.data);
+            for (const prerequisite of release.prerequisites.cores) {
+              const dependency = pins.get(prerequisite.coreId);
+              if (!dependency) throw new CoreAccessError("core_unavailable", "旧账桥接缺少能力依赖的Core");
+              requireHistoricalDataContract(observed, `core:${prerequisite.coreId}`, dependency.manifest.data);
+            }
+          }
+          return;
+        }
         // 能力可以依赖另一 Core 的数据；仅此情形需要完整组合观察，普通 Core 仍读取原目标。
-        const observed = CoreDataObservationSchema.parse(await input.observations.read(required.length ? undefined : coreId));
+        const observed = CoreDataObservationSchema.parse(await input.observations!.read(required.length ? undefined : coreId));
         if (!dataAvailable(lock.platform.data, observed.platform))
           throw new CoreAccessError("core_unavailable", "平台实际数据或迁移执行状态尚未就绪");
         const core = observed.cores.find(item => item.coreId === coreId);
