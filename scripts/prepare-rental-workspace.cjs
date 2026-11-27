@@ -48,6 +48,13 @@ const verificationTests = [
   'legacy-access-preparation.test.cjs', 'legacy-access-adoption.test.cjs', 'core-session-cases.cjs',
 ].map(file => coreDirectory + '/test/' + file);
 const verificationGuard = 'tests/fixtures/ai-native/prisma-offline-preload.cjs';
+// The paired report tools and their original consumers share one public source.
+// Independent snapshots may retain identical copies, never competing implementations.
+const verificationSupport = [verificationGuard,
+  'scripts/ai-native-b06-acceptance-report.cjs', 'scripts/ai-native-b07-report-extension.cjs',
+  'scripts/ai-native-b06-offline-guard.cjs',
+  'tests/ai-native-b06-w15-report.test.cjs', 'tests/ai-native-b07-w14-report.test.cjs',
+];
 const verificationScripts = {
   'test:rental:dist': 'node --test ' + verificationTests.slice(0, 4).join(' '),
   // Both original legacy entries own the same temporary directory and clean it on exit.
@@ -430,11 +437,11 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
     ...(options.mcp ? ['packages/mcp-server'] : [])];
   const extras = supportWorkspaces.filter(directory => !selected.some(entry => entry.target === directory));
   const support = readBuildSnapshot(options.commit, options.repo,
-    [...extras, ...supportScripts, ...(withTests ? [verificationGuard] : [])]);
+    [...extras, ...supportScripts, ...(withTests ? verificationSupport : [])]);
   const files = new Map(platform.files);
   for (const [absolute, bytes] of support.files) {
     const relative = path.relative(root, absolute).split(path.sep).join('/');
-    if (isSource(relative) || withTests && relative === verificationGuard) files.set(relative, bytes);
+    if (isSource(relative) || withTests && verificationSupport.includes(relative)) files.set(relative, bytes);
   }
   for (const [absolute, bytes] of rental.snapshot.files) {
     const relative = path.relative(root, absolute).split(path.sep).join('/');
@@ -445,10 +452,13 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
     if ((isSource(relative) || withTests && verificationTests.includes(relative))
       && selected.some(entry => relative.startsWith(entry.target + '/'))) files.set(relative, bytes);
   }
-  if (withTests) for (const file of [...verificationTests, verificationGuard])
+  if (withTests) for (const file of [...verificationTests, ...verificationSupport])
     if (!files.has(file)) throw Error('固定开发验证材料缺失：' + file);
   if (withTests) for (const [file, bytes] of rental.verification?.files ?? []) {
-    if (files.has(file)) throw Error('独立验证材料与底座/构建来源冲突：' + file);
+    if (files.has(file)) {
+      if (verificationSupport.includes(file) && Buffer.from(files.get(file)).equals(bytes)) continue;
+      throw Error('独立验证材料与底座/构建来源冲突：' + file);
+    }
     files.set(file, bytes);
   }
   if (adapterSources) for (const [file, bytes] of adapterSources.files)
@@ -616,7 +626,7 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
     host: profile === 'domain' ? null : multi ? 'example-multi-core' : 'rental',
     coreIds: multi ? ['rental', 'example-tickets'] : ['rental'], ai: Boolean(options.ai), mcp: Boolean(options.mcp),
     ...(withTests ? { verification: { suite: 'rental-original',
-      files: [...verificationTests, verificationGuard, ...(rental.verification?.files.keys() ?? [])],
+      files: [...new Set([...verificationTests, ...verificationSupport, ...(rental.verification?.files.keys() ?? [])])],
       sourceLayout: rental.layout.verification ?? null,
       supportWorkspaces: ['packages/example-tickets-core'], scripts: verificationScripts } } : {}),
     platform: { version: platform.version, source: platform.source, layout: 'platform-source', packageRoot: '.' },
@@ -631,7 +641,8 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
     workspaces: [...workspaces].map(([directory, metadata]) => ({ path: directory, name: metadata.name, version: metadata.version })),
     files: [...files].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([file, bytes]) => ({ ...describe(file, bytes),
       ...(generated.has(file) ? { generated: true } : {
-        origin: rental.origins.get(slash(path.join(root, file)))
+        origin: (withTests && verificationSupport.includes(file) ? { ...platform.source, path: file } : undefined)
+          ?? rental.origins.get(slash(path.join(root, file)))
           ?? (withTests ? rental.verification?.origins.get(slash(path.join(root, file))) : undefined)
           ?? { ...platform.source, path: file },
         transformed: !rental.verification?.files.has(file)
