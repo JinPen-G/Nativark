@@ -16,7 +16,7 @@ const {
   calendarYear,
   timeZoneOffsetMinutes,
   isValidTimeZone
-} = require("../apps/api/src/modules/subscription/subscription-term");
+} = require("@rental-os/platform-server/subscription-term");
 
 test("UTC remains the default; calendar arithmetic preserves milliseconds without mutating the anchor", () => {
   const anchor = new Date("2024-02-29T08:30:45.678Z");

@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { createAliyunOssV4Url } = require("../apps/api/dist/modules/integrations/aliyun-oss-v4.js");
+const { createAliyunOssV4Url } = require("@rental-os/platform-server/aliyun-oss-v4");
 
 const now = new Date("2024-12-03T03:44:20.000Z");
 const baseInput = {

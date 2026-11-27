@@ -6,7 +6,8 @@ const ts = require('typescript');
 const React = require('react');
 
 function load(file, dependencies = {}) {
-  const code = ts.transpileModule(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), {
+  const filename = file.startsWith('@rental-os/') ? require.resolve(file) : path.join(__dirname, '..', file);
+  const code = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true, target: ts.ScriptTarget.ES2022 },
   }).outputText;
   const result = { exports: {} };
@@ -16,8 +17,8 @@ function load(file, dependencies = {}) {
 
 const model = load('packages/rental-core/admin/governance/calendar-year-model.ts');
 const labels = load('packages/rental-core/admin/governance/ruleOptionLabels.ts');
-const officialDates = load('apps/admin/src/features/platform/official-calendar-dates.ts');
-const datePanel = load('apps/admin/src/components/ui/date-picker-month.ts');
+const officialDates = load('@rental-os/platform-admin/platform-settings/official-calendar-dates');
+const datePanel = load('@rental-os/platform-admin/source/components/ui/date-picker-month');
 
 test('an empty date field opens inside its allowed year without inventing a selected date', () => {
   const today = new Date(2026, 10, 8);

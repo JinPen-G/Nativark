@@ -6,7 +6,15 @@ const { SubscriptionService } = require("@rental-os/platform-server/subscription
 const { validateSync } = require("class-validator");
 const dto = require("@rental-os/platform-server/subscription-dto");
 const shared = require("@rental-os/platform-contracts/subscription");
-const db = require("@prisma/client");
+// 枚举对照使用当前公共 schema 的官方内存 Client，不读取旧组合宿主的生成物。
+const { createControllerSourceLoader } = require("../scripts/controller-sources.cjs");
+const publicSchema = createControllerSourceLoader(require("node:path").resolve(__dirname, ".."), undefined,
+  { schemaPath: "apps/platform-api/prisma/schema.prisma" });
+let db;
+test.before(async () => {
+  await publicSchema.prepareOfflinePrisma();
+  db = publicSchema.requireDependency("@prisma/client");
+});
 const NOW = new Date("2026-06-01T00:00:00Z");
 const clone = (x) => structuredClone(x);
 const subscription = (extra = {}) => ({ id: "sub", tenantId: "t1", revision: 1, plan: "PRO", source: "HISTORICAL_REGISTER", startAt: new Date("2026-01-01T00:00:00Z"), endAt: new Date("2027-01-01T00:00:00Z"), serviceTimeZone: "UTC", billingAnniversary: new Date("2026-01-01T00:00:00Z"), currentAmount: 500, currentCurrency: "CNY", currentTaxInclusive: true, sourceReason: null, handledAt: NOW, ...extra });
