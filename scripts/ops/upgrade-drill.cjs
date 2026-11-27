@@ -17,6 +17,8 @@
  *      既不停止、也不替换任何正在运行的实例。
  */
 
+require("./legacy-checkout.cjs").stopLegacyCommand();
+
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");

@@ -1,11 +1,12 @@
 'use strict';
-/** 本机启动预检及零 Core 根命令。依赖和 Client 按宿主分开；旧组合显式选择。
+/** 本机启动预检及零 Core 根命令。旧组合入口早退，提示固定历史检出。
  * 公共库先核原账与结构。启动不迁移或初始化；公共生成只创建本树的新 Client。
  */
 const fs = require('node:fs');
 const path = require('node:path');
 const { createRequire } = require('node:module');
 const { spawn } = require('node:child_process');
+const { LEGACY_CHECKOUT_MESSAGE } = require('./legacy-checkout.cjs');
 const root = path.resolve(__dirname, '../..');
 const json = file => JSON.parse(fs.readFileSync(file, 'utf8'));
 const normalize = file => process.platform === 'win32' ? path.resolve(file).replaceAll('\\', '/').toLowerCase() : path.resolve(file);
@@ -31,6 +32,7 @@ function localPath(file) {
 }
 
 function dependencyCheck(profile = 'platform', repair = false) {
+  if (profile === 'legacy') throw Error(LEGACY_CHECKOUT_MESSAGE);
   const [major, minor] = process.versions.node.split('.').map(Number);
   if (major < 22 || major === 22 && minor < 12) throw Error('本地启动要求 Node.js 22.12+');
   const lock = json(path.join(root, 'package-lock.json'));
@@ -96,6 +98,7 @@ function dependencyCheck(profile = 'platform', repair = false) {
 }
 
 function clientStatus(profile = 'platform') {
+  if (profile === 'legacy') throw Error(LEGACY_CHECKOUT_MESSAGE);
   const selected = profiles[profile];
   const client = path.join(root, selected.client, 'index.d.ts');
   const generatedSchema = path.join(path.dirname(client), 'schema.prisma');
@@ -307,6 +310,7 @@ async function platformCommand(command) {
 if (require.main === module) (async () => {
   const args = process.argv.slice(2);
   const profile = ['platform', 'legacy'].includes(args[0]) ? args.shift() : 'platform';
+  if (profile === 'legacy') throw Error(LEGACY_CHECKOUT_MESSAGE);
   const [command = 'check', script] = args;
   if (command === 'check' || command === 'repair-links') console.log(JSON.stringify(dependencyCheck(profile, command === 'repair-links')));
   else if (command === 'client') console.log(JSON.stringify(clientStatus(profile)));

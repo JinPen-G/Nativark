@@ -8,6 +8,8 @@
  * 把检查和应用绑在一起，等于每次想看状态都顺手改了库。
  */
 
+require("./legacy-checkout.cjs").stopLegacyCommand();
+
 const path = require("node:path");
 const fs = require("node:fs");
 const { createHash } = require("node:crypto");

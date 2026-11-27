@@ -10,6 +10,8 @@
  * 失败时**保留**演练库供排查，并打印准确的清理命令——不猜、不顺手删别的库。
  */
 
+require("./legacy-checkout.cjs").stopLegacyCommand();
+
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");

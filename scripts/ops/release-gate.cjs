@@ -11,6 +11,8 @@
  * 把检查和应用绑在一起，任何一次想看状态的执行都会顺手改库。
  */
 
+require("./legacy-checkout.cjs").stopLegacyCommand();
+
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");

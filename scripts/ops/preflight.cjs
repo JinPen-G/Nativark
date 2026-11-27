@@ -7,6 +7,8 @@
  * 这里只做**只读**探测，不建库、不改数据。
  */
 
+require("./legacy-checkout.cjs").stopLegacyCommand();
+
 const fs = require("node:fs");
 const path = require("node:path");
 const { OpsTargetError, rejectionReason } = require("./dedicated-env.cjs");

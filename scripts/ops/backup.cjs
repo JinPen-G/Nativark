@@ -8,6 +8,8 @@
  * 而这种备份要等到恢复那天才会暴露。
  */
 
+require("./legacy-checkout.cjs").stopLegacyCommand();
+
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");

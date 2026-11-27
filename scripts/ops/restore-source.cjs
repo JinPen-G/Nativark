@@ -15,6 +15,8 @@
  *   2. 目标库必须过专用库守卫，且必须是**新库**——不复用任何既有库。
  */
 
+require("./legacy-checkout.cjs").stopLegacyCommand();
+
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");

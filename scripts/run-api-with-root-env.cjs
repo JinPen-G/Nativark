@@ -1,3 +1,6 @@
+// 旧 API 包装器在加载本树环境之前转为固定历史检出提示。
+require("./ops/legacy-checkout.cjs").stopLegacyCommand();
+
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { loadProjectEnvironment } = require("../config/environment.cjs");

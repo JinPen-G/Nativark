@@ -7,6 +7,8 @@
  * 生成的来源证明；源码改动、切换提交或产物被改写后都必须重新执行本命令。
  */
 
+require("./legacy-checkout.cjs").stopLegacyCommand();
+
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
