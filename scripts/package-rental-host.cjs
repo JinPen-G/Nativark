@@ -10,11 +10,13 @@ const { createRequire, isBuiltin } = require('node:module');
 const { isDeepStrictEqual } = require('node:util');
 const { selectedCompilerOptions, samePrismaSchema, prismaSchemaTokens } = require('./build-selected-prisma.cjs');
 const { compileRentalPlatformSource, requireMatchingPublicRuntime, publicDirectories } = require('./rental-platform-build.cjs');
-const { selectWorkspaces, projectHostLock, lockedDependency, hostDirectory } = require('./rental-host-lock.cjs');
+const { selectWorkspaces, projectHostLock, lockedDependency, hostDirectory,
+  retentionSdk, retentionSdkLock, isRetentionSdkDependency } = require('./rental-host-lock.cjs');
 const root = path.resolve(__dirname, '..');
 const targetNodeVersion = '24.13.0';
 const sourceProvenanceFile = 'development.workspace.json';
 const hostBuildFile = 'rental-host.build-provenance.json';
+const publicRetentionEntry = 'apps/rental-api/dist-ai-public-retention/ai-public-retention-main.js';
 const freshAiLegacyTypeNames = [
   ['provider-capability.ports', 'AiProviderCapabilityEvidenceRecord'], ['model-gateway.ports', 'WorkspaceGatewayContext']
 ];
@@ -198,17 +200,25 @@ function runtimeOnlyMetadata(metadata) {
 
 /** 只沿真实启动模块的静态 require/import 检查闭包；不 require 应用、运行 Client 或猜动态入口。
  * 最终 Node exports/外部包的实际解析留给生成的镜像预检，在镜像内安装完成后执行。 */
-function checkRuntimeClosure(files, workspaces, lock, entry, ts, options = {}) {
+function runtimeOwner(file, workspaces, publicRetention) {
+  return publicRetention && file.startsWith(retentionSdk.install + '/') ? retentionSdk.install
+    : [...workspaces.keys()].find(directory => file.startsWith(directory + '/'));
+}
+
+function checkRuntimeClosure(inputFiles, workspaces, lock, entry, ts, options = {}) {
   const packages = new Map([...workspaces].map(([directory, metadata]) => [metadata.name, { directory, metadata }]));
+  const sdk = options.publicRetention;
+  const files = sdk ? new Map([...inputFiles, ...[...sdk.files].map(([file, bytes]) => [retentionSdk.install + '/' + file, bytes])]) : inputFiles;
   const queue = [entry], seen = new Set(), resolutions = [], clients = new Set(), runtimePeers = new Map();
   const locate = target => [target, target + '.js', target + '.json', target + '/index.js'].find(file => files.has(file));
   while (queue.length) {
     const file = queue.shift(); if (seen.has(file)) continue;
     const source = text(files, file); seen.add(file);
     if (file.endsWith('.json')) { JSON.parse(source); continue; }
-    const owner = [...workspaces.keys()].find(directory => file.startsWith(directory + '/'));
+    const owner = runtimeOwner(file, workspaces, sdk);
     if (!owner) throw Error('运行代码越出所选工作区：' + file);
-    const metadata = workspaces.get(owner), tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+    const metadata = owner === retentionSdk.install ? sdk.metadata : workspaces.get(owner);
+    const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
     if (tree.parseDiagnostics.length) throw Error('运行产物语法无效：' + file);
     const imports = new Map();
     const add = (specifier, mode) => {
@@ -232,7 +242,8 @@ function checkRuntimeClosure(files, workspaces, lock, entry, ts, options = {}) {
     for (const [specifier, modes] of imports) for (const mode of modes) {
       if (isBuiltin(specifier)) continue;
       if (specifier === '@prisma/client' || specifier.includes('.prisma/client')) throw Error('运行代码仍引用默认 Client：' + file);
-      resolutions.push({ from: file, specifier, ...(mode === 'import' ? { mode } : {}) });
+      const resolution = { from: file, specifier, ...(mode === 'import' ? { mode } : {}) };
+      resolutions.push(resolution);
       if (specifier.startsWith('.')) {
         const target = path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier));
         if (['apps/platform-api/generated/client', 'apps/rental-api/generated/client'].includes(target)) {
@@ -247,10 +258,13 @@ function checkRuntimeClosure(files, workspaces, lock, entry, ts, options = {}) {
       const declared = { ...metadata.dependencies, ...metadata.optionalDependencies, ...metadata.peerDependencies };
       if (name !== metadata.name && !Object.hasOwn(declared, name)) throw Error('运行代码使用未声明的依赖：' + file + ' -> ' + name);
       if (name.startsWith('@rental-os/')) {
-        const pkg = packages.get(name);
+        const usePublic = sdk && name === retentionSdk.name && (owner === retentionSdk.install
+          || isRetentionSdkDependency(lock, owner, name, declared[name], sdk));
+        const pkg = usePublic ? { directory: retentionSdk.install, metadata: sdk.metadata } : packages.get(name);
         if (!pkg) throw Error('运行代码引用未选工作区：' + name);
         const target = pkg.directory + '/' + workspaceExport(pkg.metadata, specifier, mode);
         if (!files.has(target)) throw Error('正式运行出口未实际构建：' + specifier + ' -> ' + target);
+        if (sdk && name === retentionSdk.name) resolution.expected = target;
         queue.push(target);
       } else {
         const dependency = lockedDependency(lock, owner, name), locked = lock.packages[dependency];
@@ -289,7 +303,7 @@ function dockerfile(mode, entry, freshAi = false, freshMcp = false) {
     `RUN node verify-runtime.cjs\nUSER node\nEXPOSE 3000\nCMD ["node", "${entry}"]\n`;
 }
 
-function createRuntimeVerifier(receiptFile = 'rental-host.context.json', moduleImports = false) {
+function createRuntimeVerifier(receiptFile = 'rental-host.context.json', moduleImports = false, publicRetention = false) {
   if (!/^[a-z][a-z0-9-]*\.context\.json$/u.test(receiptFile)) throw Error('运行收据须为宿主根内的固定 JSON 文件名');
   return `'use strict';
 // 镜像构建中的字节与解析预检；不导入应用、不实例化Client、不连接或迁移数据库。
@@ -312,7 +326,13 @@ for (const item of receipt.clients) {
   if (metadata.version !== receipt.prismaVersion) throw Error('镜像 Client 版本不一致');
 }
 if (fs.existsSync(path.join(root, 'node_modules/.prisma/client'))) throw Error('镜像不接受默认 Client');
-${moduleImports ? `// Node原解析钩子只核import条件；在load前抛出已解析URL，不执行目标模块。
+${publicRetention ? `// npm 按原锁安装后复核所选 SDK 的实际字节和两个版本的调用方解析。
+const sdk = receipt.publicRetention;
+for (const item of sdk.installedFiles) if (digest(fs.readFileSync(path.join(root, sdk.install, item.file))) !== item.sha256)
+  throw Error('公共保留 SDK 安装字节变化：' + item.file);
+const oldSdk = JSON.parse(fs.readFileSync(path.join(root, '${retentionSdk.legacyDirectory}/package.json'), 'utf8'));
+if (oldSdk.name !== sdk.name || oldSdk.version !== sdk.legacyVersion) throw Error('原混合 SDK 版本变化');
+` : ''}${moduleImports ? `// Node原解析钩子只核import条件；在load前抛出已解析URL，不执行目标模块。
 function resolveImported(from, specifier) {
   const captured = {}, probe = 'nativark-runtime-import-probe';
   const hook = registerHooks({ resolve(name, context, next) {
@@ -330,6 +350,10 @@ for (const item of receipt.runtime.resolutions) {
   const from = path.join(root, item.from);
   if (item.mode === 'import') resolveImported(from, item.specifier);
   else createRequire(from).resolve(item.specifier);
+}` : publicRetention ? `for (const item of receipt.runtime.resolutions) {
+  const actual = createRequire(path.join(root, item.from)).resolve(item.specifier);
+  if (item.expected && actual !== path.join(root, item.expected))
+    throw Error('公共保留选择的 Node 路径变化：' + item.from + ' -> ' + item.specifier);
 }` : `for (const item of receipt.runtime.resolutions) createRequire(path.join(root, item.from)).resolve(item.specifier);`}
 console.log(JSON.stringify({ status: 'image-preflight-passed', aiMode: receipt.aiMode, applicationStarted: false, deployment: 'pending' }));
 `;
@@ -412,13 +436,14 @@ function describeRentalDeployment(api, lock, deploymentFiles, platform, postCapa
 }
 
 /** 双仓运行归档须和已准备的版本、选择及 npm 源锁投影在同一次组合中。 */
-function requireSourceProvenance(bytes, npmLock, lock, host, aiMode, mcpEntry, mode, freshAi = false) {
+function requireSourceProvenance(bytes, npmLock, lock, host, aiMode, mcpEntry, mode, freshAi = false, publicRetention) {
   const source = JSON.parse(Buffer.from(bytes).toString('utf8'));
   const rental = lock.cores.find(pin => pin.manifest.id === 'rental')?.manifest;
   if (source.format !== 'nativark-core-development-source-2' || source.mode !== mode
     || source.host !== host || !['host', 'full'].includes(source.profile)
     || source.ai !== (aiMode === 'enabled') || source.mcp !== Boolean(mcpEntry)
     || source.installation !== (freshAi ? 'fresh-ai' : undefined)
+    || !isDeepStrictEqual(source.publicRetention, publicRetention?.receipt)
     || !rental || !isDeepStrictEqual(source.core?.source, rental.source)
     || source.core.version !== rental.version || source.core.tag !== (mode === 'release' ? 'v' + rental.version : undefined)
     || !isDeepStrictEqual(source.platform?.source, lock.platform.source)
@@ -555,11 +580,58 @@ function prepareFreshMcpData(build, workspace, absolute) {
   return { files: originals, release };
 }
 
+/** The public SDK uses the same source/data pin and no mixed AI sources or outputs. */
+function compilePublicRetentionSdk(build, workspace, publicAi, archiveApi) {
+  const { createBuild } = require('./check-rental-package-build.cjs');
+  const { snapshotFromFiles } = require('./rental-build-snapshot.cjs');
+  const { generatePrismaDeclarations } = require('./verify-rental-distribution.cjs');
+  const absolute = file => path.resolve(root, file).split(path.sep).join('/');
+  const prefix = retentionSdk.legacyDirectory + '/';
+  const sources = new Map([...workspace.files].filter(([file]) => file.startsWith(prefix))
+    .map(([file, bytes]) => [file.slice(prefix.length), bytes]));
+  const factory = { exports: {} }, sourceFile = absolute(prefix + 'public-package.cjs');
+  require('node:vm').compileFunction(text(sources, 'public-package.cjs'), ['module', 'require'], { filename: sourceFile })
+    (factory, createRequire(sourceFile));
+  const { projectPublicAiServerSources, publicAiClientPaths, assemblePublicAiPackage } = factory.exports;
+  const project = projectPublicAiServerSources(sources, build.ts);
+  const seed = new Map([...workspace.platform.files].map(([file, bytes]) => [absolute(file), bytes]));
+  seed.set(absolute('package-lock.json'), workspace.files.get('package-lock.json'));
+  for (const [file, bytes] of project) seed.set(absolute(prefix + file), bytes);
+  const publicBuild = createBuild(build.deps, { snapshot: snapshotFromFiles(workspace.platform.source.commit, seed), quiet: true });
+  const sharedDirectories = publicDirectories.map(directory => absolute(directory) + '/');
+  for (const [file, bytes] of build.outputs) if (sharedDirectories.some(directory => file.startsWith(directory)))
+    publicBuild.outputs.set(file, bytes);
+  const data = build.load(build.exported('@rental-os/ai-native-data/public-data', true));
+  const schema = data.composePublicAiPrismaSchema(text(workspace.platform.files, 'apps/platform-api/prisma/schema.prisma'),
+    data.createPublicAiDataContribution(publicAi.files));
+  generatePrismaDeclarations(publicBuild, [['public', schema]]);
+  const client = absolute('apps/platform-api/generated/client/index.d.ts');
+  const paths = publicAiClientPaths(publicBuild.ts, client, schema, file => publicBuild.virtual.get(absolute(file)));
+  const out = absolute(prefix + 'dist-public') + '/';
+  const { emitted } = publicBuild.compile(prefix + 'tsconfig.public.json', { paths });
+  const files = assemblePublicAiPackage('server', project, new Map([...emitted]
+    .filter(([file]) => file.startsWith(out)).map(([file, bytes]) => [file.slice(out.length), Buffer.from(bytes)])), publicBuild.ts);
+  const metadata = JSON.parse(text(files, 'package.json'));
+  if (!metadata.exports['./runtime/platform-retention-http'] || !metadata.exports['./runtime/public-rental-adapter-ports'])
+    throw Error('固定公共 SDK 缺少保留请求及受控 Rental 适配出口');
+  // npm installs one immutable tarball at the adapter's locked path. The host
+  // archive carries the asset, never node_modules or an author's installed SDK.
+  const { bytes, sha256 } = archiveApi.createCoreArchive(new Map([...files].map(([file, body]) => ['package/' + file, body])));
+  const archive = archiveApi.readCoreArchive(bytes, sha256).files;
+  if (archive.size !== files.size || [...files].some(([file, body]) => !Buffer.from(archive.get('package/' + file) ?? []).equals(body)))
+    throw Error('公共保留 SDK 归档不能按实际编译字节回读');
+  const lock = retentionSdkLock(metadata, bytes), source = workspace.platform.source;
+  return { files, metadata, bytes, sha256, lock, source, projects: publicBuild.stages,
+    receipt: { name: metadata.name, version: metadata.version, legacyVersion: retentionSdk.legacyVersion, source,
+      archive: retentionSdk.archive, install: retentionSdk.install, sha256, integrity: lock.integrity, schemaSha256: hash(schema) } };
+}
+
 function createRentalHostContext(input) {
   const { aiMode, sourceFiles, platformFiles, rentalFiles, ticketsFiles, aiFiles, mcpFiles, deploymentFiles, ts, selections, freshAi } = input;
   const sourceProvenanceBytes = sourceFiles.get(sourceProvenanceFile);
   const fixed = (sourceFiles.has(sourceProvenanceFile) || trustedBuilds.has(sourceFiles)) && requireFixedRuntime(sourceFiles, sourceProvenanceBytes);
   const development = fixed?.mode === 'development';
+  const publicRetention = fixed?.publicRetention;
   if (fixed && (selections !== fixed.selections || ts !== fixed.ts
     || hash(deploymentFiles.get('core.deployment.lock.json')) !== fixed.evidence.deploymentLockSha256
     || hash(deploymentFiles.get('schema.prisma')) !== fixed.evidence.clients.find(client => client.host === 'rental').schemaSha256))
@@ -569,6 +641,7 @@ function createRentalHostContext(input) {
   if (!['enabled', 'disabled'].includes(aiMode)) throw Error('须明确选择宿主 AI 模式');
   const mcpEntry = input.mcpEntry === undefined ? undefined : requireMcpEntry(input.mcpEntry, host);
   const freshMcp = Boolean(freshAi && mcpEntry);
+  if (publicRetention && (!freshAi || !development || mcpEntry)) throw Error('公共保留只用于 18 条新装开发运行包');
   if (mcpEntry && aiMode !== 'enabled') throw Error('MCP入口须选择同一AI数据与Runtime');
   if (freshAi && (!fixed || !development || host !== 'rental' || aiMode !== 'enabled' || !aiFiles)
     || freshMcp !== Boolean(mcpFiles))
@@ -590,7 +663,7 @@ function createRentalHostContext(input) {
   if (development && (host !== 'rental' || !freshAi && aiMode !== 'disabled' || mcpEntry && !freshMcp))
     throw Error('开发运行包只支持单 Rental 普通或明确的新装 AI 宿主');
   if (sourceProvenanceBytes) requireSourceProvenance(sourceProvenanceBytes, sourceFiles.get('package-lock.json'), lock, host, aiMode, mcpEntry,
-    development ? 'development' : 'release', Boolean(phased));
+    development ? 'development' : 'release', Boolean(phased), publicRetention);
   const publicSchema = text(sourceFiles, 'apps/platform-api/prisma/schema.prisma');
   if (publicSchema !== text(platformFiles, 'apps/platform-api/prisma/schema.prisma'))
     throw Error('实际公共 schema 与固定底座源码不同');
@@ -634,7 +707,7 @@ function createRentalHostContext(input) {
     ...(aiFiles && !phased ? [['packages/ai-native-data', aiFiles]] : [])]);
   const workspaces = selectWorkspaces(originalLock, directory => JSON.parse(text(
     fixedPackages.get(directory) ?? (publicDirectories.includes(directory) ? platformFiles : sourceFiles),
-    fixedPackages.has(directory) ? 'package.json' : directory + '/package.json')), aiMode, host, { mcp: Boolean(mcpEntry) });
+    fixedPackages.has(directory) ? 'package.json' : directory + '/package.json')), aiMode, host, { mcp: Boolean(mcpEntry), publicRetention });
   for (const directory of fixedPackages.keys()) if (!workspaces.has(directory))
     throw Error('固定 Core 包不在实际宿主依赖闭包：' + directory);
   const aiServerRuntimeOnly = Boolean(phased || mcpEntry);
@@ -671,6 +744,7 @@ function createRentalHostContext(input) {
     files.set('apps/rental-api/prisma/ai-extension/runtime-source.json', json(expected.runtimeSource));
     for (const [file, bytes] of aiFiles) files.set('public-ai-data/' + file, bytes);
   }
+  if (publicRetention) files.set(retentionSdk.archive, sourceFiles.get(retentionSdk.archive));
   files.set('rental-host.deployment-provenance.json', json(describeRentalDeployment(api, lock, deploymentFiles, platform, phased?.postCapability)));
   if (sourceProvenanceBytes) files.set(sourceProvenanceFile, sourceProvenanceBytes);
   let buildProvenance;
@@ -682,9 +756,10 @@ function createRentalHostContext(input) {
     buildProvenance = { file: hostBuildFile, sha256: hash(bytes) };
   }
   files.set('LICENSE', Buffer.from(text(sourceFiles, 'LICENSE')));
-  const entry = mcpEntry ?? directory + (phased ? '/dist-ai/ai-fresh-main.js' : aiMode === 'enabled' ? '/dist-ai/ai-main.js' : '/dist/main.js');
+  const entry = publicRetention ? publicRetentionEntry
+    : mcpEntry ?? directory + (phased ? '/dist-ai/ai-fresh-main.js' : aiMode === 'enabled' ? '/dist-ai/ai-main.js' : '/dist/main.js');
   if (mcpEntry) requireMcpStartup(files, entry, ts, freshMcp);
-  const runtime = checkRuntimeClosure(files, workspaces, originalLock, entry, ts, { moduleImports: Boolean(mcpEntry) });
+  const runtime = checkRuntimeClosure(files, workspaces, originalLock, entry, ts, { moduleImports: Boolean(mcpEntry), publicRetention });
   if (phased) {
     const initializationEntry = directory + (freshMcp ? '/dist-mcp/mcp-fresh-initialize.js' : '/dist-ai/ai-fresh-initialize.js');
     const initialization = checkRuntimeClosure(files, workspaces, originalLock, initializationEntry, ts, { moduleImports: freshMcp });
@@ -693,10 +768,10 @@ function createRentalHostContext(input) {
     runtime.runtimePeers = [...new Map([...runtime.runtimePeers, ...initialization.runtimePeers]
       .map(peer => [peer.owner + ':' + peer.name, peer])).values()];
   }
-  const projected = projectHostLock(originalLock, workspaces, aiMode, runtime.runtimePeers, host, { mcp: Boolean(mcpEntry) });
+  const projected = projectHostLock(originalLock, workspaces, aiMode, runtime.runtimePeers, host, { mcp: Boolean(mcpEntry), publicRetention });
   for (const item of runtime.resolutions) if (!item.specifier.startsWith('.') && !item.specifier.startsWith('@rental-os/')) {
     const name = item.specifier.startsWith('@') ? item.specifier.split('/').slice(0, 2).join('/') : item.specifier.split('/')[0];
-    const owner = [...workspaces.keys()].find(directory => item.from.startsWith(directory + '/'));
+    const owner = runtimeOwner(item.from, workspaces, publicRetention);
     const locked = projected.lock.packages[lockedDependency(projected.lock, owner, name)];
     if (!locked || locked.dev) throw Error('运行依赖不在生产锁闭包：' + name);
   }
@@ -714,7 +789,7 @@ function createRentalHostContext(input) {
   files.set('package.json', json(projected.root)); files.set('package-lock.json', json(projected.lock));
   files.set('Dockerfile', Buffer.from(dockerfile(aiMode, entry, Boolean(phased), freshMcp)));
   files.set('.dockerignore', Buffer.from('**/node_modules\n**/generated\n**/.git\n**/.env\n**/.env.*\ndocs\noutput\n'));
-  files.set('verify-runtime.cjs', Buffer.from(createRuntimeVerifier('rental-host.context.json', Boolean(mcpEntry))));
+  files.set('verify-runtime.cjs', Buffer.from(createRuntimeVerifier('rental-host.context.json', Boolean(mcpEntry), Boolean(publicRetention))));
   files.set('README.md', Buffer.from('# 独立 Rental 宿主镜像上下文\n\n' +
     (development ? '这是固定双仓开发组合，只用于独立新建的开发/冒烟库。不要用它更新已有安装、覆盖同版本发行或选作服务器候选。\n\n' +
       '使用 Node 24.13.0。在解包根按运行锁执行 `npm ci --include=dev --ignore-scripts`，按 Dockerfile 的两条生成命令生成专属 Client，再运行 `node verify-runtime.cjs`。' +
@@ -742,6 +817,8 @@ function createRentalHostContext(input) {
   const receipt = { format: 'rental-host-context-1', host, aiMode, imageBuild: 'not-run', deployment: 'pending',
     ...(development ? { sourceMode: 'development', releaseApproved: false, serverUpdateEligible: false } : {}),
     ...(phased ? { installation: 'fresh-ai', ledgerVersion: 2 } : {}),
+    ...(publicRetention ? { publicRetention: { ...publicRetention.receipt,
+      installedFiles: [...publicRetention.files].map(([file, bytes]) => ({ file, sha256: hash(bytes) })) } } : {}),
     mcpMode: freshMcp ? 'data-only' : mcpEntry ? 'enabled' : 'disabled', ...(mcpEntry ? { mcpEntry } : {}),
     deploymentProvenance: 'rental-host.deployment-provenance.json',
     ...(sourceProvenanceBytes ? { sourceProvenance: { file: sourceProvenanceFile, sha256: hash(sourceProvenanceBytes) } } : {}),
@@ -762,9 +839,10 @@ function createRentalHostContext(input) {
 }
 
 /** Build an untagged development candidate without relaxing the release CLI. */
-async function prepareRentalDevelopmentHost({ repo, repository, commit, coreRepo, coreCommit, deps, freshAi = false, mcp = false }) {
+async function prepareRentalDevelopmentHost({ repo, repository, commit, coreRepo, coreCommit, deps, freshAi = false, mcp = false, publicRetention = false }) {
   if (mcp && !freshAi) throw Error('新装 MCP 必须显式选择 --fresh-ai');
-  const { compileFixedPlatformContracts, createRentalDevelopmentWorkspace } = require('./prepare-rental-workspace.cjs');
+  if (publicRetention && (!freshAi || mcp)) throw Error('--public-retention 只接受 --fresh-ai 的 18 条新装组合');
+  const { compileFixedPlatformContracts, createRentalDevelopmentWorkspace, projectRentalDevelopmentWorkspace } = require('./prepare-rental-workspace.cjs');
   const { createBuild, verifyContracts } = require('./check-rental-package-build.cjs');
   const { snapshotFromFiles } = require('./rental-build-snapshot.cjs');
   const { selectedPrisma, generatePrismaDeclarations, verifyServer, verifyNative, rentalPackageInputs } = require('./verify-rental-distribution.cjs');
@@ -774,10 +852,9 @@ async function prepareRentalDevelopmentHost({ repo, repository, commit, coreRepo
   const platformApi = { ...loadContract(''), ...loadContract('/platform-source'), ...loadContract('/archive') };
   const options = { repo, repository, commit, coreRepo, coreCommit, deps, mode: 'development', profile: 'host',
     ...(freshAi ? { ai: true, freshAi: true, mcp } : {}) };
-  const workspace = await createRentalDevelopmentWorkspace(options, platformApi);
-  const sourceBytes = workspace.files.get(sourceProvenanceFile);
+  let workspace = await createRentalDevelopmentWorkspace(options, platformApi);
   const absolute = file => path.resolve(root, file).split(path.sep).join('/');
-  const build = createBuild(deps, { snapshot: snapshotFromFiles(commit,
+  let build = createBuild(deps, { snapshot: snapshotFromFiles(commit,
     new Map([...workspace.files].map(([file, bytes]) => [absolute(file), bytes]))), quiet: true });
   if (JSON.parse(text(workspace.files, 'package-lock.json')).packages['node_modules/typescript']?.version !== build.ts.version)
     throw Error('开发宿主编译器与双仓投影锁不一致');
@@ -860,8 +937,25 @@ async function prepareRentalDevelopmentHost({ repo, repository, commit, coreRepo
     selection: selections.platform, dependencyDirectory: deps, ts: build.ts, api: platformApi });
   for (const [file, bytes] of platformBuild.generated) if (!file.endsWith('/package.json'))
     build.outputs.set(absolute(file), Buffer.from(bytes).toString('utf8'));
+  let selectedRetention;
+  if (publicRetention) {
+    selectedRetention = compilePublicRetentionSdk(build, workspace, publicAi, platformApi);
+    workspace = projectRentalDevelopmentWorkspace({ ...options, publicRetention: selectedRetention },
+      workspace.platform, workspace.rental, platformApi);
+    const selected = createBuild(deps, { publicRetention: selectedRetention, quiet: true, snapshot: snapshotFromFiles(commit,
+      new Map([...workspace.files].map(([file, bytes]) => [absolute(file), bytes]))) });
+    for (const name of ['outputs', 'virtual', 'selectedClients']) for (const [file, value] of build[name]) selected[name].set(file, value);
+    selected.stages.push(...build.stages, ...selectedRetention.projects);
+    selected.selectedClients.set(absolute(retentionSdk.owner), selections.rental);
+    selected.compile(retentionSdk.owner + '/tsconfig.json');
+    selected.compile('apps/rental-api/tsconfig.public-retention.json');
+    build = selected;
+  }
+  const sourceBytes = workspace.files.get(sourceProvenanceFile);
   const compiled = bindFixedRuntime(build, workspace, sourceBytes, deployment.files, selections, platformBuild, 'development');
-  if (freshAi) trustedBuilds.get(compiled.sourceFiles).createFreshDeployment = createFreshDeployment;
+  const fixedBuild = trustedBuilds.get(compiled.sourceFiles);
+  if (freshAi) fixedBuild.createFreshDeployment = createFreshDeployment;
+  if (selectedRetention) fixedBuild.publicRetention = selectedRetention;
   return createRentalHostContext({ ...compiled, aiMode: freshAi ? 'enabled' : 'disabled', platformFiles: workspace.platform.files,
     rentalFiles, deploymentFiles: deployment.files, dependencyDirectory: deps,
     ...(freshAi ? { freshAi: extension, aiFiles: publicAi.files } : {}),
@@ -1010,6 +1104,7 @@ async function packageDevelopment(args) {
     '--core-repo': 'coreRepo', '--core-commit': 'coreCommit', '--deps': 'deps', '--output': 'output' };
   if (args[0] === '--fresh-ai') { options.freshAi = true; args = args.slice(1); }
   if (args[0] === '--mcp') { options.mcp = true; args = args.slice(1); }
+  if (args[0] === '--public-retention') { options.publicRetention = true; args = args.slice(1); }
   for (let index = 0; index < args.length; index += 2) {
     const flag = args[index], name = names[flag], value = args[index + 1];
     if (!Object.hasOwn(names, flag) || !value || value.startsWith('--') || Object.hasOwn(options, name))
