@@ -36,19 +36,21 @@ function validatorsFor(leaf, baseSchemas) {
   for (const [name, schema] of Object.entries({ ...baseSchemas, ...leaf })) ajv.addSchema({ ...convert(schema), $id: `urn:rental:consumer/${name}` }, name);
   return Object.fromEntries(Object.keys(leaf).map(name => [name, ajv.getSchema(name)]));
 }
-function compileConsumer(source) {
+function compileConsumer(source, sourceRoot) {
   const ts = require("typescript"), path = require("node:path");
-  const root = path.resolve(__dirname, "../../.."), file = path.join(root, "tests/__virtual_ai_consumer__.ts");
+  const toolchainRoot = path.resolve(__dirname, "../../..");
+  const root = path.resolve(sourceRoot ?? toolchainRoot), file = path.join(root, "tests/__virtual_ai_consumer__.ts");
   const options = { strict: true, noEmit: true, skipLibCheck: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, moduleResolution: ts.ModuleResolutionKind.Node10, experimentalDecorators: true, emitDecoratorMetadata: true, esModuleInterop: true, types: [] };
   const host = ts.createCompilerHost(options), read = host.readFile.bind(host), exists = host.fileExists.bind(host);
   host.readFile = name => path.resolve(name) === file ? source : read(name);
   host.fileExists = name => path.resolve(name) === file || exists(name);
-  // Resolve public packages from this workspace's declared exports. A stale
-  // node_modules link or dist must not make a retired source look installed.
+  // Mixed consumers explicitly supply their verified independent workspace.
+  // Public callers keep this workspace; neither uses stale links or dist.
   let loader;
   host.resolveModuleNames = (names, from) => names.map(name => {
-    if (!name.startsWith("@rental-os/")) return ts.resolveModuleName(name, from, options, host).resolvedModule;
-    loader ??= require("../../../scripts/controller-sources.cjs").createControllerSourceLoader(root);
+    if (!name.startsWith("@rental-os/")) return ts.resolveModuleName(name, from, options, host).resolvedModule
+      ?? ts.resolveModuleName(name, path.join(toolchainRoot, "tests/__virtual_ai_consumer__.ts"), options, host).resolvedModule;
+    loader ??= require("../../../scripts/controller-sources.cjs").createControllerSourceLoader(root, path.join(toolchainRoot, "node_modules"));
     const resolvedFileName = loader.resolveSource(from, name);
     return { resolvedFileName, extension: resolvedFileName.endsWith(".tsx") ? ts.Extension.Tsx : ts.Extension.Ts };
   });

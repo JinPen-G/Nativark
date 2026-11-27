@@ -1,11 +1,12 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 const { blockNetwork, compileConsumer, validatorsFor } = require('./fixtures/ai-native/contract-consumer.cjs'); blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { ChatCompletionsAdapter, ChatProtocolPolicy } = require('../apps/api/src/modules/ai-native/chat-completions.adapter');
-const { ModelEgressTransport } = require('../apps/api/src/modules/ai-native/model-egress.transport');
+// Private protocol and Rental tool assertions use the selected compatibility package.
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { ChatCompletionsAdapter, ChatProtocolPolicy } = load('@rental-os/ai-native-server/runtime/chat-completions.adapter');
+const { ModelEgressTransport } = load('@rental-os/ai-native-server/runtime/model-egress.transport');
 const egress = require('./fixtures/ai-native/model-egress.cjs');
-const { AI_NATIVE_COMPONENT_SCHEMAS: schema } = require('../apps/api/src/contracts/ai-native-schemas');
+const { AI_NATIVE_COMPONENT_SCHEMAS: schema } = load('@rental-os/ai-native-server/runtime/contracts/ai-native-schemas');
 const { AI_TOOL_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
 const validators = validatorsFor({ AiOrderExplainRequestDraft: schema.AiOrderExplainRequestDraft }, schema);
 const tool = { name: 'rental_order_explain_v1', version: AI_TOOL_DRAFT_VERSION };
@@ -106,5 +107,5 @@ test('multiple choices/refusal/truncation are never reported as a chosen success
   }
 });
 test('noEmit checks actual Adapter/decoder and public candidate type, no new shared DTO', () => {
-  assert.deepEqual(compileConsumer('import { ChatCompletionsAdapter, ChatProtocolPolicy } from "../apps/api/src/modules/ai-native/chat-completions.adapter"; import type { AdapterResult } from "../apps/api/src/modules/ai-native/model-gateway.ports"; declare const result: AdapterResult; result.toolRequests?.[0].input.orderId; new ChatProtocolPolicy();'), []);
+  assert.deepEqual(compileConsumer('import { ChatCompletionsAdapter, ChatProtocolPolicy } from "@rental-os/ai-native-server/runtime/chat-completions.adapter"; import type { AdapterResult } from "@rental-os/ai-native-server/runtime/model-gateway.ports"; declare const result: AdapterResult; result.toolRequests?.[0].input.orderId; new ChatProtocolPolicy();', process.env.AI_NATIVE_TEST_SOURCE_ROOT), []);
 });

@@ -1,9 +1,11 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { ProviderRouterService } = require('../apps/api/src/modules/ai-native/provider-router.service');
-const { InvocationAdmissionService } = require('../apps/api/src/modules/ai-native/invocation-admission.service');
+const { createControllerSourceLoader } = require('../scripts/controller-sources.cjs');
+const loader = createControllerSourceLoader(require('node:path').resolve(__dirname, '..'));
+const gateway = loader.load(loader.resolveSource(__filename, '@rental-os/platform-server/ai-gateway', true));
+const { ProviderRouterService } = gateway;
+const { InvocationAdmissionService } = gateway;
 
 const platform = { id: 'matrix-platform', kind: 'PLATFORM' }, tenant = { id: 'matrix-tenant', kind: 'TENANT', tenantId: 'tenant-a' }, other = { id: 'matrix-other', kind: 'TENANT', tenantId: 'tenant-b' };
 const profile = (scope, mode, key = 'default') => ({ id: `${scope.id}-${key}`, scopeId: scope.id, scopeKind: scope.kind, profileKey: key, role: 'DEFAULT', serviceMode: mode, protocol: 'openai_chat_completions', provider: 'synthetic', model: key, credentialRef: `vault:${key}`, configRevision: 1, enabled: true, allowedCapabilities: ['text'], disabledAt: null });

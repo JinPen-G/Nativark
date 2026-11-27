@@ -1,7 +1,7 @@
 "use strict";
 const test = require("node:test"), assert = require("node:assert/strict"), net = require("./fixtures/ai-native/contract-consumer.cjs"); net.blockNetwork(test);
-require("ts-node").register({ transpileOnly: false, compilerOptions: { module: "commonjs", moduleResolution: "node" } });
-const { ChatCompletionsStream: Stream } = require("../apps/api/src/modules/ai-native/chat-completions-stream"), f = require("./fixtures/ai-native/chat-protocol.cjs");
+const { load } = require("./fixtures/ai-native/rental-compatibility-source.cjs");
+const { ChatCompletionsStream: Stream } = load("@rental-os/ai-native-server/runtime/chat-completions-stream"), f = require("./fixtures/ai-native/chat-protocol.cjs");
 test("S05 byte by byte UTF8 and CRLF boundary decoding, complete stop+DONE and usage", () => {
   const stream = new Stream("synthetic-secret"), deltas = [];
   for (const byte of Buffer.from(f.delta("你好") + f.delta("", "stop") + f.usage + f.done)) deltas.push(...stream.push(Buffer.from([byte])));

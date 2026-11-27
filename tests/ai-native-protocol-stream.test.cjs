@@ -1,10 +1,11 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 const { blockNetwork, compileConsumer } = require('./fixtures/ai-native/contract-consumer.cjs'); blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { ModelEgressTransport } = require('../apps/api/src/modules/ai-native/model-egress.transport');
-const { ChatCompletionsAdapter } = require('../apps/api/src/modules/ai-native/chat-completions.adapter');
-const { ChatCompletionsStream } = require('../apps/api/src/modules/ai-native/chat-completions-stream');
+// Private protocol and Rental tool assertions use the selected compatibility package.
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { ModelEgressTransport } = load('@rental-os/ai-native-server/runtime/model-egress.transport');
+const { ChatCompletionsAdapter } = load('@rental-os/ai-native-server/runtime/chat-completions.adapter');
+const { ChatCompletionsStream } = load('@rental-os/ai-native-server/runtime/chat-completions-stream');
 const fixture = require('./fixtures/ai-native/model-egress.cjs'), wire = require('./fixtures/ai-native/chat-protocol.cjs');
 const input = signal => ({ callId: 'stream-1', model: 'model-1', messages: [{ role: 'user', content: 'Synthetic only' }], maxOutputTokens: 20, signal: signal ?? new AbortController().signal });
 const connection = { baseUrl: 'https://synthetic.example.test/v1' };
@@ -83,5 +84,5 @@ test('unimplemented tools/structured output remain unavailable on actual stream 
   await assert.rejects(collect(adapter.stream(input(), 'synthetic-secret', connection)), e => e.code === 'CAPABILITY_UNSUPPORTED');
 });
 test('strict TypeScript noEmit compiles actual stream adapter and transport', () => {
-  assert.deepEqual(compileConsumer('import { ModelEgressTransport } from "../apps/api/src/modules/ai-native/model-egress.transport"; import { ChatCompletionsAdapter } from "../apps/api/src/modules/ai-native/chat-completions.adapter"; declare const transport: ModelEgressTransport; const adapter = new ChatCompletionsAdapter(transport); adapter.features;'), []);
+  assert.deepEqual(compileConsumer('import { ModelEgressTransport } from "@rental-os/ai-native-server/runtime/model-egress.transport"; import { ChatCompletionsAdapter } from "@rental-os/ai-native-server/runtime/chat-completions.adapter"; declare const transport: ModelEgressTransport; const adapter = new ChatCompletionsAdapter(transport); adapter.features;', process.env.AI_NATIVE_TEST_SOURCE_ROOT), []);
 });

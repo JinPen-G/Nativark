@@ -1,8 +1,8 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { AiOperationsQueryService } = require('../apps/api/src/modules/ai-native/operations-query.service');
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { AiOperationsQueryService } = load('@rental-os/ai-native-server/runtime/operations-query.service');
 const grant = { tenantId: 'tenant-a', workspaceId: 'space-a', actorId: 'actor-a', audience: 'operator', dataScope: 'own', revision: 'revision-1' };
 const row = (id, overrides = {}) => ({ id, tenantId: 'tenant-a', workspaceId: 'space-a', actorId: 'actor-a', status: 'unknown', createdAt: new Date('2026-10-03T00:00:00Z'), ...overrides });
 test('authorized bounded projection has stable cursor and drops all sensitive extras', async () => {

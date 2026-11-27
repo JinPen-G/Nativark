@@ -1,7 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { KnowledgeCitationSession } = require('../apps/api/src/modules/ai-native/knowledge/knowledge-citation-session.ts');
+require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
+// Private protocol and Rental tool assertions use the selected compatibility package.
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { KnowledgeCitationSession } = load('@rental-os/ai-native-server/runtime/knowledge/knowledge-citation-session');
 
 const source = (id, version = 'v1') => ({ kind: 'document', documentId: 'doc-1', documentVersion: version,
   chunkId: 'chunk-1', scope: { kind: 'workspace', tenantId: 't-1', workspaceId: 'w-1' }, aclRevision: 1,

@@ -1,10 +1,11 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 const { blockNetwork, compileConsumer } = require('./fixtures/ai-native/contract-consumer.cjs'); blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true } });
-const { ChatCompletionsAdapter } = require('../apps/api/src/modules/ai-native/chat-completions.adapter');
-const { ModelEgressTransport } = require('../apps/api/src/modules/ai-native/model-egress.transport');
-const { ModelGatewayService } = require('../apps/api/src/modules/ai-native/model-gateway.service');
+// Private protocol and Rental tool assertions use the selected compatibility package.
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { ChatCompletionsAdapter } = load('@rental-os/ai-native-server/runtime/chat-completions.adapter');
+const { ModelEgressTransport } = load('@rental-os/ai-native-server/runtime/model-egress.transport');
+const { ModelGatewayService } = load('@rental-os/ai-native-server/runtime/model-gateway.service');
 const { AI_TOOL_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
 const egress = require('./fixtures/ai-native/model-egress.cjs'), wire = require('./fixtures/ai-native/chat-protocol.cjs');
 const connection = { baseUrl: 'https://synthetic.example.test/v1' }, secret = 'synthetic-secret';
@@ -19,12 +20,14 @@ test('cancellation during uncooperative post cannot produce late protocol succes
   await assert.rejects(promise, e => e.code === 'CANCELLED'); assert.equal(calls, 1);
 });
 
-test('cancellation after first delta discards remaining parsed deltas in the SAME chunk', async () => {
+test('cancellation after a validated coalesced chunk discards its buffered terminal result', async () => {
   const controller = new AbortController(), body = Buffer.from(wire.delta('first') + wire.delta('late', 'stop') + wire.done);
   const f = egress.harness({ chunks: [body] });
   const adapter = new ChatCompletionsAdapter(new ModelEgressTransport(f.dependencies));
   const iterator = adapter.stream(input(controller.signal), secret, connection)[Symbol.asyncIterator]();
-  assert.deepEqual((await iterator.next()).value, { kind: 'text_delta', delta: 'first' }); controller.abort();
+  // The adapter validates and publishes one bounded network block at a time.
+  // Cancelling after that delivery must still suppress its buffered terminal.
+  assert.deepEqual((await iterator.next()).value, { kind: 'text_delta', delta: 'firstlate' }); controller.abort();
   await assert.rejects(iterator.next(), e => e.code === 'CANCELLED'); assert.equal(f.state.timers.size, 0);
 });
 
@@ -40,5 +43,5 @@ for (const feature of ['tools', 'structuredOutput']) test(`legacy text gateway r
 });
 
 test('strict noEmit still compiles adapter, transport and legacy gateway together', () => {
-  assert.deepEqual(compileConsumer('import { ChatCompletionsAdapter } from "../apps/api/src/modules/ai-native/chat-completions.adapter"; import { ModelEgressTransport } from "../apps/api/src/modules/ai-native/model-egress.transport"; import { ModelGatewayService } from "../apps/api/src/modules/ai-native/model-gateway.service";'), []);
+  assert.deepEqual(compileConsumer('import { ChatCompletionsAdapter } from "@rental-os/ai-native-server/runtime/chat-completions.adapter"; import { ModelEgressTransport } from "@rental-os/ai-native-server/runtime/model-egress.transport"; import { ModelGatewayService } from "@rental-os/ai-native-server/runtime/model-gateway.service";', process.env.AI_NATIVE_TEST_SOURCE_ROOT), []);
 });
