@@ -120,6 +120,12 @@ export interface ChangePasswordRequest {
   newPassword: string;
 }
 
+/** 原 auth-dto 的兼容输入；仅声明传输字段，不在公共宿主挂载空间切换。
+ * 经营空间、成员关系及切换结果仍由安装的 Rental Core 校验。 */
+export interface LegacySwitchWorkspaceRequest {
+  workspaceId: string;
+}
+
 export interface PlatformTenantSummary {
   tenantId: string;
   tenantCode: string;
@@ -255,6 +261,12 @@ export interface SaveSystemUserRequest {
   isSaasAdmin?: boolean;
   isActive: boolean;
 }
+
+/** 成员重置密码只选择请求租户；目标用户来自路由，省略租户沿当前会话。 */
+export type ResetUserPasswordRequest = Pick<SaveSystemUserRequest, "tenantId">;
+
+/** 原局部权限保存：省略 permissions 按既有接口清空，不修改其他角色资料。 */
+export type SaveRolePermissionsRequest = Partial<Pick<SaveSystemRoleRequest, "permissions" | "tenantId">>;
 
 export interface SystemSecurityBaselineConfig {
   loginRateLimit: {

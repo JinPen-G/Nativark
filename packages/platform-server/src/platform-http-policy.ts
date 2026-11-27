@@ -7,7 +7,14 @@ import { PLATFORM_TOOLS_HTTP_OPERATIONS } from "./modules/platform-tools/platfor
 import { PLATFORM_FILTER_PRESET_HTTP_OPERATIONS } from "./modules/platform-tools/filter-presets-http-policy";
 import { DEMO_REQUEST_HTTP_OPERATIONS } from "./modules/demo-requests/demo-request-http-policy";
 import { TENANT_MESSAGING_HTTP_OPERATIONS } from "./modules/messaging/tenant-messaging-http-policy";
-import { TENANT_ROLE_READ_PERMISSIONS } from "./modules/platform/platform-permissions";
+import { PLATFORM_PERMISSIONS, PLATFORM_SAAS_IDENTITY_PERMISSIONS, TENANT_ROLE_READ_PERMISSIONS } from "./modules/platform/platform-permissions";
+
+/** HTTP 扫描目录包含角色码及原 SaaS 身份能力；不供 Seed 或租户角色分配使用。
+ * authority/assignable 说明授权来源，实际准入仍由对应 access 和原 Guard 裁定。 */
+export const PLATFORM_HTTP_PERMISSION_CATALOG = [
+  ...PLATFORM_PERMISSIONS.map(permission => ({ ...permission, authority: "role" as const, assignable: true as const })),
+  ...PLATFORM_SAAS_IDENTITY_PERMISSIONS,
+] as const;
 export const PLATFORM_HTTP_OPERATIONS = [
   { method: "GET", path: "/health", id: "health", summary: "读取公共宿主健康状态", access: "anonymous", response: "Health" },
   { method: "GET", path: "/openapi.json", id: "openApi", summary: "读取当前宿主接口资料", access: "anonymous", response: "OpenApi" },

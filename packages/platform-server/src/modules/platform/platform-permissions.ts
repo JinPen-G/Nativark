@@ -18,6 +18,12 @@ export const PLATFORM_PERMISSIONS = [
   { code: "rental-os:subscription:manage", name: "申请升级与续费", module: "版本与订阅" },
 ] as const;
 
+/** 原 Guard 以当前 SaaS 身份提供的能力，不写入租户角色可授予目录或初始化权限表。 */
+export const PLATFORM_SAAS_IDENTITY_PERMISSIONS = [
+  { code: "system:demo-request:view", name: "查看平台演示预约", module: "SaaS平台", authority: "saas_identity", assignable: false },
+  { code: "system:calendar-source:manage", name: "维护公共日历来源", module: "SaaS平台", authority: "saas_identity", assignable: false },
+] as const;
+
 export const managesPlatformTenants = (user: { isSaasAdmin?: boolean; permissions: string[] }) =>
   user.isSaasAdmin === true && (user.permissions.includes("*") || user.permissions.includes("system:tenant:manage"));
 

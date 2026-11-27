@@ -1,5 +1,5 @@
 /** 公共认证输入，原Rental和无Core宿主共用相同的运行时校验。 */
-import type { ChangePasswordRequest, LoginRequest, RefreshSessionRequest } from "@rental-os/platform-contracts";
+import type { ChangePasswordRequest, LegacySwitchWorkspaceRequest, LoginRequest, RefreshSessionRequest } from "@rental-os/platform-contracts";
 import { IsNotEmpty, IsString, MinLength } from "class-validator";
 
 export class LoginDto implements LoginRequest {
@@ -17,6 +17,7 @@ export class ChangePasswordDto implements ChangePasswordRequest {
   @IsString() @MinLength(8) newPassword!: string;
 }
 
-export class SwitchWorkspaceDto {
+/** 历史 Rental 控制器使用；公共 AuthSessionController 不挂载此操作。 */
+export class SwitchWorkspaceDto implements LegacySwitchWorkspaceRequest {
   @IsString() @IsNotEmpty() workspaceId!: string;
 }

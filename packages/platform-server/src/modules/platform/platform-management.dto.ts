@@ -1,7 +1,7 @@
 /** 公共HTTP输入只消费正式公共合同；Rental带品类/空间的初始化DTO继续由其原入口维护。 */
 import { RoleScope, TenantStatus, type CreatePlatformTenantRequest, type SavePlatformSelfProfileRequest,
   type SaveOrganizationRequest, type SaveSystemRoleRequest, type SaveSystemUserRequest, type SystemSecurityBaselineConfig,
-  type UpdateTenantRequest, type UpdateTenantStatusRequest } from "@rental-os/platform-contracts";
+  type UpdateTenantRequest, type UpdateTenantStatusRequest, type ResetUserPasswordRequest, type SaveRolePermissionsRequest } from "@rental-os/platform-contracts";
 import { IsArray, IsBoolean, IsEnum, IsIn, IsNotEmpty, IsObject, IsOptional, IsString, MaxLength } from "class-validator";
 
 export class SaveOrganizationDto implements SaveOrganizationRequest {
@@ -82,11 +82,11 @@ export class PlatformUserStatusDto implements Pick<SaveSystemUserRequest, "isAct
   @IsOptional() @IsString() @IsNotEmpty() tenantId?: string;
 }
 
-export class PlatformUserPasswordResetDto {
+export class PlatformUserPasswordResetDto implements ResetUserPasswordRequest {
   @IsOptional() @IsString() @IsNotEmpty() tenantId?: string;
 }
 
-export class PlatformRolePermissionsDto {
+export class PlatformRolePermissionsDto implements SaveRolePermissionsRequest {
   @IsOptional() @IsArray() @IsString({ each: true }) permissions?: string[];
   @IsOptional() @IsString() @IsNotEmpty() tenantId?: string;
 }

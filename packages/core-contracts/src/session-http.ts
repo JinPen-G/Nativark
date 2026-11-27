@@ -54,6 +54,7 @@ export function canUseCorePage(context: CoreSessionContext, coreId: string, perm
 export function createCoreSessionOpenApi(): CoreOpenApiContribution {
   return { paths: { [`/api/${CORE_SESSION_HTTP.path}`]: { get: {
     operationId: "platformCore_sessionContext", summary: CORE_SESSION_HTTP.summary, tags: ["Platform Core"], security: [{ bearerAuth: [] }],
+    permissions: [], "x-requiredPermissions": [],
     description: "需要当前operator签名会话。仅返回本人获分配且租户已开通的Core；本租户管理者另读可分配候选。注册、分配、业务角色、数据范围及就绪各自核验。",
     responses: { 200: { description: "当前主体的授权目录，空集合是合法结果", content: { "application/json": {
       schema: { $ref: "#/components/schemas/PlatformCore.Session.Response" } } } },

@@ -8,6 +8,8 @@ import { TenantStatus, type PlatformSessionContextResponse } from "@rental-os/pl
 
 原 `@rental-os/shared` 和 `@rental-os/shared/platform` 再导出同一声明，保留 Rental 与各端既有导入。新增公共消费者使用本包，行业字段继续由所属 Core 契约扩展。[原兼容出口](../shared/src/platform-identity.ts)
 
+公共成员密码重置和局部角色权限保存分别使用 `ResetUserPasswordRequest`、`SaveRolePermissionsRequest`，复用原人员／角色合同的字段和可选性。旧 `/auth-dto` 的 `SwitchWorkspaceDto` 关联 `LegacySwitchWorkspaceRequest`，仅保留原 `workspaceId` 传输格式；公共认证控制器不挂载空间切换，空间权限和切换结果仍由 Rental Core 裁定。[请求合同](src/index.ts) · [认证 DTO](../platform-server/src/modules/auth/auth-session.dto.ts) · [管理 DTO](../platform-server/src/modules/platform/platform-management.dto.ts)
+
 订阅可从 `@rental-os/platform-contracts/subscription` 单独导入。原 `@rental-os/shared` 继续再导出同一枚举和字段，基础版/PRO、统一期限、金额可空及原请求语义沿SUB专项。Core开通、成员分配和业务权限不由套餐字段代替。
 
 服务端通过 `@rental-os/platform-contracts/request-fingerprint` 使用原确定性 SHA-256 算法。平台审计、文件绑定和 Core 幂等共用这一实现，原 API 路径转接同一函数。该 Node 子出口按需加载，根合同继续用于浏览器及业务类型消费。[指纹源码](src/request-fingerprint.ts) · [原 API 接点](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/api/src/common/request-fingerprint.ts)

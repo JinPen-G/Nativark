@@ -43,6 +43,10 @@
 
 公共 HTTP 清单、访问类别、权限和文档来自同一份政策。构建后执行 `npm run api:document:platform` 输出同版本 OpenAPI JSON；此命令不启动服务、不读环境文件或数据库。HTTP 文档也由宿主在 `/api/openapi.json` 提供。接口存在不代表 Core 工具已发布或当前主体有业务权限。
 
+公共路由扫描使用根出口 `PLATFORM_HTTP_PERMISSION_CATALOG`。其中 `authority: "saas_identity"`、`assignable: false` 的演示预约和日历能力由原 Guard 的 SaaS 身份分支提供；初始化与租户角色仍使用原 `PLATFORM_PERMISSIONS`，不将这两个能力加入租户可授予目录。运行扫描时选择 `--permissions packages/platform-server/src/platform-http-policy.ts --permission-export PLATFORM_HTTP_PERMISSION_CATALOG`，其余宿主参数沿所选公共入口。[政策和扫描目录](src/platform-http-policy.ts) · [角色与身份目录](src/modules/platform/platform-permissions.ts)
+
+Core 的 `session-context` 与 `scope/read` 文档用空权限码数组表达“没有额外的全局角色码”，仍要求当前 operator 会话及原 Core／成员／范围复验。路径参数保留完整标识，例如 `{tenantId}`，与 Controller 和参数声明逐项对应。[Core 会话文档](../core-contracts/src/session-http.ts) · [Core 范围文档](../core-contracts/src/scope-http.ts)
+
 ```ts
 import { PlatformServerModule } from "@rental-os/platform-server";
 

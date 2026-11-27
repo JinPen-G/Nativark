@@ -17,6 +17,7 @@ export function createCoreScopeOpenApi(): CoreOpenApiContribution {
   const json = (name: string) => ({ "application/json": { schema: { $ref: `#/components/schemas/${name}` } } });
   return { paths: { [`/api/${CORE_SCOPE_HTTP.path}`]: { post: {
     operationId: "platformCore_scopeRead", summary: CORE_SCOPE_HTTP.summary, tags: ["Platform Core"], security: [{ bearerAuth: [] }],
+    permissions: [], "x-requiredPermissions": [],
     description: "当前operator会话读取本人获权Core及自身容器。主体来自原认证；Core独立裁定业务范围、绑定和就绪。读取不会首次初始化或授予使用权。",
     requestBody: { required: true, content: json("PlatformCore.Scope.Request") },
     responses: { 200: { description: "未建立绑定，或当前绑定及真实就绪", content: json("PlatformCore.Scope.Response") },

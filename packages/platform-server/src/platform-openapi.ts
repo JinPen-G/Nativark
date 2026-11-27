@@ -1,7 +1,8 @@
 /** 公共宿主同版本接口资料；只组合已登记公共HTTP，不加载行业文档或开放业务工具。 */
 import { Controller, Get, Inject } from "@nestjs/common";
 import type { AuthUser, TenantIdentity, TenantAppearanceProfile, SaveTenantAppearanceRequest, PlatformTenantSummary,
-  CreatePlatformTenantRequest, SaveSystemUserRequest, SaveSystemRoleRequest, SystemRoleRow, SystemUserRow, PlatformFilterPresetContribution } from "@rental-os/platform-contracts";
+  CreatePlatformTenantRequest, SaveSystemUserRequest, SaveSystemRoleRequest, ResetUserPasswordRequest, SaveRolePermissionsRequest,
+  SystemRoleRow, SystemUserRow, PlatformFilterPresetContribution } from "@rental-os/platform-contracts";
 import { PLATFORM_HTTP_OPERATIONS, platformHttpPermissions } from "./platform-http-policy";
 import { RAW_HTTP_RESPONSE } from "./common/request-id.interceptor";
 import { SUBSCRIPTION_OPENAPI_SCHEMAS, SUBSCRIPTION_OPENAPI_QUERY_SCHEMAS } from "./modules/subscription/subscription-openapi";
@@ -107,7 +108,7 @@ export const PLATFORM_OPENAPI_SCHEMAS = {
     isSaasAdmin: { type: "boolean", enum: [false], description: "仅允许 false。SaaS 主体沿独立平台初始化入口维护。" }, isActive: boolean
   } satisfies Record<keyof SaveSystemUserRequest, Schema>, ["account", "displayName", "roleIds", "isActive"]),
   "Platform.UserStatus": object({ isActive: boolean, tenantId: string }, ["isActive"]),
-  "Platform.ResetUserPasswordInput": object({ tenantId: string }),
+  "Platform.ResetUserPasswordInput": object({ tenantId: string } satisfies Record<keyof ResetUserPasswordRequest, Schema>),
   "Platform.ResetPassword": object({ userId: string, account: string, temporaryPassword: { ...string, readOnly: true }, message: string }, ["userId", "account", "temporaryPassword", "message"]),
   "Platform.Role": object({ id: string, tenantId: string, code: string, name: string, description: string, scope: string,
     fixedAllPermissions: boolean, enabledBusinessScopes: strings, isActive: boolean, permissions: strings, buttonPermissions: strings, dataScope: string
@@ -117,7 +118,7 @@ export const PLATFORM_OPENAPI_SCHEMAS = {
     scope: { type: "string", enum: ["operator", "car_shop", "store", "station"] }, enabledBusinessScopes: strings,
     permissions: strings, buttonPermissions: strings, dataScope: { type: "string", enum: ["all", "organization", "store", "own"] }, isActive: boolean
   } satisfies Record<keyof SaveSystemRoleRequest, Schema>, ["code", "name", "scope", "enabledBusinessScopes", "permissions", "isActive"]),
-  "Platform.RolePermissions": object({ permissions: strings, tenantId: string }),
+  "Platform.RolePermissions": object({ permissions: strings, tenantId: string } satisfies Record<keyof SaveRolePermissionsRequest, Schema>),
   "Platform.Deleted": object({ id: string, deleted: { type: "boolean", enum: [true] } }, ["id", "deleted"]),
   "Platform.PermissionTree": { type: "array", items: object({ code: string, name: string, children: { type: "array",
     items: object({ code: string, name: string, description: string }, ["code", "name"]) } }, ["code", "name", "children"]) }
@@ -160,7 +161,7 @@ export function createPlatformOpenApi(options: { filterPresetContributions?: rea
         "429": { description: "请求超出当前限流，按原操作或凭证核对，不换键重发" },
         "503": { description: "实际必需参加者不可用，操作未完成" },
         "500": { description: "实际持久化失败；不能视为已保存或可重发" } } };
-    (paths[`/api${item.path.replace(/:([a-z]+)/g, "{$1}")}`] ??= {})[item.method.toLowerCase()] = operation;
+    (paths[`/api${item.path.replace(/:([A-Za-z0-9_]+)/g, "{$1}")}`] ??= {})[item.method.toLowerCase()] = operation;
   }
   return { openapi: "3.0.3", info: { title: "Zelo Platform API", version: "0.1.0", description: "公共宿主接口；业务Core另贡献同版本文档，文档可见不授予Agent业务权限。" },
     paths, components: { securitySchemes: { bearerAuth: { type: "http", scheme: "bearer" } }, schemas: { ...PLATFORM_OPENAPI_SCHEMAS, ...filterSchemas } } };
