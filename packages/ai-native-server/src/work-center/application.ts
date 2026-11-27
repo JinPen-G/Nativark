@@ -79,7 +79,10 @@ export function createPublicAiWorkCenterRequests(dependencies: Dependencies): Wo
         const before = await tasks.readCreation(locator);
         const projected = ({ replayed: _internal, ...result }: NonNullable<typeof before.task>) => result;
         if (before.task) await authority.actions.resolve(before.task.taskId, 'read_metadata');
-        if (!write || before.state !== 'not_observed') return { ...before, task: before.task && projected(before.task) };
+        if (!write || before.state !== 'not_observed') {
+          await conversations.same(turn.scope);
+          return { ...before, task: before.task && projected(before.task) };
+        }
         if (turn.head.status !== 'active' || turn.head.activeTurnId !== turn.turn.turnId || turn.row.creationClosedAt) throw conflict();
         let saved;
         try { saved = await tasks.create(authority.transaction, locator); }
@@ -100,8 +103,9 @@ export function createPublicAiWorkCenterRequests(dependencies: Dependencies): Wo
         const ref = { ...locator, expectedRevision: command.expectedRevision };
         const observed = await (recovery ? runner.reconcile(ref) : runner.start(ref));
         try {
-          const snapshot = await results.snapshot(locator);
-          if (observed.status === 'unknown' || observed.status === 'unavailable' && snapshot.status === 'queued') throw new WorkCenterUnknownError();
+          const snapshot = await results.snapshot(locator, observed);
+          if (observed.status === 'unknown'
+            || observed.status === 'unavailable' && observed.nextAction !== 'manual_handoff' && snapshot.status === 'queued') throw new WorkCenterUnknownError();
           return snapshot;
         } catch { throw new WorkCenterUnknownError(); }
       };

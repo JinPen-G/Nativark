@@ -23,8 +23,8 @@ export const AI_PUBLIC_WORK_CENTER_OPERATIONS = Object.freeze({
   createTask: ['task-center', 'create', 'AiConversationTurnReferenceDraft', 'AiPublicTaskCreation', true],
   taskCreation: ['task-center', 'creation', 'AiConversationTurnReferenceDraft', 'AiPublicTaskCreation', false],
   snapshot: ['task-center', 'snapshot', 'AiPublicTaskRef', 'AiPublicTaskSnapshot', false],
-  start: ['task-center', 'start', 'AiPublicTaskStart', 'AiPublicTaskSnapshot', true],
-  reconcile: ['task-center', 'reconcile', 'AiPublicTaskStart', 'AiPublicTaskSnapshot', true],
+  start: ['task-center', 'start', 'AiPublicTaskStart', 'AiPublicTaskExecution', true],
+  reconcile: ['task-center', 'reconcile', 'AiPublicTaskStart', 'AiPublicTaskExecution', true],
   result: ['task-center', 'result', 'AiPublicTaskResultRef', 'AiPublicTaskResult', false],
   policy: ['task-center', 'textPolicy', 'AiPublicTextPolicyRead', 'AiPublicTextPolicy', false],
   savePolicy: ['task-center', 'saveTextPolicy', 'AiPublicTextPolicySave', 'AiPublicTextPolicyOperation', true],
@@ -45,6 +45,11 @@ const status = choice('active', 'archived'), meta = { conversationId: id(), capa
 const conversation = { ...scope, conversationId: id() }, kind = choice(...AI_TASK_STATUSES_DRAFT);
 const task = obj({ taskId: id(), runId: id(), status: kind, revision: observedRevision });
 const optional = (value: AiLeafSchemaDraft) => ({ oneOf: [value, nil] });
+const taskSnapshot = { contractVersion: choice(AI_TASK_DRAFT_VERSION), taskId: id(), runId: id(), status: kind, revision: observedRevision,
+  resultId: optional(id()), runStatus: kind, execution: choice('observed_original_task') };
+const handoff = obj({ status: choice('unavailable'), nextAction: choice('manual_handoff'), completedSteps: int(), cleanupFailed: int(),
+  stopReason: choice('input_limit_reached'), runTimeAccounting: choice('pending_original_time', 'not_observed') },
+  ['status', 'nextAction', 'completedSteps', 'cleanupFailed', 'runTimeAccounting']);
 const runtimeLimits = obj({ maxSteps: int(1, 1000), maxCalls: int(1, 1000), maxConcurrent: int(1, 1),
   maxTotalMs: int(1, 86400000), maxStepMs: int(1, 86400000), maxOutputBytes: int(1, 16777216) });
 const policy = obj({ revision: observedRevision, enabled: bool, expiresAt: time, limits: runtimeLimits });
@@ -80,8 +85,8 @@ export const AI_PUBLIC_WORK_CENTER_SCHEMAS: Readonly<Record<string, AiLeafSchema
     nextAction: choice('read_original_task', 'reconcile') }),
   AiPublicTaskRef: obj({ taskId: id(), runId: id() }),
   AiPublicTaskStart: obj({ taskId: id(), runId: id(), expectedRevision: revision }),
-  AiPublicTaskSnapshot: obj({ contractVersion: choice(AI_TASK_DRAFT_VERSION), taskId: id(), runId: id(), status: kind, revision: observedRevision,
-    resultId: optional(id()), runStatus: kind, execution: choice('observed_original_task') }),
+  AiPublicTaskSnapshot: obj(taskSnapshot),
+  AiPublicTaskExecution: { oneOf: [ref('AiPublicTaskSnapshot'), obj({ ...taskSnapshot, runner: handoff })] },
   AiPublicTaskResultRef: obj({ taskId: id(), resultId: id() }),
   AiPublicTaskResult: obj({ contractVersion: choice(AI_TASK_DRAFT_VERSION), taskId: id(), runId: id(), resultId: id(),
     status: choice('available', 'failed', 'unknown'), diagnostic: optional(obj({ capability: choice('text'),

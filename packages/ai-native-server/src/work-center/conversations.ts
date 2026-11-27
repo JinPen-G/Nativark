@@ -40,7 +40,14 @@ export class WorkCenterConversations {
     return owner(tx ?? this.db, context);
   }
   async same(before: Owner, tx?: Tx) {
-    if (hash(await this.current(tx)) !== hash(before)) throw denied();
+    const check = async (native: Tx) => {
+      if (hash(await this.current(native)) !== hash(before)) throw denied();
+    };
+    // Final delivery uses the original session, tenant and role locks in one
+    // short transaction. A root Auth read can straddle session revocation.
+    if (tx) await check(tx);
+    else await this.db.$transaction(check, transactionOptions);
+    this.authority.assertCurrent();
   }
   async mutate<T>(scope: Owner, run: (tx: Tx, mark: () => void) => Promise<T>) {
     let attempted = false, mayHaveCommitted = false;

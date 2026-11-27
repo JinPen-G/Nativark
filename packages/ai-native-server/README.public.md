@@ -25,3 +25,5 @@
 - `runtime/original-result-reads` 和 `runtime/original-task-recovery-read` 只观察真实原结果；租约、审批、原账和发布字段仍由原权威核对。缺当前授权或原证据时不可用。
 
 工作中心与受控 MCP 的公共读取使用 `@rental-os/platform-contracts/ai-work-center` 的 `AI_PUBLIC_WORK_CENTER_ORIGINAL_READS` 和 `AI_PUBLIC_WORK_CENTER_SCHEMAS`。其中 Task 摘要、Task 结果、会话摘要、会话原结果均只接受定位字段。已安装的公共诊断仅办理 BYOK 文本检测。平台托管执行需接入经审阅费率与原调用的可信输入上限，其他业务场景继续由 Core 提供。
+
+`start` 和 `reconcile` 的 `AiPublicTaskExecution` 返回原 Task 快照。Runner 要求人工接管时，快照附带 `runner.nextAction = manual_handoff` 和原运行计量观察。`pending_original_time` 表示该 Run 仍有待核的活动时间占用。已核结果通过原 `resultId` 读取，Task 状态继续按原快照展示。调用方应保留原定位并交人工核对；合同不会为此授予重新启动或重派权限。

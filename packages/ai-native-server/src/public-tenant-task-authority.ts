@@ -95,6 +95,12 @@ export function createPublicTenantTaskAuthority(input: {
         assertTaskAction: (context, taskId, operation) => input.assertTaskAction(reader, context, taskId, operation, transaction)
       });
       const actions = actionsFor(db, identities);
+      const lockPrincipal = async (tx: Tx) => {
+        active();
+        if (!tx || '$transaction' in tx) throw denied();
+        const lease = await principals.lock(tx, { tenantId: tenantId!, subjectId: userId!, audience: 'operator' }, tenantId!);
+        return { async resolve() { return current(project(await lease.revalidate())); } };
+      };
       const grants = new WeakMap<Tx, ReturnType<typeof actionsFor>>();
       const resourceScopes: AiTaskExecutionScopeSource = { async resolve(taskId, lease, purpose, tx) {
         active();
@@ -121,8 +127,7 @@ export function createPublicTenantTaskAuthority(input: {
           active();
           if (!tx || '$transaction' in tx) throw denied();
           await available(tx);
-          const lease = await principals.lock(tx, { tenantId: tenantId!, subjectId: userId!, audience: 'operator' }, tenantId!);
-          const nativeIdentity = { async resolve() { return current(project(await lease.revalidate())); } };
+          const nativeIdentity = await lockPrincipal(tx);
           const nativeActions = actionsFor(tx, nativeIdentity, tx);
           const verify = async (next: AiTaskTransactionReference) => {
             await available(tx);
@@ -145,18 +150,24 @@ export function createPublicTenantTaskAuthority(input: {
       // run's write lease. Its enclosing ledger transaction still uses the
       // original signed principal and same Native connection.
       const principalOn = async (tx: Tx) => {
-        active();
-        if (!tx || '$transaction' in tx) throw denied();
-        const lease = await principals.lock(tx, { tenantId: tenantId!, subjectId: userId!, audience: 'operator' }, tenantId!);
+        const nativeIdentity = await lockPrincipal(tx);
         await available(tx);
-        return current(project(await lease.revalidate()));
+        return nativeIdentity.resolve();
+      };
+      // Delivery can verify the original read policy under the same principal
+      // lock without claiming a Run or granting a write action.
+      const readActionOn = async (tx: Tx, taskId: string, operation: 'read_metadata' | 'read_step_terminal') => {
+        if (operation !== 'read_metadata' && operation !== 'read_step_terminal') throw denied();
+        const nativeIdentity = await lockPrincipal(tx);
+        await available(tx);
+        return actionsFor(tx, nativeIdentity, tx).resolve(taskId, operation);
       };
       const actionOn = (tx: Tx, taskId: string, operation: Action) => {
         const held = grants.get(tx);
         if (!held) throw denied();
         return held.resolve(taskId, operation);
       };
-      return Object.freeze({ identities, actions, transaction, principalOn, actionOn, assertCurrent: active,
+      return Object.freeze({ identities, actions, transaction, principalOn, actionOn, readActionOn, assertCurrent: active,
         resourceScopes: Object.freeze(resourceScopes), close: binding.close });
     } catch (error) { binding.close(); throw error; }
   } });
