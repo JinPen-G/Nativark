@@ -89,17 +89,17 @@ export function RentalAdminApplication() {
 
 选装原 Agent/Copilot 的 Web 宿主使用 `createRentalAssistantShell({ assistant, session, ...原RentalShellOptions })`，传入已经创建的同一个 assistant 和 Rental 会话。该组合沿 `assistant.Provider → CopilotProvider → OperatorProvider → createRentalShell` 各挂一次，通过正式 `PlatformShellProps.layout` 接回原 Agent/Admin 切换、导航、面包屑、内容类及 Copilot 布局。上次 Admin 地址在当前会话范围保存，切换时重新经过原 `useNavigation` 的 `canAccess` 和 `resolve`；未登记、撤权或没有获权回退页时停止导航。宿主直接使用该组合的 Provider 树，页面正文继续消费同一上下文。[Web 主壳组合](assistant-shell.tsx) · [原 assistant 接点](assistant/README.md) · [正式 layout slot](../../platform-admin/src/PlatformShell.tsx)
 
-完整浏览器组合使用 `createRentalAssistantBrowserHost`，同时接回会员姓名/通知草稿、规则/日历来源、品类助手及原翻译 Hook。先准备同一页面 Map 和公共 `App.navigation` 的延迟回调，再把 `createRentalAssistantAdminContribution(...).pages` 与通知工厂的 `page` 合入一份 Rental 贡献；注册成功后填入该 Map，最后创建公共应用。消息中心和铃铛传入同一通知实例。具体可直接照两个 Web 的入口，Core 作者无需修改公共后台内部。[浏览器组合](assistant-browser.tsx) · [三个 AI 页面](assistant-pages.tsx) · [原页面导航](assistant-navigation.ts) · [单 Rental 入口](../../../apps/rental-admin/src/main.tsx)
+完整浏览器组合使用 `createRentalAssistantBrowserHost`，同时接回会员姓名/通知草稿、规则/日历来源、品类助手及原翻译 Hook。先准备同一页面 Map 和公共 `App.navigation` 的延迟回调，再把 `createRentalAssistantAdminContribution(...).pages` 与通知工厂的 `page` 合入一份 Rental 贡献；注册成功后填入该 Map，最后创建公共应用。消息中心和铃铛传入同一通知实例。具体可直接照两个 Web 的入口，Core 作者无需修改公共后台内部。[浏览器组合](assistant-browser.tsx) · [三个 AI 页面](assistant-pages.tsx) · [原页面导航](assistant-navigation.ts) · [单 Rental 入口](https://github.com/JinPen-G/Zelo-rental-core/blob/5cef75a1814814a4a4ccc1172de15f16dc5ff74e/workspace/apps/rental-admin/src/main.tsx)
 
 SaaS 的原品类治理与能力目录在原开发预览开关启用时，通过该工厂返回的 `saasPages` 挂载；使用当前 SaaS 身份与原品类权限，无经营空间要求。AI 设置页缺少或无权访问任务中心时保留设置正文，仅隐藏不能定位的原任务链接。
 
 公共应用、Rental Provider 和其他 Core 复用这一份会话与 QueryClient。工单使用自己的租户范围，Rental 页面按当前服务端目录和已验证会话取得经营空间；未选经营空间不影响获权工单和公共设置。Core、成员授权或会话变化后，原请求和导航继续复验当前范围。
 
-宿主按当前页面传入 `contextSwitcher`。`undefined` 使用 Rental 原经营空间选择器，`null` 显式留空，也可传入自己的公共上下文组件。同一个 Shell 和通知 Provider 持续挂载，切换页面或撤销其他 Core 时保留当前正文的原操作状态。完整双 Core 装配只需宿主入口、薄壳和固定部署锁。[独立双 Core 示例](https://github.com/JinPen-G/Zelo-rental-core/blob/main/workspace/apps/example-multi-core-admin/README.md) · [单Rental宿主](../../../apps/rental-admin/README.md)
+宿主按当前页面传入 `contextSwitcher`。`undefined` 使用 Rental 原经营空间选择器，`null` 显式留空，也可传入自己的公共上下文组件。同一个 Shell 和通知 Provider 持续挂载，切换页面或撤销其他 Core 时保留当前正文的原操作状态。完整双 Core 装配只需宿主入口、薄壳和固定部署锁。[独立双 Core 示例](https://github.com/JinPen-G/Zelo-rental-core/blob/main/workspace/apps/example-multi-core-admin/README.md) · [单 Rental 宿主](https://github.com/JinPen-G/Zelo-rental-core/blob/5cef75a1814814a4a4ccc1172de15f16dc5ff74e/workspace/apps/rental-admin/README.md)
 
 ## 验证入口
 
-`admin/tsconfig.json` 直接复用公共 `platform-admin` 包的配置，覆盖十二组页面、统一宿主、浏览器会话与通知。源码宿主同时准备公共 UI 使用的 `ui-arc` 和 `ui-motiq` 保留源码，入口与取出范围见独立应用导读。[类型配置](tsconfig.json) · [独立应用](../../../apps/rental-admin/README.md#源码取出范围)
+`admin/tsconfig.json` 直接复用公共 `platform-admin` 包的配置，覆盖十二组页面、统一宿主、浏览器会话与通知。源码宿主同时准备公共 UI 使用的 `ui-arc` 和 `ui-motiq` 保留源码，入口与取出范围见独立应用导读。[类型配置](tsconfig.json) · [独立应用](https://github.com/JinPen-G/Zelo-rental-core/blob/5cef75a1814814a4a4ccc1172de15f16dc5ff74e/workspace/apps/rental-admin/README.md#源码取出范围)
 
 直接依赖沿 Rental 包的可选 peer 声明及宿主实际依赖准备。使用这些后台出口的宿主声明与 Core 同版本的 `@rental-os/shared`，供给原运行协议。日期使用 `dayjs`，订单列表使用 `@tanstack/react-table`，HTTP 兼容处理使用 `axios`，保留的卡片与报表动效使用 `motion`。[正式包声明](../package.json)
 

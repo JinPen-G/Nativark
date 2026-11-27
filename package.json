@@ -13,7 +13,8 @@
     "!apps/miniprogram",
     "!apps/staff-miniprogram",
     "!apps/example-multi-core-api",
-    "!apps/example-multi-core-admin"
+    "!apps/example-multi-core-admin",
+    "!apps/rental-admin"
   ],
   "scripts": {
     "prepare:rental-workspace": "node scripts/prepare-rental-workspace.cjs",
@@ -227,9 +228,6 @@
     "lint:platform-admin": "npm run lint -w @rental-os/platform-admin-app",
     "build:example-tickets-admin": "npm run build -w @rental-os/example-tickets-admin",
     "dev:example-tickets-admin": "npm run dev -w @rental-os/example-tickets-admin",
-    "build:rental-admin": "npm run build -w @rental-os/rental-admin",
-    "dev:rental-admin": "npm run dev -w @rental-os/rental-admin",
-    "lint:rental-admin": "npm run lint -w @rental-os/rental-admin",
     "build:ai-native-data": "npm run build -w @rental-os/ai-native-data",
     "lint:ai-native-data": "npm run lint -w @rental-os/ai-native-data",
     "build:ai-native-server": "npm run build -w @rental-os/ai-native-server",

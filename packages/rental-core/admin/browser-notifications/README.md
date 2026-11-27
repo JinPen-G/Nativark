@@ -1,6 +1,6 @@
 # Rental 浏览器通知
 
-`createRentalBrowserNotifications` 将原待办、个人消息状态与内联详情绑定到一个 Rental 浏览器宿主，返回 `NotificationProvider`、`useNotifications` 和 `NoticeActions`。旧组合后台与独立后台消费同一实现。[正式工厂](index.tsx) · [原后台适配](../../../../apps/admin/src/features/notifications/NotificationProvider.tsx) · [独立外壳](../../../../apps/rental-admin/src/RentalShell.tsx)
+`createRentalBrowserNotifications` 将原待办、个人消息状态与内联详情绑定到一个 Rental 浏览器宿主，返回 `NotificationProvider`、`useNotifications` 和 `NoticeActions`。旧组合后台与独立后台消费同一实现。[正式工厂](index.tsx) · [原后台适配](../../../../apps/admin/src/features/notifications/NotificationProvider.tsx) · [独立外壳](https://github.com/JinPen-G/Zelo-rental-core/blob/5cef75a1814814a4a4ccc1172de15f16dc5ff74e/workspace/apps/rental-admin/src/RentalShell.tsx)
 
 ## 宿主输入
 

@@ -197,7 +197,7 @@ This repository contains the platform base, the Tickets example, and Rental comp
 - **Purpose**: Zelo's first full-featured vertical Core, serving as a comprehensive architectural reference for complex domains—**it is a pluggable business package on top of the base, not the base itself**.
 - **Demonstrates**: End-to-end rental workflows across 4 categories (photography gear, camping equipment, vehicles, construction machinery)—catalog, assets, inventory, pricing strategies, quotes, orders, dispatch, return, inspection, settlement, and enterprise credit—supporting both non-AI and optional AI Native assemblies, paired with 4 client apps (tenant storefront, enterprise portal, customer & staff WeChat Mini Programs).
 - **Standalone Repository & Releases**: Also open-sourced at **[JinPen-G/Zelo-rental-core](https://github.com/JinPen-G/Zelo-rental-core)** with standard release packages on [GitHub Releases](https://github.com/JinPen-G/Zelo-rental-core/releases) discoverable directly via the base's GitHub Topic (`zelo-core`) workflow.
-- **In-Repo Entrypoints**: [Rental Core Guide](packages/rental-core/README.md) · [Rental API Host](apps/rental-api/README.md) · [Rental Admin Host](apps/rental-admin/README.md)
+- **Core Entrypoints**: [Rental Core Guide](packages/rental-core/README.md) · [Rental API Host](apps/rental-api/README.md) · [Standalone Rental Admin Host](https://github.com/JinPen-G/Zelo-rental-core/blob/5cef75a1814814a4a4ccc1172de15f16dc5ff74e/workspace/apps/rental-admin/README.md)
 
 ### 3. Multi-Core Composite Host (Dual-Core Reference)
 - **Purpose**: Mounts both **Rental Core** and **Example Tickets Core** together on a single shared identity layer, database, and admin shell to demonstrate independent grants, routing, and cache isolation.
@@ -313,7 +313,6 @@ Zelo/
 │   ├── example-tickets-api/          # [Example] Base + Tickets Core standalone API host
 │   ├── example-tickets-admin/        # [Example] Base + Tickets Core standalone Web host
 │   ├── rental-api/                   # [Official Core] Base + Rental standalone API (optional AI / MCP)
-│   ├── rental-admin/                 # [Official Core] Base + Rental standalone Web host
 │   └── api/ & admin/                 # [Legacy Composite] Composite dev entry consuming split single-source packages
 ├── packages/
 │   ├── core-contracts/               # [Base] Core manifests, compatibility, check CLI, capability CLI & source exporter
@@ -365,7 +364,7 @@ Zelo/
 | Path | Responsibility | Guide |
 | --- | --- | --- |
 | `packages/example-tickets-core` | Lightweight ticketing Core example (minimal non-rental reference) | [Tickets Core](packages/example-tickets-core/README.md) · [API](apps/example-tickets-api/README.md) · [Web](apps/example-tickets-admin/README.md) |
-| `packages/rental-core`, `packages/rental-mcp-host` | Official rental business Core and opt-in Rental MCP host adapter | [Rental Core](packages/rental-core/README.md) · [API](apps/rental-api/README.md) · [Web](apps/rental-admin/README.md) · [MCP Host](packages/rental-mcp-host/README.md) |
+| `packages/rental-core`, `packages/rental-mcp-host` | Official rental business Core and opt-in Rental MCP host adapter | [Rental Core](packages/rental-core/README.md) · [API](apps/rental-api/README.md) · [Standalone Web](https://github.com/JinPen-G/Zelo-rental-core/blob/5cef75a1814814a4a4ccc1172de15f16dc5ff74e/workspace/apps/rental-admin/README.md) · [MCP Host](packages/rental-mcp-host/README.md) |
 | Standalone Rental `multi-core` development workspace | Rental and Tickets dual-Core API and admin app | [Setup and historical verification](https://github.com/JinPen-G/Zelo-rental-core/blob/main/README.en.md#rental-and-tickets-example) |
 | `workspace/apps/` in the independent Rental repository | Booking storefront, enterprise portal, and customer/staff WeChat Mini Programs; built in the dual-repository `full` profile | [Client development and historical checks](https://github.com/JinPen-G/Zelo-rental-core/blob/main/README.en.md#preparing-a-standalone-dev-workspace) |
 | `apps/api`, `apps/admin`, `packages/shared` | Legacy composite entrypoints and compatibility barrel consuming the split packages | [API Module](apps/api/src/app.module.ts) · [Admin Rules](apps/admin/AGENTS.md) · [Shared Index](packages/shared/src/index.ts) |
