@@ -1,8 +1,10 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { ProviderRouterService } = require('../apps/api/src/modules/ai-native/provider-router.service');
+const { createControllerSourceLoader } = require('../scripts/controller-sources.cjs');
+const sourceLoader = createControllerSourceLoader(require('node:path').resolve(__dirname, '..'));
+const gateway = sourceLoader.load(sourceLoader.resolveSource(__filename, '@rental-os/platform-server/ai-gateway', true));
+const { ProviderRouterService } = gateway;
 const platform = { id: 'platform-id', kind: 'PLATFORM' }, scope = { id: 'tenant-id', kind: 'TENANT', tenantId: 'tenant-1' };
 const request = () => ({ consumerScope: { ...scope }, configurationScope: { ...scope }, mode: 'tenant_managed', scene: 'chat', requiredCapabilities: ['text'] });
 const profile = (key = 'default', role = 'DEFAULT') => ({ id: 'profile-' + key, profileKey: key, scopeId: scope.id, scopeKind: scope.kind,
@@ -73,14 +75,15 @@ test('absent required ports fail at construction', () => {
   for (const ports of [null, {}, { profiles: { list: async () => [] } }]) assert.throws(() => new ProviderRouterService(ports), e => e.code === 'CONFIG_INVALID');
 });
 test('legacy invoke and stream propagate all required features including text', async () => {
-  const { UnifiedAiGatewayService } = require('../apps/api/src/modules/ai-native/unified-ai-gateway.service');
+  const { UnifiedAiGatewayService } = gateway;
   for (const mode of ['invoke','stream']) {
     let received;
     const unreachable = async () => { assert.fail('routing refusal must prevent accounting and transport'); };
     const gateway = new UnifiedAiGatewayService({
       routing: { resolve: async (_context, required) => { received = required; throw Error('stop after routing input'); }, assertCurrent: unreachable },
-      budget: { reserve: unreachable, dispatch: unreachable, settle: unreachable, abandon: unreachable },
+      budget: { reserve: unreachable, dispatch: unreachable, recordUsage: unreachable, settle: unreachable, abandon: unreachable },
       admission: { admit: unreachable, transition: unreachable }, dispatch: { claim: unreachable, finish: unreachable },
+      toolPolicy: { validateToolRequest: unreachable, validateNativeToolCall: unreachable },
       audit: { append: unreachable }, transport: { invoke: unreachable, stream: unreachable }
     });
     const args = [{ tenantId: 't', workspaceId: 'w', actorId: 'a' }, { callId: 'c', model: 'm', messages: [{ role: 'user', content: 'hello' }], maxOutputTokens: 10, features: ['tools','structuredOutput'] }];

@@ -1,8 +1,10 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { ProviderRouterService } = require('../apps/api/src/modules/ai-native/provider-router.service');
+const { createControllerSourceLoader } = require('../scripts/controller-sources.cjs');
+const sourceLoader = createControllerSourceLoader(require('node:path').resolve(__dirname, '..'));
+const gateway = sourceLoader.load(sourceLoader.resolveSource(__filename, '@rental-os/platform-server/ai-gateway', true));
+const { ProviderRouterService } = gateway;
 const platform = { id: 'scope-platform', kind: 'PLATFORM' }, tenant = { id: 'scope-tenant-a', kind: 'TENANT', tenantId: 'tenant-a' }, other = { id: 'scope-tenant-b', kind: 'TENANT', tenantId: 'tenant-b' };
 const profile = (scope, key, role, mode, capabilities = ['text']) => ({ id: `${scope.id}-${key}`, scopeId: scope.id, scopeKind: scope.kind, profileKey: key, role, serviceMode: mode, protocol: 'openai_chat_completions', provider: 'synthetic', model: key, credentialRef: `vault:${key}`, configRevision: 1, enabled: true, allowedCapabilities: capabilities, disabledAt: null });
 function harness(records, allowed = new Set(records.map(row => row.id))) { const calls = []; return { calls, service: new ProviderRouterService({ profiles: { list: async scope => { calls.push(scope); return records.filter(row => row.scopeId === scope.id && row.scopeKind === scope.kind); }, get: async () => null, create: async () => { throw new Error('unused'); }, update: async () => null }, capabilities: { preflight: async (row, required) => ({ allowed: allowed.has(row.id) && required.every(capability => row.allowedCapabilities.includes(capability)), required, missing: allowed.has(row.id) ? required.filter(capability => !row.allowedCapabilities.includes(capability)) : [...required], stale: [] }) } }) }; }

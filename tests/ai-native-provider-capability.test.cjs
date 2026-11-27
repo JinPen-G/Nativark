@@ -1,9 +1,11 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { ProviderCapabilityService } = require('../apps/api/src/modules/ai-native/provider-capability.service');
-const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
+const { createControllerSourceLoader } = require('../scripts/controller-sources.cjs');
+const sourceLoader = createControllerSourceLoader(require('node:path').resolve(__dirname, '..'));
+const gateway = sourceLoader.load(sourceLoader.resolveSource(__filename, '@rental-os/platform-server/ai-gateway', true));
+const { ProviderCapabilityService } = gateway;
+const { capabilityProfileFingerprint } = gateway;
 const profile = { id: 'profile-w03', scopeId: 'scope-w03', scopeKind: 'TENANT', profileKey: 'default', role: 'DEFAULT', serviceMode: 'platform_managed', protocol: 'openai_chat_completions', provider: 'rental-os', model: 'managed', credentialRef: 'vault:w03', configRevision: 2, enabled: true, allowedCapabilities: ['text', 'tools', 'structured_output'], disabledAt: null };
 function harness() { const rows = new Map(); return { rows, service: new ProviderCapabilityService({ list: async p => [...rows.values()].filter(row => row.profileId === p.id), upsert: async input => { const row = { id: `e-${input.capability}`, profileId: input.profile.id, scope: { id: input.profile.scopeId, kind: input.profile.scopeKind }, capability: input.capability, status: input.status, source: input.source, observedRevision: input.profile.configRevision, evidenceHash: input.evidenceHash, checkedAt: input.checkedAt, expiresAt: input.expiresAt ?? null, details: input.details }; rows.set(input.capability, row); return row; } }, { allowMock: true }) }; }
 test('required capabilities are denied until current supported evidence exists', async () => { const h = harness(); assert.deepEqual((await h.service.preflight(profile, ['text', 'tools'])).missing, ['text', 'tools']); await assert.rejects(h.service.assert(profile, ['tools']), e => e.code === 'CAPABILITY_UNSUPPORTED'); await h.service.record({ profile, capability: 'tools', status: 'supported', source: 'connection_test', evidenceHash: 'hash-tools', checkedAt: new Date(), expiresAt: new Date(Date.now() + 60000), details: { verification: { evidence: 'mock', methodVersion: 'synthetic-tools-1', capability: 'tools', profileFingerprint: capabilityProfileFingerprint(profile) } } }); await assert.rejects(h.service.assert(profile, ['text', 'tools']), e => e.code === 'CAPABILITY_UNSUPPORTED'); assert.equal((await h.service.preflight(profile, ['tools'])).allowed, true); });

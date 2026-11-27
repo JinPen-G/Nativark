@@ -1,8 +1,11 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
-const { UnifiedAiGatewayService } = require('../apps/api/src/modules/ai-native/unified-ai-gateway.service');
-const { PublicAiGatewayService } = require('../apps/api/src/modules/ai-native/public-ai-gateway.service');
+require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
+const { createControllerSourceLoader } = require('../scripts/controller-sources.cjs');
+const sourceLoader = createControllerSourceLoader(require('node:path').resolve(__dirname, '..'));
+const gateway = sourceLoader.load(sourceLoader.resolveSource(__filename, '@rental-os/platform-server/ai-gateway', true));
+const { UnifiedAiGatewayService } = gateway;
+const { PublicAiGatewayService } = gateway;
 const context = { tenantId: 'tenant-1', workspaceId: 'workspace-1', actorId: 'actor-1' };
 const scope = { id: 'scope-1', kind: 'WORKSPACE', tenantId: context.tenantId, workspaceId: context.workspaceId };
 const intent = { draftVersion: 'ain-c03-draft-2', requestId: 'call-1', sceneCode: 'rental.order.explain', messages: [{ role: 'user', content: [{ kind: 'text', text: 'Explain my order.' }] }], requiredFeatures: ['text'], optionalFeatures: [], maxOutputTokens: 32 };
@@ -17,10 +20,11 @@ function harness() {
     budget: {
       reserve: async call => { calls.push(structuredClone(call)); events.push('reserve'); if (reserveGate) await reserveGate; return { id: 'budget-1' }; },
       dispatch: async (call, id) => { assert.equal(id, 'budget-1'); assert.deepEqual(call, calls[0]); events.push('budget:dispatch'); if (dispatchGate) await dispatchGate; },
+      recordUsage: async (call, id, usage) => { assert.equal(id, 'budget-1'); assert.deepEqual(call, calls[0]); assert.deepEqual(usage, { inputTokens: 1, outputTokens: 2 }); events.push('usage:record'); },
       settle: async (call, id, key, usage) => { assert.equal(id, 'budget-1'); assert.deepEqual(call, calls[0]); assert.ok(key.includes('call-1')); assert.deepEqual(usage, { inputTokens: 1, outputTokens: 2 }); events.push('settle'); },
       abandon: async (call, id, reason) => { assert.equal(id, 'budget-1'); assert.deepEqual(call, calls[0]); events.push(`abandon:${reason}`); }
     },
-    audit: { append: async () => { events.push('audit'); } },
+    audit: { append: async entry => { events.push(`audit:${entry.event}`); } },
     transport: { invoke: async () => { events.push('transport'); return { text: 'ok', usage: { inputTokens: 1, outputTokens: 2 } }; }, stream: async function* () { events.push('transport'); yield { kind: 'text_delta', delta: 'ok' }; yield { kind: 'result', result: { text: 'ok', usage: { inputTokens: 1, outputTokens: 2 } } }; } }
   };
   const service = () => new UnifiedAiGatewayService(ports, 1000, scene);
@@ -29,7 +33,7 @@ function harness() {
 }
 for (const mode of ['invoke', 'stream']) test(`${mode} uses one budget account with claim-bound reserve, dispatch and settlement`, async () => {
   const h = harness(); await h.run(mode);
-  assert.deepEqual(h.events, ['claim', 'reserve', 'audit', 'budget:dispatch', 'transport', 'settle', 'finish:completed']);
+  assert.deepEqual(h.events, [`audit:ai.${mode}.prepared`, 'claim', 'reserve', `audit:ai.${mode}.admitted`, 'budget:dispatch', 'transport', 'usage:record', 'settle', 'finish:completed']);
   const call = h.calls[0]; assert.equal(call.binding.id, 'admission-1'); assert.equal(call.request.callId, intent.requestId); assert.equal(call.request.model, 'model-1');
   assert.match(call.request.intentHash, /^[a-f0-9]{64}$/); assert.equal(call.binding.actorId, context.actorId);
 });

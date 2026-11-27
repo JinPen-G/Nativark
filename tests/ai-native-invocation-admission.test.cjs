@@ -1,8 +1,10 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { InvocationAdmissionService } = require('../apps/api/src/modules/ai-native/invocation-admission.service');
+const { createControllerSourceLoader } = require('../scripts/controller-sources.cjs');
+const sourceLoader = createControllerSourceLoader(require('node:path').resolve(__dirname, '..'));
+const gateway = sourceLoader.load(sourceLoader.resolveSource(__filename, '@rental-os/platform-server/ai-gateway', true));
+const { InvocationAdmissionService } = gateway;
 const scope = { id: 'tenant-a:space-a', kind: 'WORKSPACE', tenantId: 'tenant-a', workspaceId: 'space-a' };
 function harness() { const rows = new Map(), repo = { get: async (s, callId) => rows.get(`${s.tenantId}:${s.workspaceId}:${callId}`) ?? null, create: async input => { const key = `${input.scope.tenantId}:${input.scope.workspaceId}:${input.callId}`; if (rows.has(key)) throw new Error('unique'); const row = { id: `admission-${input.callId}`, scope: input.scope, actorId: input.actorId, callId: input.callId, requestHash: input.requestHash, profileId: input.profileId ?? null, status: 'admitted', dispatchId: null, unknownReason: null, expiresAt: input.expiresAt, admittedAt: new Date(), updatedAt: new Date(), revokedAt: null, completedAt: null }; rows.set(key, row); return row; }, transition: async (s, callId, from, to, patch = {}) => { const key = `${s.tenantId}:${s.workspaceId}:${callId}`, row = rows.get(key); if (!row || row.status !== from) return null; Object.assign(row, patch, { status: to }); return row; } }; return { rows, service: new InvocationAdmissionService(repo) }; }
 const input = (callId = 'call-1', requestHash = 'hash-1') => ({ scope, actorId: 'actor-a', callId, requestHash, expiresAt: new Date(Date.now() + 60_000) });

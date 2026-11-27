@@ -1,10 +1,12 @@
 "use strict";
 const test = require("node:test"), assert = require("node:assert/strict");
 require("./fixtures/ai-native/contract-consumer.cjs").blockNetwork(test);
-require("ts-node").register({ transpileOnly: false, compilerOptions: { module: "commonjs", moduleResolution: "node", experimentalDecorators: true, emitDecoratorMetadata: true } });
-const { ModelGatewayService } = require("../apps/api/src/modules/ai-native/model-gateway.service");
-const { ModelGatewayModule } = require("../apps/api/src/modules/ai-native/model-gateway.module");
-const { ModelAdapterError, ModelGatewayError } = require("../apps/api/src/modules/ai-native/model-gateway.ports");
+const { createControllerSourceLoader } = require('../scripts/controller-sources.cjs');
+const sourceLoader = createControllerSourceLoader(require('node:path').resolve(__dirname, '..'));
+const gateway = sourceLoader.load(sourceLoader.resolveSource(__filename, '@rental-os/platform-server/ai-gateway', true));
+const { ModelGatewayService } = gateway;
+const { ModelGatewayModule } = gateway;
+const { ModelAdapterError, ModelGatewayError } = gateway;
 const context = { tenantId: "synthetic-tenant", workspaceId: "synthetic-space", actorId: "synthetic-actor" };
 const request = () => ({ callId: "synthetic-call", model: "synthetic-model", messages: [{ role: "user", content: "Synthetic input only" }], maxOutputTokens: 100 });
 function harness() {

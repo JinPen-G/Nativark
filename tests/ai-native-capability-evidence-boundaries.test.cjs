@@ -1,9 +1,11 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { ProviderCapabilityService } = require('../apps/api/src/modules/ai-native/provider-capability.service');
-const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
+const { createControllerSourceLoader } = require('../scripts/controller-sources.cjs');
+const sourceLoader = createControllerSourceLoader(require('node:path').resolve(__dirname, '..'));
+const gateway = sourceLoader.load(sourceLoader.resolveSource(__filename, '@rental-os/platform-server/ai-gateway', true));
+const { ProviderCapabilityService } = gateway;
+const { capabilityProfileFingerprint } = gateway;
 const now = new Date('2026-10-04T00:00:00Z');
 const profile = { id: 'p', scopeId: 's', scopeKind: 'TENANT', profileKey: 'default', role: 'DEFAULT', serviceMode: 'tenant_managed', protocol: 'openai_chat_completions', provider: 'synthetic', model: 'm', credentialRef: 'vault:x', configRevision: 2, enabled: true, disabledAt: null, allowedCapabilities: ['text','tools'] };
 const row = () => ({ id: 'e', profileId: 'p', scope: { id: 's', kind: 'TENANT' }, capability: 'tools', status: 'supported', source: 'connection_test', observedRevision: 2,
