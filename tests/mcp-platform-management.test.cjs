@@ -5,21 +5,18 @@
 const assert = require('node:assert/strict'), { test } = require('node:test');
 const fs = require('node:fs'), path = require('node:path');
 const { createRequire } = require('node:module'), { pathToFileURL } = require('node:url');
-const { fixture: originalFixture, source, root, output, identity: als } = require('./fixtures/mcp/original-identity.cjs');
-const { PlatformService } = source('apps/api/src/modules/platform/platform.service.ts');
+const { fixture: originalFixture, source, root, output, identity: als, installed, ts, toolchainRoot, selectedSource } = require('./fixtures/mcp/original-identity.cjs');
 const { createOriginalMcpPlatformManagement, createOriginalMcpPlatformAdmissionManagement } = source('apps/api/src/modules/auth/original-mcp-platform-management.ts');
 const { createOriginalMcpAdmissionControlPlane } = source('apps/api/src/modules/auth/original-mcp-admission-control-plane.ts');
 const { OperationLogService } = source('apps/api/src/common/operation-log.service.ts');
-const installed = createRequire(path.join(root, 'clients/agent-desktop/harness/packages/mcp/mcp-client/package.json'));
-const ts = require(path.join(root, 'clients/agent-desktop/harness/node_modules/typescript/lib/typescript.js'));
 const signal = () => new AbortController().signal;
 let artifact;
 async function compiled() {
   if (artifact) return artifact;
-  const target = fs.mkdtempSync(path.join(root, 'output/mcp-platform-management-verification-')), pkg = path.join(root, 'packages/mcp-server'), staged = path.join(target, 'node_modules/@rental-os/mcp-server');
+  const target = fs.mkdtempSync(path.join(output, 'platform-management-')), pkg = path.join(root, 'packages/mcp-server'), staged = path.join(target, 'node_modules/@rental-os/mcp-server');
   fs.mkdirSync(staged, { recursive: true }); fs.copyFileSync(path.join(pkg, 'package.json'), path.join(staged, 'package.json'));
   const options = { strict: true, skipLibCheck: true, declaration: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext,
-    types: ['node'], typeRoots: [path.join(root, 'clients/agent-desktop/harness/node_modules/@types')], rootDir: path.join(pkg, 'src'), outDir: path.join(staged, 'dist'),
+    types: ['node'], typeRoots: [path.join(toolchainRoot, 'node_modules/@types')], rootDir: path.join(pkg, 'src'), outDir: path.join(staged, 'dist'),
     paths: { '@modelcontextprotocol/server': [path.join(path.dirname(installed.resolve('@modelcontextprotocol/server')), 'index.d.mts')] } };
   const check = program => { const diagnostics = ts.getPreEmitDiagnostics(program); assert.equal(diagnostics.length, 0, diagnostics.map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n')).join('\n')); assert.equal(program.emit().emitSkipped, false); };
   check(ts.createProgram([path.join(pkg, 'src/admission-control-plane.ts')], options));
@@ -28,9 +25,9 @@ async function compiled() {
     'export { createMcpAdmissionControlPlane } from "@rental-os/mcp-server/admission-control-plane";',
   ].join('\n'));
   check(ts.createProgram([consumer], { ...options, rootDir: target, outDir: path.join(target, 'consumer-build') }));
-  check(ts.createProgram([path.join(root, 'apps/api/src/modules/auth/trusted-platform-browser-principal.ts')], { ...options,
-    rootDir: path.join(root, 'apps/api/src/modules/auth'), outDir: path.join(output, 'platform-principal-types') }));
-  const auditSource = fs.readFileSync(path.join(root, 'apps/api/src/common/operation-log.service.ts'), 'utf8');
+  check(ts.createProgram([selectedSource('@rental-os/rental-core/trusted-platform-browser-principal')], { ...options,
+    rootDir: path.dirname(selectedSource('@rental-os/rental-core/trusted-platform-browser-principal')), outDir: path.join(output, 'platform-principal-types') }));
+  const auditSource = fs.readFileSync(selectedSource('@rental-os/rental-mcp-host/operation-log'), 'utf8');
   const auditAst = ts.createSourceFile('operation-log.service.ts', auditSource, ts.ScriptTarget.ES2022, true);
   const auditType = auditAst.statements.find(node => ts.isTypeAliasDeclaration(node) && node.name.text === 'OriginalOAuthAuditRecord'); assert.ok(auditType);
   // Compile the actual internal event type only, not substituted Prisma/Nest API types.
@@ -53,8 +50,7 @@ function fixture(api) {
   const f = originalFixture(), now = Math.floor(Date.now() / 1000); f.user.isSaasAdmin = true; f.tenantStatus = 'ACTIVE'; f.accountReads = 0; f.sessionReads = 0; f.queries = [];
   f.session = { id: 'platform-original-session', userId: f.user.id, currentWorkspaceId: null, audience: 'operator', expiresAt: new Date((now + 1800) * 1000), revokedAt: null };
   f.payload = { sub: f.user.id, tid: f.user.tenantId, sid: f.session.id, aud: 'operator', iat: now, exp: now + 900 };
-  Object.setPrototypeOf(f.platform, PlatformService.prototype);
-  f.platform.getAuthSession = (...args) => PlatformService.prototype.getAuthSession.call(f.platform, ...args);
+
   f.repository.prisma = { user: { findFirst() { throw new Error('Global account fallback forbidden'); } }, authSession: { findFirst() { throw new Error('Global session fallback forbidden'); } } };
   f.tx.user = { async findFirst(query) { f.accountReads++; assert.equal(query.where.isActive, true); assert.equal(query.where.tenant.status, 'ACTIVE');
     const row = query.where.id === f.user.id && f.user.isActive && f.tenantStatus === 'ACTIVE' ? structuredClone(f.user) : null;

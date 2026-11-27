@@ -9,7 +9,7 @@ const fs = require('node:fs'), path = require('node:path');
 const { spawn, execFileSync } = require('node:child_process');
 const { randomBytes, createHash } = require('node:crypto');
 const { createOwnedDatabase } = require('./helpers/e2e-database-ownership.cjs');
-const root = path.resolve(__dirname, '..'), output = path.join(root, 'output');
+const root = path.resolve(process.env.MCP_TEST_SOURCE_ROOT || path.join(__dirname, '..')), output = path.join(root, 'output');
 const basedir = 'C:/Program Files/MySQL/MySQL Server 8.4';
 const mysqld = path.join(basedir, 'bin/mysqld.exe'), mysql = path.join(basedir, 'bin/mysql.exe');
 const netstat = 'C:/Windows/System32/netstat.exe', powershell = 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
@@ -65,7 +65,7 @@ function serverArgs(directory, port) {
 }
 
 async function compiledStores(directory) {
-  const { createRequire } = require('node:module'), { pathToFileURL } = require('node:url');
+  const { createRequire, isBuiltin } = require('node:module'), { pathToFileURL } = require('node:url');
   // Reuse only an explicitly selected, fixed artifact in this worktree. Every
   // original source hash and the real package manifest must still match. This
   // does not claim a fresh type check or copy another tree's generated client.
@@ -87,14 +87,37 @@ async function compiledStores(directory) {
       currentSourceHashesMatched: true, freshMcpTypecheck: false });
     return import(pathToFileURL(path.join(artifact, 'consumer-build/consumer.mjs')).href);
   }
-  const ts = require(path.join(root, 'clients/agent-desktop/harness/node_modules/typescript/lib/typescript.js'));
-  const installed = createRequire(path.join(root, 'clients/agent-desktop/harness/packages/mcp/mcp-client/package.json'));
+  const toolchainRoot = path.resolve(process.env.MCP_TEST_TOOLCHAIN_ROOT || root);
+  const dependencyDirectory = path.join(toolchainRoot, "node_modules");
+  const dependencyRequire = createRequire(path.join(dependencyDirectory, "typescript/package.json"));
+  // Resolve each third-party package from the chosen installation. A missing
+  // prerequisite cannot fall through to an ancestor or a private Harness checkout.
+  function resolveDependency(specifier) {
+    if (isBuiltin(specifier)) return specifier;
+    const packageName = specifier.split("/").slice(0, specifier.startsWith("@") ? 2 : 1).join("/");
+    const packageDirectory = path.join(dependencyDirectory, packageName);
+    if (!fs.existsSync(path.join(packageDirectory, "package.json"))) {
+      const error = new Error(`MCP test prerequisite ${packageName} is missing from ${dependencyDirectory}. Set MCP_TEST_TOOLCHAIN_ROOT to an existing installation containing this package.`);
+      error.code = "MCP_TEST_PREREQUISITE";
+      throw error;
+    }
+    const resolved = dependencyRequire.resolve(specifier);
+    const relative = path.relative(fs.realpathSync(packageDirectory), fs.realpathSync(resolved));
+    assert.ok(relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative),
+      `MCP test dependency ${specifier} resolved outside its selected package`);
+    return resolved;
+  }
+  function installed(specifier) { return dependencyRequire(resolveDependency(specifier)); }
+  installed.resolve = resolveDependency;
+  const ts = installed("typescript");
+  installed.resolve("@types/node/package.json");
+  installed.resolve("@modelcontextprotocol/server");
   const source = path.join(root, 'packages/mcp-server'), build = path.join(directory, 'store-build');
   const staged = path.join(build, 'node_modules/@rental-os/mcp-server'); fs.mkdirSync(staged, { recursive: true });
   fs.copyFileSync(path.join(source, 'package.json'), path.join(staged, 'package.json'));
   const options = { strict: true, skipLibCheck: true, declaration: true, target: ts.ScriptTarget.ES2022,
     module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext,
-    types: ['node'], typeRoots: [path.join(root, 'clients/agent-desktop/harness/node_modules/@types')],
+    types: ['node'], typeRoots: [path.join(dependencyDirectory, '@types')],
     rootDir: path.join(source, 'src'), outDir: path.join(staged, 'dist'),
     paths: { '@modelcontextprotocol/server': [path.join(path.dirname(installed.resolve('@modelcontextprotocol/server')), 'index.d.mts')] } };
   const check = program => {

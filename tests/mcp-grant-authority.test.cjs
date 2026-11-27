@@ -4,21 +4,18 @@
 const assert = require('node:assert/strict'), { test } = require('node:test');
 const fs = require('node:fs'), path = require('node:path'), { createHash } = require('node:crypto');
 const { createRequire, registerHooks } = require('node:module'), { pathToFileURL } = require('node:url');
-const { fixture: identityFixture, source, identity: als } = require('./fixtures/mcp/original-identity.cjs');
+const { fixture: identityFixture, source, root, output: fixtureOutput, installed, ts, toolchainRoot, identity: als } = require('./fixtures/mcp/original-identity.cjs');
 const { createOriginalMcpGrantManagement } = source('apps/api/src/modules/auth/original-mcp-grant-management.ts');
 const { createOriginalMcpGrantControlPlane } = source('apps/api/src/modules/auth/original-mcp-grant-control-plane.ts');
 const { OperationLogService } = source('apps/api/src/common/operation-log.service.ts');
-const { PlatformService } = source('apps/api/src/modules/platform/platform.service.ts');
-const root = path.resolve(__dirname, '..'), signal = () => new AbortController().signal;
-const installed = createRequire(path.join(root, 'clients/agent-desktop/harness/packages/mcp/mcp-client/package.json'));
-const ts = require(path.join(root, 'clients/agent-desktop/harness/node_modules/typescript/lib/typescript.js'));
+const signal = () => new AbortController().signal;
 let artifact;
 async function compiled() {
   if (artifact) return artifact;
-  const output = fs.mkdtempSync(path.join(root, 'output/mcp-grant-authority-verification-'));
+  const output = path.join(fixtureOutput, 'grant-authority');
   const packageRoot = path.join(root, 'packages/mcp-server'), staged = path.join(output, 'node_modules/@rental-os/mcp-server');
   fs.mkdirSync(staged, { recursive: true }); fs.copyFileSync(path.join(packageRoot, 'package.json'), path.join(staged, 'package.json'));
-  const typeRoots = [path.join(root, 'clients/agent-desktop/harness/node_modules/@types')];
+  const typeRoots = [path.join(toolchainRoot, 'node_modules/@types')];
   const options = { strict: true, skipLibCheck: true, declaration: true, target: ts.ScriptTarget.ES2022,
     module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext, types: ['node'], typeRoots,
     rootDir: path.join(packageRoot, 'src'), outDir: path.join(staged, 'dist'),
@@ -234,8 +231,6 @@ test('original Web owner/tenant manager reads credential-free grant summary and 
     const f = fixture(api), now = Math.floor(Date.now() / 1000), session = { id: 'grant-management-session', userId: 'user-a', audience: 'operator', currentWorkspaceId: 'workspace-a', expiresAt: new Date((now + 900) * 1000), revokedAt: null };
     f.state.mcp_oauth_grant_operations = {}; f.state.mcp_oauth_grant_last_use = {};
     f.state.mcp_read_goal_budgets = {}; f.state.mcp_read_calls = {}; // explicit SQL/target substitutes; actual budget/receipt code below
-    f.original.platform.getAuthSession = (...args) => PlatformService.prototype.getAuthSession.call(f.original.platform, ...args);
-    f.original.platform.assertTrustedWorkspaceIntegrationManagement = (...args) => PlatformService.prototype.assertTrustedWorkspaceIntegrationManagement.call(f.original.platform, ...args);
     f.nativeExtra = { authSession: { findFirst: async () => structuredClone(session) }, operationLog: { create: async ({ data }) => { if (f.failAudit) throw new Error('private audit failure'); f.pendingAudit.push(data); return { id: 'original-grant-management-audit' }; } } };
     f.queryExtra = (working, sql, values) => {
       if (sql.startsWith('SELECT callId, goalId, grantId FROM mcp_read_calls WHERE grantId')) {

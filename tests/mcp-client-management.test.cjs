@@ -5,20 +5,17 @@
 const assert = require('node:assert/strict'), { test } = require('node:test');
 const fs = require('node:fs'), path = require('node:path');
 const { createRequire, registerHooks } = require('node:module'), { pathToFileURL } = require('node:url');
-const { fixture: originalFixture, source, root, identity: als } = require('./fixtures/mcp/original-identity.cjs');
-const { PlatformService } = source('apps/api/src/modules/platform/platform.service.ts');
+const { fixture: originalFixture, source, root, output: fixtureOutput, installed, ts, toolchainRoot, identity: als } = require('./fixtures/mcp/original-identity.cjs');
 const { OperationLogService } = source('apps/api/src/common/operation-log.service.ts');
 const { createOriginalMcpPublicClientManagement } = source('apps/api/src/modules/auth/original-mcp-public-client-management.ts');
-const installed = createRequire(path.join(root, 'clients/agent-desktop/harness/packages/mcp/mcp-client/package.json'));
-const ts = require(path.join(root, 'clients/agent-desktop/harness/node_modules/typescript/lib/typescript.js'));
 const signal = () => new AbortController().signal, options = { isolationLevel: 'Serializable', maxWait: 2500, timeout: 5000 };
 let artifact;
 async function compiled() {
   if (artifact) return artifact;
-  const output = fs.mkdtempSync(path.join(root, 'output/mcp-client-management-verification-')), pkg = path.join(root, 'packages/mcp-server'), staged = path.join(output, 'node_modules/@rental-os/mcp-server');
+  const output = path.join(fixtureOutput, 'client-management'), pkg = path.join(root, 'packages/mcp-server'), staged = path.join(output, 'node_modules/@rental-os/mcp-server');
   fs.mkdirSync(staged, { recursive: true }); fs.copyFileSync(path.join(pkg, 'package.json'), path.join(staged, 'package.json'));
   const compiler = { strict: true, skipLibCheck: true, declaration: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext,
-    types: ['node'], typeRoots: [path.join(root, 'clients/agent-desktop/harness/node_modules/@types')], rootDir: path.join(pkg, 'src'), outDir: path.join(staged, 'dist'),
+    types: ['node'], typeRoots: [path.join(toolchainRoot, 'node_modules/@types')], rootDir: path.join(pkg, 'src'), outDir: path.join(staged, 'dist'),
     paths: { '@modelcontextprotocol/server': [path.join(path.dirname(installed.resolve('@modelcontextprotocol/server')), 'index.d.mts')] } };
   const check = program => { const diagnostics = ts.getPreEmitDiagnostics(program); assert.equal(diagnostics.length, 0, diagnostics.map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n')).join('\n')); assert.equal(program.emit().emitSkipped, false); };
   check(ts.createProgram(['prisma-public-client-registry.ts', 'prisma-oauth-grant-authority.ts', 'prisma-oauth-consent-authority.ts', 'prisma-oauth-admission-store.ts', 'prisma-oauth-web-consent.ts', 'public-client-authorization.ts'].map(file => path.join(pkg, 'src', file)), compiler));

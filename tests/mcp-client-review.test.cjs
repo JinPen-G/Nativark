@@ -5,21 +5,19 @@
 const assert = require('node:assert/strict'), { test } = require('node:test');
 const fs = require('node:fs'), path = require('node:path');
 const { createRequire, registerHooks } = require('node:module'), { pathToFileURL } = require('node:url');
-const { root, source } = require('./fixtures/mcp/original-identity.cjs');
+const { root, source, output: fixtureOutput, installed, ts, toolchainRoot } = require('./fixtures/mcp/original-identity.cjs');
 const { fixture: baseFixture } = require('./fixtures/mcp/public-client-management.cjs');
 const { createOriginalMcpClientReviewManagement } = source('apps/api/src/modules/auth/original-mcp-client-review-management.ts');
 const { createOriginalMcpPublicClientManagement } = source('apps/api/src/modules/auth/original-mcp-public-client-management.ts');
 const { createOriginalMcpReviewedGovernanceControlPlane } = source('apps/api/src/modules/auth/original-mcp-reviewed-governance-control-plane.ts');
-const installed = createRequire(path.join(root, 'clients/agent-desktop/harness/packages/mcp/mcp-client/package.json'));
-const ts = require(path.join(root, 'clients/agent-desktop/harness/node_modules/typescript/lib/typescript.js'));
 const signal = () => new AbortController().signal, origin = 'https://admin.example.invalid';
 const config = { enabled: true, prepareEndpoint: origin + '/mcp/client-review/prepare', decisionEndpoint: origin + '/mcp/client-review/decide', receiptEndpoint: origin + '/mcp/client-review/receipt', allowedScopes: ['rental.catalog.read'], policyRevision: 1, actionTtlSeconds: 120, maxReviewLifetimeSeconds: 900 };
 let artifact;
 async function compiled() {
   if (artifact) return artifact;
-  const output = fs.mkdtempSync(path.join(root, 'output/mcp-client-review-verification-')), pkg = path.join(root, 'packages/mcp-server'), staged = path.join(output, 'node_modules/@rental-os/mcp-server');
+  const output = path.join(fixtureOutput, 'client-review'), pkg = path.join(root, 'packages/mcp-server'), staged = path.join(output, 'node_modules/@rental-os/mcp-server');
   fs.mkdirSync(staged, { recursive: true }); fs.copyFileSync(path.join(pkg, 'package.json'), path.join(staged, 'package.json'));
-  const options = { strict: true, skipLibCheck: true, declaration: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext, types: ['node'], typeRoots: [path.join(root, 'clients/agent-desktop/harness/node_modules/@types')], rootDir: path.join(pkg, 'src'), outDir: path.join(staged, 'dist'), paths: { '@modelcontextprotocol/server': [path.join(path.dirname(installed.resolve('@modelcontextprotocol/server')), 'index.d.mts')] } };
+  const options = { strict: true, skipLibCheck: true, declaration: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext, types: ['node'], typeRoots: [path.join(toolchainRoot, 'node_modules/@types')], rootDir: path.join(pkg, 'src'), outDir: path.join(staged, 'dist'), paths: { '@modelcontextprotocol/server': [path.join(path.dirname(installed.resolve('@modelcontextprotocol/server')), 'index.d.mts')] } };
   const check = program => { const diagnostics = ts.getPreEmitDiagnostics(program); assert.equal(diagnostics.length, 0, diagnostics.map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n')).join('\n')); assert.equal(program.emit().emitSkipped, false); };
   check(ts.createProgram(['reviewed-governance-control-plane.ts', 'public-client-authorization.ts'].map(file => path.join(pkg, 'src', file)), options));
   const consumer = path.join(output, 'consumer.mts'); fs.writeFileSync(consumer, `

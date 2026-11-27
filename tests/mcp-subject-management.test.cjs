@@ -5,24 +5,21 @@
 const assert = require('node:assert/strict'), { test } = require('node:test');
 const fs = require('node:fs'), path = require('node:path');
 const { createRequire } = require('node:module'), { pathToFileURL } = require('node:url');
-const { fixture: originalFixture, source, root, identity } = require('./fixtures/mcp/original-identity.cjs');
-const { PlatformService } = source('apps/api/src/modules/platform/platform.service.ts');
+const { fixture: originalFixture, source, root, identity, output: originalOutput, installed, ts, toolchainRoot } = require('./fixtures/mcp/original-identity.cjs');
 const { OperationLogService } = source('apps/api/src/common/operation-log.service.ts');
 const { createOriginalMcpSubjectManagement } = source('apps/api/src/modules/auth/original-mcp-subject-management.ts');
 const { createOriginalMcpSubjectControlPlane } = source('apps/api/src/modules/auth/original-mcp-subject-control-plane.ts');
 const { createOriginalMcpGrantIdentity } = source('apps/api/src/modules/auth/original-mcp-grant-identity.ts');
-const installed = createRequire(path.join(root, 'clients/agent-desktop/harness/packages/mcp/mcp-client/package.json'));
-const ts = require(path.join(root, 'clients/agent-desktop/harness/node_modules/typescript/lib/typescript.js'));
 const signal = () => new AbortController().signal;
 const resource = 'https://mcp.example.invalid/mcp', target = { userId: 'user-a', tenantId: 'tenant-a' };
 const transactionOptions = { isolationLevel: 'Serializable', maxWait: 2500, timeout: 5000 };
 let artifact;
 async function compiled() {
   if (artifact) return artifact;
-  const output = fs.mkdtempSync(path.join(root, 'output/mcp-subject-management-verification-')), pkg = path.join(root, 'packages/mcp-server'), staged = path.join(output, 'node_modules/@rental-os/mcp-server');
+  const output = fs.mkdtempSync(path.join(originalOutput, 'subject-management-')), pkg = path.join(root, 'packages/mcp-server'), staged = path.join(output, 'node_modules/@rental-os/mcp-server');
   fs.mkdirSync(staged, { recursive: true }); fs.copyFileSync(path.join(pkg, 'package.json'), path.join(staged, 'package.json'));
   const options = { strict: true, skipLibCheck: true, declaration: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext,
-    types: ['node'], typeRoots: [path.join(root, 'clients/agent-desktop/harness/node_modules/@types')], rootDir: path.join(pkg, 'src'), outDir: path.join(staged, 'dist'),
+    types: ['node'], typeRoots: [path.join(toolchainRoot, 'node_modules/@types')], rootDir: path.join(pkg, 'src'), outDir: path.join(staged, 'dist'),
     paths: { '@modelcontextprotocol/server': [path.join(path.dirname(installed.resolve('@modelcontextprotocol/server')), 'index.d.mts')] } };
   const check = program => { const diagnostics = ts.getPreEmitDiagnostics(program); assert.equal(diagnostics.length, 0, diagnostics.map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n')).join('\n')); assert.equal(program.emit().emitSkipped, false); };
   check(ts.createProgram([path.join(pkg, 'src/subject-control-plane.ts')], options));
@@ -50,9 +47,6 @@ function fixture(api) {
   const originalUserRead = f.tx.user.findFirst;
   f.tx.user.findFirst = async query => f.otherUser && query.where.id === f.otherUser.id ? (f.otherUser.isActive ? structuredClone(f.otherUser) : null) : originalUserRead(query);
   f.tx.authSession = { findFirst: async query => query.where.id === session.id && session.revokedAt === null && session.expiresAt > new Date() ? structuredClone(session) : null };
-  f.platform.getAuthSession = (...args) => PlatformService.prototype.getAuthSession.call(f.platform, ...args);
-  f.platform.assertTrustedWorkspaceIntegrationManagement = (...args) => PlatformService.prototype.assertTrustedWorkspaceIntegrationManagement.call(f.platform, ...args);
-  f.platform.assertTrustedWorkspaceSubjectManagement = (...args) => PlatformService.prototype.assertTrustedWorkspaceSubjectManagement.call(f.platform, ...args);
   f.enableManagement = () => { const r = f.user.roleAssignments[0].role; r.permissions = [{ permission: { code: 'system:integration:manage' } }]; r.dataScope = 'ALL'; };
   f.browser = () => new Request('https://admin.example.invalid/mcp/subjects', { headers: { authorization: 'Bearer ' + f.auth.signAccessToken(f.payload) } });
   f.database = { async $transaction(callback, options) {

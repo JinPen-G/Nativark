@@ -4,21 +4,19 @@
  * this does not approve notices, perform MFA or prove true UI/DB/full API types. */
 const assert = require('node:assert/strict'), { test } = require('node:test');
 const fs = require('node:fs'), path = require('node:path'), { createRequire } = require('node:module'), { pathToFileURL } = require('node:url');
-const { source, root } = require('./fixtures/mcp/original-identity.cjs');
+const { source, root, output: fixtureOutput, installed, ts, toolchainRoot } = require('./fixtures/mcp/original-identity.cjs');
 const { fixture: originalFixture } = require('./fixtures/mcp/public-client-management.cjs');
 const { createOriginalMcpConsentPolicyManagement } = source('apps/api/src/modules/auth/original-mcp-consent-policy-management.ts');
 const { createOriginalMcpGrantIdentity } = source('apps/api/src/modules/auth/original-mcp-grant-identity.ts');
-const installed = createRequire(path.join(root, 'clients/agent-desktop/harness/packages/mcp/mcp-client/package.json'));
-const ts = require(path.join(root, 'clients/agent-desktop/harness/node_modules/typescript/lib/typescript.js'));
 const signal = () => new AbortController().signal, resource = 'https://mcp.example.invalid/mcp', platform = { kind: 'platform' }, workspace = { kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'workspace-a' };
 const options = { isolationLevel: 'Serializable', maxWait: 2500, timeout: 5000 };
 let artifact;
 async function compiled() {
   if (artifact) return artifact;
-  const output = fs.mkdtempSync(path.join(root, 'output/mcp-consent-policy-verification-')), pkg = path.join(root, 'packages/mcp-server'), staged = path.join(output, 'node_modules/@rental-os/mcp-server');
+  const output = path.join(fixtureOutput, 'consent-policy'), pkg = path.join(root, 'packages/mcp-server'), staged = path.join(output, 'node_modules/@rental-os/mcp-server');
   fs.mkdirSync(staged, { recursive: true }); fs.copyFileSync(path.join(pkg, 'package.json'), path.join(staged, 'package.json'));
   const opts = { strict: true, skipLibCheck: true, declaration: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext,
-    types: ['node'], typeRoots: [path.join(root, 'clients/agent-desktop/harness/node_modules/@types')], rootDir: path.join(pkg, 'src'), outDir: path.join(staged, 'dist'),
+    types: ['node'], typeRoots: [path.join(toolchainRoot, 'node_modules/@types')], rootDir: path.join(pkg, 'src'), outDir: path.join(staged, 'dist'),
     paths: { '@modelcontextprotocol/server': [path.join(path.dirname(installed.resolve('@modelcontextprotocol/server')), 'index.d.mts')] } };
   const check = program => { const diag = ts.getPreEmitDiagnostics(program); assert.equal(diag.length, 0, diag.map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n')).join('\n')); assert.equal(program.emit().emitSkipped, false); };
   check(ts.createProgram([path.join(pkg, 'src/prisma-oauth-consent-policy-store.ts')], opts));

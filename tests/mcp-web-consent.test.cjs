@@ -6,7 +6,7 @@ const assert = require('node:assert/strict'), { test, after } = require('node:te
 const fs = require('node:fs'), path = require('node:path'), { createHash } = require('node:crypto');
 const { registerHooks } = require('node:module'), { pathToFileURL } = require('node:url');
 const { fixture: originalFixture, source, runtimeShared: principalShared, installed, ts, dependencyDirectory,
-  output: originalOutput, cleanup: cleanupOriginal } = require('./fixtures/mcp/original-identity.cjs');
+  root, checkNativeRequestScopeTypes, output: originalOutput, cleanup: cleanupOriginal } = require('./fixtures/mcp/original-identity.cjs');
 after(cleanupOriginal);
 const { createOriginalMcpCatalogReadAuthority } = source('apps/api/src/modules/auth/original-mcp-catalog-read-authority.ts');
 const { createOriginalMcpAvailabilityReadAuthority } = source('apps/api/src/modules/auth/original-mcp-availability-read-authority.ts');
@@ -15,7 +15,7 @@ const { createOriginalMcpOAuthCore } = source('apps/api/src/modules/auth/origina
 const { createOriginalMcpCatalogReadTools } = source('apps/api/src/modules/auth/original-mcp-catalog-read-tools.ts');
 const { AsyncLocalStorage } = require('node:async_hooks');
 const { createOriginalMcpHost } = source('apps/api/src/modules/auth/original-mcp-host.ts');
-const root = path.resolve(__dirname, '..'), signal = () => new AbortController().signal;
+const signal = () => new AbortController().signal;
 installed.resolve('@modelcontextprotocol/server');
 let artifact, registerOriginalReadTools;
 async function compiled() {
@@ -35,20 +35,12 @@ async function compiled() {
   fs.mkdirSync(stagedRental, { recursive: true }); fs.copyFileSync(path.join(rentalRoot, 'package.json'), path.join(stagedRental, 'package.json'));
   check(ts.createProgram([path.join(rentalRoot, 'src/capability-mapping.ts'), path.join(rentalRoot, 'src/catalog-goal-policy.ts')], {
     ...options, rootDir: path.join(rentalRoot, 'src'), outDir: path.join(stagedRental, 'dist'),
-    paths: { ...options.paths, '@rental-os/mcp-server': [path.join(staged, 'dist/index.d.ts')] },
-  }));
-  // Strictly compile only the new API context and original request-identity types.
-  // Nest exception declaration is an explicit facade, not API/Prisma/DI validation.
-  const nestTypes = path.join(output, 'context-nest.d.ts');
-  fs.writeFileSync(nestTypes, 'export declare class ForbiddenException extends Error { constructor(message?: string); }\n');
-  const nativeTypes = path.join(output, 'context-native.d.ts');
-  fs.writeFileSync(nativeTypes, 'export namespace Prisma { export interface TransactionClient {} }\n');
-  check(ts.createProgram([path.join(root, 'apps/api/src/modules/auth/original-mcp-read-context.ts')], {
-    ...options, module: ts.ModuleKind.Node16, moduleResolution: ts.ModuleResolutionKind.Node16,
-    rootDir: path.join(root, 'apps/api/src'), outDir: path.join(output, 'read-context-types'),
     paths: { ...options.paths, '@rental-os/mcp-server': [path.join(staged, 'dist/index.d.ts')],
-      '@rental-os/mcp-server/*': [path.join(staged, 'dist/*.d.ts')], '@nestjs/common': [nestTypes], '@prisma/client': [nativeTypes] },
+      '@rental-os/mcp-server/prisma-mcp-catalog-goals': [path.join(staged, 'dist/prisma-mcp-catalog-goals.d.ts')] },
   }));
+  // Check the same read-context contract against the selected schema and formal
+  // package owners, including original Native/cancellation negative assertions.
+  checkNativeRequestScopeTypes();
   const consumer = path.join(output, 'consumer.mts');
   fs.writeFileSync(consumer, [
     'export { createOriginalMcpTrafficMeter, originalMcpTrafficClass } from "@rental-os/mcp-server/original-traffic-meter";',
@@ -288,8 +280,6 @@ function fixture(api, requestedScopes = scopes) {
       return value;
     } finally { f.native = parent?.native ?? tx; release(); }
   } };
-  const { PlatformService } = source('apps/api/src/modules/platform/platform.service.ts');
-  original.platform.getAuthSession = (...args) => PlatformService.prototype.getAuthSession.call(original.platform, ...args);
   f.bearer = original.auth.signAccessToken({ sub: 'user-a', tid: 'tenant-a', sid: session.id, wid: session.currentWorkspaceId, aud: 'operator', iat: now, exp: now + 900 });
   f.browser = () => new Request(authorizationEndpoint, { headers: { authorization: 'Bearer ' + f.bearer } });
   f.post = (prepared, decision = 'approve', options = {}) => new Request(consentEndpoint, { method: 'POST', headers: { authorization: 'Bearer ' + f.bearer, origin: 'https://as.example.invalid', 'sec-fetch-site': 'same-origin', 'content-type': 'application/x-www-form-urlencoded', ...options.headers },
@@ -383,9 +373,7 @@ test('original catalog goal adoption closes once under trusted Web nonce preserv
   assert.throws(()=>api.createPrismaMcpCatalogGoalIntents(unknown.config,{ goalPolicy:unknown.authority.goalPolicy,acceptsNextInput:unknown.authority.acceptsNextInput,withCurrent:unknown.authority.withCurrent,withOwner:unknown.authority.withOwner,audit:unknown.authority.audit }),'missing original transition path never falls back to intent authority');
   // HTTP goal control uses the ACTUAL original host/Core. Identity/goal setup
   // above and SQL/MFA remain fixtures; no listener or real external HTTP runs.
-  const web=await make();await web.read();const OriginalPlatform=source('apps/api/src/modules/platform/platform.service.ts').PlatformService;
-  web.f.original.platform.assertTrustedWorkspaceIntegrationManagement=(...args)=>OriginalPlatform.prototype.assertTrustedWorkspaceIntegrationManagement.call(web.f.original.platform,...args);
-  web.f.original.platform.assertTrustedWorkspaceSubjectManagement=(...args)=>OriginalPlatform.prototype.assertTrustedWorkspaceSubjectManagement.call(web.f.original.platform,...args);
+  const web=await make();await web.read();
   const issuer='https://as.example.invalid/',tokenEndpoint=issuer+'token',revocationEndpoint=issuer+'revoke',admin=issuer+'governance';
   const service={ enabled:true,resource:{ resourceUrl:resource,authorizationServerUrl:issuer,allowedOrigins:[issuer],maxRequestBytes:65536,authorizationTimeoutMs:5000 },
     authorization:{ issuer,authorizationEndpoint,tokenEndpoint,revocationEndpoint,allowedScopes:scopes,allowedOrigins:[issuer],timeoutMs:5000,maxMetadataBytes:65536 },
@@ -755,9 +743,7 @@ test('real original browser identity + persisted nonce/decision is consumed by o
   await assert.rejects(() => noVerification.webConsent.prepare(missing.input, missing.browser(), signal())); assert.deepEqual(missing.state.mcp_oauth_grants, {}, 'required real verification cannot be replaced by core wiring');
   await core.service.close(); assert.equal((await core.service.fetch(browserRequest())).status, 503); await noVerification.service.close();
 
-  const hosted = fixture(api), { PlatformService } = source('apps/api/src/modules/platform/platform.service.ts');
-  hosted.original.platform.assertTrustedWorkspaceIntegrationManagement = (...args) => PlatformService.prototype.assertTrustedWorkspaceIntegrationManagement.call(hosted.original.platform, ...args);
-  hosted.original.platform.assertTrustedWorkspaceSubjectManagement = (...args) => PlatformService.prototype.assertTrustedWorkspaceSubjectManagement.call(hosted.original.platform, ...args);
+  const hosted = fixture(api);
   const admin = 'https://admin.example.invalid', common = { enabled: true, resourceUrl: resource, requestTimeoutMs: 5000, maxResponseBytes: 65536 };
   const readGrant = api.createPrismaOAuthGrantAuthority({ enabled: true, resourceUrl: resource, allowedScopes: scopes }, hosted.store, hosted.registry, hosted.identity);
   const catalogName = api.MCP_BUSINESS_CAPABILITIES.find(value => value.code === 'rental.catalog.search').name;

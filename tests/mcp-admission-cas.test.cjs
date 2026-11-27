@@ -1,20 +1,94 @@
 "use strict";
 /** Admission CAS sources/ESM with explicit SQL and original-management substitutes.
  * No real management Guard, DB, migration, consent or business publication. */
-const assert = require('node:assert/strict'), { test } = require('node:test');
+const assert = require('node:assert/strict'), { test, after } = require('node:test');
 const fs = require('node:fs'), path = require('node:path');
-const { createRequire } = require('node:module'), { pathToFileURL } = require('node:url');
-const root = path.resolve(__dirname, '..');
-const installed = createRequire(path.join(root, 'clients/agent-desktop/harness/packages/mcp/mcp-client/package.json'));
-const ts = require(path.join(root, 'clients/agent-desktop/harness/node_modules/typescript/lib/typescript.js'));
+const { createRequire, registerHooks, isBuiltin } = require('node:module'), { pathToFileURL } = require('node:url');
+const root = path.resolve(process.env.MCP_TEST_SOURCE_ROOT || path.join(__dirname, ".."));
+const toolchainRoot = path.resolve(process.env.MCP_TEST_TOOLCHAIN_ROOT || root);
+const dependencyDirectory = path.join(toolchainRoot, "node_modules");
+const dependencyRequire = createRequire(path.join(dependencyDirectory, "typescript/package.json"));
+// Resolve each third-party package from the chosen installation. A missing
+// prerequisite cannot fall through to an ancestor or a private Harness checkout.
+function resolveDependency(specifier) {
+  if (isBuiltin(specifier)) return specifier;
+  const packageName = specifier.split("/").slice(0, specifier.startsWith("@") ? 2 : 1).join("/");
+  const packageDirectory = path.join(dependencyDirectory, packageName);
+  if (!fs.existsSync(path.join(packageDirectory, "package.json"))) {
+    const error = new Error(`MCP test prerequisite ${packageName} is missing from ${dependencyDirectory}. Set MCP_TEST_TOOLCHAIN_ROOT to an existing installation containing this package.`);
+    error.code = "MCP_TEST_PREREQUISITE";
+    throw error;
+  }
+  const resolved = dependencyRequire.resolve(specifier);
+  const relative = path.relative(fs.realpathSync(packageDirectory), fs.realpathSync(resolved));
+  assert.ok(relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative),
+    `MCP test dependency ${specifier} resolved outside its selected package`);
+  return resolved;
+}
+function installed(specifier) { return dependencyRequire(resolveDependency(specifier)); }
+installed.resolve = resolveDependency;
+const ts = installed("typescript");
+installed.resolve("@types/node/package.json");
+installed.resolve("@modelcontextprotocol/server");
+const temporaryRoot = path.join(root, "output/.tmp");
+const owner = path.basename(process.argv[1] || "mcp-tests").replace(/[^A-Za-z0-9._-]/gu, "_");
+const outputParent = path.resolve(process.env.MCP_TEST_OUTPUT_ROOT || path.join(temporaryRoot, `mcp-test-toolchain-${process.pid}`));
+const outputDirectory = path.join(outputParent, `mcp-admission-cas-${owner}-${process.pid}`);
+let ownsOutput = false, runtimeHooks;
+function within(directory, file) {
+  const relative = path.relative(directory, file);
+  return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+function checkOutputPath() {
+  assert.ok(within(temporaryRoot, outputParent), "MCP test output must stay in this worktree's output/.tmp");
+  for (let current = outputDirectory; current !== root; current = path.dirname(current)) {
+    assert.ok(within(root, current), "MCP test output escaped its worktree");
+    if (fs.existsSync(current)) assert.equal(fs.lstatSync(current).isSymbolicLink(), false, "MCP test must not follow output links");
+  }
+}
+function prepareOutput() {
+  if (!ownsOutput) {
+    checkOutputPath();
+    fs.mkdirSync(outputParent, { recursive: true });
+    fs.mkdirSync(outputDirectory);
+    ownsOutput = true;
+  }
+  return outputDirectory;
+}
+function cleanupOutput() {
+  if (!ownsOutput) return;
+  checkOutputPath();
+  assert.equal(fs.realpathSync(outputDirectory), outputDirectory, "MCP test output was redirected");
+  const checkChildren = directory => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      assert.equal(entry.isSymbolicLink(), false, "MCP test cleanup must not enter a link");
+      if (entry.isDirectory()) checkChildren(path.join(directory, entry.name));
+    }
+  };
+  checkChildren(outputDirectory);
+  runtimeHooks?.deregister();
+  fs.rmSync(outputDirectory, { recursive: true });
+  assert.equal(fs.existsSync(outputDirectory), false, "MCP test output was not removed");
+  ownsOutput = false;
+  if (!process.env.MCP_TEST_OUTPUT_ROOT) {
+    try { fs.rmdirSync(outputParent); }
+    catch (error) { if (error.code !== "ENOTEMPTY" && error.code !== "ENOENT") throw error; }
+  }
+}
+// Register before compilation so failed and cancelled runs release their own output.
+after(cleanupOutput);
+process.once("exit", cleanupOutput);
+for (const [name, status] of [["SIGINT", 130], ["SIGTERM", 143]]) process.once(name, () => {
+  try { cleanupOutput(); } finally { process.exit(status); }
+});
 const signal = () => new AbortController().signal;
 let artifact;
 async function compiled() {
   if (artifact) return artifact;
-  const output = fs.mkdtempSync(path.join(root, 'output/mcp-admission-cas-verification-'));
+  const output = prepareOutput();
   const packageRoot = path.join(root, 'packages/mcp-server'), staged = path.join(output, 'node_modules/@rental-os/mcp-server');
   fs.mkdirSync(staged, { recursive: true }); fs.copyFileSync(path.join(packageRoot, 'package.json'), path.join(staged, 'package.json'));
-  const typeRoots = [path.join(root, 'clients/agent-desktop/harness/node_modules/@types')];
+  const typeRoots = [path.join(dependencyDirectory, '@types')];
   const options = { strict: true, skipLibCheck: true, declaration: true, target: ts.ScriptTarget.ES2022,
     module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext, types: ['node'], typeRoots,
     rootDir: path.join(packageRoot, 'src'), outDir: path.join(staged, 'dist'),

@@ -1,13 +1,13 @@
 "use strict";
 /** Bundle/profile/Loader and CommandRuntime integration; transport alone is an offline substitute. */
 const assert = require("node:assert/strict");
-const { test } = require("node:test");
+const { test, after } = require("node:test");
 const fs = require("node:fs");
 const path = require("node:path");
 const { createRequire, registerHooks } = require("node:module");
 const { pathToFileURL } = require("node:url");
 
-const root = path.resolve(__dirname, "..");
+const root = path.resolve(process.env.MCP_TEST_SOURCE_ROOT || path.join(__dirname, ".."));
 const harness = process.env.HARNESS_ROOT;
 if (!harness || !path.isAbsolute(harness) || !fs.existsSync(path.join(harness, "apps/cli/package.json"))) {
   throw new Error("Set HARNESS_ROOT to the absolute path of a prepared, compatible Harness checkout");
@@ -25,11 +25,62 @@ const publicResolve = name => (name.startsWith("@modelcontextprotocol/") ? mcp
     : ["@deepseek-ai/dsh-storage", "@deepseek-ai/dsh-storage-domain", "@deepseek-ai/dsh-storage-json"].includes(name) ? basePackage
       : ["@deepseek-ai/dsh-mcp-client", "@deepseek-ai/dsh-scope", "@deepseek-ai/dsh-tools"].includes(name) ? mcp : cli).resolve(name);
 
-const { buildBundle } = require("../clients/harness-plugin/scripts/build-bundle.cjs");
+const { buildBundle } = require(path.join(pluginRoot, "scripts/build-bundle.cjs"));
 const { createHash } = require("node:crypto");
 const npmCli = process.env.HARNESS_NPM_CLI || path.join(root, ".tools/npm/bin/npm-cli.js");
 if (!path.isAbsolute(npmCli) || !fs.existsSync(npmCli)) throw new Error("Set HARNESS_NPM_CLI to an installed npm-cli.js absolute path");
 const tar = createRequire(npmCli)("tar");
+
+const temporaryRoot = path.join(root, "output/.tmp");
+const owner = path.basename(process.argv[1] || "mcp-tests").replace(/[^A-Za-z0-9._-]/gu, "_");
+const outputParent = path.resolve(process.env.MCP_TEST_OUTPUT_ROOT || path.join(temporaryRoot, `mcp-test-toolchain-${process.pid}`));
+const outputDirectory = path.join(outputParent, `harness-${owner}-${process.pid}`);
+let ownsOutput = false;
+function within(directory, file) {
+  const relative = path.relative(directory, file);
+  return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+function checkOutputPath() {
+  assert.ok(within(temporaryRoot, outputParent), "MCP test output must stay in this worktree's output/.tmp");
+  for (let current = outputDirectory; current !== root; current = path.dirname(current)) {
+    assert.ok(within(root, current), "MCP test output escaped its worktree");
+    if (fs.existsSync(current)) assert.equal(fs.lstatSync(current).isSymbolicLink(), false, "MCP test must not follow output links");
+  }
+}
+function prepareOutput() {
+  if (!ownsOutput) {
+    checkOutputPath();
+    fs.mkdirSync(outputParent, { recursive: true });
+    fs.mkdirSync(outputDirectory);
+    ownsOutput = true;
+  }
+  return outputDirectory;
+}
+function cleanupOutput() {
+  if (!ownsOutput) return;
+  checkOutputPath();
+  assert.equal(fs.realpathSync(outputDirectory), outputDirectory, "MCP test output was redirected");
+  const checkChildren = directory => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      assert.equal(entry.isSymbolicLink(), false, "MCP test cleanup must not enter a link");
+      if (entry.isDirectory()) checkChildren(path.join(directory, entry.name));
+    }
+  };
+  checkChildren(outputDirectory);
+  fs.rmSync(outputDirectory, { recursive: true });
+  assert.equal(fs.existsSync(outputDirectory), false, "MCP test output was not removed");
+  ownsOutput = false;
+  if (!process.env.MCP_TEST_OUTPUT_ROOT) {
+    try { fs.rmdirSync(outputParent); }
+    catch (error) { if (error.code !== "ENOTEMPTY" && error.code !== "ENOENT") throw error; }
+  }
+}
+// Register before compilation so failed and cancelled runs release their own output.
+after(cleanupOutput);
+process.once("exit", cleanupOutput);
+for (const [name, status] of [["SIGINT", 130], ["SIGTERM", 143]]) process.once(name, () => {
+  try { cleanupOutput(); } finally { process.exit(status); }
+});
 
 function transportSource(name) {
   const load = specifier => {
@@ -57,7 +108,7 @@ function writeJson(file, value) {
 }
 
 test("Bundle pack refuses an incomplete archive report before recording delivery", async () => {
-  const output = fs.mkdtempSync(path.join(root, "output/harness-plugin-pack-denial-"));
+  const output = fs.mkdtempSync(path.join(prepareOutput(), "pack-denial-"));
   // The packer is the external subprocess boundary; compilation still uses real installed declarations.
   const packer = path.join(output, "incomplete-pack.cjs");
   fs.writeFileSync(packer, `console.log(JSON.stringify([{ filename: ${JSON.stringify(`${manifest.name.replace(/^@/, "").replace(/\//g, "-")}-${manifest.version}.tgz`)}, files: [] }]));\n`);
@@ -70,7 +121,7 @@ test("Bundle pack refuses an incomplete archive report before recording delivery
 
 // One owner contains global resolver/fetch changes; no unrelated tests run inside it.
 test("Rental bundle loads through real profile and Loader without granting business access", async t => {
-  const output = fs.mkdtempSync(path.join(root, "output/harness-plugin-loader-"));
+  const output = fs.mkdtempSync(path.join(prepareOutput(), "loader-"));
   const profile = path.join(output, "profile");
   const staged = path.join(profile, "node_modules/@rental-os/harness-plugin");
   const bundle = await buildBundle({ outputDir: path.join(output, "delivery"), harnessRoot: harness, npmCli });

@@ -5,21 +5,18 @@
 const assert = require('node:assert/strict'), { test } = require('node:test');
 const fs = require('node:fs'), path = require('node:path');
 const { createRequire } = require('node:module'), { pathToFileURL } = require('node:url');
-const { fixture: originalFixture, source, root } = require('./fixtures/mcp/original-identity.cjs');
-const { PlatformService } = source('apps/api/src/modules/platform/platform.service.ts');
+const { fixture: originalFixture, source, root, output: originalOutput, installed, ts, toolchainRoot } = require('./fixtures/mcp/original-identity.cjs');
 const { createOriginalMcpWorkspaceManagement, createOriginalMcpWorkspaceAdmissionManagement } = source('apps/api/src/modules/auth/original-mcp-workspace-management.ts');
 const { createOriginalMcpAdmissionControlPlane } = source('apps/api/src/modules/auth/original-mcp-admission-control-plane.ts');
 const { OperationLogService } = source('apps/api/src/common/operation-log.service.ts');
-const installed = createRequire(path.join(root, 'clients/agent-desktop/harness/packages/mcp/mcp-client/package.json'));
-const ts = require(path.join(root, 'clients/agent-desktop/harness/node_modules/typescript/lib/typescript.js'));
 const signal = () => new AbortController().signal;
 let artifact;
 async function compiled() {
   if (artifact) return artifact;
-  const output = fs.mkdtempSync(path.join(root, 'output/mcp-workspace-management-verification-')), pkg = path.join(root, 'packages/mcp-server'), staged = path.join(output, 'node_modules/@rental-os/mcp-server');
+  const output = fs.mkdtempSync(path.join(originalOutput, 'workspace-management-')), pkg = path.join(root, 'packages/mcp-server'), staged = path.join(output, 'node_modules/@rental-os/mcp-server');
   fs.mkdirSync(staged, { recursive: true }); fs.copyFileSync(path.join(pkg, 'package.json'), path.join(staged, 'package.json'));
   const options = { strict: true, skipLibCheck: true, declaration: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext,
-    types: ['node'], typeRoots: [path.join(root, 'clients/agent-desktop/harness/node_modules/@types')], rootDir: path.join(pkg, 'src'), outDir: path.join(staged, 'dist'),
+    types: ['node'], typeRoots: [path.join(toolchainRoot, 'node_modules/@types')], rootDir: path.join(pkg, 'src'), outDir: path.join(staged, 'dist'),
     paths: { '@modelcontextprotocol/server': [path.join(path.dirname(installed.resolve('@modelcontextprotocol/server')), 'index.d.mts')] } };
   const check = program => { const diagnostics = ts.getPreEmitDiagnostics(program); assert.equal(diagnostics.length, 0, diagnostics.map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n')).join('\n')); assert.equal(program.emit().emitSkipped, false); };
   check(ts.createProgram([path.join(pkg, 'src/admission-control-plane.ts')], options));
@@ -41,8 +38,6 @@ function fixture(api) {
   const session = f.session = { id: 'original-session', userId: f.user.id, currentWorkspaceId: f.workspace.id, audience: 'operator', expiresAt: new Date((now + 1800) * 1000), revokedAt: null };
   f.payload = { sub: f.user.id, tid: f.user.tenantId, sid: session.id, wid: session.currentWorkspaceId, aud: 'operator', iat: now, exp: now + 900 };
   f.tx.authSession = { findFirst: async query => query.where.id === session.id && session.revokedAt === null && session.expiresAt > new Date() ? structuredClone(session) : null };
-  f.platform.getAuthSession = (...args) => PlatformService.prototype.getAuthSession.call(f.platform, ...args);
-  f.platform.assertTrustedWorkspaceIntegrationManagement = (...args) => PlatformService.prototype.assertTrustedWorkspaceIntegrationManagement.call(f.platform, ...args);
   f.browser = () => new Request('https://admin.example.invalid/mcp/admission', { headers: { authorization: 'Bearer ' + f.auth.signAccessToken(f.payload) } });
   f.authorizer = createOriginalMcpWorkspaceManagement(f.auth, f.platform, f.browser());
   f.enableManagement = () => { const role = f.user.roleAssignments[0].role; role.permissions = [{ permission: { code: 'system:integration:manage' } }]; role.dataScope = 'ALL'; };
@@ -83,7 +78,6 @@ test('original tenant integration rights authorize exact workspace and are consu
   assert.ok(f.calls.some(([kind]) => kind === 'tx-user')); assert.ok(f.calls.some(([kind]) => kind === 'tx-member')); assert.ok(f.queries.every(query => !query.sql.includes('tenant-a')));
 
   const web = fixture(api); web.enableManagement();
-  web.platform.assertTrustedSaasManagement = (...args) => PlatformService.prototype.assertTrustedSaasManagement.call(web.platform, ...args);
   const config = { enabled: true, resourceUrl: resource, allowedScopes: ['rental.catalog.read'], requestTimeoutMs: 5000, maxResponseBytes: 65536,
     readEndpoint: 'https://admin.example.invalid/mcp/admission/read', saveEndpoint: 'https://admin.example.invalid/mcp/admission/save', receiptEndpoint: 'https://admin.example.invalid/mcp/admission/receipt' };
   const control = createOriginalMcpAdmissionControlPlane(api, config, web.auth, web.platform, web.logs,
