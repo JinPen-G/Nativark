@@ -38,9 +38,9 @@ node scripts/ops/release-verify.cjs mcp <本地ZeloGit目录> <基线完整SHA> 
 
 `prepared` 核对 `development.workspace.json` 的 `release` 模式和实际 `host` 或 `full` 选择，复算 API 宿主文件、运行 npm 锁、部署锁、schema、`migration_lock.toml` 和原 SQL 摘要。发布身份包含两仓完整 SHA、装配选择、原 npm 锁、组合投影锁、运行锁、部署锁及宿主收据摘要。比较按所有者和正式迁移身份报告增删、原文或原账变更，并检查次序、schema、数据合同和能力选择。编译产物及所选 Client 的回执随宿主材料核对，镜像内实际生成的 Client 与 Web 产物在后续构建核收。
 
-选择 AI 时，旧发行 `0.1.1` 对应 `./data-package` 和原 `prisma/` 迁移，公共数据发行 `0.2.0` 对应 `./public-data-package` 和 `prisma-public/` 新装材料。两种发行分别核锁、包文件、导出和 SQL。运行 SDK `0.2.1` 缺正式数据发行身份时会被拒绝。旧混合与新公共数据之间的正反向比较均标记 `requiresAiDataBridge`，继续等待原账桥接。
+选择 AI 时，旧数据发行 `0.1.1` 对应 dataVersion `0.1.0`、`./data-package` 和原 `prisma/` 迁移。公共数据发行 `0.2.0`、`0.2.2` 均对应 dataVersion `0.2.0`、`prisma-public/`、原 12 文件集合及 `public-data`、`public-data-package`、`public-mysql-data` 三个出口。各发行分别核锁、包文件、导出和原 SQL。`@rental-os/ai-native-data` 的四出口 SDK `0.2.1`、`0.2.3` 及未知发行被数据发行校验拒绝。公共保留的 `@rental-os/ai-native-server` SDK 按独立包身份和固定构建回执核定，本批版本为 `0.2.1`。两个公共数据发行之间继续使用相同迁移身份，旧混合与公共数据之间的正反向比较均标记 `requiresAiDataBridge`，由原账桥接核收。
 
-选择 MCP 的 prepared 材料需同时提供正式宿主入口、部署锁中的 `mcp` `0.1.0` 能力、固定包文件及五项按正式 ID 排列的 SQL 和原账标识。原账名按 `platform-capability.mcp.*` 核对，既有库的历史映射仍由原宿主取得执行证据。`mcp` 模式使用支持 `--no-lazy-fetch` 的 Git 从本地固定对象读取公开贡献清单和原 SQL，仅核顺序、前置和摘要。现有宿主打包入口还需接入 MCP 能力和原账观察。
+选择 MCP 的 prepared 材料需同时提供正式宿主入口、部署锁中的 `mcp` `0.1.0` 或 `0.1.1` 发行、dataVersion `0.1.0`、固定包文件及五项按正式 ID 排列的 SQL 和原账标识。未知发行或数据版本会被拒绝。原账名按 `platform-capability.mcp.*` 核对，既有库的历史映射仍由原宿主取得执行证据。`mcp` 模式使用支持 `--no-lazy-fetch` 的 Git 从本地固定对象读取公开贡献清单和原 SQL，仅核顺序、前置和摘要。现有宿主打包入口还需接入 MCP 能力和原账观察。
 
 退出 `0` 表示材料核对通过，比较模式还表示材料无数据差异。`2` 表示有数据差异，`1` 表示输入验证失败或缺少必要材料。所有模式的 JSON 都标明 `releaseApproved: false` 和 `databaseChecked: false`。`domain`、旧单 SHA 证明和缺正式 AI 数据包的候选均被拒绝。旧组合基线可用 `prepared legacy-combined` 明确识别，校验会在读取现场材料前要求正式旧库桥接。原迁移门禁和回退继续沿上文入口。
 
@@ -72,6 +72,10 @@ node --require "$ZELO_REPO/tests/fixtures/ai-native/prisma-offline-preload.cjs" 
 
 入口从固定源码调用原底座及 Core 归档器，回读两个实际资产和包内清单，打印 `rental-release-assets-1` 回执。回执的 `platform.asset.sha256`、`rental.asset.sha256` 用于正式 CI。下列命令适用于已安装并已授权 `gh` 的终端。`ZELO_TAG` 和 `RENTAL_TAG` 分别是已经核对的真实新 Tag。
 
+发行入口复用固定 `core-contracts` 的三段数字稳定版本规则，并按主、次、修订版本完整比较，要求底座高于已公开的 `0.1.18`、Rental 高于 `0.1.15`。例如 `0.2.0` 可进入后续 Tag 与兼容核验。预发布、带构建后缀、同版及旧版会被拒绝。
+
+底座根锁依赖用于编译公共合同。业务发行编译由 [release-dependencies.cjs](../release-dependencies.cjs) 从同一双仓 `host` 投影读取根清单、原投影锁及所选 workspace 清单，在任务目录的 `build-dependencies` 内执行 `npm ci --include=dev --ignore-scripts`，通过原 `--deps` 交给发行器。安装后核输入原字节，构建结束或失败均清理该独占依赖目录。目录已存在或身份发生变化时拒绝覆盖／清理，保留错误供调用方处理。
+
 ```sh
 gh release create "$ZELO_TAG" "$ASSET_DIR/platform-source-${ZELO_TAG#v}.tgz" \
   --repo JinPen-G/Zelo --verify-tag --title "Zelo 底座 $ZELO_TAG" --notes '固定源码归档，供双仓候选构建与核验。'
@@ -89,13 +93,27 @@ gh workflow run rental-release-candidate.yml --repo JinPen-G/Zelo --ref main \
   -f retain_images=true
 ```
 
-[Rental 正式候选构建](../../../.github/workflows/rental-release-candidate.yml) 从可信 Zelo `main` 手动派发。填写已发布的两仓完整 SHA、各自版本 Tag 和独立核收的两个发行归档 SHA-256。Zelo SHA 须等于该次运行的 `GITHUB_SHA`。调用方先验证 Tag 解引用，再取得该 Tag 下的 `platform-source-<版号>.tgz` 与 `rental-<版号>.tgz`，逐一核对原字节。在受管 Linux runner 使用锁定依赖，按[材料生成入口](../release-prepare-pair.cjs)构建普通单 Rental 组合。
+[Rental 正式候选构建](../../../.github/workflows/rental-release-candidate.yml) 从可信 Zelo `main` 手动派发。填写已发布的两仓完整 SHA、各自版本 Tag 和独立核收的两个发行归档 SHA-256。Zelo SHA 须等于该次运行的 `GITHUB_SHA`。调用方先验证 Tag 解引用，再取得该 Tag 下的 `platform-source-<版号>.tgz` 与 `rental-<版号>.tgz`，逐一核对原字节。在受管 Linux runner 使用锁定依赖，按[材料生成入口](../release-prepare-pair.cjs)构建所选单 Rental 组合。
 
 ```sh
 node scripts/ops/release-prepare-pair.cjs release "$ZELO_REPO" "$ZELO_COMMIT" "$RENTAL_REPO" "$RENTAL_COMMIT" "$TASK_DIR" "$PLATFORM_DIGEST" "$RENTAL_DIGEST"
 ```
 
-`TASK_DIR` 是本次专用目录，输入归档分别存为 `platform.tgz`、`rental.tgz`。调用从固定源码投影重新对照底座发行，使用原准备器生成部署锁、schema 和原迁移 SQL，再用正式宿主打包器构建 API。Web 使用同一源投影 npm 锁，直接消费 API 上下文中的 Core 包和同一份部署锁。归档生产与镜像运行使用同平台的锁定 Node 工具链，Linux 镜像使用 Linux 归档。`development` 模式省略两个发行摘要，使用原开发运行包生成离线演练材料并标记不可部署。
+`TASK_DIR` 是本次专用目录，输入归档分别存为 `platform.tgz`、`rental.tgz`。`prepareRentalReleaseWorkspace` 先核固定源码、两 Tag 和两归档，返回含所选 vendor 的最终 workspace。`withReleaseDependencies` 按该投影锁安装独占编译依赖，再在同一进程调用 `packageRentalReleaseWorkspace(prepared, { deps })` 正式重编译并复核原归档。Web 使用同一 workspace 的 npm 锁，直接消费 API 上下文中的 Core 包和同一份部署锁。归档生产与镜像运行使用同平台的锁定 Node 工具链，Linux 镜像使用 Linux 归档。`development` 模式省略两个发行摘要，仅为普通组合生成不可部署的演练材料。
+
+候选选择使用 `--ai disabled|public-retention` 与 `--mcp disabled|enabled`，两项默认 `disabled`。对应 CI 输入为 `ai_mode`、`mcp_mode`。选择公共 AI 保留还须提供 `--ai-data-sha256`，对应 CI 的 `ai_data_sha256`，其值来自独立核收的实际数据发行。普通组合携带该摘要、单独启用 MCP、未知或重复选项均被拒绝。
+
+`public-retention` 选择正式两阶段的公共 AI 保留宿主。须同时提交已独立核收的 AI 数据发行 SHA-256，第一阶段准备和第二阶段重编译均与此摘要核对。固定版本的实际安装、Web 和配对镜像结果分别记录。
+
+- 固定双仓的 release 投影和正式宿主打包消费原发行资产，生成同次公共保留运行入口、v2 部署锁、18 条原迁移及 `postCapability` 来源。发布校验逐项核后置扩展原 SQL、schema、来源、前置迁移和原账名。数据发行摘要须与锁、实际数据包、宿主收据逐一相等，SDK 继续走独立版本和安装文件校验。
+- API 与 Web 使用同一选择、投影 npm 锁和部署锁。Web 通过 `RENTAL_PUBLIC_AI_DATA_PACKAGE_DIR` 读取 API 材料中的 `public-ai-data`。锁内显式选择 MCP 时，`RENTAL_MCP_DATA_PACKAGE_DIR` 指向同一 API 材料的 `packages/mcp-server`，完整包须经所选 Vite 入口核验。数据目录传递只提供构建材料，MCP HTTP 状态沿实际宿主收据核定。OP 收据核验覆盖 v2 原账、扩展 SQL、运行入口和实际编译项目后，才产生配对镜像输入。
+- 公共保留与 MCP 联合选择目前由正式入口明确拒绝。已有23条新装数据组合和双能力 Web 消费沿各自入口验证，`data-only` 的 HTTP 状态仍由第一方权威和实际宿主装配核定。
+
+正式 AI 归档、成对镜像和 CI 成功证据须从同一固定组合实际生成。旧线上 AI 升级继续经过三项旧迁移、首次旧账桥接、备份恢复和具体版本切换审批。
+
+API 准备和原宿主打包复用上述同锁独占依赖入口。Web 构建继续按同一投影锁安装依赖，在缺少根 `tsconfig.json` 时生成继承该投影 `./tsconfig.base.json` 的临时构建配置，限定共用源码的配置查找范围。该文件仅用于本次 Web 构建，源码归档、npm 锁和正式候选身份继续按原材料核验。
+
+所选新装投影中的 vendor 数据 SDK 精确使用 `@rental-os/ai-native-data@0.2.3`，由 `apps/rental-api` 以 `@rental-os/public-ai-data` 别名安装。公共保留 server SDK 仍为适配包独占的 `@rental-os/ai-native-server@0.2.1`。两者分别核包身份、固定来源、归档 SHA-256／SHA-512、文件清单与投影安装锁，再带入编译依赖目录。AI 数据发行 `0.2.2` 的摘要继续独立核定。
 
 产物 job 将 `rental-image-input-<run_id>-<run_attempt>` 交给双仓镜像工作流，并独立传递 `input.json` 的原文 SHA-256。镜像工作流按调用方 `github.workflow_ref` 核对固定入口。[双仓镜像工作流](../../../.github/workflows/rental-image-ci.yml) · [GitHub 可复用工作流上下文](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations#github-context)
 

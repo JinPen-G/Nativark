@@ -1,6 +1,6 @@
 "use strict";
 
-/** 从固定双仓与原发行生成普通 Rental 镜像交接。仅在独占任务目录构建，不连接业务库。 */
+/** 从固定双仓与原发行生成 Rental 镜像交接。选择在副作用前核定，未接通的正式能力拒绝制包。 */
 const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const { registerHooks } = require("node:module");
@@ -10,6 +10,7 @@ const { CONTEXT_FILE, isFullCommit, isPackagePath, isSha256, readJson, sha256, v
 const { digestFiles } = require("./release-facts.cjs");
 const { requireReleaseTag } = require("./release-image-pair.cjs");
 const { readReleaseFiles } = require("./release-verify.cjs");
+const { withReleaseDependencies } = require("./release-dependencies.cjs");
 
 const CORE = "packages/rental-core/";
 const SOURCE = "development.workspace.json";
@@ -18,6 +19,35 @@ const BASE_REPOSITORY = "https://github.com/JinPen-G/Nativark";
 const TOOLS = ["prepare-rental-workspace", "rental-build-snapshot", "rental-host-lock", "check-rental-package-build",
   "build-selected-prisma", "verify-rental-distribution", "rental-build-memory", "rental-platform-build", "package-rental-host"];
 const json = value => Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
+
+function parsePairArguments(args) {
+  const mode = args[0], development = mode === "development", count = development ? 6 : 8;
+  const [ , platformDir, platformCommit, rentalDir, rentalCommit, taskDir, platformDigest, rentalDigest] = args.slice(0, count);
+  if (!["release", "development"].includes(mode) || args.length < count
+    || ![platformDir, rentalDir, taskDir].every(value => typeof value === "string" && value.length > 0 && !value.startsWith("--"))
+    || ![platformCommit, rentalCommit].every(isFullCommit)
+    || !development && ![platformDigest, rentalDigest].every(isSha256)) {
+    throw new Error("用法：release-prepare-pair.cjs <release|development> <Zelo目录> <完整SHA> <Rental目录> <完整SHA> <任务目录> [底座归档SHA256 Rental归档SHA256] [--ai disabled|public-retention] [--mcp disabled|enabled] [--ai-data-sha256 SHA256]");
+  }
+  const flags = new Map();
+  for (let index = count; index < args.length; index += 2) {
+    const name = args[index], value = args[index + 1];
+    if (!["--ai", "--mcp", "--ai-data-sha256"].includes(name) || flags.has(name) || !value || value.startsWith("--")) {
+      throw new Error("候选选择存在未知、重复或缺值参数");
+    }
+    flags.set(name, value);
+  }
+  const aiMode = flags.get("--ai") ?? "disabled", mcpMode = flags.get("--mcp") ?? "disabled";
+  const aiDataSha256 = flags.get("--ai-data-sha256");
+  if (!["disabled", "public-retention"].includes(aiMode) || !["disabled", "enabled"].includes(mcpMode)
+    || aiMode === "disabled" && (mcpMode !== "disabled" || aiDataSha256 !== undefined)
+    || aiMode === "public-retention" && !isSha256(aiDataSha256)) {
+    throw new Error("普通组合禁带 AI/MCP 材料；public-retention 须提供独立核收的 AI 数据发行 SHA-256，MCP 须显式选择");
+  }
+  if (mcpMode === "enabled") throw new Error("公共保留加 MCP 尚无同一正式宿主，data-only 不能作为 HTTP enabled 候选");
+  if (development && aiMode !== "disabled") throw new Error("本入口的开发演练仅支持普通组合，公共保留须使用正式两阶段入口");
+  return { mode, development, platformDir, platformCommit, rentalDir, rentalCommit, taskDir, platformDigest, rentalDigest, aiMode, mcpMode, aiDataSha256 };
+}
 
 function git(directory, ...args) {
   return execFileSync("git", ["--no-replace-objects", "-C", directory, ...args],
@@ -32,35 +62,6 @@ function writeFiles(directory, files) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, bytes, { flag: "wx" });
   }
-}
-
-function prepareDeployment(workspace, deps, repo, archiveApi, platformAsset, rentalAsset, platformDigest, rentalDigest) {
-  const tool = name => require(path.join(repo, "scripts", `${name}.cjs`));
-  const absolute = file => path.resolve(repo, file).split(path.sep).join("/");
-  const { snapshotFromFiles } = tool("rental-build-snapshot");
-  const { createBuild, verifyContracts } = tool("check-rental-package-build");
-  const build = createBuild(deps, { quiet: true, snapshot: snapshotFromFiles(workspace.platform.source.commit,
-    new Map([...workspace.files].map(([file, bytes]) => [absolute(file), bytes]))) });
-  verifyContracts(build);
-  const { publicSchema } = tool("verify-rental-distribution").verifyServer(build);
-  for (const directory of ["apps/platform-api", "packages/ai-native-data", "apps/rental-api"]) build.compile(`${directory}/tsconfig.json`);
-  const memory = tool("rental-build-memory").createMemoryBuild(build);
-  const load = name => memory.load(build.exported(`@rental-os/${name}`, true));
-  const rental = archiveApi.readCoreArchive(rentalAsset, rentalDigest).files;
-  const platform = archiveApi.readCoreArchive(platformAsset, platformDigest).files;
-  if (platform.size !== workspace.platform.files.size || [...platform].some(([file, bytes]) =>
-    !workspace.platform.files.has(file) || !Buffer.from(bytes).equals(workspace.platform.files.get(file)))) {
-    throw new Error("底座发行归档的文件与固定 Git 投影不一致");
-  }
-  const { data, migrationNames } = load("platform-api/data-plan").createPublicPlatformDataPlan();
-  const manifest = readJson(rental.get("core.manifest.json"), "Rental 正式清单");
-  const release = { versions: { platform: workspace.platform.version, contract: load("core-contracts").CORE_CONTRACT_VERSION,
-    node: process.versions.node, capabilities: {} }, source: workspace.platform.source, sha256: platformDigest, data };
-  const prepared = memory.load(absolute("apps/rental-api/dist/prepare-deployment.js")).createRentalDeploymentFiles({
-    release, pin: { manifest, sha256: rentalDigest }, coreFiles: rental, publicSchema,
-    publicMigrations: data.migrations.map((item, index) => ({ name: migrationNames[index], sql: platform.get(`apps/platform-api/${item.file}`) })),
-  });
-  return { rental, prepared };
 }
 
 async function bundleWeb(webSource, outDir) {
@@ -83,6 +84,8 @@ function buildWeb({ repo, task, workspace, apiFiles, inputDir, npmLockSha256, de
   for (const [file, bytes] of apiFiles) if (file.startsWith(CORE) || /^(?:apps|packages)\/[^/]+\/dist(?:-[a-z0-9-]+)?\//u.test(file)) {
     webFiles.set(file, bytes);
   }
+  // 给没有独立 tsconfig 的共用源码限定查找边界，避免继承构建目录外的配置。
+  if (!webFiles.has("tsconfig.json")) webFiles.set("tsconfig.json", json({ extends: "./tsconfig.base.json" }));
   writeFiles(webSource, webFiles);
   const npmCli = process.platform === "win32"
     ? path.resolve(path.dirname(process.execPath), "node_modules/npm/bin/npm-cli.js")
@@ -94,10 +97,18 @@ function buildWeb({ repo, task, workspace, apiFiles, inputDir, npmLockSha256, de
   const guard = path.join(repo, "tests/fixtures/ai-native/prisma-offline-preload.cjs");
   const audit = path.join(temp, "web-audit.log");
   const lock = path.join(inputDir, "api", DEPLOYMENT, "core.deployment.lock.json");
+  const publicAiData = apiFiles.has("public-ai-data/package.json") ? path.join(inputDir, "api", "public-ai-data") : "";
+  const deployment = readJson(apiFiles.get(`${DEPLOYMENT}core.deployment.lock.json`), "API 固定部署锁");
+  const selectedMcp = (deployment.lockVersion === 2 ? deployment.base : deployment).dataCapabilities?.some(item => item.id === "mcp") === true;
+  if (selectedMcp && (!apiFiles.has("packages/mcp-server/package.json") || !apiFiles.has("packages/mcp-server/data-contribution.json"))) {
+    throw new Error("Web 构建缺少 API 同一选择的 MCP 数据包");
+  }
+  const mcpData = selectedMcp ? path.join(inputDir, "api", "packages/mcp-server") : "";
   execFileSync(process.execPath, ["--require", guard, __filename, "--bundle-web", webSource, webDir], {
     cwd: path.join(webSource, "apps/rental-admin"), timeout: 300000, stdio: ["ignore", process.stderr, process.stderr],
     env: { ...process.env, DATABASE_URL: "mysql://offline:offline@127.0.0.1:1/rental_os_offline", AI_OFFLINE_WRITE_ROOT: task,
-      AI_OFFLINE_AUDIT: audit, TEMP: temp, TMP: temp, TMPDIR: temp, XDG_CACHE_HOME: temp, CORE_DEPLOYMENT_LOCK: lock },
+      AI_OFFLINE_AUDIT: audit, TEMP: temp, TMP: temp, TMPDIR: temp, XDG_CACHE_HOME: temp, CORE_DEPLOYMENT_LOCK: lock,
+      RENTAL_PUBLIC_AI_DATA_PACKAGE_DIR: publicAiData, RENTAL_MCP_DATA_PACKAGE_DIR: mcpData },
   });
   const web = readReleaseFiles(webDir);
   if (!web.get("index.html")?.length || fs.existsSync(audit)
@@ -110,12 +121,8 @@ function buildWeb({ repo, task, workspace, apiFiles, inputDir, npmLockSha256, de
 }
 
 async function preparePair(args) {
-  const [mode, platformDir, platformCommit, rentalDir, rentalCommit, taskDir, platformDigest, rentalDigest] = args;
-  const development = mode === "development";
-  if ((development ? args.length !== 6 : mode !== "release" || args.length !== 8 || ![platformDigest, rentalDigest].every(isSha256))
-    || ![platformCommit, rentalCommit].every(isFullCommit) || process.versions.node !== "24.13.0") {
-    throw new Error("用法：release-prepare-pair.cjs <release|development> <Zelo目录> <完整SHA> <Rental目录> <完整SHA> <任务目录> [底座归档SHA256 Rental归档SHA256]，Node 须为 24.13.0");
-  }
+  const { mode, development, platformDir, platformCommit, rentalDir, rentalCommit, taskDir, platformDigest, rentalDigest, aiMode, aiDataSha256 } = parsePairArguments(args);
+  if (process.versions.node !== "24.13.0") throw new Error("Node 须为 24.13.0");
   if (!development && process.platform !== "linux") throw new Error("正式镜像材料须在 Linux 生成以匹配运行归档摘要");
   const repo = fs.realpathSync(platformDir), coreRepo = fs.realpathSync(rentalDir), task = path.resolve(taskDir);
   const toolCommit = git(repo, "rev-parse", "HEAD").toString().trim();
@@ -141,25 +148,29 @@ async function preparePair(args) {
   const platformAsset = development ? undefined : pack.readOrdinary(platformPath, 128 * 1024 * 1024);
   const repository = development ? BASE_REPOSITORY : readJson(archiveApi.readCoreArchive(platformAsset, platformDigest)
     .files.get("platform.source.json"), "底座正式源码收据").source.repository;
-  const workspace = await prepare.createRentalDevelopmentWorkspace({ repo, repository, commit: platformCommit,
-    coreRepo, coreCommit: rentalCommit, mode, profile: "host" }, platformApi);
+  const publicRetention = aiMode === "public-retention";
+  const prepared = development ? undefined : await pack.prepareRentalReleaseWorkspace({ repo, repository, commit: platformCommit,
+    coreRepo, coreCommit: rentalCommit, deps, mode: "release", profile: "host", aiMode: publicRetention ? "enabled" : "disabled",
+    freshAi: publicRetention, publicRetention, mcp: false, aiDataSha256,
+    platformArchive: platformAsset, platformSha256: platformDigest,
+    rentalArchive: pack.readOrdinary(rentalPath, 128 * 1024 * 1024), rentalSha256: rentalDigest });
+  const workspace = prepared?.workspace ?? await prepare.createRentalDevelopmentWorkspace({ repo, repository, commit: platformCommit,
+    coreRepo, coreCommit: rentalCommit, mode, profile: "host", ai: false, mcp: false }, platformApi);
   const output = path.join(task, "host.tgz");
-  let packed;
-  if (development) {
-    packed = await pack.main(["--development", "--repo", repo, "--repository", repository, "--commit", platformCommit,
-      "--core-repo", coreRepo, "--core-commit", rentalCommit, "--output", output]);
-  } else {
+  if (!development) {
     requireReleaseTag(workspace.platform.source, workspace.platform.version, "platform");
     requireReleaseTag(workspace.rental.source, workspace.rental.metadata.version, "rental");
-    const { rental, prepared } = prepareDeployment(workspace, deps, repo, archiveApi, platformAsset,
-      pack.readOrdinary(rentalPath, 128 * 1024 * 1024), platformDigest, rentalDigest);
-    const deploymentDir = path.join(task, "prepared"), rentalPackage = path.join(task, "core"), provenance = path.join(task, SOURCE);
-    writeFiles(deploymentDir, prepared.files);
-    writeFiles(rentalPackage, rental);
-    fs.writeFileSync(provenance, workspace.files.get(SOURCE), { flag: "wx" });
-    packed = await pack.main(["--ai", "disabled", "--deployment", deploymentDir, "--platform-package", platformPath, "--rental-package", rentalPackage,
-      "--source-provenance", provenance, "--platform-repo", repo, "--core-repo", coreRepo, "--output", output]);
   }
+  const packed = await withReleaseDependencies(workspace, task, async dependencyDirectory => {
+    if (development) return pack.main(["--development", "--repo", repo, "--repository", repository, "--commit", platformCommit,
+      "--core-repo", coreRepo, "--core-commit", rentalCommit, "--deps", dependencyDirectory, "--output", output]);
+    const result = await pack.packageRentalReleaseWorkspace(prepared, { deps: dependencyDirectory });
+    if (result.workspace !== workspace || result.receipt.aiDataSha256 !== aiDataSha256) {
+      throw new Error("正式 API 未使用第一阶段的最终投影或所选 AI 数据摘要");
+    }
+    pack.writeArchive(output, result.bytes);
+    return result;
+  });
 
   const apiFiles = archiveApi.readCoreArchive(pack.readOrdinary(output, 128 * 1024 * 1024), packed.sha256).files;
   if (!Buffer.from(apiFiles.get(SOURCE)).equals(workspace.files.get(SOURCE))) throw new Error("API 不属于本次固定 Web 投影");
@@ -188,6 +199,8 @@ async function preparePair(args) {
   fs.writeFileSync(path.join(inputDir, "input.json"), manifest, { flag: "wx" });
   return { ...report, inputSha256: sha256(manifest) };
 }
+
+module.exports = { parsePairArguments, preparePair };
 
 if (require.main === module) {
   const args = process.argv.slice(2);

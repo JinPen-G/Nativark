@@ -27,6 +27,24 @@ on:
         description: 独立核收的 Rental 标准包 SHA-256
         required: true
         type: string
+      ai_mode:
+        description: AI 选择，public-retention 使用正式两阶段构建
+        type: choice
+        default: disabled
+        options:
+          - disabled
+          - public-retention
+      mcp_mode:
+        description: MCP 显式选择，须有同组合 23 条原迁移与能力证明
+        type: choice
+        default: disabled
+        options:
+          - disabled
+          - enabled
+      ai_data_sha256:
+        description: 选择 AI 时必填的实际数据发行摘要，SDK 摘要不能代替
+        type: string
+        required: false
       retain_images:
         description: 将公开材料构建的两镜像短期留存在 Actions 产物
         type: boolean
@@ -48,6 +66,9 @@ jobs:
       RENTAL_TAG: ${{ inputs.rental_tag }}
       PLATFORM_DIGEST: ${{ inputs.platform_asset_sha256 }}
       RENTAL_DIGEST: ${{ inputs.rental_asset_sha256 }}
+      AI_MODE: ${{ inputs.ai_mode }}
+      MCP_MODE: ${{ inputs.mcp_mode }}
+      AI_DATA_DIGEST: ${{ inputs.ai_data_sha256 }}
       TASK_DIR: output/.tmp/rental-release-candidate
       GIT_TERMINAL_PROMPT: '0'
     steps:
@@ -77,6 +98,19 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 24.13.0
+      - name: 核对所选正式构建能力
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const { parsePairArguments } = require('./scripts/ops/release-prepare-pair.cjs');
+          const env = process.env;
+          const args = ['release', env.GITHUB_WORKSPACE, env.ZELO_COMMIT, env.TASK_DIR + '/rental',
+            env.RENTAL_COMMIT, env.TASK_DIR + '/pair', env.PLATFORM_DIGEST, env.RENTAL_DIGEST,
+            '--ai', env.AI_MODE || 'disabled', '--mcp', env.MCP_MODE || 'disabled'];
+          if (env.AI_DATA_DIGEST) args.push('--ai-data-sha256', env.AI_DATA_DIGEST);
+          parsePairArguments(args);
+          NODE
       - name: 核对真实 Tag 和发行材料
         shell: bash
         run: |
@@ -95,6 +129,8 @@ jobs:
           requireReleaseTag({ repository: 'https://github.com/JinPen-G/Zelo', commit: env.ZELO_COMMIT }, platform, 'platform');
           requireReleaseTag({ repository: 'https://github.com/JinPen-G/nativark-rental-core', commit: env.RENTAL_COMMIT }, rental, 'rental');
           NODE
+          git fetch --no-tags --depth=1 origin "refs/tags/$ZELO_TAG:refs/tags/$ZELO_TAG"
+          test "$(git rev-parse "refs/tags/$ZELO_TAG^{commit}")" = "$ZELO_COMMIT"
           git -C "$task/rental" fetch --no-tags --depth=1 origin "refs/tags/$RENTAL_TAG:refs/tags/$RENTAL_TAG"
           test "$(git -C "$task/rental" rev-parse "refs/tags/$RENTAL_TAG^{commit}")" = "$RENTAL_COMMIT"
           mkdir "$task/pair"
@@ -116,9 +152,11 @@ jobs:
           export DATABASE_URL=mysql://offline:offline@127.0.0.1:1/rental_os_offline
           export AI_OFFLINE_WRITE_ROOT="$task" AI_OFFLINE_AUDIT="$task/offline/audit.log"
           export TEMP="$task/offline" TMP="$task/offline" TMPDIR="$task/offline" XDG_CACHE_HOME="$task/offline"
+          selection=(--ai "${AI_MODE:-disabled}" --mcp "${MCP_MODE:-disabled}")
+          if test -n "$AI_DATA_DIGEST"; then selection+=(--ai-data-sha256 "$AI_DATA_DIGEST"); fi
           node --no-compilation-cache --max-old-space-size=6144 --require ./tests/fixtures/ai-native/prisma-offline-preload.cjs \
             scripts/ops/release-prepare-pair.cjs release "$GITHUB_WORKSPACE" "$ZELO_COMMIT" "$task/rental" "$RENTAL_COMMIT" "$task/pair" \
-            "$PLATFORM_DIGEST" "$RENTAL_DIGEST" | tee "$task/prepare.log"
+            "$PLATFORM_DIGEST" "$RENTAL_DIGEST" "${selection[@]}" | tee "$task/prepare.log"
           test ! -e "$AI_OFFLINE_AUDIT"
           digest=$(sha256sum "$task/pair/input/input.json" | cut -d ' ' -f 1)
           printf 'input_sha256=%s\n' "$digest" >> "$GITHUB_OUTPUT"

@@ -22,6 +22,7 @@ const CAPABILITY_ROOTS = { "ai-native": "packages/ai-native-data/", mcp: "packag
 const AI_RELEASES = new Map([
   ["0.1.1", { dataVersion: "0.1.0", schema: "prisma/schema.prisma", entries: ["data", "prisma-schema", "preparation", "data-package", "mysql-data"] }],
   ["0.2.0", { dataVersion: "0.2.0", schema: "prisma-public/schema.prisma", entries: ["public-data", "public-data-package", "public-mysql-data"] }],
+  ["0.2.2", { dataVersion: "0.2.0", schema: "prisma-public/schema.prisma", entries: ["public-data", "public-data-package", "public-mysql-data"] }],
 ]);
 const MCP_MIGRATIONS = [
   ["mcp.0001-oauth", "mysql-oauth-schema.sql"],
@@ -92,11 +93,10 @@ function verifyContextFiles(files, context) {
   return digests;
 }
 
-function verifyCapabilityFiles(capability, files, digests, schema, label) {
+function verifyCapabilityFiles(capability, files, digests, schema, label, prefix = CAPABILITY_ROOTS[capability.id]) {
   requireEvidence(isSha256(capability.sha256) && capability.prerequisites?.platform && Array.isArray(capability.prerequisites.cores)
     && Array.isArray(capability.files) && Array.isArray(capability.data?.migrations) && capability.schema?.file === schema,
     `缺少正式锁定的 ${label} 数据包及前置`);
-  const prefix = CAPABILITY_ROOTS[capability.id];
   const declared = new Map();
   for (const item of capability.files) {
     requireEvidence(isPackagePath(item?.file) && !declared.has(item.file) && isSha256(item.sha256)
@@ -111,7 +111,8 @@ function verifyCapabilityFiles(capability, files, digests, schema, label) {
   }
   requireEvidence(["package.json", "LICENSE", "README.md"].every(file => declared.has(file)), `正式 ${label} 数据包缺少包清单、许可或说明`);
   const metadata = readJson(files.get(prefix + "package.json"), `正式 ${label} 数据包清单`);
-  requireEvidence(metadata.name === `@rental-os/${prefix.split("/")[1]}` && metadata.version === capability.version && metadata.license === "MIT",
+  requireEvidence(metadata.name === `@rental-os/${capability.id === "ai-native" ? "ai-native-data" : "mcp-server"}`
+    && metadata.version === capability.version && metadata.license === "MIT",
     `正式 ${label} 数据包身份或版本不一致`);
   return { declared, metadata };
 }
@@ -129,9 +130,10 @@ function verifyAiData(capability, context, files, digests) {
   const variant = AI_RELEASES.get(capability.version);
   requireEvidence(variant && capability.data?.version === variant.dataVersion && capability.sha256 === context.aiDataSha256,
     "AI 数据发行版本、数据版本或宿主摘要不一致");
-  const material = verifyCapabilityFiles(capability, files, digests, variant.schema, "AI");
+  const material = verifyCapabilityFiles(capability, files, digests, variant.schema, "AI",
+    context.ledgerVersion === 2 ? "public-ai-data/" : CAPABILITY_ROOTS["ai-native"]);
   verifyCapabilityExports(material, variant.entries, "default", "AI");
-  if (capability.version === "0.2.0") {
+  if (capability.version === "0.2.0" || capability.version === "0.2.2") {
     const [initial] = capability.data.migrations;
     requireEvidence(material.declared.size === 12 && material.declared.has("prisma-public/provenance.json")
       && capability.data.migrations.length === 1 && initial.id === "ai-native.20261126000000-public-initial"
@@ -144,7 +146,7 @@ function verifyAiData(capability, context, files, digests) {
 }
 
 function verifyMcpData(capability, files, digests) {
-  requireEvidence(capability.version === "0.1.0" && capability.data?.version === "0.1.0", "MCP 数据包发行版本不一致");
+  requireEvidence(["0.1.0", "0.1.1"].includes(capability.version) && capability.data?.version === "0.1.0", "MCP 数据包发行版本不一致");
   const material = verifyCapabilityFiles(capability, files, digests, "prisma/schema.prisma", "MCP");
   verifyCapabilityExports(material, ["data-capability", "mysql-data"], "import", "MCP");
   requireEvidence(material.metadata.exports?.["./data-contribution.json"] === `./${MCP_MANIFEST}`, "MCP 缺少正式包内数据清单出口");
@@ -158,7 +160,7 @@ function verifyMcpData(capability, files, digests) {
     "正式 MCP 迁移身份、五份原 SQL 或顺序不一致");
 }
 
-function verifyDeployment(files, deployment, lock, capabilities, digests) {
+function verifyDeployment(files, deployment, lock, capabilities, digests, phased, source) {
   const prepared = file => describe(files, DEPLOYMENT_ROOT + file, file);
   const metadata = {
     lock: prepared("core.deployment.lock.json"),
@@ -173,7 +175,8 @@ function verifyDeployment(files, deployment, lock, capabilities, digests) {
     { owner: "platform", release: lock.platform, root: "apps/platform-api/", prefix: "" },
     ...lock.cores.map(pin => ({ owner: pin.manifest.id, release: { ...pin.manifest, sha256: pin.sha256 },
       root: "packages/rental-core/", prefix: `core.${pin.manifest.id}.` })),
-    ...capabilities.map(release => ({ owner: release.id, release, root: CAPABILITY_ROOTS[release.id], prefix: "platform-capability." })),
+    ...capabilities.map(release => ({ owner: release.id, release,
+      root: phased && release.id === "ai-native" ? "public-ai-data/" : CAPABILITY_ROOTS[release.id], prefix: "platform-capability." })),
   ];
   const expected = [];
   const data = {};
@@ -203,6 +206,43 @@ function verifyDeployment(files, deployment, lock, capabilities, digests) {
         originalDirectory: posix.dirname(migration.file), directory,
         ledger: { table: "_prisma_migrations", migrationName: directory, checksum: file.sha256 }, file });
     }
+  }
+  if (phased) {
+    const ai = capabilities.find(item => item.id === "ai-native");
+    const post = phased.postCapability?.[0];
+    const migration = { id: "rental.20261127000000-ai-extension", file: "prisma/ai-extension/20261127000000-initial.sql",
+      sha256: "11954e36e6553b70d8613d5b4f00f44f7a2bb3abbf16b758919a331e87e4d86b", source: lock.cores[0].manifest.source };
+    const prerequisites = { core: { version: { minInclusive: "0.1.0", maxExclusive: "0.1.2" },
+      migration: { id: "rental.20261119030000-initial", sha256: "59e69aadf4db0138561ec9233955941da32a2f27f576583bd7915b9f1a7d05ae" } },
+      capability: { id: "ai-native", version: ai.version === "0.2.2"
+        ? { minInclusive: "0.2.2", maxExclusive: "0.2.3" } : { minInclusive: "0.2.0", maxExclusive: "0.2.1" },
+      migration: { id: ai.data.migrations[0].id, sha256: ai.data.migrations[0].sha256 } } };
+    requireEvidence(phased.postCapability?.length === 1 && isDeepStrictEqual(post, { coreId: "rental", migration, prerequisites })
+      && deployment.installation === "fresh-ai" && isDeepStrictEqual(deployment.postCapability, phased.postCapability)
+      && ["0.1.0", "0.1.1"].includes(lock.cores[0].manifest.data.version)
+      && lock.cores[0].manifest.data.migrations.some(item => item.id === prerequisites.core.migration.id
+        && item.sha256 === prerequisites.core.migration.sha256), "v2 后置扩展的原 SQL、来源或前置不一致");
+    const extensionFiles = [
+      ["prisma/ai-extension/schema.prisma", "8f22ea1360c7a58752505b511d83936b225465d20836690d38f35e8020b1fcb3"],
+      [migration.file, migration.sha256],
+      ["prisma/ai-extension/20261127000000-provenance.json", "618895a8c8bc99d7c03ca3dd86f4fc0fd609eab2d143b0dd03450070e149e24e"],
+    ];
+    for (const [file, digest] of extensionFiles) {
+      const full = "apps/rental-api/" + file;
+      requireEvidence(digests.get(full) === digest && source.files?.some(item => item.path === full && item.sha256 === digest),
+        "v2 扩展原件与固定来源不同");
+    }
+    requireEvidence(isDeepStrictEqual(readJson(files.get("apps/rental-api/prisma/ai-extension/runtime-source.json"), "v2 运行来源"),
+      { format: "rental-fresh-ai-runtime-1", platform: lock.platform.source, rental: migration.source, extension: migration.source }),
+    "v2 运行来源与双仓锁不一致");
+    const directory = `post-capability.rental.${migration.id}`, file = prepared(`migrations/${directory}/migration.sql`);
+    requireEvidence(file.sha256 === migration.sha256 && expected.length === 17, "公共保留须包含18条原迁移");
+    expected.push({ owner: "rental", source: migration.source, assetSha256: migration.sha256, id: migration.id,
+      originalPath: migration.file, originalDirectory: posix.dirname(migration.file), directory,
+      ledger: { table: "_prisma_migrations", migrationName: directory, checksum: file.sha256 }, file });
+    data.postCapability = phased.postCapability;
+  } else {
+    requireEvidence(deployment.installation === undefined && deployment.postCapability === undefined, "v1 不能携带后置扩展");
   }
   expected.sort((left, right) => left.directory < right.directory ? -1 : 1);
   requireEvidence(isDeepStrictEqual(deployment.migrations, expected.map((entry, order) => ({ order, ...entry }))),
@@ -244,14 +284,27 @@ function verifyBuildProvenance(files, context, source, identity, lock, migration
   const projected = sourceFiles.get("package-lock.json");
   requireEvidence(sourceFiles.size === source.files.length && projected?.sha256 === proof.npmLockSha256
     && projected.bytes === source.npmLocks.projected.bytes, "固定宿主构建与来源文件表的投影锁不一致");
-  const projects = [...CONTRACT_PROJECTS,
+  let projects = [...CONTRACT_PROJECTS,
     ...(sourceFiles.has("packages/ai-native-data/package.json") ? ["packages/ai-native-data/tsconfig.json"] : []),
     "apps/rental-api/tsconfig.json",
     ...(source.ai ? ["packages/ai-native-server/tsconfig.json", "apps/rental-api/tsconfig.ai.json"] : [])];
   requireEvidence(!source.mcp, "当前固定构建合同尚无正式 MCP 宿主编译证明");
+  if (context.sourceArtifacts || context.ledgerVersion === 2) {
+    projects = [...CONTRACT_PROJECTS.slice(0, 4), "packages/core-contracts/tsconfig.json",
+      ...["platform-server", "core-host", "platform-core-host"].map(name => `packages/${name}/tsconfig.json`),
+      ...(context.ledgerVersion === 2 ? ["packages/ai-native-data/tsconfig.json", "packages/ai-native-data/tsconfig.public.json",
+        "packages/rental-core/tsconfig.json", "packages/rental-core/tsconfig.json", "packages/ai-native-server/tsconfig.json"]
+        : ["packages/rental-core/tsconfig.json"]),
+      "apps/platform-api/tsconfig.json", "packages/ai-native-data/tsconfig.json", "apps/rental-api/tsconfig.json",
+      ...(context.ledgerVersion === 2 ? ["apps/rental-api/tsconfig.ai.json", "apps/rental-admin/tsconfig.json",
+        "packages/ai-native-server/tsconfig.public.json", "packages/rental-ai-adapters/tsconfig.json",
+        "apps/rental-api/tsconfig.public-retention.json"] : [])];
+  }
   requireEvidence(Array.isArray(proof.projects) && isDeepStrictEqual(proof.projects.map(item => item?.config), projects)
-    && proof.projects.every(item => hasSource(item.config) && item.diagnostics === 0
-      && [item.roots, item.sourceFiles, item.outputs].every(value => Number.isSafeInteger(value) && value > 0))
+    && proof.projects.every(item => (hasSource(item.config)
+      || context.ledgerVersion === 2 && item.config === "packages/ai-native-server/tsconfig.public.json") && item.diagnostics === 0
+      && [item.roots, item.sourceFiles].every(value => Number.isSafeInteger(value) && value > 0)
+      && Number.isSafeInteger(item.outputs) && (item.config === "apps/rental-admin/tsconfig.json" ? item.outputs === 0 : item.outputs > 0))
     && Array.isArray(platformBuild.projects) && isDeepStrictEqual(platformBuild.projects.map(item => item?.project), PLATFORM_PROJECTS)
     && platformBuild.projects.every(item => hasSource(item.project) && isSha256(item.inputsSha256)),
     "固定宿主构建的编译项目、源码配置或诊断不一致");
@@ -265,7 +318,7 @@ function verifyBuildProvenance(files, context, source, identity, lock, migration
       && item.schemaSha256 === migrations.schemaSha256), "固定宿主构建的 Client 声明、schema 或选择不一致");
 
   const expectedOutputs = new Map([...digests].filter(([file]) => RUNTIME_OUTPUT.test(file)
-    && !file.startsWith("packages/rental-core/") && !(source.ai && file.startsWith(CAPABILITY_ROOTS["ai-native"]))));
+    && !file.startsWith("packages/rental-core/") && !(source.ai && context.ledgerVersion !== 2 && file.startsWith(CAPABILITY_ROOTS["ai-native"]))));
   requireEvidence(Array.isArray(proof.files) && proof.files.length === expectedOutputs.size && expectedOutputs.has(context.entry),
     "固定宿主构建证明与实际入包产物集合不一致");
   for (const item of proof.files) {
@@ -274,6 +327,34 @@ function verifyBuildProvenance(files, context, source, identity, lock, migration
     expectedOutputs.delete(item.file);
   }
   return reference.sha256;
+}
+
+function verifyPublicSdk(files, source, context, field, dataSdk) {
+  const sdk = context[field], original = source[field];
+  requireEvidence(sdk && original, "公共保留缺少实际 SDK 收据");
+  const { installedFiles, ...receipt } = sdk;
+  const name = dataSdk ? "@rental-os/ai-native-data" : "@rental-os/ai-native-server";
+  const version = dataSdk ? "0.2.3" : "0.2.1";
+  const owner = dataSdk ? "apps/rental-api" : "packages/rental-ai-adapters";
+  const alias = dataSdk ? "@rental-os/public-ai-data" : name;
+  const archive = `vendor/${dataSdk ? "ai-native-data" : "ai-native-server"}-public-${version}.tgz`;
+  const bytes = files.get(archive);
+  const declared = source.files?.find(item => item.path === archive);
+  const locked = readJson(files.get("package-lock.json"), "运行锁").packages?.[`${owner}/node_modules/${alias}`];
+  requireEvidence(isDeepStrictEqual(receipt, original) && sdk.name === name && sdk.version === version
+    && (dataSdk ? sdk.alias === alias : sdk.legacyVersion === "0.1.0" && isSha256(sdk.schemaSha256))
+    && isDeepStrictEqual(sdk.source, source.platform.source) && sdk.archive === archive && sdk.install === `${owner}/node_modules/${alias}`
+    && bytes?.length > 0 && isSha256(sdk.sha256) && sha256(bytes) === sdk.sha256
+    && declared?.sha256 === sdk.sha256 && declared.bytes === bytes.length
+    && sdk.integrity === `sha512-${createHash("sha512").update(bytes).digest("base64")}`
+    && locked?.version === version && locked.resolved === `file:${archive}` && locked.integrity === sdk.integrity
+    && (!dataSdk || locked.name === name)
+    && readJson(files.get(`${owner}/package.json`), "SDK 调用方").dependencies?.[alias] === `file:../../${archive}`,
+  "公共 SDK 的包身份、来源、vendor 原字节或运行安装锁不一致");
+  requireEvidence(Array.isArray(installedFiles) && installedFiles.length > 0
+    && new Set(installedFiles.map(item => item?.file?.toLowerCase())).size === installedFiles.length
+    && installedFiles.every(item => isPackagePath(item?.file) && isSha256(item.sha256))
+    && installedFiles.some(item => item.file === "package.json"), "公共 SDK 缺少实际安装文件表");
 }
 
 function verifyPreparedRental(files, expectedContextSha256, { requireFixedBuild = false } = {}) {
@@ -287,6 +368,13 @@ function verifyPreparedRental(files, expectedContextSha256, { requireFixedBuild 
   requireEvidence(context.sourceProvenance?.file === SOURCE_FILE && digests.has(SOURCE_FILE)
     && context.sourceProvenance.sha256 === digests.get(SOURCE_FILE), "宿主缺少正式双来源证明");
   const source = readJson(files.get(SOURCE_FILE), SOURCE_FILE);
+  const freshAi = context.ledgerVersion === 2;
+  requireEvidence(freshAi ? source.installation === "fresh-ai" && context.installation === "fresh-ai"
+    && source.ai === true && source.mcp === false && context.publicRetention && source.publicRetention
+    && context.sourceMode === "release" && context.releaseApproved === false && context.serverUpdateEligible === false
+    : source.installation === undefined && source.publicRetention === undefined && source.publicAiDataSdk === undefined
+      && context.installation === undefined && context.publicRetention === undefined && context.publicAiDataSdk === undefined
+      && context.ledgerVersion === undefined, "v2 公共保留或 v1 普通宿主的选择标记不一致");
   requireEvidence(source.format === "nativark-core-development-source-2" && source.mode === "release" && source.host === "rental"
     && ["host", "full"].includes(source.profile) && isDeepStrictEqual(source.coreIds, ["rental"])
     && typeof source.ai === "boolean" && typeof source.mcp === "boolean", "需要 release 模式的 Rental 宿主双来源，domain 源码不能作为候选");
@@ -294,7 +382,8 @@ function verifyPreparedRental(files, expectedContextSha256, { requireFixedBuild 
     && /^apps\/rental-api\/dist-mcp\/[a-z0-9][a-z0-9-]*\.js$/u.test(context.mcpEntry)
     : context.mcpMode === "disabled" && context.mcpEntry === undefined, "缺少正式 MCP 宿主入口或选择不一致");
   requireEvidence(context.aiMode === (source.ai ? "enabled" : "disabled"), "AI 选择与宿主收据不一致");
-  const entry = source.mcp ? context.mcpEntry : `apps/rental-api/${source.ai ? "dist-ai/ai-main.js" : "dist/main.js"}`;
+  const entry = freshAi ? "apps/rental-api/dist-ai-public-retention/ai-public-retention-main.js"
+    : source.mcp ? context.mcpEntry : `apps/rental-api/${source.ai ? "dist-ai/ai-main.js" : "dist/main.js"}`;
   requireEvidence(context.entry === entry && files.get(entry)?.length > 0, "宿主缺少所选运行入口");
   for (const file of ["Dockerfile", "package.json", "verify-runtime.cjs"]) {
     requireEvidence(files.get(file)?.length > 0, `缺少正式宿主材料 ${file}`);
@@ -306,7 +395,9 @@ function verifyPreparedRental(files, expectedContextSha256, { requireFixedBuild 
   const lockFile = DEPLOYMENT_ROOT + "core.deployment.lock.json";
   const deploymentLockSha256 = digests.get(lockFile);
   requireEvidence(deploymentLockSha256 && deploymentLockSha256 === context.deploymentLockSha256, "正式部署锁缺失或与宿主收据不一致");
-  const lock = readJson(files.get(lockFile), "core.deployment.lock.json");
+  const deploymentLock = readJson(files.get(lockFile), "core.deployment.lock.json");
+  requireEvidence(deploymentLock.lockVersion === (freshAi ? 2 : 1), "宿主账版本与实际部署锁不一致");
+  const lock = freshAi ? deploymentLock.base : deploymentLock;
   const pin = lock.cores?.[0];
   requireEvidence(lock.lockVersion === 1 && Array.isArray(lock.cores) && lock.cores.length === 1 && pin?.manifest?.id === "rental"
     && isSha256(pin.sha256) && pin.sha256 === context.coreSha256 && isSha256(lock.platform?.sha256)
@@ -327,6 +418,20 @@ function verifyPreparedRental(files, expectedContextSha256, { requireFixedBuild 
     "缺少所选 AI/MCP 能力的正式部署材料，或部署锁与选择不一致");
   if (source.ai) verifyAiData(capabilities.find(item => item.id === "ai-native"), context, files, digests);
   if (source.mcp) verifyMcpData(capabilities.find(item => item.id === "mcp"), files, digests);
+  if (context.sourceArtifacts || freshAi) {
+    requireEvidence(context.sourceMode === "release" && context.releaseApproved === false && context.serverUpdateEligible === false
+      && isDeepStrictEqual(context.sourceArtifacts, { platformSha256: lock.platform.sha256, rentalSha256: pin.sha256,
+        ...(freshAi ? { aiDataSha256: context.aiDataSha256 } : {}) }), "正式两阶段原归档摘要不一致");
+  }
+  if (freshAi) {
+    requireEvidence(["0.2.0", "0.2.2"].includes(capabilities[0].version)
+      && isDeepStrictEqual(capabilities[0].source, platform), "公共保留的数据发行须与底座同源");
+    verifyPublicSdk(files, source, context, "publicRetention", false);
+    verifyPublicSdk(files, source, context, "publicAiDataSdk", true);
+    const initialization = "apps/rental-api/dist-ai/ai-fresh-initialize.js";
+    requireEvidence(context.runtime?.initialization?.entry === initialization && digests.has(initialization),
+      "公共保留缺少同版新装初始化入口");
+  }
   const npm = source.npmLocks;
   const npmLocks = {
     platform: lockDigest(npm?.platform, "底座原 npm 锁", "package-lock.json"),
@@ -336,7 +441,7 @@ function verifyPreparedRental(files, expectedContextSha256, { requireFixedBuild 
   };
   requireEvidence(npmLocks.projected === context.originalNpmLockSha256 && readJson(files.get("package-lock.json"), "运行 npm 锁").lockfileVersion === 3,
     "组合 npm 投影锁与宿主收据不一致，或运行锁缺少 npm v3 格式");
-  const migrations = verifyDeployment(files, deployment, lock, capabilities, digests);
+  const migrations = verifyDeployment(files, deployment, lock, capabilities, digests, freshAi ? deploymentLock : undefined, source);
   migrations.platformSchemaSha256 = describe(files, "apps/platform-api/prisma/schema.prisma").sha256;
   requireEvidence(Array.isArray(context.clients) && context.clients.length === 2
     && context.clients.some(item => item?.directory === "apps/platform-api/generated/client" && item.mode === "platform"
@@ -344,7 +449,8 @@ function verifyPreparedRental(files, expectedContextSha256, { requireFixedBuild 
     && context.clients.some(item => item?.directory === "apps/rental-api/generated/client" && item.mode === (source.ai ? "rental-ai" : "rental")
       && item.schemaSha256 === migrations.schemaSha256), "所选 Client 收据与锁定 schema 不一致");
   const identity = { format: "rental-release-identity-1", platform, rental,
-    selection: { host: source.host, profile: source.profile, coreIds: source.coreIds, ai: source.ai, mcp: source.mcp },
+    selection: { host: source.host, profile: source.profile, coreIds: source.coreIds, ai: source.ai, mcp: source.mcp,
+      ...(freshAi ? { installation: "fresh-ai", aiMode: "public-retention", mcpMode: "disabled" } : {}) },
     npmLocks, deploymentLockSha256, contextSha256: expectedContextSha256 };
   const buildProvenanceSha256 = verifyBuildProvenance(files, context, source, identity, lock, migrations, digests, requireFixedBuild);
   if (buildProvenanceSha256) identity.buildProvenanceSha256 = buildProvenanceSha256;
