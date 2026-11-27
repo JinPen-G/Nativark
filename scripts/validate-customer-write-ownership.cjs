@@ -15,7 +15,17 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const { checkedPath } = require("./controller-sources.cjs");
+function checkedPath(root, target, kind = "file") {
+  const file = path.resolve(root, target), relative = path.relative(root, file);
+  if (relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)) throw new Error("Selected source escapes its root: " + file);
+  if (!fs.existsSync(file)) throw new Error("Selected source is missing: " + file);
+  for (let current = file; current !== root; current = path.dirname(current))
+    if (fs.lstatSync(current).isSymbolicLink()) throw new Error("Selected source cannot follow links: " + current);
+  const stat = fs.statSync(file);
+  if (kind === "directory" ? !stat.isDirectory() : !stat.isFile()) throw new Error("Selected source has the wrong type: " + file);
+  return file;
+}
+
 let ROOT = path.resolve(__dirname, ".."), owner;
 const selectedRoots = [], args = process.argv.slice(2);
 for (let i = 0; i < args.length; i++) {
@@ -26,6 +36,7 @@ for (let i = 0; i < args.length; i++) {
   else throw new Error("只接受 --source-root / --scan-root / --owner");
 }
 if (!selectedRoots.length || !owner) throw new Error("客户写入检查必须显式选择 --scan-root 和 --owner");
+ROOT = fs.realpathSync(ROOT);
 const SCAN_ROOTS = selectedRoots.map(directory => checkedPath(ROOT, directory, "directory"));
 const OWNER = checkedPath(ROOT, owner);
 if (!SCAN_ROOTS.some(directory => OWNER.startsWith(directory + path.sep))) throw new Error("客户唯一写入口必须在所选扫描范围内");
@@ -46,10 +57,16 @@ function walk(dir, out = []) {
 }
 
 const violations = [];
+const scannedFiles = new Set();
 let ownerWrites = 0;
 let scanned = 0;
 
-for (const file of SCAN_ROOTS.flatMap(root => walk(root))) {
+for (const directory of SCAN_ROOTS) {
+  const files = walk(directory);
+  if (!files.length) throw new Error(`客户写入扫描目录没有 TypeScript 源码：${directory}`);
+  for (const file of files) scannedFiles.add(file);
+}
+for (const file of scannedFiles) {
   scanned += 1;
   const source = fs.readFileSync(file, "utf8");
   const lines = source.split(/\r?\n/u);
@@ -74,6 +91,8 @@ if (!fs.existsSync(OWNER)) {
   console.error(`[customer-write-ownership] 写入口文件不存在: ${path.relative(ROOT, OWNER)}`);
   process.exit(1);
 }
+
+if (ownerWrites === 0) throw new Error("所选客户唯一写入口没有原客户模型写调用，不能以空扫描通过");
 
 if (violations.length > 0) {
   console.error("[customer-write-ownership] 以下客户模型写调用不在 mysql-customer-master.ts 内：");
