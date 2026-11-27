@@ -93,6 +93,6 @@ npm run register:permissions -w @rental-os/example-tickets-api
 
 ## 验证入口与前置卡点
 
-公开标准包使用 `node packages/core-contracts/dist/check.js <已准备工单目录> --host <同版宿主版本JSON> --json` 核清单、入口和兼容。必要类型沿[内存类型入口](../../scripts/check-selected-prisma-types.cjs)的 `--mode platform --config apps/example-tickets-api/tsconfig.json`。完整源码中的[原运行包 runner](../../tests/rental-host-package.test.cjs)复用[单工单材料用例](../../tests/platform-host-package-cases.cjs)，覆盖完整包、唯一公共 Client、实际根装配、缺失及篡改材料拒绝，它的运行范围及隔离前置以源码为准。
+公开标准包使用 `node packages/core-contracts/dist/check.js <已准备工单目录> --host <同版宿主版本JSON> --json` 核清单、入口和兼容。必要类型沿[内存类型入口](../../scripts/check-selected-prisma-types.cjs)的 `--mode platform --config apps/example-tickets-api/tsconfig.json`。原运行包 runner 同时编译旧双 Core 宿主，应在[完整历史检出 `46db0945…`](https://github.com/JinPen-G/Zelo/tree/46db0945dee92ac916f7265e95948943fc8b641d)运行 `node tests/rental-host-package.test.cjs`。该版的单工单材料用例覆盖完整包、唯一公共 Client、实际根装配、缺失及篡改材料拒绝。
 
 首次绑定或普通业务因部署准入 unknown 拒绝时，先按上述 SaaS 管理步骤读取并核定原状态。缺 Client 先回公共 schema 生成步骤，缺清单或包摘要不符核同一待部署包与实际解析目录，公共数据版本不符核固定发行与本宿主原计划，权限目录缺项使用同一部署锁登记。绑定和原操作返回未知时保留原键，沿[只读结果及当前事实](../../packages/core-contracts/README.md#core-管理-http-合同)核对。单工单的独立安装、原迁移、业务HTTP及持久重启已有实际冒烟；完整工单Web、双Core和独立升级继续按各自组合核收。

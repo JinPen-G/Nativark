@@ -96,7 +96,7 @@ flowchart TD
 | --- | --- | --- |
 | **无 Core（纯底座）** | 独立启动登录，完整使用租户/组织/角色/安全/订阅/字典编号/集成/消息/Core 管理，首页显示无 Core 引导空态 | [platform-api](apps/platform-api/README.md) + [platform-admin](apps/platform-admin/README.md) |
 | **单 Core** | 仅加载所选单个 Core 及其数据迁移与页面，不携带其他行业代码 | [example-tickets-api](apps/example-tickets-api/README.md) / [rental-api](apps/rental-api/README.md) |
-| **多 Core 并存** | 同部署、同租户并行运行多个 Core，共享公共会话，各自权限、导航、数据与前端缓存严格隔离 | [example-multi-core-api](apps/example-multi-core-api/README.md) + [example-multi-core-admin](apps/example-multi-core-admin/README.md) |
+| **多 Core 并存** | 同部署、同租户并行运行多个 Core，共享公共会话，各自权限、导航、数据与前端缓存严格隔离 | [独立 Rental 的双 Core 示例](https://github.com/JinPen-G/Zelo-rental-core#rental-与工单双-core-示例) |
 | **停用与重开** | 停用单个 Core 时阻止新业务写入，保留既有数据、配置与历史收据，并允许在途收尾；重开后按当前权限恢复 | 内置标准 Core 生命周期 |
 
 ---
@@ -155,7 +155,7 @@ Zelo 公共底座采用宽松的 **[MIT License](LICENSE)**，**开发者对自�
 
 ## 内置业务 Core 示例
 
-本仓库除了公共底座外，还随仓自带两个不同复杂度的业务 Core 包与一套多 Core 组合宿主，方便开箱体验与对照开发：
+本仓库包含公共底座、工单示例和 Rental 兼容源码。Rental 与工单的组合宿主在独立 Rental 仓维护：
 
 ### 1. Example Tickets Core（轻量教学示例）
 - **定位**：最小化非租赁业务 Core 样板，仅按租户范围隔离，不引入门店、库存、资金或 AI 依赖。
@@ -170,7 +170,8 @@ Zelo 公共底座采用宽松的 **[MIT License](LICENSE)**，**开发者对自�
 
 ### 3. Multi-Core 组合宿主（双 Core 并存示范）
 - **定位**：同时装配 **Rental Core** 与 **Example Tickets Core**，在同一套公共身份、数据库与管理后台中演示多 Core 独立授权、独立路由与缓存隔离。
-- **入口**：[双 Core API 宿主](apps/example-multi-core-api/README.md) · [双 Core Web 宿主](apps/example-multi-core-admin/README.md)
+- **普通开发**：按[独立 Rental 开发说明](https://github.com/JinPen-G/Zelo-rental-core#rental-与工单双-core-示例)固定两仓完整提交，选 `--profile multi-core`。在生成的工作区使用 `build:example-multi-core-api` 与 `build:example-multi-core-admin`，两端共用同一份含 Rental 和工单的固定部署锁。
+- **历史构建、打包和回归**：旧单仓双 Core（含 AI）只在[完整历史检出 `46db0945…`](https://github.com/JinPen-G/Zelo/tree/46db0945dee92ac916f7265e95948943fc8b641d)沿原锁构建。旧打包使用 `npm run package:rental-host -- --host example-multi-core` 及该版要求的材料；`tests/rental-host-package.test.cjs`、`tests/admin-branding.test.cjs` 和 `tests/admin-copilot-style-boundary.test.cjs` 也在该检出运行。现行 `multi-core` 范围提供普通开发源码，其回执不能用于旧双 Core 打包或部署。
 
 ---
 
@@ -280,8 +281,6 @@ Zelo/
 │   ├── platform-admin/               # [纯底座] 零 Core 独立公共 Web 后台宿主
 │   ├── example-tickets-api/          # [示例宿主] 底座 + 工单 Core 独立 API
 │   ├── example-tickets-admin/        # [示例宿主] 底座 + 工单 Core 独立后台
-│   ├── example-multi-core-api/       # [示例宿主] 底座 + Rental + 工单 双 Core API
-│   ├── example-multi-core-admin/     # [示例宿主] 底座 + Rental + 工单 双 Core 后台
 │   ├── rental-api/                   # [官方 Core 宿主] 底座 + Rental 独立 API（可选启用 AI / MCP）
 │   ├── rental-admin/                 # [官方 Core 宿主] 底座 + Rental 独立后台
 │   └── api/ & admin/                 # [兼容组合] 保留原开发入口，底层消费上述拆分单源包
@@ -336,7 +335,7 @@ Zelo/
 | --- | --- | --- |
 | `packages/example-tickets-core` | 轻量工单 Core 示例包（非租赁最小参考） | [工单 Core](packages/example-tickets-core/README.md) · [API](apps/example-tickets-api/README.md) · [Web](apps/example-tickets-admin/README.md) |
 | `packages/rental-core`、`packages/rental-mcp-host` | 官方租赁业务 Core 包及显式选装的 Rental MCP 宿主 | [Rental Core](packages/rental-core/README.md) · [API](apps/rental-api/README.md) · [Web](apps/rental-admin/README.md) · [MCP 宿主](packages/rental-mcp-host/README.md) |
-| `apps/example-multi-core-api` / `admin` | Rental + 工单 双 Core 并存示范宿主 | [双 Core API](apps/example-multi-core-api/README.md) · [双 Core Web](apps/example-multi-core-admin/README.md) |
+| 独立 Rental 的 `multi-core` 开发组合 | Rental + 工单双 Core API 和后台 | [独立组合与历史入口](https://github.com/JinPen-G/Zelo-rental-core#rental-与工单双-core-示例) |
 | 独立 Rental 的 `workspace/apps/` | 配套预约网站、企业门户、客户和员工微信小程序；以双仓 `full` 组合构建 | [四端开发与旧验证入口](https://github.com/JinPen-G/Zelo-rental-core/blob/main/README.md#源码开发工作区) |
 | `apps/api`、`apps/admin`、`packages/shared` | 原组合工程兼容入口与共享总出口（底层消费拆分后的单源包） | [API 装配](apps/api/src/app.module.ts) · [Admin 规则](apps/admin/AGENTS.md) · [shared 出口](packages/shared/src/index.ts) |
 | [Zelo-website](https://github.com/JinPen-G/Zelo-website) | 独立维护的 Zelo 官网；底座构建不安装官网依赖 | [官网源码与许可](https://github.com/JinPen-G/Zelo-website) |

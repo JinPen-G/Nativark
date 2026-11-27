@@ -150,7 +150,7 @@ const observations = createMysqlCoreDeploymentObservation({
 | --- | --- | --- |
 | [所选源码类型](../../scripts/check-selected-prisma-types.cjs) | rental-ai 组合、官方 Prisma 5.22 声明及所选源码 / 出口 | WASM / generator 与严格编译只驻内存，真实 Client 和数据库另验 |
 | [固定发行](../../scripts/verify-rental-distribution.cjs) | 明确 --commit 的真实配置 emit、AI 完整包 / 归档 / 安装准备和正式出口 | 固定 Git 树与内存产物，冷安装 / Docker / OS 部署另验 |
-| [宿主打包](../../tests/rental-host-package.test.cjs) | 普通 / AI 同版包、部署锁、所选 Client 与 CLI 文件运输 | 显式内存文件 / 运输 fixture，真实迁移与启动另验 |
+| [历史宿主打包](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/tests/rental-host-package.test.cjs) | 普通 / AI 同版包、部署锁、所选 Client 与 CLI 文件运输 | 使用 `46db0945…` 完整检出的原锁和旧双 Core 宿主；显式内存文件 / 运输 fixture，真实迁移与启动另验 |
 | [AI 宿主组合](../../apps/rental-api/test/ai-composition.test.cjs) | 同一数据贡献与原 AI / Rental 依赖、HTTP 和恢复消费者 | 依赖、SQL、授权与外部运输按用例明确的 fixture 取证 |
 
 本版 schema 与来源材料可逐字节核 102 个原模型 / 枚举块、58 份 SQL 和所有提取 / 排除范围，组合目标为 247 模型 / 35 枚举。createAiNativeDataPreparation 输出 60 文件并保持 pending，完整构建包以五个真实出口及固定摘要另行校验。阶段执行次数、命令与固定版本保留在原开发记录。

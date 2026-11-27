@@ -96,7 +96,7 @@ flowchart TD
 | --- | --- | --- |
 | **Zero-Core (Base Only)** | Standalone login with full tenant/org/role/security/subscription/dictionary/integration/messaging/Core management; displays a clean zero-Core onboarding state | [platform-api](apps/platform-api/README.md) + [platform-admin](apps/platform-admin/README.md) |
 | **Single Core** | Loads only the chosen Core with its own SQL migrations and UI routes, carrying zero unrelated industry code | [example-tickets-api](apps/example-tickets-api/README.md) / [rental-api](apps/rental-api/README.md) |
-| **Multi-Core Coexistence** | Runs multiple Cores side by side in one deployment and tenant with shared auth and strict permission, route, data, and cache isolation | [example-multi-core-api](apps/example-multi-core-api/README.md) + [example-multi-core-admin](apps/example-multi-core-admin/README.md) |
+| **Multi-Core Coexistence** | Runs multiple Cores side by side in one deployment and tenant with shared auth and strict permission, route, data, and cache isolation | [Dual-Core example in the Rental repository](https://github.com/JinPen-G/Zelo-rental-core/blob/main/README.en.md#rental-and-tickets-example) |
 | **Disable & Re-enable** | Disabling a Core blocks new writes while preserving existing data, settings, receipts, and in-flight completion; re-enabling restores access under current grants | Built-in Core lifecycle |
 
 ---
@@ -155,7 +155,7 @@ Because the Zelo base is released under the permissive **[MIT License](LICENSE)*
 
 ## Built-in Business Core Examples
 
-Alongside the pure platform base, this repository ships two business Cores of different complexity plus a dual-Core host for out-of-the-box evaluation and reference:
+This repository contains the platform base, the Tickets example, and Rental compatibility sources. The standalone Rental repository maintains the Rental and Tickets composite host:
 
 ### 1. Example Tickets Core (Lightweight Starter)
 - **Purpose**: Minimal non-rental business Core template scoped strictly by tenant—no stores, inventory, payments, or AI dependencies.
@@ -170,7 +170,8 @@ Alongside the pure platform base, this repository ships two business Cores of di
 
 ### 3. Multi-Core Composite Host (Dual-Core Reference)
 - **Purpose**: Mounts both **Rental Core** and **Example Tickets Core** together on a single shared identity layer, database, and admin shell to demonstrate independent grants, routing, and cache isolation.
-- **Entrypoints**: [Multi-Core API Host](apps/example-multi-core-api/README.md) · [Multi-Core Admin Host](apps/example-multi-core-admin/README.md)
+- **Ordinary development**: Follow the [standalone Rental guide](https://github.com/JinPen-G/Zelo-rental-core/blob/main/README.en.md#rental-and-tickets-example), pin both full commit SHAs, and select `--profile multi-core`. In the resulting workspace, use `build:example-multi-core-api` and `build:example-multi-core-admin` with the same deployment lock for Rental and Tickets.
+- **Historical builds, packaging, and tests**: Use the [complete pinned checkout at `46db0945…`](https://github.com/JinPen-G/Zelo/tree/46db0945dee92ac916f7265e95948943fc8b641d) and its lock for the legacy dual-Core host, including AI. Use `npm run package:rental-host -- --host example-multi-core` with that revision's required inputs. Run `tests/rental-host-package.test.cjs`, `tests/admin-branding.test.cjs`, and `tests/admin-copilot-style-boundary.test.cjs` in the same checkout. The current `multi-core` profile provides ordinary development sources; its receipt does not qualify as a legacy package or deployment input.
 
 ---
 
@@ -280,8 +281,6 @@ Zelo/
 │   ├── platform-admin/               # [Base] Zero-Core standalone platform Web admin host
 │   ├── example-tickets-api/          # [Example] Base + Tickets Core standalone API host
 │   ├── example-tickets-admin/        # [Example] Base + Tickets Core standalone Web host
-│   ├── example-multi-core-api/       # [Example] Base + Rental + Tickets dual-Core API host
-│   ├── example-multi-core-admin/     # [Example] Base + Rental + Tickets dual-Core Web host
 │   ├── rental-api/                   # [Official Core] Base + Rental standalone API (optional AI / MCP)
 │   ├── rental-admin/                 # [Official Core] Base + Rental standalone Web host
 │   └── api/ & admin/                 # [Legacy Composite] Composite dev entry consuming split single-source packages
@@ -336,7 +335,7 @@ Zelo/
 | --- | --- | --- |
 | `packages/example-tickets-core` | Lightweight ticketing Core example (minimal non-rental reference) | [Tickets Core](packages/example-tickets-core/README.md) · [API](apps/example-tickets-api/README.md) · [Web](apps/example-tickets-admin/README.md) |
 | `packages/rental-core`, `packages/rental-mcp-host` | Official rental business Core and opt-in Rental MCP host adapter | [Rental Core](packages/rental-core/README.md) · [API](apps/rental-api/README.md) · [Web](apps/rental-admin/README.md) · [MCP Host](packages/rental-mcp-host/README.md) |
-| `apps/example-multi-core-api` / `admin` | Dual-Core coexistence reference host (Rental + Tickets) | [Multi-Core API](apps/example-multi-core-api/README.md) · [Multi-Core Web](apps/example-multi-core-admin/README.md) |
+| Standalone Rental `multi-core` development workspace | Rental and Tickets dual-Core API and admin app | [Setup and historical verification](https://github.com/JinPen-G/Zelo-rental-core/blob/main/README.en.md#rental-and-tickets-example) |
 | `workspace/apps/` in the independent Rental repository | Booking storefront, enterprise portal, and customer/staff WeChat Mini Programs; built in the dual-repository `full` profile | [Client development and historical checks](https://github.com/JinPen-G/Zelo-rental-core/blob/main/README.en.md#preparing-a-standalone-dev-workspace) |
 | `apps/api`, `apps/admin`, `packages/shared` | Legacy composite entrypoints and compatibility barrel consuming the split packages | [API Module](apps/api/src/app.module.ts) · [Admin Rules](apps/admin/AGENTS.md) · [Shared Index](packages/shared/src/index.ts) |
 | [Zelo-website](https://github.com/JinPen-G/Zelo-website) | The separately maintained Zelo website; the base build does not install website dependencies | [Website source and notices](https://github.com/JinPen-G/Zelo-website) |

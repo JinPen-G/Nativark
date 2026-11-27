@@ -1,4 +1,0 @@
-{
-  "extends": "../../packages/platform-admin/tsconfig.json",
-  "include": ["src", "vite.config.ts"]
-}

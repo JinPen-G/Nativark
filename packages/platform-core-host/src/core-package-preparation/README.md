@@ -48,15 +48,15 @@
    node -e "const fs=require('node:fs'); const lock=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); fs.writeFileSync(process.argv[2],JSON.stringify(lock.platform,null,2)+'\n',{flag:'wx'});" $candidateLock C:\release\platform.release.json
    ```
 
-3. Rental 或双 Core 先用[原部署准备](../../../../apps/rental-api/src/prepare-deployment.ts)生成完整 schema、迁移和锁。通用候选的 `deployment/schema.prisma` 仅含数据源，不能直接当作 Rental 打包材料。下面是关闭 AI 的 Rental 命令；双 Core 在末尾加 `--additional-core C:\release\example-tickets-core`，所选完整包及顺序须与候选锁一致。新迁移目录须是实际 `apps/rental-api` 根的直接子目录，使生成器指向同一 `../generated/client`。生成后比较完整锁，失败即停止交包：
+3. Rental 先用[原部署准备](../../../../apps/rental-api/src/prepare-deployment.ts)生成完整 schema、迁移和锁。通用候选的 `deployment/schema.prisma` 仅含数据源，不能直接当作 Rental 打包材料。下面是关闭 AI 的 Rental 命令。新迁移目录须是实际 `apps/rental-api` 根的直接子目录，使生成器指向同一 `../generated/client`。生成后比较完整锁，失败即停止交包：
 
    ```powershell
    node apps/rental-api/dist/prepare-deployment.js C:\release\platform.release.json C:\release\rental-core C:\checkout\apps\rental-api\prisma-update
    node -e "const fs=require('node:fs'); const read=p=>JSON.parse(fs.readFileSync(p,'utf8')); require('node:assert/strict').deepEqual(read(process.argv[1]),read(process.argv[2]));" $candidateLock C:\checkout\apps\rental-api\prisma-update\core.deployment.lock.json
    ```
 
-   已选 AI 时，在三个位置参数后、`--additional-core` 前再传候选 `dataCapabilities` 中的固定 AI 数据发行 JSON 和完整 AI 包目录；打包对应使用 `--ai enabled --ai-data-package <同一完整AI包绝对目录>`。此步骤不生成 Client、不执行 SQL、不证明实际迁移就绪；所选 Client 仍按[宿主构建步骤](../../../../apps/rental-api/README.md)准备并核对同一 schema。
-4. 完整材料与候选锁一致后交原打包器。零 Core 公共宿主直接用候选锁，打包器自行核原公共 schema/迁移；单工单宿主在公共命令后加 `--host example-tickets --tickets-package C:\release\example-tickets-core`。Rental 使用上一步的新完整部署目录，双 Core 在 Rental 命令后加 `--host example-multi-core --tickets-package C:\release\example-tickets-core`：
+   已选 AI 时，在三个位置参数后再传候选 `dataCapabilities` 中的固定 AI 数据发行 JSON 和完整 AI 包目录；打包对应使用 `--ai enabled --ai-data-package <同一完整AI包绝对目录>`。此步骤不生成 Client、不执行 SQL、不证明实际迁移就绪；所选 Client 仍按[宿主构建步骤](../../../../apps/rental-api/README.md)准备并核对同一 schema。
+4. 完整材料与候选锁一致后交原打包器。零 Core 公共宿主直接用候选锁，打包器自行核原公共 schema/迁移；单工单宿主在公共命令后加 `--host example-tickets --tickets-package C:\release\example-tickets-core`。Rental 使用上一步的新完整部署目录：
 
    ```powershell
    node scripts/package-platform-host.cjs --lock $candidateLock --platform-package C:\release\platform-source.tgz --platform-client C:\checkout\apps\platform-api\generated\client\index.d.ts --output C:\release\platform-host.tgz --deps C:\checkout\node_modules
@@ -64,6 +64,8 @@
    ```
 
    按实际组合选择其中一个命令，使用本仓库已生成的专属 Client 和固定完整包。[公共打包器](../../../../scripts/package-platform-host.cjs)与[Rental 打包器](../../../../scripts/package-rental-host.cjs)核源码/包、依赖锁、完整部署材料与启动出口；打包不办理镜像构建、迁移、切换或注册，结果继续为 pending。
+
+Rental 与工单的普通双 Core 开发使用[独立 `multi-core` 工作区](https://github.com/JinPen-G/Zelo-rental-core#rental-与工单双-core-示例)，由其宿主说明选择两份固定包和部署锁。复建旧单仓双 Core 运行包时，在[完整历史检出 `46db0945…`](https://github.com/JinPen-G/Zelo/tree/46db0945dee92ac916f7265e95948943fc8b641d)使用该版的依赖锁、宿主和原材料：部署准备沿原 `--additional-core`，打包沿原 `--host example-multi-core --tickets-package`。现行开发来源回执不能替代旧包的发行来源与部署证据。
 
 前进更新仍由[原更新规划](../../../core-contracts/src/update.ts)拒绝程序或数据降版。兼容程序恢复须使用上次已验证的完整运行包及其原部署锁，先确认当前数据可由旧程序读取、原迁移链和物理结构符合该锁，全部所选底座/Core/能力及合同相互兼容，并核历史与在途操作、当前授权/分配/绑定的保留。同一数据版本不自动证明这些条件；部分迁移或 unknown 继续按原收据核对。旧候选、修改锁、倒写数据版本或放宽包校验均不能作为回退依据。本链没有通用程序回退执行器，实际恢复及不兼容拒绝须由目标环境验证。部署者继续办理当前数据核验、原迁移、切换和注册，租户授权及成员分配沿原入口保持。完整独立运行、真实数据库和宿主验收沿原专项门槛核收。
 

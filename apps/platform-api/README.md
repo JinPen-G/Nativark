@@ -166,4 +166,4 @@ Rental 提供自己的 schema、公共关系与实际数据计划，宿主按同
 
 独立运行包保留源码 schema 的原字节摘要。官方生成的 Client schema 可以整理空白，打包和运行预检使用同一 token 比较；标识符、类型、属性和字符串默认值变化仍拒绝，迁移 SQL 的摘要规则保持原样。[共同核验](../../scripts/build-selected-prisma.cjs)
 
-在完整源码检出中，所选源码类型使用[内存类型命令](../../scripts/check-selected-prisma-types.cjs)的 `--mode platform` 与本宿主 `--config apps/platform-api/tsconfig.json`。公共合同使用 `npm test -w @rental-os/core-contracts`，零 Core 与单工单运行材料沿[现有运行包用例](../../tests/platform-host-package-cases.cjs)和其[原 runner](../../tests/rental-host-package.test.cjs)读取固定证据。源码发行把未包含的检查资料链接到同一来源提交。类型、内存根装配、真实监听 / 数据库及冷安装分别记录。
+所选源码类型使用[内存类型命令](../../scripts/check-selected-prisma-types.cjs)的 `--mode platform` 与本宿主 `--config apps/platform-api/tsconfig.json`。公共合同使用 `npm test -w @rental-os/core-contracts`。原零 Core 与单工单运行包断言的 runner 同时编译旧双 Core 宿主，在[完整历史检出 `46db0945…`](https://github.com/JinPen-G/Zelo/tree/46db0945dee92ac916f7265e95948943fc8b641d)运行 `node tests/rental-host-package.test.cjs`。类型、内存根装配、真实监听 / 数据库及冷安装分别记录。
