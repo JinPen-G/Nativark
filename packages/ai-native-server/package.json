@@ -80,6 +80,9 @@
       "public-tenant-model-settings": [
         "dist/public-tenant-model-settings.d.ts"
       ],
+      "public-ai-work-center": [
+        "dist/public-ai-work-center.d.ts"
+      ],
       "public-platform-finance": [
         "dist/public-platform-finance.d.ts"
       ],
@@ -180,6 +183,10 @@
     "./public-tenant-model-settings": {
       "types": "./dist/public-tenant-model-settings.d.ts",
       "default": "./dist/public-tenant-model-settings.js"
+    },
+    "./public-ai-work-center": {
+      "types": "./dist/public-ai-work-center.d.ts",
+      "default": "./dist/public-ai-work-center.js"
     },
     "./public-platform-finance": {
       "types": "./dist/public-platform-finance.d.ts",

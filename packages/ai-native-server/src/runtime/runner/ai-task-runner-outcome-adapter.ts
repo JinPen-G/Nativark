@@ -1,7 +1,6 @@
-import type { AiTaskTransitionRepository } from '../ai-task-transition.repository';
-import type { AiTaskRepository } from '../ai-task.repository';
+import type { TaskPersistenceRepository } from '../task-persistence.repository';
 import type { AiTaskRunnerOutcomePort, AiTaskRunnerTaskOutcome } from '@rental-os/platform-server/ai-runtime';
-import { AI_TASK_DRAFT_VERSION, type AiTaskEventDraft } from '@rental-os/shared';
+import { AI_TASK_DRAFT_VERSION, type AiTaskEventDraft } from '@rental-os/platform-contracts/ai-task';
 import { isDeepStrictEqual } from 'node:util';
 import { AiTaskRunnerError } from '@rental-os/platform-server/ai-runtime';
 
@@ -16,10 +15,11 @@ export interface AiTaskRunnerOutcomeCommandFactory {
 }
 
 export interface AiTaskRunnerOutcomeAdapters {
-  transitions: Pick<AiTaskTransitionRepository, 'transition'> & Partial<Pick<AiTaskTransitionRepository, 'settleCancellation'>>;
+  transitions: { transition(value: unknown): Promise<OutcomeReceipt>; settleCancellation?(value: unknown): Promise<OutcomeReceipt> };
   commands: AiTaskRunnerOutcomeCommandFactory;
-  tasks?: Pick<AiTaskRepository, 'readMetadata'>;
+  tasks?: Pick<TaskPersistenceRepository, 'readMetadata'>;
 }
+type OutcomeReceipt = { event: AiTaskEventDraft; runRevision: number | null };
 
 function target(outcome: AiTaskRunnerTaskOutcome) {
   if (outcome.status === 'cancelled') return { to: 'cancelled' as const, reason: 'cancel_settled' as const };
@@ -45,7 +45,7 @@ export function createAiTaskRunnerOutcomePort(adapters: AiTaskRunnerOutcomeAdapt
     if (!isDeepStrictEqual(prepared, expected)) throw new AiTaskRunnerError('AI_INVALID_INPUT');
     return prepared;
   };
-  const observe = (value: Awaited<ReturnType<AiTaskTransitionRepository['transition']>>) => {
+  const observe = (value: OutcomeReceipt) => {
     try { return structuredClone(value); } catch { throw unknown(); }
   };
   const unknown = () => new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'aggregate transition acknowledgement requires original receipt');

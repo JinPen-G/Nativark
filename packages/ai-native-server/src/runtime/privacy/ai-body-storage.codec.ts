@@ -2,10 +2,10 @@
  * 不产生授权、不改内容哈希，也不保存检索明文副本。旧明文只兼容读取，
  * 回填须走独立受权维护；损坏密文和缺密钥不能降级为明文或空成功。 */
 import { createHash } from 'node:crypto';
-import { rentalPrismaNulls } from '@rental-os/rental-core/prisma-null-values';
+import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { Prisma } from '@prisma/client';
 import { SECRET_BOX_ENVELOPE_PATTERN, type SecretBox } from '@rental-os/platform-server/secret-box';
-import { AiTaskRepositoryError } from '../ai-task.repository';
+import { AiTaskRepositoryError } from '../../task-errors';
 
 export const AI_BODY_STORAGE = Symbol('AI_BODY_STORAGE');
 export const AI_BODY_STORAGE_VERSION = 'rental-os-ai-body-1';
@@ -18,8 +18,8 @@ export type AiBodyCipher = Pick<SecretBox, 'encrypt' | 'decrypt'>;
 
 export const isAiBodyRecord = (value: unknown): value is RecordValue => !!value && typeof value === 'object'
   && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
-const emptyBody = (value: unknown) => value === null || value === undefined || value === rentalPrismaNulls.DbNull
-  || value === rentalPrismaNulls.JsonNull || value === '' || Array.isArray(value) && value.length === 0
+const emptyBody = (value: unknown) => value === null || value === undefined || value === prismaRuntime.DbNull
+  || value === prismaRuntime.JsonNull || value === '' || Array.isArray(value) && value.length === 0
   || isAiBodyRecord(value) && Object.keys(value).length === 0;
 
 /** Retention marks are exact, non-body values. Extra fields must not use this

@@ -21,6 +21,9 @@ export interface AiTaskCreationAuthority {
    * explicit unstarted closure. This is not a caller-supplied authorization. */
   assertCreationOpen?(tx: Prisma.TransactionClient, command: { creationKey: string; sceneCode: string; inputRef: string },
     grant: { context: AiExecutionContext; scopeId: string; sceneVersion: string; inputRevision: number; inputHash: string }): Promise<void>;
+  /** Persist the server-owned action policy with the first Task/Run. This
+   * participant shares the original transaction and never executes the Task. */
+  registerActions?(tx: Prisma.TransactionClient, created: { taskId: string; runId: string; scopeId: string; inputRef: string }): Promise<void>;
   /** If supplied, use this transaction for original source/current authority reads. */
   resolve(sceneCode: string, inputRef: string, transaction?: Prisma.TransactionClient): Promise<{
     context: AiExecutionContext; creationAllowed: true; sceneCode: string; sceneVersion: string;
@@ -212,6 +215,7 @@ return this.transactions.withAiTaskTransaction(tx, { kind: 'creation', inputRef:
           authorizedAt: initial.access.authorizedAt, sequence: 1, revision: 1, status: "QUEUED", fencingToken: new prismaRuntime.Decimal(0),
           leaseOwnerId: null, leaseExpiresAt: null
         }, select: { id: true } });
+        await this.authority!.registerActions?.(tx, { taskId: candidateId, runId, scopeId: scope.id, inputRef: input.inputRef });
         await verifyCurrent(this.verifyInTransaction ? tx : undefined);
         return { taskId: candidateId, runId, status: "queued", revision: 1, replayed: false };
 

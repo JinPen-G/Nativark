@@ -6,8 +6,10 @@ import { AI_CONTRACT_DRAFT_VERSION, AI_CAPABILITY_PROBE_KINDS_DRAFT,
 import type { AiProviderProfileRecord } from './provider-profile.ports';
 import { capabilityProfileFingerprint } from './capability-verification';
 import { prepareGatewayTextIntent, prepareGatewayEmbeddingProbeIntent } from './gateway-intent';
-import { ModelGatewayError, modelUsageSchema, modelReasoningEvidenceSchema, modelEmbeddingEvidenceSchema } from '@rental-os/platform-server/ai-gateway';
+import { ModelGatewayError, modelUsageSchema, modelReasoningEvidenceSchema, modelEmbeddingEvidenceSchema, tenantGatewayContextSchema } from '@rental-os/platform-server/ai-gateway';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
+import { AI_PUBLIC_TEXT_SCENE } from '@rental-os/platform-contracts/ai-work-center';
+import { AI_TEXT_CAPABILITY_PROBE_STEP_CODE } from '@rental-os/platform-contracts/ai-task';
 import { visionCapabilityChallenge, VISION_PROBE_METHOD } from './vision-capability-challenge';
 import { audioCapabilityChallenge, AUDIO_PROBE_METHOD } from './audio-capability-challenge';
 
@@ -25,10 +27,8 @@ export const hasObjectiveProbeMethod = (capability: TextProbeCapability, protoco
   capability === 'embedding' ? protocol === 'openai_chat_completions'
     : capability === 'reasoning' ? protocol === 'openai_responses'
     : ['text', 'streaming', 'vision', 'audio', 'structured_output', 'tools'].includes(capability);
-export const TEXT_PROBE_SCENE = 'ai.capability.text';
-/** Mirrored by the shared source contract; local literal keeps the isolated
- * runtime usable before a shared client regeneration. */
-export const TEXT_CAPABILITY_PROBE_TOOL = 'ai.capability.text.probe' as const;
+export const TEXT_PROBE_SCENE = AI_PUBLIC_TEXT_SCENE;
+export const TEXT_CAPABILITY_PROBE_TOOL = AI_TEXT_CAPABILITY_PROBE_STEP_CODE;
 export const TEXT_PROBE_TTL_MS = 3_600_000;
 const id = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 export const probeDigest = z.string().regex(/^[0-9a-f]{64}$/u);
@@ -74,7 +74,7 @@ export const textProbeProfileIdSchema = id.max(36);
 export const textProbeDescriptorSchema = z.object({
   // Selection is not an executable method. Match the actual protocol and method
   // rather than accepting a reasoning command with a foreign text descriptor.
-  command: textProbeCommandSchema, context: probeContextSchema, scopeId: id.max(36), profileId: textProbeProfileIdSchema,
+  command: textProbeCommandSchema, context: z.union([probeContextSchema, tenantGatewayContextSchema]), scopeId: id.max(36), profileId: textProbeProfileIdSchema,
   methodVersion: z.enum([TEXT_PROBE_METHOD, STREAM_PROBE_METHOD, VISION_PROBE_METHOD, AUDIO_PROBE_METHOD, STRUCTURED_PROBE_METHOD, TOOLS_PROBE_METHOD, REASONING_PROBE_METHOD, EMBEDDING_PROBE_METHOD]), callId: id, intentHash: probeDigest, challengeHash: probeDigest,
   profileFingerprint: probeDigest, configuration: z.record(z.unknown()), configurationHash: probeDigest,
   stepId: id.max(36), runId: id.max(36)
@@ -183,7 +183,7 @@ export function textProbePreparation(operationId: string, scopeId: string, capab
   return { intent: null, expected: null, intentHash: requestFingerprint(metadata),
     challengeHash: requestFingerprint({ ...metadata, challenge: 'not_available' }) };
 }
-export function textProbeConfiguration(profile: AiProviderProfileRecord, consumer: { kind: 'workspace'; tenantId: string } | { kind: 'platform' }): AiGatewayConfigReferenceDraft {
+export function textProbeConfiguration(profile: AiProviderProfileRecord, consumer: { kind: 'workspace' | 'tenant'; tenantId: string } | { kind: 'platform' }): AiGatewayConfigReferenceDraft {
   if (consumer.kind === 'platform') {
     // Explicit SaaS/platform consumer reference (shared third branch). The
     // profile must itself be platform-owned; no tenant attribution is invented.
@@ -200,7 +200,9 @@ export function textProbeConfiguration(profile: AiProviderProfileRecord, consume
 }
 export function matchesProbeProfile(descriptor: TextProbeDescriptor, profile: AiProviderProfileRecord) {
   const expectedScopeKind = profile.serviceMode === 'platform_managed' ? 'PLATFORM' : 'TENANT';
-  const consumer = isPlatformProbeContext(descriptor.context) ? { kind: 'platform' as const } : { kind: 'workspace' as const, tenantId: descriptor.context.tenantId };
+  const consumer = 'tenantId' in descriptor.context ? { kind: 'workspaceId' in descriptor.context ? 'workspace' as const : 'tenant' as const,
+    tenantId: descriptor.context.tenantId }
+    : { kind: 'platform' as const };
   return profile.scopeKind === expectedScopeKind
     && profile.enabled && !profile.disabledAt && textProbeRequirements(descriptor.command).every(value => profile.allowedCapabilities.includes(value))
     && hasObjectiveProbeMethod(textProbeCapability(descriptor.command), profile.protocol)

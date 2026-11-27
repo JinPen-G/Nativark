@@ -51,7 +51,9 @@ export interface TenantModelConfigPorts<Context extends TenantConfigurationConte
     compareAndSwap(tenantId: string, expectedRevision: number, next: TenantModelRecord, context?: Context,
       operation?: ModelConfigurationOperationWrite, legacy?: LegacyModelConfigurationBasis): Promise<boolean>;
     readOperation?(context: Context, operationKey: string, commandHash?: string): Promise<AiModelConfigurationOperationDraft>;
-    setAllowedCapabilities?(context: Context, expectedRevision: number, capabilities: readonly AiProfileCapability[]): Promise<{ revision: number; allowedCapabilities: readonly AiProfileCapability[] }>;
+    setAllowedCapabilities?(context: Context, expectedRevision: number, capabilities: readonly AiProfileCapability[],
+      operation?: ModelConfigurationOperationWrite): Promise<{ revision: number; allowedCapabilities: readonly AiProfileCapability[] }>;
+    readAllowedCapabilities?(context: Context, expectedRevision: number): Promise<readonly AiProfileCapability[]>;
   };
 }
 
@@ -347,6 +349,37 @@ export class TenantModelConfigService<Context extends TenantConfigurationContext
     context = await this.authorize(context, 'manage');
     if (typeof this.ports.repository.setAllowedCapabilities !== 'function') throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
     return this.ports.repository.setAllowedCapabilities(context, parsed.data.expectedRevision, parsed.data.allowedCapabilities);
+  }
+
+  /** Explicit public diagnostic policy. Change only the text allowance and
+   * retain the original same-revision config, Profile and receipt transaction. */
+  async setTextProbeAllowance(context: Context, value: unknown): Promise<AiTenantModelSettingsSummaryDraft> {
+    const parsed = z.object({ expectedRevision: z.number().int().min(1).max(4294967294),
+      operationKey: modelConfigurationOperationKey, allowText: z.boolean() }).strict().safeParse(this.snapshot(value));
+    if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
+    const command = parsed.data, repository = this.ports.repository;
+    if (!repository.readOperation || !repository.readAllowedCapabilities || !repository.setAllowedCapabilities)
+      throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
+    context = await this.authorize(context, 'manage');
+    if (context.workspaceId !== undefined) throw new ModelGatewayError('FORBIDDEN');
+    const commandHash = this.secrets.fingerprint(requestFingerprint({ context, command, action: 'tenant_text_probe_allowance' }));
+    const prior = await repository.readOperation(context, command.operationKey, commandHash);
+    if (prior.state === 'recorded') {
+      if (!('tenantId' in prior.result) || prior.result.tenantId !== context.tenantId) throw new ModelGatewayError('CONFIG_INVALID');
+      return prior.result;
+    }
+    const before = await this.readRecord(context.tenantId);
+    if (before?.revision !== command.expectedRevision) throw new AiModelConfigurationRevisionConflictError();
+    if (tenantModelMode(before) !== 'tenant_managed' || !before.settings) throw new ModelGatewayError('CONFIG_INVALID');
+    const present = await repository.readAllowedCapabilities(context, before.revision);
+    const next = present.filter(capability => capability !== 'text');
+    const capabilities = command.allowText ? [...next, 'text' as const] : next;
+    const result = this.publicSummary(context.tenantId, { ...before, revision: before.revision + 1 });
+    await repository.setAllowedCapabilities(context, before.revision, capabilities, { operationKey: command.operationKey,
+      expectedRevision: before.revision, commandHash, result });
+    try { await this.authorize(context, 'manage'); }
+    catch { throw new AiModelConfigurationResultUnknownError(); }
+    return result;
   }
 
   /** Mode selection is not a credential deletion operation. */

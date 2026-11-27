@@ -197,9 +197,10 @@ export class TaskRunPlanRepository<Database extends Db = Db> {
     await this.held(this.db, lease, access);
   }
 
-  async savePlan(value: AiTaskRunnerPlan, lease: AiTaskRunnerLease) {
+  async savePlan(value: AiTaskRunnerPlan, lease: AiTaskRunnerLease,
+    publishInputs?: (tx: Tx, scopeId: string) => Promise<void>) {
     const plan = aiTaskRunPlanSchema.parse(structuredClone(value)); lease = structuredClone(lease);
-    if (plan.taskId !== lease.taskId || plan.runId !== lease.runId) throw denied();
+    if (plan.taskId !== lease.taskId || plan.runId !== lease.runId || publishInputs && !this.nativeScope) throw denied();
     const proof = planProofSchema.parse(await this.authorize(plan, lease));
     if (Date.parse(proof.expiresAt) <= this.wall().getTime()) throw denied();
     return this.locked(lease, async (tx, access) => {
@@ -212,6 +213,7 @@ export class TaskRunPlanRepository<Database extends Db = Db> {
       if (!prior) {
         const task = await tx.aiTask.updateMany({ where: { AND: [access.taskWhere, { revision: plan.taskRevision, cancelRequestedAt: null }] }, data: { revision: plan.taskRevision } });
         if (task.count !== 1) throw conflict();
+        await publishInputs?.(tx, access.scopeId);
         await tx.aiTaskRunPlan.create({ data: { ...key, planHash: hash, authorityHash: proof.authorityHash, policyVersion: proof.policyVersion, payload: plan } });
       }
       if (this.nativeScope) {

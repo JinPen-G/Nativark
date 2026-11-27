@@ -34,7 +34,7 @@ export function createPublicTenantTaskAuthority(input: {
   creationPermission: string;
   assertDataAvailable(database: Pick<Tx, '$queryRaw'>): Promise<void>;
   /** Allow only the exact scene, publication and original object for this action. */
-  assertTaskAction(database: TenantIdentity, identity: TenantContext, taskId: string, operation: Action): Promise<void>;
+  assertTaskAction(database: TenantIdentity, identity: TenantContext, taskId: string, operation: Action, transaction?: Tx): Promise<void>;
   /** Check the exact source, entitlement and current policy in the owning Native. */
   assertReference(transaction: Tx, identity: TenantContext, reference: AiTaskTransactionReference): Promise<void>;
   clock?: () => Date;
@@ -90,9 +90,9 @@ export function createPublicTenantTaskAuthority(input: {
         await available(db);
         return current(await resolveRoot());
       } };
-      const actionsFor = (reader: TenantIdentity, trusted: typeof identities) => createPublicTaskActionAuthority({
+      const actionsFor = (reader: TenantIdentity, trusted: typeof identities, transaction?: Tx) => createPublicTaskActionAuthority({
         db: reader, identities: trusted, entryPermission, clock,
-        assertTaskAction: (context, taskId, operation) => input.assertTaskAction(reader, context, taskId, operation)
+        assertTaskAction: (context, taskId, operation) => input.assertTaskAction(reader, context, taskId, operation, transaction)
       });
       const actions = actionsFor(db, identities);
       const grants = new WeakMap<Tx, ReturnType<typeof actionsFor>>();
@@ -123,7 +123,7 @@ export function createPublicTenantTaskAuthority(input: {
           await available(tx);
           const lease = await principals.lock(tx, { tenantId: tenantId!, subjectId: userId!, audience: 'operator' }, tenantId!);
           const nativeIdentity = { async resolve() { return current(project(await lease.revalidate())); } };
-          const nativeActions = actionsFor(tx, nativeIdentity);
+          const nativeActions = actionsFor(tx, nativeIdentity, tx);
           const verify = async (next: AiTaskTransactionReference) => {
             await available(tx);
             const principal = await nativeIdentity.resolve();
@@ -151,7 +151,12 @@ export function createPublicTenantTaskAuthority(input: {
         await available(tx);
         return current(project(await lease.revalidate()));
       };
-      return Object.freeze({ identities, actions, transaction, principalOn, assertCurrent: active,
+      const actionOn = (tx: Tx, taskId: string, operation: Action) => {
+        const held = grants.get(tx);
+        if (!held) throw denied();
+        return held.resolve(taskId, operation);
+      };
+      return Object.freeze({ identities, actions, transaction, principalOn, actionOn, assertCurrent: active,
         resourceScopes: Object.freeze(resourceScopes), close: binding.close });
     } catch (error) { binding.close(); throw error; }
   } });

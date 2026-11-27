@@ -55,6 +55,8 @@ node scripts/prepare-platform-public-ai.cjs --repo . --repository https://github
 
 有 `system:params:manage` 的当前租户管理员可在 `/settings/ai` 管理本租户的模型配置，按原操作键核对保存结果。选装宿主从[公共租户设置模块](../../packages/ai-native-server/src/public-tenant-model-settings.ts)登记接口、Guard 和 OpenAPI，共用所选数据、当前会话和原事务，不要求安装业务 Core 或建立经营空间。
 
+同一选装宿主提供[公共工作中心 API](../../packages/ai-native-server/src/public-ai-work-center.ts)。首次办理文本检测，先在原 SaaS 订阅目录发布 `ai.native.use` 并为租户配置在期权益，再保存租户自己的模型和凭据。用当前具完整租户范围的参数管理员依次提交 `allowTextProbe`、`saveTextPolicy`，两项都带原操作键和当前修订。`textPolicy` 读取计划政策，`textPolicyOperation` 核对原保存结果。工作中心使用原 `ai.capability.text` 挑战；会话 `create`、`admit` 保存定位，Task `create` 只建立元数据，`start` 才进入原 Runner 和唯一 Gateway。Task `snapshot`、`result` 及会话 `modelResult` 读取原结果。具体输入和返回以[本版 OpenAPI 的同源合同](../../packages/platform-contracts/src/ai-work-center.ts)为准；失应答只按原定位核对，不重发。这里的工作中心 API 尚未接公共 Web 页面，平台托管执行仍需可信费率和输入上限。
+
 反向代理部署可设置进程配置 `TRUST_PROXY_HOPS` 为非负安全整数，默认 `0` 不信任转发头。只在 API 无法绕过代理直达、代理链跳数固定且入口代理正确重写转发头时，按实际跳数配置（例如单层受控代理设为 `1`）。公共限流继续使用 Express 据此解析的 `request.ip`，不直接采信任意 `X-Forwarded-For`，演示预约仍为每地址 5 次 / 600 秒，邀请阈值也保持原规则。非法配置在创建应用前拒绝。[启动实现](src/main.ts)
 
 ## 实现与功能入口

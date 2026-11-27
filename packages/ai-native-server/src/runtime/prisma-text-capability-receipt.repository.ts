@@ -12,7 +12,7 @@ import { checkedAccountingCall } from './budget/prisma-gateway-accounting-facts'
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { isGatewayOrderExplainRequest } from './gateway-contract-validation';
 import { probeUsageSchema, embeddingProbeUsageSchema, textDigest, textProbeDescriptorSchema,
-  textProbeIntent, textProbeObservationSchema, textProbeCapability, textProbeMode, isPlatformProbeContext, TEXT_PROBE_TTL_MS,
+  textProbeIntent, textProbeObservationSchema, textProbeCapability, textProbeMode, TEXT_PROBE_TTL_MS,
   type TextProbeDescriptor, type TextProbeReceipt } from './text-capability-probe';
 
 import { PrismaTextCapabilityEvidenceReader, type TextProbeEvidenceDatabase } from '../configuration/text-capability-evidence.reader';
@@ -50,7 +50,7 @@ export class PrismaTextCapabilityReceiptRepository extends PrismaTextCapabilityE
     // never upgrade the original text-echo-1 receipt or another invocation.
     if (!row || (textProbeMode(row.descriptor.command) === 'stream' ? input.delivery?.mode !== 'stream' : input.delivery?.mode === 'stream')
       || call.binding.scope.id !== row.descriptor.scopeId || call.binding.profileId !== row.descriptor.profileId
-      || (isPlatformProbeContext(row.descriptor.context)
+      || (!('tenantId' in row.descriptor.context)
         ? call.binding.scope.kind !== 'PLATFORM' || 'tenantId' in call.context || 'workspaceId' in call.context
           || call.context.actorId !== row.descriptor.context.actorId
         : requestFingerprint(call.context) !== requestFingerprint(row.descriptor.context))

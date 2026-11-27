@@ -3,7 +3,7 @@
  * 仍由原服务负责。只支持原回调事务，不拦截raw SQL，SQL正文由原仓储显式处理。 */
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
 import type { PrismaClient } from '@prisma/client';
-import { AiTaskRepositoryError } from '../ai-task.repository';
+import { AiTaskRepositoryError } from '../../task-errors';
 import { AI_BODY_STORAGE, AI_BODY_TITLE_PLACEHOLDER, AiBodyStorageCodec, isAiBodyRecord,
   type AiBodyCipher } from './ai-body-storage.codec';
 

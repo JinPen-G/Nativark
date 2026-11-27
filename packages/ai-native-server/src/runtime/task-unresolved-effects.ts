@@ -2,14 +2,14 @@
  * A terminal task alone cannot prove its steps, approvals or model accounting
  * settled. Missing/oversized evidence keeps the hold; no records are changed. */
 import type { Prisma } from '@prisma/client';
-import { modelUsageSchema } from './model-gateway.ports';
-import { isGatewayConfig } from './gateway-contract-validation';
+import { isGatewayConfig, modelUsageSchema } from '@rental-os/platform-server/ai-gateway';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 const terminal = ['SUCCEEDED', 'PARTIALLY_SUCCEEDED', 'FAILED', 'CANCELLED'] as const;
 export async function aiTaskHasUnresolvedEffects(tx: Prisma.TransactionClient, scopeId: string, taskId: string,
-  owner: { tenantId: string | null; workspaceId: string | null }): Promise<boolean> {
+  owner: { tenantId: string | null; workspaceId: string | null; kind?: 'TENANT' }): Promise<boolean> {
   const platform = owner.tenantId === null && owner.workspaceId === null;
-  if (!platform && (owner.tenantId === null || owner.workspaceId === null)) return true;
+  const tenant = owner.kind === 'TENANT' && owner.tenantId !== null && owner.workspaceId === null;
+  if (owner.kind === 'TENANT' && !tenant || !tenant && !platform && (owner.tenantId === null || owner.workspaceId === null)) return true;
   if (await tx.aiTask.findFirst({ where: { id: taskId, scopeId, status: { notIn: [...terminal] } }, select: { id: true } })
     || await tx.aiStep.findFirst({ where: { taskId, scopeId, status: { in: ['RUNNING', 'UNKNOWN'] } }, select: { id: true } })
     || await tx.aiTaskExecutionCharge.findFirst({ where: { taskId, scopeId, status: { in: ['RESERVED', 'UNKNOWN'] } }, select: { chargeId: true } })
@@ -21,11 +21,11 @@ export async function aiTaskHasUnresolvedEffects(tx: Prisma.TransactionClient, s
   const invocations = await tx.aiGatewayInvocation.findMany({ where: { taskId, scopeId }, select: { callId: true }, orderBy: { id: 'asc' }, take: 201 });
   if (runs.length > 100 || invocations.length > 200) return true;
   const calls = invocations.map(row => row.callId);
-  if (platform) {
-    // Platform reservations and admissions have null business attribution.
-    // Checking WORKSPACE rows would silently discard an unresolved platform
-    // charge; an absent original accounting association must retain its body.
-    if (await tx.aiBudgetReservation.findFirst({ where: { scopeId, scopeKind: 'PLATFORM',
+  if (platform || tenant) {
+    // A tenant-wide receipt has no workspace. Its tenant, scope kind and
+    // original accounting association must still match on every row.
+    const scopeKind = tenant ? 'TENANT' : 'PLATFORM', tenantId = owner.tenantId;
+    if (await tx.aiBudgetReservation.findFirst({ where: { scopeId, scopeKind,
       status: { in: ['reserved', 'pending_reconciliation', 'unknown'] }, OR: [
         { runId: { in: runs.map(row => row.id) } }, { accountingReceipts: { some: { taskId, scopeId } } }
       ] }, select: { id: true } })) return true;
@@ -35,16 +35,17 @@ export async function aiTaskHasUnresolvedEffects(tx: Prisma.TransactionClient, s
     for (const invocation of invocations) {
       const source = await tx.aiGatewayInvocation.findFirst({ where: { taskId, scopeId, callId: invocation.callId } });
       const receipt = source && await tx.aiGatewayAccountingReceipt.findUnique({ where: { invocationId: source.id } });
-      if (!source || !receipt || receipt.scopeKind !== 'PLATFORM' || receipt.scopeId !== scopeId
-        || receipt.taskId !== taskId || receipt.tenantId !== null || receipt.workspaceId !== null) return true;
+      if (!source || !receipt || receipt.scopeKind !== scopeKind || receipt.scopeId !== scopeId
+        || receipt.taskId !== taskId || receipt.tenantId !== tenantId || receipt.workspaceId !== null) return true;
       const reservation = await tx.aiBudgetReservation.findUnique({ where: { id: receipt.reservationId } });
       const admission = await tx.aiInvocationAdmission.findUnique({ where: { id: receipt.admissionId } });
-      if (!isGatewayConfig(source.configuration) || source.configuration.configurationScope.kind !== 'platform'
-        || 'tenantId' in source.configuration || requestFingerprint(source.configuration) !== source.configurationHash
-        || !reservation || !admission || reservation.scopeKind !== 'PLATFORM' || reservation.scopeId !== scopeId
-        || reservation.tenantId !== null || reservation.workspaceId !== null || admission.scopeKind !== 'PLATFORM'
-        || admission.tenantId !== null || admission.workspaceId !== null || admission.callId !== source.callId
-        || admission.platformDedupKey !== source.callId || reservation.callId !== source.callId
+      if (!isGatewayConfig(source.configuration) || (tenant ? !('tenantId' in source.configuration) || source.configuration.tenantId !== tenantId
+        : 'tenantId' in source.configuration || source.configuration.configurationScope.kind !== 'platform')
+        || requestFingerprint(source.configuration) !== source.configurationHash
+        || !reservation || !admission || reservation.scopeKind !== scopeKind || reservation.scopeId !== scopeId
+        || reservation.tenantId !== tenantId || reservation.workspaceId !== null || admission.scopeKind !== scopeKind
+        || admission.tenantId !== tenantId || admission.workspaceId !== null || admission.callId !== source.callId
+        || admission.platformDedupKey !== (tenant ? null : source.callId) || reservation.callId !== source.callId
         || reservation.requestId !== source.callId || reservation.idempotencyKey !== source.callId
         || reservation.configurationHash !== source.configurationHash
         || reservation.configRevision !== source.configuration.configRevision || admission.profileId !== source.configuration.configId
@@ -60,8 +61,8 @@ export async function aiTaskHasUnresolvedEffects(tx: Prisma.TransactionClient, s
       const events = await tx.aiBudgetLedgerEntry.findMany({ where: { reservationId: reservation.id,
         kind: { in: ['settle', 'reconcile', 'release'] } }, take: 2 });
       const event = events[0];
-      if (events.length !== 1 || event.scopeId !== scopeId || event.scopeKind !== 'PLATFORM'
-        || event.tenantId !== null || event.reservationId !== reservation.id || event.outputTokens !== null) return true;
+      if (events.length !== 1 || event.scopeId !== scopeId || event.scopeKind !== scopeKind
+        || event.tenantId !== tenantId || event.reservationId !== reservation.id || event.outputTokens !== null) return true;
       if (receipt.state === 'cancelled') {
         if (event.kind !== 'release' || event.evidenceHash !== null || event.inputTokens !== null || event.calls !== null
           || event.moneyAmount !== null || event.moneyCurrency !== null || receipt.usageHash !== null

@@ -1,13 +1,13 @@
 import { withAiTaskTransaction } from './task-transaction-authority';
 import { prismaRuntime } from '@rental-os/platform-server/prisma-runtime';
-import type { Prisma, PrismaClient, AiTaskStatus } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import {
   AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_TASK_TRANSITION_REASONS_DRAFT, AI_TOOL_DRAFT_VERSION,
-  type AiTaskEventDraft, type AiTaskTransitionRequestDraft, type AiStepStatusDraft, type AiStepStateDraft, type AiProposalPayloadDraft
+  type AiTaskEventDraft, type AiProposalPayloadDraft
 } from "@rental-os/shared";
 import { AiTaskRepository, AiTaskRepositoryError, type AiTaskRepositoryAuthority } from "./ai-task.repository";
-import { AI_TASK_TRANSITIONS_DRAFT, evaluateAiTaskTransitionDraft, evaluateAiTaskAdmissionTransitionDraft, evaluateAiTaskConfirmationTransitionDraft, type AiTaskTransitionStateDraft } from "./task-transition-draft";
+import { AI_TASK_TRANSITIONS_DRAFT, evaluateAiTaskConfirmationTransitionDraft } from "./task-transition-draft";
 import { requestFingerprint } from "@rental-os/platform-contracts/request-fingerprint";
 import { fingerprintAiProposalDraft } from "./proposal-binding-draft";
 import { aiPersistenceScopeColumns } from "./persistence-scope";
@@ -15,6 +15,9 @@ import { aiTaskRunPlanSchema } from "./runner/prisma-task-run-evidence.repositor
 import { settingsChangeReferenceSchema } from "@rental-os/rental-core/approved-settings-validation";
 import { profileChangeInputSchema } from './runner/prisma-task-plan-input.source';
 import { isDeepStrictEqual } from 'node:util';
+import { lockTaskTransition, recordTaskTransition, taskTransitionSelect as taskSelect,
+  taskTransitionCommandSchema as commandSchema, AiTaskTransitionResultUnknownError } from './task-transition-commit';
+export { AiTaskTransitionResultUnknownError } from './task-transition-commit';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const revision = z.number().int().min(1).max(4294967294);
@@ -22,10 +25,6 @@ const leaseSchema = z.object({
   runId: id, holderId: id, revision,
   fencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u)
 }).strict();
-const commandSchema = z.object({
-  taskId: id, expectedRevision: revision,
-  to: z.enum(AI_TASK_STATUSES_DRAFT), reason: z.enum(AI_TASK_TRANSITION_REASONS_DRAFT), lease: leaseSchema.optional()
-}).strict().refine(value => value.to === "cancel_requested" ? value.lease === undefined : value.lease !== undefined);
 const confirmationCommandSchema = z.object({ taskId: id.max(36), stepId: id.max(36), expectedTaskRevision: revision,
   expectedStepRevision: revision, checkpointRef: id.max(36),
   lease: leaseSchema.extend({ taskId: id.max(36), expiresAt: z.string().datetime({ offset: true }) }).strict()
@@ -47,21 +46,8 @@ export interface AiTaskConfirmationCheckpointSource {
     tx: Prisma.TransactionClient): Promise<z.infer<typeof confirmationEvidenceSchema>>;
   readDecision?(input: Parameters<AiTaskConfirmationCheckpointSource['read']>[0], tx: Prisma.TransactionClient): Promise<z.infer<typeof confirmationDecisionEvidenceSchema>>;
 }
-const taskSelect = {
-  id: true, scopeId: true, status: true, revision: true, contractVersion: true,
-  eventCursor: true, cancelRequestedAt: true
-} satisfies Prisma.AiTaskSelect;
-const stepSelect = { id: true, runId: true, sequence: true, revision: true, actionId: true, requestFingerprint: true,
-  status: true, effect: true } satisfies Prisma.AiStepSelect;
 const maxCursor = 18446744073709551615n;
-const conflict = () => new AiTaskRepositoryError("AI_REVISION_CONFLICT");
-export class AiTaskTransitionResultUnknownError extends Error {
-  readonly code = 'AI_RESULT_UNKNOWN';
-  readonly retryable = false;
-  readonly nextAction = 'reconcile';
-  constructor() { super('AI_RESULT_UNKNOWN'); }
-}
-
+const conflict = () => new AiTaskRepositoryError('AI_REVISION_CONFLICT');
 /**
  * Internal mutation path, deliberately not registered in a controller/worker.
  * All future step writers must lock/CAS the task row before changing its steps;
@@ -382,20 +368,7 @@ const originalWork = async () => {
           || task.cancelRequestedAt !== null)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         // Input consumption and resume must share the dedicated receipt transaction.
         if (task.status === 'WAITING_INPUT' && input.to === 'running') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-        if (task.contractVersion !== AI_TASK_DRAFT_VERSION || !AI_TASK_STATUSES_DRAFT.some(status => status === task.status.toLowerCase())) {
-          throw new AiTaskRepositoryError("AI_INVALID_INPUT");
-        }
-        if (task.revision !== input.expectedRevision || task.eventCursor < 0n || task.eventCursor >= maxCursor) throw conflict();
-        // The update locks the task row; all reservations below roll back on any failure.
-        writeAttempted = true;
-        const reserved = await tx.aiTask.updateMany({
-          where: { ...initial.where, scopeId: task.scopeId, revision: task.revision, eventCursor: task.eventCursor, status: task.status },
-          data: { revision: { increment: 1 }, eventCursor: { increment: 1n } }
-        });
-        if (reserved.count !== 1) throw conflict();
-        const rows = await tx.aiStep.findMany({
-          where: { scopeId: task.scopeId, taskId: task.id }, select: stepSelect, orderBy: [{ runId: "asc" }, { sequence: "asc" }], take: 1001
-        });
+        const rows = await lockTaskTransition(tx, initial, task, input, () => { writeAttempted = true; });
         if (inputWitness) {
           if (task.status !== 'CANCEL_REQUESTED' || !task.cancelRequestedAt) throw conflict();
           await inputWitness(tx, { id: task.id, scopeId: task.scopeId, revision: task.revision });
@@ -411,112 +384,21 @@ const originalWork = async () => {
             || previous.cursor !== task.eventCursor || !pause.success || pause.data.confirmation.checkpointRef !== confirmation.checkpointRef
             || pause.data.confirmation.phaseId !== checkpoint?.proof.phaseId) throw conflict();
         }
-        // Only a persisted original charge under this Task lock may explain a
-        // PENDING admission whose reply was lost. This witness is server-read,
-        // not a command field, effect receipt, cleanup ticket or execution grant.
-        const pending = input.to === 'waiting_external' && input.lease
-          ? rows.filter(row => row.runId === input.lease!.runId && row.status === 'PENDING' && row.effect === 'NONE') : [];
-        const admission = pending.length ? await tx.aiTaskExecutionCharge.findFirst({ where: {
-          scopeId: task.scopeId, taskId: task.id, runId: input.lease!.runId, amount: { gt: 0n },
-          status: { in: ['RESERVED', 'UNKNOWN'] }, resource: { in: ['STEPS', 'ACTIVE_MS', 'OUTPUT_BYTES'] },
-          OR: pending.map(row => ({ stepId: row.id, actionId: row.actionId, stepFingerprint: row.requestFingerprint }))
-        }, select: { stepId: true, actionId: true } }) : null;
-        const admittedStep = admission && pending.find(row => row.id === admission.stepId && row.actionId === admission.actionId);
-        // Reauthorize after awaited reads/lock acquisition, before any status/event commit.
-        const current = await this.access.resolveAccess(input.taskId, "transition_task");
-        if (initial.bindingKey !== current.bindingKey || (checkpoint && checkpoint.expiresAt <= current.now.getTime())) throw new AiTaskRepositoryError("AI_ACCESS_DENIED");
-        const occurredAt = current.now.toISOString();
-        const state: AiTaskTransitionStateDraft = {
-          contractVersion: AI_TASK_DRAFT_VERSION, taskId: task.id, revision: task.revision,
-          status: task.status.toLowerCase() as AiTaskTransitionStateDraft["status"],
-          steps: rows.map(row => ({
-            stepId: row.id, runId: row.runId, sequence: row.sequence, revision: row.revision, actionId: row.actionId,
-            outcome: { status: row.status.toLowerCase() as AiStepStatusDraft, effect: row.effect.toLowerCase() as AiStepStateDraft["outcome"]["effect"] }
-          }))
-        };
-        // Runner counters describe this run, while task completion covers all
-        // persistent runs. A failed successor cannot erase completed ancestors.
-        if (!settleCancellation && input.to === 'failed' && input.reason === 'execution_failed'
-          && rows.some(row => row.status === 'SUCCEEDED') && !rows.every(row => row.status === 'SUCCEEDED')) {
-          input.to = 'partially_succeeded';
-          input.reason = 'completed';
-        }
-        if (settleCancellation) {
-          if (task.status !== 'CANCEL_REQUESTED') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-          if (rows.some(row => row.effect === 'COMMITTED')) {
-            input.to = rows.every(row => row.status === 'SUCCEEDED') ? 'succeeded' : 'partially_succeeded';
-          }
-        }
-        const request: AiTaskTransitionRequestDraft = {
-          contractVersion: AI_TASK_DRAFT_VERSION, taskId: task.id, expectedRevision: task.revision,
-          to: input.to, reason: input.reason, occurredAt,
-          initiator: input.lease ? { kind: "worker", id: input.lease.holderId } : { kind: current.actorKind === "AUTOMATION" ? "system" : "user", id: current.actorId }
-        };
-        const decision = checkpoint ? evaluateAiTaskConfirmationTransitionDraft(state, request, {
-          stepId: checkpoint.proof.stepId, runId: checkpoint.proof.runId,
-          stepRevision: checkpoint.proof.stepRevision, actionId: checkpoint.proof.actionId
-        }) : admittedStep ? evaluateAiTaskAdmissionTransitionDraft(state, request, {
-          stepId: admittedStep.id, runId: admittedStep.runId, stepRevision: admittedStep.revision, actionId: admittedStep.actionId
-        }) : evaluateAiTaskTransitionDraft(state, request);
-        if (!decision.allowed) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
-        let nextRunRevision: number | null = null;
-        if (input.lease) {
-          const lease = input.lease;
-          const terminal = ['succeeded', 'partially_succeeded', 'failed', 'cancelled'].includes(input.to);
-          // Aggregate completion includes older runs. Close only the held run,
-          // deriving its outcome from its own steps rather than copying a
-          // partially-successful task onto a failed or successful successor.
-          const runSteps = rows.filter(row => row.runId === lease.runId);
-          const runStatus: AiTaskStatus = input.to === 'cancelled' ? 'CANCELLED'
-            : input.to === 'succeeded' || (runSteps.length > 0 && runSteps.every(row => row.status === 'SUCCEEDED')) ? 'SUCCEEDED'
-              : runSteps.some(row => row.status === 'SUCCEEDED') ? 'PARTIALLY_SUCCEEDED'
-                : input.reason === 'cancel_settled' ? 'CANCELLED' : 'FAILED';
-          const held = await tx.aiRun.updateMany({
-            where: {
-              id: lease.runId, scopeId: task.scopeId, taskId: task.id, revision: lease.revision,
-              fencingToken: new prismaRuntime.Decimal(lease.fencingToken), leaseOwnerId: lease.holderId,
-              leaseExpiresAt: { gt: current.now }, actorKind: current.actorKind, actorId: current.actorId,
-              status: { in: ["QUEUED", "RUNNING"] }
-            },
-            // Activation/finalization belongs to this task+run transaction,
-            // not lease acquisition/release. A resume must preserve the original
-            // start time; old missing timestamps are not fabricated as history.
-            data: { revision: { increment: 1 },
-              ...(terminal ? { status: runStatus, endedAt: current.now }
-                : input.to === 'running' ? { status: 'RUNNING' as const,
-                  ...(task.status === 'QUEUED' ? { startedAt: current.now } : {}) } : {}) }
-          });
-          if (held.count !== 1) throw conflict();
-          nextRunRevision = lease.revision + 1;
-        }
-        const changed = await tx.aiTask.updateMany({
-          where: { ...current.where, scopeId: task.scopeId, revision: decision.nextRevision, eventCursor: task.eventCursor + 1n, status: task.status },
-          data: {
-            status: input.to.toUpperCase() as AiTaskStatus,
-            ...(input.to === "cancel_requested" ? { cancelRequestedAt: current.now } : {})
-          }
-        });
-        if (changed.count !== 1) throw conflict();
-        const event: AiTaskEventDraft = {
-          contractVersion: AI_TASK_DRAFT_VERSION, taskId: task.id, cursor: (task.eventCursor + 1n).toString(),
-          taskRevision: decision.nextRevision, occurredAt, type: "task.transition",
-          data: { from: state.status, to: input.to, reason: input.reason }
-        };
-        await tx.aiTaskEvent.create({
-          data: {
-            scopeId: task.scopeId, taskId: task.id, cursor: task.eventCursor + 1n,
-            taskRevision: decision.nextRevision, type: event.type, occurredAt: current.now,
-            // Internal audit envelope, not the wire payload. A reader must explicitly project event.data.
-            payload: { data: event.data, initiator: { ...request.initiator, actorKind: current.actorKind, actorId: current.actorId },
-              ...(checkpoint ? { confirmation: { checkpointRef: checkpoint.proof.checkpointRef, phaseId: checkpoint.proof.phaseId,
-                ...(checkpoint.continuation ? { decisionRef: checkpoint.continuation.decisionRef, decision: checkpoint.continuation.decision,
-                  contentHash: checkpoint.proof.contentHash, remainingActiveMs: checkpoint.continuation.remainingActiveMs,
-                  remainingOutputBytes: checkpoint.continuation.remainingOutputBytes,
-                  stepId: checkpoint.proof.stepId, stepRevision: checkpoint.proof.stepRevision, runId: input.lease!.runId,
-                  runRevision: nextRunRevision!, holderId: input.lease!.holderId, fencingToken: input.lease!.fencingToken } : {}) } } : {}) }
-          },
-          select: { cursor: true }
-        });
+        const { event, runRevision: nextRunRevision } = await recordTaskTransition(tx, initial, task, rows, input, settleCancellation, async () => {
+          const current = await this.access.resolveAccess(input.taskId, 'transition_task');
+          if (checkpoint && checkpoint.expiresAt <= current.now.getTime()) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          return current;
+        }, checkpoint ? {
+          decide: (state, request) => evaluateAiTaskConfirmationTransitionDraft(state, request, {
+            stepId: checkpoint.proof.stepId, runId: checkpoint.proof.runId, stepRevision: checkpoint.proof.stepRevision, actionId: checkpoint.proof.actionId
+          }),
+          payload: runRevision => ({ confirmation: { checkpointRef: checkpoint.proof.checkpointRef, phaseId: checkpoint.proof.phaseId,
+            ...(checkpoint.continuation ? { decisionRef: checkpoint.continuation.decisionRef, decision: checkpoint.continuation.decision,
+              contentHash: checkpoint.proof.contentHash, remainingActiveMs: checkpoint.continuation.remainingActiveMs,
+              remainingOutputBytes: checkpoint.continuation.remainingOutputBytes,
+              stepId: checkpoint.proof.stepId, stepRevision: checkpoint.proof.stepRevision, runId: input.lease!.runId,
+              runRevision: runRevision!, holderId: input.lease!.holderId, fencingToken: input.lease!.fencingToken } : {}) } })
+        } : undefined);
         // This value becomes observable only after Prisma resolves the transaction commit.
         callbackCompleted = true;
         return { event, runRevision: nextRunRevision,

@@ -1,6 +1,6 @@
 # Zelo 公共 AI 服务端
 
-选装服务包 `0.2.1` 保留公共模型配置、SaaS 设置、会话及 Task 原结果读取，并包含平台 AI 预算、费率和额度管理。业务 Core 的场景、工具、授权、业务执行和外发字段由其所属宿主提供。
+选装服务包提供公共模型配置、SaaS 设置、Task 与会话原结果读取，以及平台 AI 预算、费率和额度管理。业务 Core 的场景、工具、授权、业务执行和结果字段由其所属宿主提供。
 
 使用 `public-package.cjs` 的 `publicAiClientPaths(ts, client, expectedSchema, readFile)` 核宿主已选择的公共 AI Prisma Client，并将返回值传给编译 `tsconfig.public.json` 的 `compilerOptions.paths`。`expectedSchema` 来自同一宿主底座及固定公共 AI 数据贡献。该检查只读已生成声明，不生成 Client。
 
@@ -20,5 +20,8 @@
 - `model-configuration` 的 `createPublicTenantInvocationConfiguration` 读取原租户模式和加密 BYOK 连接，平台托管连接沿 `PrismaPlatformModelConnection`。两者均需当次执行权。管理设置、正常请求路由、场景输入发布、有效能力证明及正式费率／输入上限由现有授权入口提供。
 - `model-adapters` 注册原 Chat Completions、Responses 和 Messages 编解码器及受控 HTTPS，从服务端挂到同一 Gateway。普通文本和流式沿原错误、取消、用量和终态合同。媒体、结构化结果及 Embedding 探测按显式协议选项启用，仍须当前能力证据。业务工具由其 Core 贡献，不从模型文本注册。
 - `public-tenant-task-authority` 用原签名请求、原主体锁和已保存的 Task action policy 提供当前动作与同事务复核。宿主必须固定实际权限、已发布场景和对象来源，注入真实 `assertTaskAction`、`assertReference` 和数据观察，并在请求结束关闭请求绑定。此入口不登记 HTTP 或任何默认场景。
+- `public-ai-work-center` 将 `PublicAiWorkCenterModule.register` 接到选装宿主原 `PlatformServerModule` 和 Client。用 `withPublicAiWorkCenterHttpAccess` 和 `createPublicAiWorkCenterOpenApi` 登记同源权限与接口。公共租户须有完整数据范围、`system:params:manage`、在期 `ai.native.use` 订阅权益和已保存的 BYOK 配置。租户显式允许文本检测并发布有期限的计划政策，再通过会话创建、受理、Task 创建和显式启动执行原文本挑战。公共结果只返回原诊断结论。保存、启动或派发失应答时按原定位读取，`reconcile` 只采用原 Run 和效果证据。
 - `runtime/budget/public-budget-ledger` 供正式 Gateway 接入原预算账本。新预占和派发需要同一个 Task 事务边界；平台预算、费率和额度 HTTP 本身只管理原政策及人工操作收据。
 - `runtime/original-result-reads` 和 `runtime/original-task-recovery-read` 只观察真实原结果；租约、审批、原账和发布字段仍由原权威核对。缺当前授权或原证据时不可用。
+
+工作中心与受控 MCP 的公共读取使用 `@rental-os/platform-contracts/ai-work-center` 的 `AI_PUBLIC_WORK_CENTER_ORIGINAL_READS` 和 `AI_PUBLIC_WORK_CENTER_SCHEMAS`。其中 Task 摘要、Task 结果、会话摘要、会话原结果均只接受定位字段。已安装的公共诊断仅办理 BYOK 文本检测。平台托管执行需接入经审阅费率与原调用的可信输入上限，其他业务场景继续由 Core 提供。

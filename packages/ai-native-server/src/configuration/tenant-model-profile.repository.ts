@@ -7,6 +7,8 @@ import { checkedTenantModelRecord, PrismaTenantModelConfigRepository, readLegacy
 import { tenantModelMode, tenantModelServiceEnabled, AiModelConfigurationResultUnknownError } from '../runtime/model-config-compatibility';
 import { tenantModelCredentialReference, type TenantModelConfigPorts, type TenantModelRecord } from '../runtime/tenant-model-config.service';
 import { capabilityNameSchema } from '../runtime/capability-verification';
+import { parseAiProviderProfileRecord } from '../runtime/provider-profile.repository';
+import { AiModelConfigurationRevisionConflictError } from '../runtime/model-config-compatibility';
 import type { AiProfileCapability } from '../runtime/provider-profile.ports';
 import { readModelConfigurationOperation, appendModelConfigurationOperation, type ModelConfigurationOperationWrite,
   type ModelConfigurationOperationDb } from '../runtime/model-configuration-operation';
@@ -58,7 +60,20 @@ export class PrismaTenantModelProfileRepository<Context extends TenantConfigurat
     return result;
   }
 
-  async setAllowedCapabilities(caller: Context, expectedRevision: number, value: readonly AiProfileCapability[]) {
+  async readAllowedCapabilities(caller: Context, expectedRevision: number) {
+    await this.authorize(structuredClone(caller), 'manage');
+    const columns = aiPersistenceScopeColumns({ kind: 'tenant', tenantId: caller.tenantId });
+    const scope = await this.db.aiScope.findFirst({ where: columns });
+    if (!scope || Object.entries(columns).some(([key, value]) => scope[key as keyof typeof columns] !== value))
+      throw new ModelGatewayError('FORBIDDEN');
+    const row = await this.db.aiProviderProfile.findFirst({ where: { scopeId: scope.id, scopeKind: 'TENANT', role: 'DEFAULT' } });
+    if (!row || row.scopeId !== scope.id || row.scopeKind !== 'TENANT' || row.role !== 'DEFAULT' || row.serviceMode !== 'tenant_managed'
+      || row.configRevision !== expectedRevision) throw new AiModelConfigurationRevisionConflictError();
+    await this.authorize(structuredClone(caller), 'manage');
+    return parseAiProviderProfileRecord(row).allowedCapabilities;
+  }
+
+  async setAllowedCapabilities(caller: Context, expectedRevision: number, value: readonly AiProfileCapability[], operation?: ModelConfigurationOperationWrite) {
     const parsed = contextSchema.safeParse(caller), capabilities = z.array(capabilityNameSchema).max(8)
       .refine(items => new Set(items).size === items.length).safeParse(value);
     if (!parsed.success || !capabilities.success || !Number.isInteger(expectedRevision)
@@ -66,9 +81,15 @@ export class PrismaTenantModelProfileRepository<Context extends TenantConfigurat
     const context = parsed.data as Context;
     try { await this.authorize(structuredClone(context), 'manage'); } catch { throw new ModelGatewayError('FORBIDDEN'); }
     const previous = await this.read(context.tenantId);
-    if (!previous?.settings || previous.revision !== expectedRevision) throw new ModelGatewayError('CONFIG_INVALID');
+    if (!previous?.settings || previous.revision !== expectedRevision) {
+      if (operation) throw new AiModelConfigurationRevisionConflictError();
+      throw new ModelGatewayError('CONFIG_INVALID');
+    }
     const next = { ...previous, revision: expectedRevision + 1 };
-    if (!await this.commit(context.tenantId, expectedRevision, next, context, capabilities.data)) throw new ModelGatewayError('CONFIG_INVALID');
+    if (!await this.commit(context.tenantId, expectedRevision, next, context, capabilities.data, operation)) {
+      if (operation) throw new AiModelConfigurationRevisionConflictError();
+      throw new ModelGatewayError('CONFIG_INVALID');
+    }
     return { revision: next.revision, allowedCapabilities: [...capabilities.data] };
   }
 

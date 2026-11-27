@@ -8,7 +8,7 @@ import { AiGatewayRoutingService, ModelGatewayError, ProviderCapabilityReader, P
   RoutedModelTransport, gatewayRoutingBinding, gatewayTextIntentBindingSchema,
   modelAdapterSupportsCapabilities, tenantGatewayContextSchema, type GatewayCapacityPort, type GatewayContext,
   type GatewayConnectionResolver, type GatewayTextIntentBinding, type ModelAdapter, type TenantGatewayContext,
-  type UnifiedGatewayAudit } from '@rental-os/platform-server/ai-gateway';
+  type UnifiedGatewayAudit, type UnifiedGatewayPorts } from '@rental-os/platform-server/ai-gateway';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
 import { AiTaskRepositoryError } from './task-errors';
 import { AiTaskExecutionBudgetError } from './task-resource-ledger';
@@ -44,6 +44,14 @@ export function createPublicTenantTaskGateway(input: {
   scene: GatewayTextIntentBinding;
   /** The registered configuration service uses the original current invocation permission. */
   selection: { selectionForInvocation(context: { tenantId: string; actorId: string }): Promise<{ mode: 'platform_managed' | 'tenant_managed'; revision: number }> };
+  /** The diagnostic scene supplies a fixed, separately authorized challenge;
+   * ordinary scenes continue to require independently verified capability. */
+  diagnostic?: {
+    resolve(context: TenantGatewayContext, required: readonly import('@rental-os/platform-server/ai-gateway').AiProfileCapability[]): ReturnType<AiGatewayRoutingService<TenantGatewayContext>['resolve']>;
+    authorizeDispatch: NonNullable<ConstructorParameters<typeof RoutedModelTransport>[2]>['authorizeDispatch'];
+    recordPreparation(tx: Tx, invocation: import('@prisma/client').AiGatewayInvocation, context: TenantGatewayContext): Promise<void>;
+    observation: NonNullable<UnifiedGatewayPorts['observation']>;
+  };
   connections: { platform: GatewayConnectionResolver; tenant: GatewayConnectionResolver };
   adapters: readonly (ModelAdapter & { readonly evidenceMode: 'mock' | 'live' })[];
   evidence: 'mock' | 'live';
@@ -71,8 +79,17 @@ export function createPublicTenantTaskGateway(input: {
   const capabilities = new ProviderCapabilityReader({ list: profile => listCapabilityEvidence(db, profile) },
     { liveEvidenceVerifier: verifier, allowMock: evidence === 'mock' }, clock);
   const router = new ProviderRouterService({ profiles: new PrismaProviderProfileRepository(db), capabilities });
-  const routing = new AiGatewayRoutingService<TenantGatewayContext>(scopes,
+  const normal = new AiGatewayRoutingService<TenantGatewayContext>(scopes,
     { selectionForInvocation: ({ tenantId, actorId }) => input.selection.selectionForInvocation({ tenantId, actorId }) }, router, scene.routeScene);
+  if (input.diagnostic && (scene.sceneCode !== 'ai.capability.text' || typeof input.diagnostic.resolve !== 'function'
+    || typeof input.diagnostic.authorizeDispatch !== 'function' || typeof input.diagnostic.recordPreparation !== 'function'
+    || typeof input.diagnostic.observation?.record !== 'function')) throw new ModelGatewayError('CONFIG_INVALID');
+  const diagnostic = input.diagnostic;
+  const routing = diagnostic ? { resolve: diagnostic.resolve.bind(diagnostic), async assertCurrent(context: TenantGatewayContext,
+    original: Awaited<ReturnType<typeof normal.resolve>>) {
+    if (gatewayRoutingBinding(await diagnostic.resolve(context, original.requiredCapabilities)) !== gatewayRoutingBinding(original))
+      throw new ModelGatewayError('CONFIG_INVALID');
+  } } : normal;
   const forTenant = (value: GatewayContext) => {
     const parsed = tenantGatewayContextSchema.safeParse(value);
     if (!parsed.success) throw new ModelGatewayError('FORBIDDEN');
@@ -174,6 +191,7 @@ export function createPublicTenantTaskGateway(input: {
             requestId: invocation.callId, idempotencyKey: invocation.callId, stepId: invocation.stepId, runId: invocation.runId,
             actionId: invocation.actionId, priceVersion: invocation.priceVersion });
           if (preparation) {
+            await diagnostic?.recordPreparation(tx, invocation, principal);
             const data = gatewayPreparationReceipt(invocation, principal.tenantId, preparation.requestHash, preparation.configurationHash);
             const previous = await tx.operationLog.findUnique({ where: { id: data.id } });
             if (effectiveSignal.aborted || signal.aborted) throw new ModelGatewayError('CANCELLED');
@@ -187,7 +205,7 @@ export function createPublicTenantTaskGateway(input: {
         return source;
       };
       let profileHash: string | undefined, preparedInvocation: Awaited<ReturnType<typeof finalNative>> | undefined;
-      const transport = new RoutedModelTransport(input.connections, adapters, undefined, async (caller, request, providerSignal) => {
+      const transport = new RoutedModelTransport(input.connections, adapters, diagnostic, async (caller, request, providerSignal) => {
         current(caller);
         if (!profileHash || request.callId !== stored.intent.requestId || request.model !== stored.configuration.model
           || request.maxOutputTokens !== stored.intent.maxOutputTokens) throw denied();
@@ -197,7 +215,7 @@ export function createPublicTenantTaskGateway(input: {
       const gateway = new PublicAiGatewayService({ evidence, async verifyEvidence(route) {
         await checkRoute(stored, principal, route);
         return true;
-      }, ports: { ...ownership, budget: accounting.budget, capacity: input.capacity, transport, audit: {
+      }, ports: { ...ownership, budget: accounting.budget, capacity: input.capacity, transport, observation: diagnostic?.observation, audit: {
         async prepare(preparation, signal) {
           current(preparation.context);
           if (!preparation.profile || preparation.callId !== stored.intent.requestId
@@ -238,6 +256,7 @@ export function createPublicTenantTaskGateway(input: {
     } };
   } };
   return Object.freeze({ invocations, tools: Object.freeze(tools), recovery: accounting.recovery,
+    resolveRoute: routing.resolve.bind(routing), assertRoute: routing.assertCurrent.bind(routing),
     dispatchEvidence: Object.freeze({ readDispatch: accounting.readDispatch }) });
 }
 

@@ -71,6 +71,10 @@
       "types": "./dist/ai-original-result.d.ts",
       "default": "./dist/ai-original-result.js"
     },
+    "./ai-work-center": {
+      "types": "./dist/ai-work-center.d.ts",
+      "default": "./dist/ai-work-center.js"
+    },
     "./ai-usage": {
       "types": "./dist/ai-usage.d.ts",
       "default": "./dist/ai-usage.js"
@@ -90,6 +94,7 @@
   },
   "typesVersions": {
     "*": {
+      "ai-work-center": ["dist/ai-work-center.d.ts"],
       "subscription": [
         "dist/subscription.d.ts"
       ],

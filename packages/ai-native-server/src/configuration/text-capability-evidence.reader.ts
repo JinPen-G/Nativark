@@ -45,9 +45,10 @@ export class PrismaTextCapabilityEvidenceReader implements AiLiveCapabilityEvide
     const d = row.descriptor, o = observation;
     // Platform receipts require platform attribution on every original row;
     // nullable tenant columns alone cannot prove the row belongs to a platform call.
-    const expectTenantId = isPlatformProbeContext(d.context) ? null : d.context.tenantId;
-    const expectWorkspaceId = isPlatformProbeContext(d.context) ? null : d.context.workspaceId;
-    const expectScopeKind = isPlatformProbeContext(d.context) ? 'PLATFORM' : 'WORKSPACE';
+    const expectTenantId = 'tenantId' in d.context ? d.context.tenantId : null;
+    const expectWorkspaceId = 'workspaceId' in d.context ? d.context.workspaceId : null;
+    const tenantProbe = 'scopeKind' in d.context && d.context.scopeKind === 'TENANT';
+    const expectScopeKind = tenantProbe ? 'TENANT' : 'workspaceId' in d.context ? 'WORKSPACE' : 'PLATFORM';
     const [admission, accounting, reservation] = await Promise.all([
       db.aiInvocationAdmission.findUnique({ where: { id: o.admissionId } }),
       db.aiGatewayAccountingReceipt.findUnique({ where: { reservationId: o.reservationId } }),
@@ -63,7 +64,8 @@ export class PrismaTextCapabilityEvidenceReader implements AiLiveCapabilityEvide
       || accounting.tenantId !== expectTenantId || accounting.workspaceId !== expectWorkspaceId
       || accounting.dispatchToken !== o.dispatchId || accounting.requestHash !== o.requestHash || accounting.state !== 'dispatched'
       || invocation.scopeId !== d.scopeId || invocation.taskId !== accounting.taskId || invocation.actorId !== d.context.actorId
-      || invocation.callId !== d.callId || invocation.intentHash !== d.intentHash || invocation.stepFingerprint !== requestFingerprint(d.command)
+      || invocation.callId !== d.callId || invocation.intentHash !== d.intentHash
+      || invocation.stepFingerprint !== (tenantProbe ? d.intentHash : requestFingerprint(d.command))
       || invocation.runId !== d.runId || invocation.stepId !== d.stepId || invocation.mode !== textProbeMode(d.command)
       || invocation.sceneCode !== 'ai.capability.text' || invocation.maxOutputTokens !== 32
       || invocation.configurationHash !== d.configurationHash || requestFingerprint(invocation.configuration) !== d.configurationHash
