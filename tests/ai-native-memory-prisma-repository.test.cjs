@@ -1,19 +1,22 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { PrismaStructuredMemoryRepository } = require('./fixtures/ai-native/knowledge-repository-baseline.cjs').load('apps/api/src/modules/ai-native/knowledge/prisma-memory.repository.ts', () => require('../apps/api/src/modules/ai-native/knowledge/prisma-memory.repository'));
+const publicKnowledge = require('./fixtures/ai-native/knowledge-persistent-content.cjs').publicDocumentHarness();
+const { PrismaStructuredMemoryRepository } = require('./fixtures/ai-native/knowledge-repository-baseline.cjs').load('apps/api/src/modules/ai-native/knowledge/prisma-memory.repository.ts', () => ({ PrismaStructuredMemoryRepository: publicKnowledge.memoryRepository.constructor }));
 const scope = { kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'space-a' }, owner = { actorKind: 'user', actorId: 'user-a' };
 const memory = { draftVersion: 'ain-c06-draft-1', memoryId: 'memory-a', revision: 1, owner, scope, aclRevision: 1, expiresAt: '2026-12-01T00:00:00.000Z', status: 'proposed', preference: { kind: 'locale', value: 'zh-CN' } };
 const clone = value => structuredClone(value);
-const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+const { createControllerSourceLoader } = require('../scripts/controller-sources.cjs');
+const publicLoader = createControllerSourceLoader(require('node:path').resolve(__dirname, '..'));
+const { requestFingerprint } = publicLoader.load(publicLoader.resolveSource(__filename, '@rental-os/platform-contracts/request-fingerprint', true));
 const confirmationRow = proof => ({ id: proof.id, tenantId: proof.scope.tenantId, workspaceId: proof.scope.workspaceId,
   subjectId: proof.memoryId, proposalRevision: proof.revision, status: proof.status, confirmedBy: proof.owner.actorId, expiresAt: new Date(proof.expiresAt),
   proposalHash: requestFingerprint(['structured-memory-confirmation-v1', { memoryId: proof.memoryId, revision: proof.revision, aclRevision: proof.aclRevision,
     owner: proof.owner, scope: proof.scope, audience: proof.audience, preference: proof.preference, memoryExpiresAt: proof.memoryExpiresAt, issuedAt: proof.issuedAt, expiresAt: proof.expiresAt }]), state: clone(proof) });
 function dbFactory() {
-  const state = { memories: new Map(), operations: new Map(), confirmations: new Map(), failOperation: false, casCount: 1, admissionError: null, responseError: null, operationError: null, readError: null };
+  const state = { memories: new Map(), operations: new Map(), confirmations: new Map(), erasures: new Map(), failOperation: false, casCount: 1, admissionError: null, responseError: null, operationError: null, readError: null };
   const delegates = () => ({
+    aiDataErasure: { findUnique: async ({ where }) => clone(state.erasures.get(where.id) ?? null) },
     aiStructuredMemory: {
       findFirst: async ({ where }) => { if (state.readError) throw state.readError; return [...state.memories.values()].find(v => v.id === where.id && v.tenantId === where.tenantId && v.workspaceId === where.workspaceId && v.ownerKind === where.ownerKind && v.ownerId === where.ownerId) ?? null; },
       create: async ({ data }) => { const row = { ...clone(data) }; state.memories.set(row.id, row); return row; },
@@ -28,8 +31,8 @@ function dbFactory() {
   });
   return { state, ...delegates(), async $transaction(callback) {
     if (state.admissionError) throw state.admissionError;
-    const original = { memories: state.memories, operations: state.operations };
-    state.memories = clone(original.memories); state.operations = clone(original.operations);
+    const original = { memories: state.memories, operations: state.operations, erasures: state.erasures };
+    for (const key of Object.keys(original)) state[key] = clone(original[key]);
     let result;
     try { result = await callback(delegates()); }
     catch (error) { Object.assign(state, original); throw error; }
@@ -96,7 +99,7 @@ test('memory transaction admission failure is unavailable, not a revision confli
   assert.equal(db.state.memories.size, 0); assert.equal(db.state.operations.size, 0);
 });
 for (const code of ['P2002', 'P2034']) test(`memory explicit ${code} rollback stays conflict`, async () => {
-  const { Prisma } = require('../apps/api/node_modules/@prisma/client');
+  const Prisma = require('@prisma/client/runtime/library');
   const db = dbFactory(), repo = new PrismaStructuredMemoryRepository(db);
   db.state.operationError = new Prisma.PrismaClientKnownRequestError('private rollback', { code, clientVersion: '5.22.0' });
   assert.equal(await repo.commit(command()), 'conflict');
@@ -109,7 +112,7 @@ test('memory failed update restores the prior revision in the transaction double
   assert.equal(db.state.memories.get('memory-a').revision, 1); assert.equal(db.state.operations.size, 1);
 });
 test('memory COMMIT failure after the callback cannot become a retryable conflict', async () => {
-  const { Prisma } = require('../apps/api/node_modules/@prisma/client');
+  const Prisma = require('@prisma/client/runtime/library');
   const db = dbFactory(), repo = new PrismaStructuredMemoryRepository(db);
   db.state.responseError = new Prisma.PrismaClientKnownRequestError('late response', { code: 'P2002', clientVersion: '5.22.0' });
   await assert.rejects(repo.commit(command()), unknown);
@@ -172,7 +175,7 @@ test('JSON key reordering does not invalidate a correctly bound confirmation', a
   assert.equal(await repo.commit({ ...command(), expectedRevision: 1, next: { ...memory, revision: 2, status: 'confirmed', confirmationRecordId: 'proof-a' }, confirmation: proof(), operation: { id: 'confirm-a', fingerprint: 'confirm-hash' } }), 'committed');
 });
 test('actual memory service propagates uncertainty and replays the same operation without another write', async () => {
-  const { StructuredMemoryService } = require('../apps/api/src/modules/ai-native/knowledge/structured-memory.service');
+  const StructuredMemoryService = publicKnowledge.memory.constructor;
   const db = dbFactory(), repo = new PrismaStructuredMemoryRepository(db);
   const context = { scope, actor: { kind: 'user', userId: owner.actorId }, audience: 'operator' };
   const service = new StructuredMemoryService({ repository: repo, confirmations: repo, clock: { now: () => Date.parse('2026-10-06T00:00:00Z') },

@@ -1,6 +1,6 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-const h = require('./fixtures/ai-native/knowledge-service.cjs');
+const h = require('./fixtures/ai-native/knowledge-public.cjs');
 test.after(() => assert.deepEqual(h.attempts, []));
 test('confirmation revoked during final memory reread cannot return a confirmed preference', async () => {
   const f = h.memoryHarness(), ctx = h.context();

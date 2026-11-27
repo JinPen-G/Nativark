@@ -1,8 +1,8 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'es2022', experimentalDecorators: true, emitDecoratorMetadata: true } });
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
-const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+const { requestFingerprint } = load('@rental-os/platform-contracts/request-fingerprint');
 
 // Real authorization, takeover, runner and repositories; storage and executor facts are synthetic.
 async function interrupted(complete = true) {
@@ -22,22 +22,49 @@ async function interrupted(complete = true) {
   return { h, root, lease, command };
 }
 
-test('takeover consumes its current lease to recover the original artifact without a second claim', async () => {
+test('takeover recovers the original artifact without a second claim while unresolved run time retains manual handoff', async () => {
   const { h, root, lease, command } = await interrupted();
-  const artifact = h.clone(h.state.aiTaskResultArtifact), actionId = h.state.aiStep[0].actionId, charges = h.state.aiTaskExecutionCharge.map(c => c.chargeId);
-  assert.equal((await root.takeoverAndRecover(command)).status, 'succeeded');
+  const artifact = h.clone(h.state.aiTaskResultArtifact), actionId = h.state.aiStep[0].actionId;
+  const charges = h.clone(h.state.aiTaskExecutionCharge), stepId = h.state.aiStep[0].id;
+  assert.deepEqual(await root.takeoverAndRecover(command), { status: 'unavailable', completedSteps: 1, cleanupFailed: 0, nextAction: 'manual_handoff' });
   assert.equal(h.state.operationLog.length, 1); assert.equal(h.state.aiRun[0].fencingToken.toFixed(0), String(BigInt(lease.fencingToken) + 1n));
-  assert.equal(h.state.aiRun[0].leaseOwnerId, null); assert.equal(h.state.aiTask[0].status, 'SUCCEEDED');
+  assert.equal(h.state.aiRun[0].leaseOwnerId, null); assert.equal(h.state.aiTask[0].status, 'RUNNING');
+  assert.equal(h.state.aiStep[0].status, 'SUCCEEDED'); assert.equal(h.state.aiStep[0].resultRef, artifact[0].id);
   assert.equal(h.state.aiTaskExecutionBudget[0].consumedSteps, 1n); assert.equal(h.state.aiStep[0].actionId, actionId);
-  assert.deepEqual(h.state.aiTaskResultArtifact, artifact); assert.deepEqual(h.state.aiTaskExecutionCharge.map(c => c.chargeId), charges);
+  assert.deepEqual(h.state.aiTaskResultArtifact, artifact);
+  const stepCharges = h.state.aiTaskExecutionCharge.filter(c => c.stepId === stepId);
+  assert.deepEqual(stepCharges.map(c => c.chargeId), charges.filter(c => c.stepId === stepId).map(c => c.chargeId));
+  assert.deepEqual(stepCharges.map(c => c.resource).sort(), ['ACTIVE_MS', 'OUTPUT_BYTES', 'STEPS']);
+  assert.ok(stepCharges.every(c => c.status === 'RECORDED' && c.evidenceRef.startsWith(`${artifact[0].id}:`)));
+  // Known step measurements cannot settle the stopped worker's run-time debt.
+  const originalRunCharges = charges.filter(c => c.stepId === null);
+  assert.deepEqual(h.state.aiTaskExecutionCharge.filter(c => originalRunCharges.some(original => original.chargeId === c.chargeId)), originalRunCharges);
+  const debt = originalRunCharges.filter(c => c.status === 'UNKNOWN');
+  assert.equal(debt.length, 1); assert.equal(debt[0].actualAmount, null);
+  assert.equal(h.state.aiTaskExecutionBudget[0].reservedActiveMs, debt[0].amount);
+  const observerCharges = h.state.aiTaskExecutionCharge.filter(c => !charges.some(original => original.chargeId === c.chargeId));
+  assert.ok(observerCharges.length > 0);
+  assert.ok(observerCharges.every(c => c.stepId === null && c.actionId === null && c.resource === 'ACTIVE_MS'
+    && c.status === 'RECORDED' && c.actualAmount !== null && c.evidenceRef === `overhead:${c.chargeId}`
+    && c.taskId === command.taskId && c.runId === command.runId && c.leaseOwnerId === command.holderId
+    && c.fencingToken.toFixed(0) === h.state.aiRun[0].fencingToken.toFixed(0)));
   assert.deepEqual(h.executions, ['input-clarify']);
 });
 
-test('unjudgeable original result remains unknown after takeover without new output or charges', async () => {
+test('unjudgeable original result remains unknown after takeover without new output or step charges', async () => {
   const { h, root, command } = await interrupted(false), before = h.clone(h.state.aiTaskResultArtifact);
+  const originalCharges = h.clone(h.state.aiTaskExecutionCharge), stepId = h.state.aiStep[0].id;
   assert.equal((await root.takeoverAndRecover(command)).status, 'unknown');
   assert.equal(h.state.aiTask[0].status, 'WAITING_EXTERNAL'); assert.equal(h.state.aiTaskExecutionBudget[0].consumedSteps, 0n);
-  assert.ok(h.state.aiTaskExecutionCharge.every(c => c.status === 'UNKNOWN'));
+  const stepCharges = h.state.aiTaskExecutionCharge.filter(c => c.stepId === stepId);
+  assert.deepEqual(stepCharges.map(c => c.resource).sort(), ['ACTIVE_MS', 'OUTPUT_BYTES', 'STEPS']);
+  assert.ok(stepCharges.every(c => c.status === 'UNKNOWN' && c.actualAmount === null));
+  assert.deepEqual(h.state.aiTaskExecutionCharge.filter(c => originalCharges.some(original => original.chargeId === c.chargeId)), originalCharges);
+  const observerCharges = h.state.aiTaskExecutionCharge.filter(c => !originalCharges.some(original => original.chargeId === c.chargeId));
+  assert.ok(observerCharges.length > 0);
+  assert.ok(observerCharges.every(c => c.stepId === null && c.actionId === null && c.resource === 'ACTIVE_MS'
+    && c.status === 'RECORDED' && c.actualAmount !== null && c.evidenceRef === `overhead:${c.chargeId}`
+    && c.taskId === command.taskId && c.runId === command.runId && c.leaseOwnerId === command.holderId));
   assert.deepEqual(h.state.aiTaskResultArtifact, before); assert.deepEqual(h.executions, ['input-clarify']);
   assert.equal(h.state.aiRun[0].leaseOwnerId, null);
 });
@@ -45,7 +72,8 @@ test('unjudgeable original result remains unknown after takeover without new out
 test('competing takeover-and-recover requests have one winner and one accounting result', async () => {
   const { h, root, command } = await interrupted();
   const results = await Promise.allSettled([root.takeoverAndRecover(command), root.takeoverAndRecover({ ...command, holderId: 'human-b' })]);
-  assert.equal(results.filter(r => r.status === 'fulfilled' && r.value.status === 'succeeded').length, 1);
+  assert.equal(results.filter(r => r.status === 'fulfilled' && r.value.status === 'unavailable'
+    && r.value.completedSteps === 1 && r.value.nextAction === 'manual_handoff').length, 1);
   assert.equal(results.filter(r => r.status === 'rejected' && r.reason.code === 'AI_REVISION_CONFLICT').length, 1);
   assert.equal(h.state.operationLog.length, 1); assert.equal(h.state.aiTaskExecutionBudget[0].consumedSteps, 1n);
   assert.deepEqual(h.executions, ['input-clarify']);

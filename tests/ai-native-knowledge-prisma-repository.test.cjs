@@ -1,19 +1,23 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { PrismaKnowledgeRepository } = require('./fixtures/ai-native/knowledge-repository-baseline.cjs').load('apps/api/src/modules/ai-native/knowledge/prisma-knowledge.repository.ts', () => require('../apps/api/src/modules/ai-native/knowledge/prisma-knowledge.repository'));
+const publicKnowledge = require('./fixtures/ai-native/knowledge-persistent-content.cjs').publicDocumentHarness();
+const { PrismaKnowledgeRepository } = require('./fixtures/ai-native/knowledge-repository-baseline.cjs').load('apps/api/src/modules/ai-native/knowledge/prisma-knowledge.repository.ts', () => ({ PrismaKnowledgeRepository: publicKnowledge.repo.constructor }));
 const scope = { kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'space-a' };
 const document = { draftVersion: 'ain-c06-draft-1', documentId: 'doc-a', documentVersion: 'v1', attachmentId: 'attachment-a', owner: { actorKind: 'user', actorId: 'user-a' }, scope, aclRevision: 1, title: 'Synthetic SOP', publication: 'draft', parsing: 'parsed', indexing: 'not_indexed', validFrom: '2026-10-01T00:00:00.000Z' };
-const record = { document, revision: 1 };
+const sourceContentHash = require('node:crypto').createHash('sha256').update('untrusted synthetic text').digest('hex');
+const sourceOperationId = `source-content:${require('node:crypto').createHash('sha256').update(JSON.stringify(document.documentVersion)).digest('hex')}`;
+const record = { document, revision: 1, contentHash: sourceContentHash };
 const chunk = { draftVersion: 'ain-c06-draft-1', documentId: 'doc-a', documentVersion: 'v1', chunkId: 'chunk-a', scope, aclRevision: 1, locator: { kind: 'section', sectionId: 'section-a', paragraph: 1 }, text: 'untrusted synthetic text', trust: 'untrusted_data' };
 const clone = value => structuredClone(value);
 function dbFactory() {
-  const state = { documents: new Map(), versions: new Map(), chunks: new Map(), operations: new Map(), failOperation: false, failOperationIds: [], casCount: 1, admissionError: null, responseError: null, operationError: null, readError: null };
+  const state = { documents: new Map(), versions: new Map(), chunks: new Map(), operations: new Map(), erasures: new Map(), failOperation: false, failOperationIds: [], casCount: 1, admissionError: null, responseError: null, operationError: null, readError: null };
   const delegates = () => ({
+    // Creation reads the same transaction's deletion marker before inserting.
+    aiDataErasure: { findUnique: async ({ where }) => clone(state.erasures.get(where.id) ?? null) },
     aiKnowledgeDocument: {
       findFirst: async ({ where, include }) => { if (state.readError) throw state.readError; const row = [...state.documents.values()].find(v => v.id === where.id && v.tenantId === where.tenantId && v.workspaceId === where.workspaceId); if (!row) return null; const out = clone(row); if (include?.versions) out.versions = [...state.versions.values()].filter(v => v.documentId === row.id).sort((a, b) => b.version - a.version).slice(0, include.versions.take ?? 100); return out; },
-      create: async ({ data }) => { const row = { ...clone(data) }; state.documents.set(row.id, row); return clone(row); },
+      create: async ({ data }) => { const row = { createdAt: new Date('2026-10-06T00:00:00Z'), ...clone(data) }; state.documents.set(row.id, row); return clone(row); },
       update: async ({ where, data }) => { const row = state.documents.get(where.id); if (!row) throw new Error('missing'); Object.assign(row, clone(data)); return clone(row); },
       updateMany: async ({ where, data }) => { const row = state.documents.get(where.id); if (state.casCount !== 1) return { count: state.casCount }; if (!row || row.revision !== where.revision || row.tenantId !== where.tenantId || row.workspaceId !== where.workspaceId) return { count: 0 }; Object.assign(row, clone(data)); return { count: 1 }; }
     },
@@ -29,7 +33,7 @@ function dbFactory() {
   });
   return { state, ...delegates(), async $transaction(callback) {
     if (state.admissionError) throw state.admissionError;
-    const original = { documents: state.documents, versions: state.versions, chunks: state.chunks, operations: state.operations };
+    const original = { documents: state.documents, versions: state.versions, chunks: state.chunks, operations: state.operations, erasures: state.erasures };
     for (const key of Object.keys(original)) state[key] = clone(original[key]);
     let result;
     try { result = await callback(delegates()); }
@@ -44,6 +48,8 @@ test('Prisma adapter persists a scoped record, immutable chunks and operation re
   assert.equal(await repo.commit({ scope, documentId: 'doc-a', expectedRevision: 0, operation: { id: 'op-a', fingerprint: 'hash-a' }, next: record, chunks: [chunk], newVersion: true }), 'committed');
   assert.deepEqual(await repo.read(scope, 'doc-a'), record);
   assert.deepEqual(await repo.operation(scope, 'doc-a', 'op-a'), { id: 'op-a', fingerprint: 'hash-a' });
+  assert.deepEqual([...db.state.operations.values()].map(row => row.operationId).sort(), ['op-a', sourceOperationId].sort());
+  assert.equal(await repo.sourceContentHash(scope, 'doc-a', 'v1'), sourceContentHash);
   assert.equal(db.state.versions.size, 1); assert.equal(db.state.chunks.size, 1);
 });
 
@@ -82,11 +88,13 @@ test('knowledge COMMIT response loss preserves facts and reconciles the original
   const db = dbFactory(), repo = new PrismaKnowledgeRepository(db);
   db.state.responseError = new Error('private database response lost');
   await assert.rejects(repo.commit(command()), unknown);
-  assert.equal(db.state.documents.size, 1); assert.equal(db.state.versions.size, 1); assert.equal(db.state.operations.size, 1);
+  assert.equal(db.state.documents.size, 1); assert.equal(db.state.versions.size, 1);
+  assert.deepEqual([...db.state.operations.values()].map(row => row.operationId).sort(), ['op-a', sourceOperationId].sort());
   db.state.responseError = null;
   assert.deepEqual(await repo.operation(scope, 'doc-a', 'op-a'), command().operation);
   assert.equal(await repo.commit(command()), 'committed');
-  assert.equal(db.state.versions.size, 1); assert.equal(db.state.chunks.size, 1); assert.equal(db.state.operations.size, 1);
+  assert.equal(db.state.versions.size, 1); assert.equal(db.state.chunks.size, 1);
+  assert.deepEqual([...db.state.operations.values()].map(row => row.operationId).sort(), ['op-a', sourceOperationId].sort());
 });
 test('knowledge transaction admission failure is unavailable, not a revision conflict', async () => {
   const db = dbFactory(), repo = new PrismaKnowledgeRepository(db); db.state.admissionError = new Error('private admission failure');
@@ -94,7 +102,7 @@ test('knowledge transaction admission failure is unavailable, not a revision con
   assert.equal(db.state.documents.size, 0); assert.equal(db.state.operations.size, 0);
 });
 for (const code of ['P2002', 'P2034']) test(`knowledge explicit ${code} rollback stays conflict`, async () => {
-  const { Prisma } = require('../apps/api/node_modules/@prisma/client');
+  const Prisma = require('@prisma/client/runtime/library');
   const db = dbFactory(), repo = new PrismaKnowledgeRepository(db);
   db.state.operationError = new Prisma.PrismaClientKnownRequestError('private rollback', { code, clientVersion: '5.22.0' });
   assert.equal(await repo.commit(command()), 'conflict');
@@ -106,14 +114,15 @@ test('an error with only a Prisma-looking code cannot prove rollback', async () 
   await assert.rejects(repo.commit(command()), unknown);
 });
 test('knowledge COMMIT failure after the callback cannot become a retryable conflict', async () => {
-  const { Prisma } = require('../apps/api/node_modules/@prisma/client');
+  const Prisma = require('@prisma/client/runtime/library');
   const db = dbFactory(), repo = new PrismaKnowledgeRepository(db);
   db.state.responseError = new Prisma.PrismaClientKnownRequestError('late response', { code: 'P2002', clientVersion: '5.22.0' });
   await assert.rejects(repo.commit(command()), unknown);
-  assert.equal(db.state.documents.size, 1); assert.equal(db.state.operations.size, 1);
+  assert.equal(db.state.documents.size, 1);
+  assert.deepEqual([...db.state.operations.values()].map(row => row.operationId).sort(), ['op-a', sourceOperationId].sort());
 });
 test('actual document service preserves unknown and replays a committed create without another version', async () => {
-  const { KnowledgeDocumentService } = require('../apps/api/src/modules/ai-native/knowledge/knowledge-document.service');
+  const KnowledgeDocumentService = publicKnowledge.documents.constructor;
   const db = dbFactory(), repo = new PrismaKnowledgeRepository(db);
   const context = { scope, actor: { kind: 'user', userId: document.owner.actorId }, audience: 'operator' };
   const service = new KnowledgeDocumentService({ repository: repo, clock: { now: () => Date.parse('2026-10-06T00:00:00Z') },
@@ -127,8 +136,8 @@ test('actual document service preserves unknown and replays a committed create w
   assert.equal(db.state.documents.size, 1); assert.equal(db.state.versions.size, 1); assert.equal(db.state.operations.size, 1);
 });
 async function parsedDocument(db = dbFactory()) {
-  const { KnowledgeDocumentService } = require('../apps/api/src/modules/ai-native/knowledge/knowledge-document.service');
-  const { KnowledgeTextParser } = require('../apps/api/src/modules/ai-native/knowledge/knowledge-text-parser');
+  const KnowledgeDocumentService = publicKnowledge.documents.constructor;
+  const KnowledgeTextParser = publicKnowledge.documents.ports.parser.constructor;
   const repo = new PrismaKnowledgeRepository(db), context = { scope, actor: { kind: 'user', userId: document.owner.actorId }, audience: 'operator' };
   const service = new KnowledgeDocumentService({ repository: repo, clock: { now: () => Date.parse('2026-10-06T00:00:00Z') },
     authorization: { authorize: async () => ({ scope, actor: document.owner, audience: 'operator', accessKey: 'synthetic-grant' }) },
@@ -144,8 +153,11 @@ test('real create then parse persists chunks on the existing immutable document 
   assert.deepEqual(stored.map(row => row.text), ['First section.', 'Second section.']);
   for (const row of stored) {
     assert.equal(row.versionId, [...h.db.state.versions.values()][0].id);
-    assert.equal(row.state.documentVersion, 'v1'); assert.equal(row.state.trust, 'untrusted_data');
+    assert.equal(row.state.chunk.documentVersion, 'v1'); assert.equal(row.state.chunk.trust, 'untrusted_data');
+    assert.equal(row.state.sourceContentHash, result.contentHash);
+    assert.match(row.state.chunkHash, /^[a-f0-9]{64}$/u);
   }
+  assert.equal(result.contentHash, require('node:crypto').createHash('sha256').update('First section.\n\nSecond section.').digest('hex'));
   const receipts = h.db.state.operations.size;
   await h.service.parseDocument(h.context, h.input);
   assert.equal(h.db.state.chunks.size, 2); assert.equal(h.db.state.operations.size, receipts);
@@ -187,7 +199,7 @@ for (const [name, change] of Object.entries({
 });
 test('knowledge receipts reject unknown failure fields and mismatched scope results', async () => {
   const db = dbFactory(), repo = new PrismaKnowledgeRepository(db); await repo.commit(command());
-  const receipt = [...db.state.operations.values()][0]; receipt.failure = 'private database details';
+  const receipt = [...db.state.operations.values()].find(row => row.operationId === 'op-a'); receipt.failure = 'private database details';
   await assert.rejects(repo.operation(scope, 'doc-a', 'op-a'), e => e.code === 'unavailable');
   delete receipt.failure; db.aiKnowledgeOperation.findFirst = async () => ({ ...receipt, workspaceId: 'other-space' });
   await assert.rejects(repo.operation(scope, 'doc-a', 'op-a'), e => e.code === 'unavailable');

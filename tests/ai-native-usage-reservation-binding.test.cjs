@@ -1,10 +1,9 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { createRequire } = require('node:module'), path = require('node:path');
-const { Prisma } = createRequire(path.resolve(__dirname, '../apps/api/package.json'))('@prisma/client');
-const { UsageAccountingService } = require('../apps/api/src/modules/ai-native/usage-accounting.service');
+const Prisma = require('@prisma/client/runtime/library');
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const { UsageAccountingService } = load('@rental-os/ai-native-server/runtime/usage-accounting.service');
 const scope = { id: 'scope-usage', kind: 'WORKSPACE', tenantId: 'tenant-1', workspaceId: 'space-1' };
 const input = () => ({ scope: { ...scope }, callId: 'call-1', idempotencyKey: 'key-1', reservedUnits: 20, expiresAt: new Date(Date.now() + 60000) });
 const row = () => ({ ...input(), id: 'usage-1', status: 'reserved', actualInput: null, actualOutput: null, unknownReason: null });

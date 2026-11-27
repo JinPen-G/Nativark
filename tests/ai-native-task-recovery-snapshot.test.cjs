@@ -1,8 +1,8 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'es2022', experimentalDecorators: true, emitDecoratorMetadata: true } });
+const { load } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
 const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
-const { composeAuthorizedReadonlyPersistentTaskInputRunner } = require('../apps/api/src/modules/ai-native/runner/authorized-persistent-task-input.composition');
+const { composeAuthorizedReadonlyPersistentTaskInputRunner } = load('@rental-os/ai-native-server/runtime/runner/authorized-persistent-task-input.composition');
 const query = { taskId: 'task-a', runId: 'run-a' };
 const noWrites = (h, start) => assert.equal(h.trace.slice(start).some(entry => /\.(create|update|upsert)$/u.test(entry) || entry === 'row.lock'), false);
 const make = async () => { const h = await authorizedRunnerHarness(); return { h, root: composeAuthorizedReadonlyPersistentTaskInputRunner(h.configuration()) }; };
@@ -11,7 +11,11 @@ const make = async () => { const h = await authorizedRunnerHarness(); return { h
 test('released partial work exposes original results, task-wide counters and existing wire events without claiming or writing', async () => {
   const { h, root } = await make(), controller = new AbortController();
   h.storeControl.beforeCommit = async draft => {
-    if (draft.aiTaskExecutionCharge.length && draft.aiTaskExecutionCharge.every(c => c.status === 'RECORDED')) controller.abort();
+    // Stop after the first original step settles. Run timing has its own
+    // active reservation, so it must not delay this interruption until run end.
+    const step = draft.aiStep[0];
+    const charges = draft.aiTaskExecutionCharge.filter(c => c.stepId === step?.id);
+    if (step?.status === 'SUCCEEDED' && charges.length === 3 && charges.every(c => c.status === 'RECORDED')) controller.abort();
   };
   assert.equal((await root.runner.run(h.claim(), controller.signal)).status, 'unavailable');
   h.storeControl.beforeCommit = null;
@@ -22,7 +26,9 @@ test('released partial work exposes original results, task-wide counters and exi
   assert.equal(snapshot.steps.length, 1); assert.equal(snapshot.steps[0].status, 'succeeded'); assert.equal(snapshot.steps[0].effect, 'none');
   assert.equal(snapshot.steps[0].actionId, h.state.aiStep[0].actionId); assert.equal(snapshot.steps[0].resultRef, h.state.aiTaskResultArtifact[0].id);
   assert.equal(snapshot.steps[0].artifacts[0].completeMeasurement, true);
-  assert.deepEqual(snapshot.steps[0].charges.map(c => c.chargeId).sort(), h.state.aiTaskExecutionCharge.map(c => c.chargeId).sort());
+  const stepCharges = h.state.aiTaskExecutionCharge.filter(c => c.stepId === h.state.aiStep[0].id);
+  assert.deepEqual(stepCharges.map(c => c.resource).sort(), ['ACTIVE_MS', 'OUTPUT_BYTES', 'STEPS']);
+  assert.deepEqual(snapshot.steps[0].charges.map(c => c.chargeId).sort(), stepCharges.map(c => c.chargeId).sort());
   assert.equal(snapshot.resources.counters.steps.consumed, '1'); assert.equal(snapshot.resources.counters.steps.reserved, '0');
   for (const [resource, field] of [['calls', 'Calls'], ['active_ms', 'ActiveMs'], ['output_bytes', 'OutputBytes']]) {
     assert.equal(snapshot.resources.counters[resource].consumed, h.state.aiTaskExecutionBudget[0][`consumed${field}`].toString());

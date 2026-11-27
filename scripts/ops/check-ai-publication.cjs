@@ -1,8 +1,15 @@
 'use strict';
 
-async function checkPublication(input) {
-  require('ts-node').register({ skipProject: true, transpileOnly: true, compilerOptions: { module: 'commonjs', target: 'es2022' } });
-  const { parseRuntimePublication } = require('../../apps/api/src/modules/ai-native/runtime-publication.schema.ts');
+/** The workspace publication belongs to the explicitly selected Rental host.
+ * Resolve its declared export before reading input; missing source is unavailable. */
+async function checkPublication(input, options = {}) {
+  if (!options.sourceRoot) throw new Error('Select the prepared Rental source with --source-root');
+  const path = require('node:path');
+  const { createControllerSourceLoader } = require('../controller-sources.cjs');
+  const sourceRoot = path.resolve(options.sourceRoot);
+  const loader = createControllerSourceLoader(sourceRoot, options.dependencyRoot);
+  const { parseRuntimePublication } = loader.load(loader.resolveSource(path.join(sourceRoot, 'package.json'),
+    '@rental-os/ai-native-server/runtime/runtime-publication.schema', true));
   const chunks = [];
   let bytes = 0;
   try {
@@ -18,7 +25,13 @@ async function checkPublication(input) {
 }
 
 if (require.main === module) {
-  checkPublication(process.stdin).then(state => {
+  const args = process.argv.slice(2), options = {};
+  for (let index = 0; index < args.length; index += 2) {
+    const name = { '--source-root': 'sourceRoot', '--dependency-root': 'dependencyRoot' }[args[index]];
+    if (!name || !args[index + 1] || options[name]) throw new Error('Expected --source-root <prepared-root> [--dependency-root <node_modules>]');
+    options[name] = args[index + 1];
+  }
+  checkPublication(process.stdin, options).then(state => {
     console.log(`AI_RUNTIME_PUBLICATION ${state}`);
     process.exitCode = state === 'configured' ? 0 : state === 'unconfigured' ? 2 : 1;
   }).catch(() => { console.error('AI_RUNTIME_PUBLICATION unavailable'); process.exitCode = 1; });

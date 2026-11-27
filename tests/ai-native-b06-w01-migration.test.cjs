@@ -12,7 +12,9 @@ test('migration checker accepts ordered synthetic DDL and rejects forward refere
 });
 
 test('migration checker scans all existing migration.sql files without mutating them', () => {
-  const root = require('node:path').resolve(__dirname, '../apps/api/prisma/migrations');
+  // The selected compatibility package preserves the original 58 AI migrations.
+  require('./fixtures/ai-native/rental-compatibility-source.cjs');
+  const root = require('node:path').join(process.env.AI_NATIVE_TEST_SOURCE_ROOT, 'packages/ai-native-data/prisma/migrations');
   const report = analyzeMigrationDirectory(root);
   assert.ok(report.length > 0);
   assert.ok(report.every(item => Array.isArray(item.issues)));

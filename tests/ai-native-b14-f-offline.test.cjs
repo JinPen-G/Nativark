@@ -3,6 +3,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const runner = require('../scripts/ai-native-b14-offline.cjs');
+require('./fixtures/ai-native/rental-compatibility-source.cjs');
+const sourceRoot = process.env.AI_NATIVE_TEST_SOURCE_ROOT;
 
 test('B14-F runner discovers B02-B14 tests in deterministic order', () => {
   const files = runner.discoverTests(path.resolve(__dirname));
@@ -29,7 +31,9 @@ test('B14-F engineering commands inherit the guard and use the no-env admin mode
   assert.match(options.env.NODE_OPTIONS, /prisma-offline-preload\.cjs/);
   assert.ok(path.isAbsolute(options.env.AI_OFFLINE_AUDIT));
   assert.equal(result.countsAvailable, false);
-  assert.ok(runner.commands().some(([_c, args]) => args.includes('ai-offline')));
+  assert.ok(runner.commands(sourceRoot).some(([_c, args]) => args.includes('ai-offline')));
+  assert.ok(runner.commands(sourceRoot).some(([_c, args]) => args.includes('@rental-os/rental-admin')));
+  assert.throws(() => runner.commands(), /explicit/);
 });
 test('B14-F relative audit path is anchored before children change working directory', () => {
   const previous = process.env.AI_OFFLINE_AUDIT;
@@ -46,7 +50,8 @@ test('B14-F relative audit path is anchored before children change working direc
 
 test('B14-F builds before artifact tests and propagates spawn errors', () => {
   const calls = [];
-  runner.runSuite({ testsRoot: path.resolve(__dirname), runner: (_c, args) => { calls.push(args); return { status: 0, stdout: '', stderr: '' }; } });
+  runner.runSuite({ sourceRoot, testsRoot: path.resolve(__dirname), runner: (_c, args, options) => {
+    assert.equal(options.cwd, require('node:fs').realpathSync(path.resolve(sourceRoot))); calls.push(args); return { status: 0, stdout: '', stderr: '' }; } });
   const build = calls.findIndex(args => args.includes('build'));
   const testFile = calls.findIndex(args => args.some(arg => /ai-native-b\d.*\.cjs$/.test(arg)));
   assert.ok(build >= 0 && build < testFile);
@@ -54,7 +59,7 @@ test('B14-F builds before artifact tests and propagates spawn errors', () => {
 });
 
 test('B14-F report explicitly separates offline evidence from unrun environments', () => {
-  const report = runner.runSuite({ testsRoot: path.resolve(__dirname), runner: (_command, args) => ({ status: args.includes('bad') ? 1 : 0, signal: null, stdout: '', stderr: '' }), testTimeout: 100, checkTimeout: 100 });
+  const report = runner.runSuite({ sourceRoot, testsRoot: path.resolve(__dirname), runner: (_command, args) => ({ status: args.includes('bad') ? 1 : 0, signal: null, stdout: '', stderr: '' }), testTimeout: 100, checkTimeout: 100 });
   assert.equal(report.tool, 'ai-native-b14-offline');
   assert.ok(report.unrun.includes('真实模型/供应商'));
   assert.equal(typeof report.failed, 'number');

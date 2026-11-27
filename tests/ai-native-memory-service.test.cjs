@@ -1,6 +1,6 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-const h = require('./fixtures/ai-native/knowledge-service.cjs');
+const h = require('./fixtures/ai-native/knowledge-public.cjs');
 const confirmChange = revision => h.memoryChange('confirm', revision, { confirmationRecordId: 'confirm-1' });
 async function fixture() { const f = h.memoryHarness(); f.proposal = await f.memory.propose(h.context(), h.memoryProposal()); return f; }
 test.after(() => assert.deepEqual(h.attempts, []));
@@ -82,7 +82,7 @@ test('expiry boundary blocks consumption but permits authorized deletion; no unl
   await assert.rejects(f.memory.propose(h.context(), h.memoryProposal({ memoryId: 'forever', expiresAt: '2036-01-01T00:00:00Z' })), { code: 'invalid_input' });
 });
 test('no production defaults and no automation self-confirmation', async () => {
-  const f = await fixture(), { StructuredMemoryService } = h.load('structured-memory.service');
+  const f = await fixture(), StructuredMemoryService = f.memory.constructor;
   for (const key of ['repository', 'authorization', 'clock', 'confirmations']) assert.throws(() => new StructuredMemoryService({ ...f.memoryPorts, [key]: undefined }), { code: 'unavailable' });
   await assert.rejects(f.memory.propose(h.context({ audience: 'automation', actor: { kind: 'automation', subjectId: 'bot', policyId: 'policy', policyRevision: 1, expiresAt: '2026-10-04T00:00:00Z' } }), h.memoryProposal()), { code: 'unavailable' });
 });

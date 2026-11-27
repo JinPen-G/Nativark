@@ -5,7 +5,8 @@ const path = require('node:path');
 function normalize(name) { return name.replace(/[`${\[\]]/g, '').split('.').pop().toLowerCase(); }
 function analyzeMigrationSql(sql, name = 'inline') {
   const created = new Map(); const issues = []; const constraints = new Map();
-  const statements = sql.split(/;\s*(?:\r?\n|$)/).map(value => value.trim()).filter(Boolean);
+  const statements = sql.split(/;\s*(?:\r?\n|$)/)
+    .map(value => value.replace(/^(?:\s|--[^\r\n]*(?:\r?\n|$)|\/\*[\s\S]*?\*\/)+/u, '').trim()).filter(Boolean);
   statements.forEach((statement, index) => {
     const tableMatch = statement.match(/^create\s+table\s+(?:if\s+not\s+exists\s+)?[`\[]?([\w-]+)[`\]]?/i);
     if (tableMatch) {
@@ -35,14 +36,23 @@ function analyzeMigrationDirectory(root) {
     const file = path.join(root, dir.name, 'migration.sql');
     if (fs.existsSync(file)) files.push(file);
   }
+  if (!files.length) throw new Error(`No original migration.sql files in the selected directory: ${root}`);
   return files.sort().map(file => analyzeMigrationSql(fs.readFileSync(file, 'utf8'), path.relative(root, file)));
 }
+// Source selection is explicit. A public initial SQL file and a prepared
+// Rental migration directory retain their own paths and original SQL bytes.
+function analyzeMigrationSource(source) {
+  if (!source) throw new Error('Select a migration SQL file or prepared migration directory');
+  const target = path.resolve(source);
+  return fs.statSync(target).isDirectory() ? analyzeMigrationDirectory(target)
+    : [analyzeMigrationSql(fs.readFileSync(target, 'utf8'), target)];
+}
 if (require.main === module) {
-  const root = path.resolve(process.cwd(), 'apps/api/prisma/migrations');
-  const report = analyzeMigrationDirectory(root);
+  if (process.argv.length !== 3) throw new Error('Usage: node scripts/ai-native-b06-migration-check.cjs <migration.sql|migrations-directory>');
+  const report = analyzeMigrationSource(process.argv[2]);
   const issues = report.flatMap(item => item.issues.map(issue => ({ file: item.name, ...issue })));
   const result = { tool: 'ai-native-b06-migration-check', files: report.length, issues, reports: report };
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   process.exitCode = issues.length ? 1 : 0;
 }
-module.exports = { analyzeMigrationSql, analyzeMigrationDirectory };
+module.exports = { analyzeMigrationSql, analyzeMigrationDirectory, analyzeMigrationSource };

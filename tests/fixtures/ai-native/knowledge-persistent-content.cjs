@@ -109,5 +109,5 @@ exports.publicDocumentHarness = function publicDocumentHarness() {
     cache: { maxEntries: 4, maxBytes: 10000, ttlMs: 1000 },
     policy: { sceneCode: 'knowledge_document_fixture', maxOutputTokens: 100 },
   });
-  return Object.assign(f, composeKnowledgeServices(ports), { db, repo: ports.documents.repository });
+  return Object.assign(f, composeKnowledgeServices(ports), { db, repo: ports.documents.repository, memoryRepository: ports.memory.repository });
 };

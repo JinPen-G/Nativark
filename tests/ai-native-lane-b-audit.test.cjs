@@ -1,7 +1,9 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-const h = require('./fixtures/ai-native/knowledge-service.cjs');
-const load = () => require('../apps/api/src/modules/ai-native/evaluation/evaluation-audit');
+const h = require('./fixtures/ai-native/knowledge-public.cjs');
+const { load: selected } = require('./fixtures/ai-native/rental-compatibility-source.cjs');
+// The original offline evidence formatter belongs to the selected compatibility source.
+const load = () => selected('@rental-os/ai-native-server/runtime/evaluation/evaluation-audit');
 const input = () => ({ version: 1, requestId: 'synthetic-request', scope: h.scope, inputHash: 'a'.repeat(64), authorityHash: 'b'.repeat(64), planIds: ['synthetic-plan'], toolIds: ['knowledge_search'], result: { status: 'unknown', code: 'AI_RESULT_UNKNOWN' } });
 test.after(() => assert.deepEqual(h.attempts, []));
 test('audit schema rejects raw model thought, prompts, credentials and unknown result bodies', () => {

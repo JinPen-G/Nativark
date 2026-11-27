@@ -1,6 +1,6 @@
 'use strict';
-const test = require('node:test'), assert = require('node:assert/strict'); require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test); require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { UsageAccountingService } = require('../apps/api/src/modules/ai-native/usage-accounting.service'); const scope = { id: 'tenant-a:space-a', kind: 'WORKSPACE', tenantId: 'tenant-a', workspaceId: 'space-a' };
+const test = require('node:test'), assert = require('node:assert/strict'); require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
+const { UsageAccountingService } = require('./fixtures/ai-native/usage-settlement.cjs'); const scope = { id: 'tenant-a:space-a', kind: 'WORKSPACE', tenantId: 'tenant-a', workspaceId: 'space-a' };
 function harness() {
   const f = require('./fixtures/ai-native/usage-settlement.cjs').setup(); f.state.rows = [];
   f.state.scope = structuredClone(scope); f.state.grant.context.scope = { kind: 'workspace', tenantId: scope.tenantId, workspaceId: scope.workspaceId };

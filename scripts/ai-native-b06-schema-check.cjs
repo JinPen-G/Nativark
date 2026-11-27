@@ -1,6 +1,6 @@
 'use strict';
 const fs = require('node:fs'); const path = require('node:path');
-const { analyzeMigrationDirectory } = require('./ai-native-b06-migration-check.cjs');
+const { analyzeMigrationSource } = require('./ai-native-b06-migration-check.cjs');
 function parseSchema(schema) {
   const models = [];
   for (const match of schema.matchAll(/model\s+(\w+)\s*\{([\s\S]*?)\}/gmi)) {
@@ -18,8 +18,8 @@ function compareSchemaToMigrations(schema, reports) {
   return { models, migrationTables: tables, onlyInSchema: modelTables.filter(table => !tables.includes(table)), onlyInMigrations: tables.filter(table => !modelTables.includes(table)) };
 }
 if (require.main === module) {
-  const root = path.resolve(process.cwd(), 'apps/api/prisma');
-  const report = compareSchemaToMigrations(fs.readFileSync(path.join(root, 'schema.prisma'), 'utf8'), analyzeMigrationDirectory(path.join(root, 'migrations')));
+  if (process.argv.length !== 4) throw new Error('Usage: node scripts/ai-native-b06-schema-check.cjs <schema.prisma> <migration.sql|migrations-directory>');
+  const report = compareSchemaToMigrations(fs.readFileSync(path.resolve(process.argv[2]), 'utf8'), analyzeMigrationSource(process.argv[3]));
   process.stdout.write(JSON.stringify({ tool: 'ai-native-b06-schema-check', ...report }, null, 2) + '\n');
 }
 module.exports = { parseSchema, compareSchemaToMigrations };

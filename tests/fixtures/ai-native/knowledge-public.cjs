@@ -85,15 +85,16 @@ function harness() {
     factReference: async (_, fact) => clone(fact),
   };
   const unused = () => { throw new Error('This ACL fixture does not provide model, index or memory execution'); };
-  const services = composeKnowledgeServices({
+  const modulePorts = {
     documents: { repository: h.repo, authorization: h.authorization, clock: h.clock, files: h.files },
     content: h.content, selection: h.selection, search: h.search, index: { apply: unused },
     memory: { repository: { read: unused, operation: unused, commit: unused }, authorization: h.authorization,
       clock: h.clock, confirmations: { read: unused } },
     gateway: { invoke: unused, stream: unused }, cache: { maxEntries: 32, maxBytes: 65536, ttlMs: 1000 },
     policy: { sceneCode: 'knowledge_acl_fixture', maxOutputTokens: 100 },
-  });
-  return Object.assign(h, { documents: services.documents, publication: services.publication,
+  };
+  const services = composeKnowledgeServices(modulePorts);
+  return Object.assign(h, { modulePorts, documents: services.documents, publication: services.publication,
     sources: services.sources, retrieval: services.retrieval });
 }
 async function published(h, ctx = context(), input = draft()) {
@@ -102,4 +103,32 @@ async function published(h, ctx = context(), input = draft()) {
   record.document.indexing = 'indexed'; h.repo.seed(record);
   return h.publication.publish(ctx, { documentId: input.documentId, expectedRevision: record.revision, operationId: 'publish-1' });
 }
-module.exports = { contracts, attempts, clone, key, scope, now, context, draft, harness, published, source, query };
+/** Original finite memory CAS and confirmation records, consumed through the
+ * public service factory. This does not grant knowledge-body deletion. */
+function memoryHarness(f = harness()) {
+  f.memories = new Map(); f.memoryReceipts = new Map(); f.confirmations = new Map(); f.confirmationReads = 0;
+  f.memoryRepository = {
+    read: async (scope, owner, id) => clone(f.memories.get(key(scope, owner, id)) ?? null),
+    operation: async (scope, owner, id, op) => clone(f.memoryReceipts.get(key(scope, owner, id, op)) ?? null),
+    commit: async input => {
+      const k = key(input.scope, input.owner, input.memoryId), op = key(input.scope, input.owner, input.memoryId, input.operation.id);
+      if ((f.memories.get(k)?.revision ?? 0) !== input.expectedRevision || f.memoryReceipts.has(op)) return 'conflict';
+      if (input.confirmation && key(f.confirmations.get(input.confirmation.id)) !== key(input.confirmation)) return 'conflict';
+      f.memories.set(k, clone(input.next)); f.memoryReceipts.set(op, clone(input.operation)); return 'committed';
+    },
+  };
+  f.memoryPorts = { repository: f.memoryRepository, authorization: f.authorization, clock: f.clock,
+    confirmations: { read: async (_, id) => { f.confirmationReads++; return clone(f.confirmations.get(id) ?? null); } } };
+  f.memory = composeKnowledgeServices({ ...f.modulePorts, memory: f.memoryPorts }).memory;
+  f.confirm = (memory, overrides = {}) => {
+    const record = { id: 'confirm-1', memoryId: memory.memoryId, revision: memory.revision, aclRevision: memory.aclRevision,
+      owner: clone(memory.owner), scope: clone(memory.scope), audience: 'operator', preference: clone(memory.preference),
+      memoryExpiresAt: memory.expiresAt, status: 'confirmed', issuedAt: new Date(f.now).toISOString(), expiresAt: memory.expiresAt, ...overrides };
+    f.confirmations.set(record.id, record); return record;
+  };
+  return f;
+}
+const memoryProposal = overrides => ({ memoryId: 'memory-1', operationId: 'propose-1', expiresAt: '2026-10-04T00:00:00Z', preference: { kind: 'locale', value: 'zh-CN' }, ...overrides });
+const memoryChange = (operation, expectedRevision, extra = {}) => ({ draftVersion: contracts.AI_KNOWLEDGE_DRAFT_VERSION, memoryId: 'memory-1', expectedRevision, operation, ...extra });
+module.exports = { contracts, attempts, clone, key, scope, now, context, draft, harness, published, source, query,
+  memoryHarness, memoryProposal, memoryChange };
