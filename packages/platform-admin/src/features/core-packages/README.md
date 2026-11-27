@@ -12,7 +12,7 @@
 | --- | --- |
 | 1. 发现 | SaaS 管理员进入 `/platform/core-packages` 的“发现 Core”，搜索 `rental`，选择 `JinPen-G/Zelo-rental-core`。 |
 | 2. 下载与校验 | 在 `v0.1.12` 详情点“选择版本”，核对上面的来源和摘要，保存固定发行引用，再按预览确认“准备候选”。成功回执显示“候选已准备，待部署”。 |
-| 3. 部署注册 | 部署人员按[Rental 宿主步骤](../../../../../apps/rental-api/README.md)使用固定包与部署锁，完成构建、迁移和启动，在“当前目录”核对注册来源及版本。首次准入按[正式管理步骤](../../../../platform-core-host/README.md#部署准入与存量切换)读取当前状态并登记 `accepting`。 |
+| 3. 部署注册 | 部署人员按[Rental 宿主步骤](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/README.md)使用固定包与部署锁，完成构建、迁移和启动，在“当前目录”核对注册来源及版本。首次准入按[正式管理步骤](../../../../platform-core-host/README.md#部署准入与存量切换)读取当前状态并登记 `accepting`。 |
 | 4. 租户授权 | SaaS 管理员进入 `/platform/core-access` 的“租户 Core 授权”，选目标租户与 `rental`，核对当前修订并保存授权。租户列表的“Core 授权”动作也进入此页。 |
 | 5. 成员分配 | 租户管理员进入 `/settings/member-cores` 的“成员 Core 分配”，给指定成员分配 `rental`，再按原角色和经营空间入口配置业务权限及绑定。当前目录、租户授权、成员分配与业务范围分别回读。 |
 

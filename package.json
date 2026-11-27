@@ -14,7 +14,8 @@
     "!apps/staff-miniprogram",
     "!apps/example-multi-core-api",
     "!apps/example-multi-core-admin",
-    "!apps/rental-admin"
+    "!apps/rental-admin",
+    "!apps/rental-api"
   ],
   "scripts": {
     "prepare:rental-workspace": "node scripts/prepare-rental-workspace.cjs",
@@ -232,13 +233,7 @@
     "lint:ai-native-data": "npm run lint -w @rental-os/ai-native-data",
     "build:ai-native-server": "npm run build -w @rental-os/ai-native-server",
     "lint:ai-native-server": "npm run lint -w @rental-os/ai-native-server",
-    "build:rental-api": "npm run build -w @rental-os/rental-api",
-    "build:rental-api:ai": "npm run build:ai -w @rental-os/rental-api",
-    "lint:rental-api": "npm run lint -w @rental-os/rental-api",
-    "lint:rental-api:ai": "npm run lint:ai -w @rental-os/rental-api",
     "package:rental-host": "node scripts/package-rental-host.cjs",
-    "build:rental-api:mcp": "npm run build:mcp -w @rental-os/rental-api",
-    "lint:rental-api:mcp": "npm run lint:mcp -w @rental-os/rental-api",
     "lint:ai-native-admin": "npm run lint -w @rental-os/ai-native-admin"
   },
   "devDependencies": {

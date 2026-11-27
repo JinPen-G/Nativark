@@ -291,4 +291,4 @@ DDL 模式核原结构、约束和 SQL 事务。显式 --native-stores 另编译
 
 - 生产宿主仍须接 HTTP / Nest / Guard、可信 UI、当前适用 MFA / 审查源，以及所选 MCP SQL 的正式迁移与真实持久仓储。
 - 各业务运输须补齐正式 wire、版本、字段 / 目的地释放、所属持久目标与原限流来源。完整活跃口径、Resources / 其他工具和 R1 / R2 副作用沿原批准与唯一执行链继续交付。
-- 安装 / 构建、浏览器 / Harness、真实数据库 / 外部服务及生产发布分别验收，固定包和原 Core / 数据准入由宿主登记。[Core 宿主](../platform-core-host/README.md) · [Rental 宿主](../../apps/rental-api/README.md)
+- 安装 / 构建、浏览器 / Harness、真实数据库 / 外部服务及生产发布分别验收，固定包和原 Core / 数据准入由宿主登记。[Core 宿主](../platform-core-host/README.md) · [Rental 宿主](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/README.md)

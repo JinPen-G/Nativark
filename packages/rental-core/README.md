@@ -10,10 +10,10 @@ Core 停用后，受控宿主可通过 `originalReceiptRead` 登记已有操作�
 
 | 入口 | 职责与直接消费者 |
 | --- | --- |
-| [完整应用](src/application.ts)、[仓储组合](src/application-repositories.ts)、[领域基础](src/application-domain.ts)、[独立宿主](../../apps/rental-api/src/assembly.ts) | 完整应用以同一数据库组合仓储、资金、事实和业务服务，事件沿调用方事务传播。独立宿主取得该服务图，分别管理构造、启动与退出。 |
+| [完整应用](src/application.ts)、[仓储组合](src/application-repositories.ts)、[领域基础](src/application-domain.ts)、[独立宿主](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/assembly.ts) | 完整应用以同一数据库组合仓储、资金、事实和业务服务，事件沿调用方事务传播。独立宿主取得该服务图，分别管理构造、启动与退出。 |
 | [客户应用](src/application-customers.ts)、[客户端应用](src/application-client.ts)、[企业应用](src/application-enterprise.ts)、[品类应用](src/application-category.ts) | 完整应用复用同一客户主档、会员、企业政策和资金，再组合客户端、企业及品类服务。业务读写沿各服务的当前权限、原键和事务执行。 |
-| [HTTP选择器](src/application-http.ts)、[平台选择器](src/application-platform.ts)、[AI业务源](src/application-ai-sources.ts)、[启用AI的宿主组合](../../apps/rental-api/src/ai-composition.ts) | HTTP和平台选择器供独立宿主复用同一实例。AI业务源由完整应用构造并返回，启用AI的宿主通过显式Provider别名选择原业务服务。 |
-| [应用参加者](src/application-participants.ts)、[宿主生命周期](../../apps/rental-api/src/lifecycle.ts)、[旧组合关闭入口](../../apps/api/src/main.ts) | 原到期作业和后台服务由宿主启动。旧组合的信号和显式 close 共用一次关闭，先停新并等待原文件、到期、配货及限流工作，再关闭 HTTP 和数据库；排空失败明确拒绝关闭。标准宿主等待空间枚举、命名锁及已进入业务全部返回，不取消已提交操作或重做 unknown。 |
+| [HTTP选择器](src/application-http.ts)、[平台选择器](src/application-platform.ts)、[AI业务源](src/application-ai-sources.ts)、[启用AI的宿主组合](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/ai-composition.ts) | HTTP和平台选择器供独立宿主复用同一实例。AI业务源由完整应用构造并返回，启用AI的宿主通过显式Provider别名选择原业务服务。 |
+| [应用参加者](src/application-participants.ts)、[宿主生命周期](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/lifecycle.ts)、[旧组合关闭入口](../../apps/api/src/main.ts) | 原到期作业和后台服务由宿主启动。旧组合的信号和显式 close 共用一次关闭，先停新并等待原文件、到期、配货及限流工作，再关闭 HTTP 和数据库；排空失败明确拒绝关闭。标准宿主等待空间枚举、命名锁及已进入业务全部返回，不取消已提交操作或重做 unknown。 |
 | [HTTP文档贡献](src/http-openapi.ts)、[原操作](src/http-openapi-operations.ts)、[同源schema](src/http-openapi-schemas.ts) | `/http-openapi` 提供平台可组合的 Rental 机器契约、原组合兼容出口与明确字段/路由缺口 |
 | [商品与资产前端](admin/catalog/README.md)、[统一页面贡献](admin/index.tsx)、[请求与图片](admin/catalog/client.ts) | `/admin/catalog` 持有商品、资产、库存、照片与状态历史，七个窄出口提供页面、请求、上下文、图片、列表能力及纯术语；统一贡献组合九页，宿主提供当前身份、经营空间及原鉴权传输 |
 | [定价与营销前端](admin/commercial/README.md)、[七页声明](admin/commercial/pages.ts)、[请求与上下文](admin/commercial/client.ts) | `/admin/commercial` 提供定价组、价格版本/调价、优惠、券和服务容量；宿主提供同一会话与经营空间，表单和主操作复用公共呈现，旧地址和价格管理权限保持 |
@@ -58,7 +58,7 @@ Core 停用后，受控宿主可通过 `originalReceiptRead` 登记已有操作�
 | [存量单项接管](src/legacy-access-adoption.ts) | `/legacy-access-adoption` 将确认的单项候选交回原管理服务，在同一事务复验来源、当前身份和修订，沿原操作键保存授权/分配/绑定及审计 |
 | [经营空间会话权威](src/mysql-workspace-principal.ts)、[原仓储入口](../../apps/api/src/modules/platform/platform.repository.ts) | `@rental-os/rental-core/mysql-workspace-principal` 提供可进入空间、默认空间、成员权限及会话复验，构造时传入同一数据库与原账号/角色投影回调。原 Auth、Guard 和 MCP 沿六个仓储入口消费同一实例，角色及权限锁沿原事务顺序。服务端明确登记的缓冲读取持共享身份锁，业务写入及原会话管理保留独占锁；每个原事务仍核当前权限与会话，返回前复验 |
 | [主应用工厂](src/mysql-primary-application.ts)、[原宿主接线](../../apps/api/src/modules/rental-core/rental-primary-application.providers.ts) | `/mysql-primary-application` 构造同一对核心与报价/营销实例，显式提供真实配置快照、数据库和参加者；旧服务令牌、HTTP及AI消费这两个实例 |
-| [独立API宿主](../../apps/rental-api/README.md)、[唯一根模块](../../apps/rental-api/src/app.module.ts)、[请求政策](src/http-access-policy.ts) | 组合公共平台与同一Rental应用、身份和数据库；按真实处理器区分身份维护、公开、业务与管理准入，未接齐的必要处理器在连接和监听前拒绝。原事务、提交收据和返回前字段复验分别保留 |
+| [独立API宿主](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/README.md)、[唯一根模块](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/app.module.ts)、[请求政策](src/http-access-policy.ts) | 组合公共平台与同一Rental应用、身份和数据库；按真实处理器区分身份维护、公开、业务与管理准入，未接齐的必要处理器在连接和监听前拒绝。原事务、提交收据和返回前字段复验分别保留 |
 | [核心聚合](src/mysql-core-runtime.ts)、[宿主接点](src/core-runtime-ports.ts) | `/mysql-core-runtime` 持有原配置、库存、订单、交接及结算裁定；主应用工厂供给原依赖，Controller/AI/企业及各端继续消费原签名 |
 | [报价/营销聚合](src/mysql-business-runtime.ts)、[宿主接点](src/business-runtime-ports.ts) | `/mysql-business-runtime` 维护价格、日历、规则、报价、券、奖励和通知恢复；主应用工厂保留原正文维护读取器，当前与历史价格分别读取 |
 | [订单确认](src/mysql-order-confirmation.ts)、[确认接点](src/order-confirmation-ports.ts)、[批准合同](src/approved-order-transaction.ports.ts) | `/mysql-order-confirmation` 与 `/approved-order-ports` 保留原报价消费、库存/容量、券、批准和幂等同事务提交，客户/企业参加者由宿主供给 |
@@ -171,7 +171,7 @@ Core 停用后，受控宿主可通过 `originalReceiptRead` 登记已有操作�
 
 [善后声明](src/application-recovery-policy.ts)与[当前权威](src/application-recovery-authority.ts)只接实际登记处理器。89个原读取/收尾入口分别绑定订单、空间或企业历史，新增的文件/承运证据、审批原结果及企业回款凭证通过原材料定位订单。员工收款历史绑定本次真实 `orderId` 查询；旧操作和 unknown 不取得新订单权。
 
-宿主从同一业务实例供给 `originalHistory` 和企业授权参加者，按当前身份、Tenant/Core、原Order与Workspace复核，再由原ACL/审批/资金服务处理。材料/归属或当前授权变化时拒绝，缺参加者明确不可用。代码登记、租户停用后的善后与当前部署分别核定，不能把读取原结果当成新业务授权。[文件定位](src/file-business-access.ts) · [宿主接入](../../apps/rental-api/README.md#请求事务与响应)
+宿主从同一业务实例供给 `originalHistory` 和企业授权参加者，按当前身份、Tenant/Core、原Order与Workspace复核，再由原ACL/审批/资金服务处理。材料/归属或当前授权变化时拒绝，缺参加者明确不可用。代码登记、租户停用后的善后与当前部署分别核定，不能把读取原结果当成新业务授权。[文件定位](src/file-business-access.ts) · [宿主接入](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/rental-api/README.md#请求事务与响应)
 
 ## HTTP API 文档
 
@@ -218,7 +218,7 @@ node -e "const { createRentalOpenApi } = require('@rental-os/rental-core/http-op
 
 Rental HTTP从 `@rental-os/rental-core/http` 的 `RentalHttpModule` 接入，类型 `RentalHttpServiceGroups` 列出宿主需要供给的真实应用。
 
-完整实例从 [application](src/application.ts) 构造，经 [application-http](src/application-http.ts) 与 [application-platform](src/application-platform.ts) 分别供给原 Rental HTTP 和公共模块。宿主显式选择 AI 模式：未启用时客户检查出箱传 `null` 且不装配 AI 参加者；启用时必须提供原失败出箱、事务事件和通知草稿读取器。构造不会启服务或启动作业。独立组合的实际挂载集合及明确路由缺口见 [Rental API](../../apps/rental-api/README.md)。
+完整实例从 [application](src/application.ts) 构造，经 [application-http](src/application-http.ts) 与 [application-platform](src/application-platform.ts) 分别供给原 Rental HTTP 和公共模块。宿主显式选择 AI 模式：未启用时客户检查出箱传 `null` 且不装配 AI 参加者；启用时必须提供原失败出箱、事务事件和通知草稿读取器。构造不会启服务或启动作业。独立组合的实际挂载集合及明确路由缺口见 [Rental API](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/README.md)。
 
 网站、门户和部分前端出口继续使用 `@rental-os/shared@0.1.0` 的原运行协议。该包是可选 peer，消费这些出口的宿主仍须安装它；只使用其他出口时可按实际依赖选择。租赁值逐项转到已有 Core 正式出口，AI schema 和协调器当前仍由原 Shared 单源提供。
 
@@ -238,7 +238,7 @@ Rental HTTP从 `@rental-os/rental-core/http` 的 `RentalHttpModule` 接入，类
 2. 在宿主 `imports` 中使用 `RentalHttpModule.registerFactory({ imports, inject, useFactory })`，工厂返回上一步的应用集合。已经完成实例装配的宿主可用 `register(services)`；应用集合只创建一次，必需服务缺失时启动失败，原可选服务保持原处理。
 3. 由宿主注册原身份/权限Guard、ALS及Rental HTTP政策，并选择该Core的路由贡献。员工、客户与企业接口沿各自audience和业务范围裁定；HTTP模块与单独品类模块选其一，避免重复Controller。
 
-原组合AppModule从 `/http` 导入同一19个Controller，保留原Controller列表和provider接线；独立宿主从[完整应用](src/application.ts)取得同一服务图、数据和作业，可选 AI 从[独立 AI 组合](../../apps/rental-api/src/ai-composition.ts)供给原参加者。字段、请求验证类和政策从下面各HTTP出口及[OpenAPI源码](../../apps/api/src/contracts/openapi-document.ts)查阅。[统一模块](src/http.module.ts) · [原服务绑定](../../apps/api/src/modules/rental-core/rental-http.providers.ts)
+原组合AppModule从 `/http` 导入同一19个Controller，保留原Controller列表和provider接线；独立宿主从[完整应用](src/application.ts)取得同一服务图、数据和作业，可选 AI 从[独立 AI 组合](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/ai-composition.ts)供给原参加者。字段、请求验证类和政策从下面各HTTP出口及[OpenAPI源码](../../apps/api/src/contracts/openapi-document.ts)查阅。[统一模块](src/http.module.ts) · [原服务绑定](../../apps/api/src/modules/rental-core/rental-http.providers.ts)
 
 微信客户认证从 `/mysql-client-wechat-auth` 接入，实际事务、渠道凭据、同一客户主档/注册、当前会话和审计经 `/client-wechat-ports` 供给。运输使用 `@rental-os/platform-server/integration-wechat` 的同一类和错误身份，保留原AppID缓存及凭据一次刷新；业务绑定核水印，已登录客户的一次性code错误不重试、不视为会话失效。原[微信Nest接线](../../apps/api/src/modules/client/client-wechat-auth.service.ts)保持八项构造位置。
 
@@ -248,7 +248,7 @@ Rental HTTP从 `@rental-os/rental-core/http` 的 `RentalHttpModule` 接入，类
 
 三个单租户队列由公共内核按原时间与对象 ID 有界续读。兼容运行时每次新建仓储包装和清理器时，供给同一个 `schedulingScope`，使后续批次能继续处理后排候选。宿主重启只重置调度位置，原文件状态、期限、冻结依据和未知收据继续保留；逐对象授权与占用仍由原参加者裁定。[实际装配](src/file-application-runtime.ts)
 
-型号图片首次解绑在原图片事务中把 active 文件排为 `delete_queued`；已有排队、未定、在途或已删事实保持原收据。唯一清理器占用后才派发删除，Core 移除观察保留未完成作业与 unknown 阻碍。[图片事务](src/mysql-core-configuration.ts) · [移除观察](../../apps/rental-api/src/core-removal-source.ts)
+型号图片首次解绑在原图片事务中把 active 文件排为 `delete_queued`；已有排队、未定、在途或已删事实保持原收据。唯一清理器占用后才派发删除，Core 移除观察保留未完成作业与 unknown 阻碍。[图片事务](src/mysql-core-configuration.ts) · [移除观察](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/core-removal-source.ts)
 
 员工原键观察的请求与回执 schema 从 `@rental-os/rental-core/staff-upload-observation` 读取，服务端从 `@rental-os/rental-core/file-application-staff-observation` 导入 `parseStaffUploadObservation`。解析复用原 Ajv 封闭校验、8KiB 描述上限及原上传键 UTF-16 长度和 trim 规则，宿主继续向同一 HTTP/文件参加者供给解析函数。[观察合同](src/staff-upload-observation.ts) · [原键解析与观察](src/file-application-staff-observation.ts)
 
@@ -326,7 +326,7 @@ Core绑定和空间就绪检查可通过 `readReadinessConfiguration` 在同一�
 
 报表从 `@rental-os/rental-core/mysql-reports` 创建，宿主仅提供本表的只读方法，原Auth/ALS供给当前地点及数据范围。每次查询保留租户/空间、草稿排除、订单归属和地点过滤；仅本人范围不能读取混合空间库存快照的整份报表。AI使用固定 `getBoundedOperationReport`，数量或分页证据冲突明确拒绝，不能把部分统计当总数。CSV从 `/report-csv` 复用，币种、筛选和历史口径说明跟随同一结果，导出不重新查询。[原报表Nest接点](../../apps/api/src/modules/rental-core/rental-workspace-report.repository.ts) · [原导出接点](../../apps/api/src/modules/rental-core/rental-workspace-report.csv.ts)
 
-到期作业从 `@rental-os/rental-core/mysql-due-jobs` 接入，原Nest provider供给同一数据库、Core、业务、动作幂等、容量、企业核销及支付实例。GET_LOCK、任务与RELEASE_LOCK仍在同一交互式事务连接，内部业务沿原短事务和操作键；失败释放锁并继续其他任务/空间，不以本地支付过期代替原渠道核验。宿主只登记一个provider并继承原启动/销毁钩子；企业/支付保持原Optional接线，启用相应生产任务须提供原参加者，不能用空成功替代。标准宿主从[应用参加者](src/application-participants.ts)构造同一 allocation 与 dueJobs，并由[唯一生命周期](../../apps/rental-api/src/lifecycle.ts)统一启动和排空。[原作业接点](../../apps/api/src/modules/rental-core/rental-due-job.scheduler.ts) · [原离线作业验证](../../tests/rental-due-job-scheduler.test.cjs)
+到期作业从 `@rental-os/rental-core/mysql-due-jobs` 接入，原Nest provider供给同一数据库、Core、业务、动作幂等、容量、企业核销及支付实例。GET_LOCK、任务与RELEASE_LOCK仍在同一交互式事务连接，内部业务沿原短事务和操作键；失败释放锁并继续其他任务/空间，不以本地支付过期代替原渠道核验。宿主只登记一个provider并继承原启动/销毁钩子；企业/支付保持原Optional接线，启用相应生产任务须提供原参加者，不能用空成功替代。标准宿主从[应用参加者](src/application-participants.ts)构造同一 allocation 与 dueJobs，并由[唯一生命周期](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/lifecycle.ts)统一启动和排空。[原作业接点](../../apps/api/src/modules/rental-core/rental-due-job.scheduler.ts) · [原离线作业验证](../../tests/rental-due-job-scheduler.test.cjs)
 
 支付到期与手动关单共用 [原支付执行器](src/mysql-payment-runtime.ts)的唯一关单运输收据。准备记录按原支付单派生固定键，在原租户、订单和支付单锁下先提交，再复核当前派发权。收据保存原空间、商户单号、提供方、方式、金额及 Stripe 原 Session。查询和关闭结果提交均核同一快照，原支付状态和渠道应答继续决定结果。准备提交失应答、运输超时或结果落库未确认时，恢复仅查询同一支付单；可信已关闭结果同时收口原意图与关单收据，可信已付结果沿原入账。手动重试和重建 worker 共用该观察，进程退出仍等待已进入运输的原结果。[原作业恢复验证](../../tests/rental-worker-recovery.test.cjs)
 
@@ -343,7 +343,7 @@ Core绑定和空间就绪检查可通过 `readReadinessConfiguration` 在同一�
 | `integrations.fileCleanup` | [集成生命周期](src/application-integrations.ts)、[文件应用](src/file-application-runtime.ts)与[清理权威](src/application-file-cleanup-authority.ts)，处理原过期上传、完成暂存及待删除对象 | 等待当前清理批次，删除失应答只观察原对象键与修订，AI 知识依赖沿显式选装参加者 |
 | `client.rateLimit` | [唯一限流实例](src/mysql-client-rate-limit.ts)，HTTP、客户认证及清理共用原配额表 | 等待当前清理，完整日窗口和原原子递增保留，退出后由宿主关闭同一数据库 |
 
-上述执行者由[宿主生命周期验证](../../apps/rental-api/test/lifecycle.test.cjs)和[原到期任务验证](../../tests/rental-due-job-scheduler.test.cjs)覆盖所选正常、拒绝及排空分支。业务事件从[仓储组合](src/application-repositories.ts)参加原调用方事务，启用 AI 时使用同一[失败出箱](../ai-native-server/src/business-events/prisma-business-failure-outbox.ts)。真实数据库锁、外部运输、进程重启及完整卸载沿各自实际环境核验。
+上述执行者由[宿主生命周期验证](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/rental-api/test/lifecycle.test.cjs)和[原到期任务验证](../../tests/rental-due-job-scheduler.test.cjs)覆盖所选正常、拒绝及排空分支。业务事件从[仓储组合](src/application-repositories.ts)参加原调用方事务，启用 AI 时使用同一[失败出箱](../ai-native-server/src/business-events/prisma-business-failure-outbox.ts)。真实数据库锁、外部运输、进程重启及完整卸载沿各自实际环境核验。
 
 换货候选/试算从 @rental-os/rental-core/mysql-exchange-preview接入，供给同一核心、报价/营销、配货和原事务，使用[私有服务视图](src/exchange-preview-ports.ts)。已有事务原样传入；没有事务时由原数据源开启。候选只释放当前受权商品及可用资产，预留和费用批准分别由原业务入口执行。旧Nest provider保留五项依赖和可选容量；需容量的新服务缺组件时明确拒绝。[原试算接线](../../apps/api/src/modules/rental-core/rental-exchange-preview.service.ts) · [换货计价/历史验证](../../tests/rental-exchange-segment-pricing.test.cjs)
 
@@ -401,7 +401,7 @@ Core绑定和空间就绪检查可通过 `readReadinessConfiguration` 在同一�
 
 请求边界绑定真实 Controller 和 handler。仪表盘和通知模板列表保留默认模板初始化，每次原 upsert 在独立 ReadCommitted 事务内锁定 Tenant/Core，重复维护保留历史主键。任务入队与完成、通知登记、适配日志、打印记录、设备更新与绑定也在各自原提交点使用同事务围栏，随后日志仍独立提交，日志失败保留先前回执。兼容宿主沿原存储办理，标准 Rental 宿主选中的请求权威在每次提交核验租户、Core 和部署状态。共享准入在每个原事务使用同一 Auth 的成员租约锁定并复验当前会话、账号、角色、数据与地点范围，沿 Tenant 共享父锁保持原锁顺序；缓冲读取返回前再次复验。十八项声明分别登记六项纯读取、两项模板维护读取和十项写入的实际参加者，完整宿主组合由 `compileRentalHttpAccessPolicy(...).assertReviewed()`核定。[原成员权威](src/application-member-authority.ts) · [原会话租约](src/auth-service.ts) · [请求边界](src/http-integration-access.ts) · [共享准入](src/application-access.ts) · [原私有提交](src/mysql-integrations.ts)
 
-SQL、Decimal、空值单例、错误类和隔离级别通过正式 `@rental-os/platform-server/prisma-runtime` 复用官方运行库。JSON 写入使用 [Rental 空值桥](src/prisma-null-values.ts)的 `/prisma-null-values`，将同一官方单例连接到所选 Client 的输入类型；公共底座不引用业务生成类型。业务枚举保持原字面值并由生成类型约束；核心/业务私有 MySQL 声明使用所选宿主 schema 的生成类型。首次源码构建可先运行[纯schema准备入口](../../scripts/prepare-selected-prisma-schema.cjs)，选择 `rental`（162模型）或 `rental-ai`（248模型），将 schema 写到 `apps/rental-api` 根下显式指定且尚不存在的直接子目录；它不依赖 `dist`、不生成Client，也不办理迁移或部署。随后由宿主的独立生成流程产生 `apps/rental-api/generated/client`，再开始编译。完整发行包的[部署准备](../../apps/rental-api/src/prepare-deployment.ts)用于已构建发行的核验，不是首次源码生成的前置。
+SQL、Decimal、空值单例、错误类和隔离级别通过正式 `@rental-os/platform-server/prisma-runtime` 复用官方运行库。JSON 写入使用 [Rental 空值桥](src/prisma-null-values.ts)的 `/prisma-null-values`，将同一官方单例连接到所选 Client 的输入类型；公共底座不引用业务生成类型。业务枚举保持原字面值并由生成类型约束；核心/业务私有 MySQL 声明使用所选宿主 schema 的生成类型。首次源码构建可先运行[纯schema准备入口](../../scripts/prepare-selected-prisma-schema.cjs)，选择 `rental`（162模型）或 `rental-ai`（248模型），将 schema 写到 `apps/rental-api` 根下显式指定且尚不存在的直接子目录；它不依赖 `dist`、不生成Client，也不办理迁移或部署。随后由宿主的独立生成流程产生 `apps/rental-api/generated/client`，再开始编译。完整发行包的[部署准备](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/prepare-deployment.ts)用于已构建发行的核验，不是首次源码生成的前置。
 
 数据发行从 `createRentalDataRelease` 核对受控包的固定版本、可读范围和迁移原文。每项使用 `rental.` 命名空间，文件位于 `prisma/migrations/<name>/migration.sql` 或 `migrations/<name>/migration.sql`，其中 `<name>` 对应原 Prisma `migration_name`。摘要按原始字节计算，换行及编码变化均须作为发行差异处理。结果中的数据合同、账名称和 SQL 保持同一顺序，供宿主接入数据计划。[发行合同与原文核对](src/data.ts)
 
@@ -422,7 +422,7 @@ npm run lint -w @rental-os/rental-core
 
 构建前置按公共合同 → Rental基础合同 → Shared兼容声明 → 公共Core宿主 → Rental完整服务的顺序执行；`npm run build:contracts -w @rental-os/rental-core`只生成Shared实际消费的18个正式合同入口及其内部依赖，避免Shared与完整服务循环构建。该入口保留同一运行时值和正式声明，不创建另一套合同。[合同构建配置](tsconfig.contracts.json) · [内存构建检查](../../scripts/check-rental-package-build.cjs) · [固定版本发行与五端消费核验](../../scripts/verify-rental-distribution.cjs)
 
-独立公开仓库从实际发行提交构建标准包，清单、Tag 和 Release 资产须对应同一来源。公开包声明 `/api/cores/rental/v1` 下已审定的业务操作，部署后的规范路径和原路径进入同一 Controller。包准备、实际部署、注册和租户授权沿现有流程完成。见[规范路径和文档共用入口](src/http-portable.ts)与[宿主接入说明](../../apps/rental-api/README.md)。
+独立公开仓库从实际发行提交构建标准包，清单、Tag 和 Release 资产须对应同一来源。公开包声明 `/api/cores/rental/v1` 下已审定的业务操作，部署后的规范路径和原路径进入同一 Controller。包准备、实际部署、注册和租户授权沿现有流程完成。见[规范路径和文档共用入口](src/http-portable.ts)与[宿主接入说明](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/README.md)。
 
 当前组合使用 Base `0.1.17`，源码 `3fee227517a2b20e18a426e853f18cdf37cb63ff`，以及 Rental `0.1.14`，独立源码 `2cada4c9bb7e7c4baa1affe66b72f5750e8431e6`。安装和独立更新按所选固定包摘要及部署锁办理。`0.1.14` 将订单报价总额的原 Token 样式随 Core 页面加载，不修改业务逻辑、数据版本或迁移；原 `0.1.13` 的六表升级与回退限制仍适用。[Base 0.1.17](https://github.com/JinPen-G/Zelo/releases/tag/v0.1.17) · [Rental 0.1.14](https://github.com/JinPen-G/Zelo-rental-core/releases/tag/v0.1.14)
 
@@ -438,7 +438,7 @@ Core 使用底座的正式 API 和已声明能力扩展业务，底座与 Core �
 node scripts/prepare-rental-workspace.cjs --repo <固定底座Git目录> --repository https://github.com/JinPen-G/Zelo --commit 68303f7abedc8c70540662f70e268eacb132e2a1 --core-repo <独立CoreGit目录> --core-commit 2cada4c9bb7e7c4baa1affe66b72f5750e8431e6 --out <新开发归档.tgz>
 ```
 
-在新目录解包，执行 `npm ci`、`npm run check:types`，修改 `packages/rental-core` 后执行 `npm run check:core`。可选 AI 开发组合在准备时显式加 `--ai`；Client 生成、构建、迁移和启动按 [Rental 宿主](../../apps/rental-api/README.md)办理。包内 `development.workspace.json` 记录两个来源和文件摘要，开发组合不依赖维护者私有文档、旧生成物或聊天记忆。
+在新目录解包，执行 `npm ci`、`npm run check:types`，修改 `packages/rental-core` 后执行 `npm run check:core`。可选 AI 开发组合在准备时显式加 `--ai`；Client 生成、构建、迁移和启动按 [Rental 宿主](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/README.md)办理。包内 `development.workspace.json` 记录两个来源和文件摘要，开发组合不依赖维护者私有文档、旧生成物或聊天记忆。
 
 公开出包时用 `--source-repository https://github.com/JinPen-G/Zelo` 固定底座和公共资料来源，`--build-repo` 指向已取得的底座 Git 对象目录，`--core-repo` 指向独立 Core 仓库。发行从独立 Core 标签重新编译，不要求它与底座内的旧 Rental 子树一致。构建与底座 SHA、独立仓的版本 Tag 和新归档路径分别传入；已有安装的来源保持原值，跨仓迁移按明确的来源处置流程办理。
 
@@ -446,7 +446,7 @@ node scripts/prepare-rental-workspace.cjs --repo <固定底座Git目录> --repos
 node scripts/verify-rental-distribution.cjs --portable --build-repo <固定底座Git目录> --commit <构建SHA> --platform-commit <底座SHA> --source-repository https://github.com/JinPen-G/Zelo --core-repo <独立仓根目录> --core-commit <版本Tag的提交SHA> --out <新目录/rental-版本.tgz>
 ```
 
-独立 Linux 镜像使用[宿主打包入口](../../scripts/package-rental-host.cjs)。先完成正式源码构建、完整 Rental 标准包及[原部署准备](../../apps/rental-api/src/prepare-deployment.ts)，再从仓库根执行以下命令；参数均为实际绝对路径，输出父目录须存在且归档不能已存在。底座 `.tgz` 须使用与原 prepared 锁的 `platform.sha256` 一致的固定源码归档，不能用候选 `platform/` 目录代替。
+独立 Linux 镜像使用[宿主打包入口](../../scripts/package-rental-host.cjs)。先完成正式源码构建、完整 Rental 标准包及[原部署准备](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/prepare-deployment.ts)，下方无双仓来源回执的命令仅在完整历史检出 `46db0945…` 执行；当前固定双仓按独立宿主导读选择同版来源、锁与正式打包入口。`apps/rental-api` 是组合或历史宿主中的路径；参数均为实际绝对路径，输出父目录须存在且归档不能已存在。底座 `.tgz` 须使用与原 prepared 锁的 `platform.sha256` 一致的固定源码归档，不能用候选 `platform/` 目录代替。
 
 ```text
 node scripts/package-rental-host.cjs --ai disabled --deployment <原prepared目录> --platform-package <原固定底座.tgz绝对路径> --rental-package <完整固定Rental包目录> --client <本树apps/rental-api/generated/client/index.d.ts> --platform-client <本树apps/platform-api/generated/client/index.d.ts> --output <新归档绝对路径.tgz>
@@ -464,7 +464,7 @@ HTTP宿主登记 `/http-core` 和 `/http-business` 的两个Controller，从 `/h
 
 支付应用使用`/mysql-payment-runtime`和`/mysql-payment-reconciliation-file`，宿主供给原数据库、配置、资金、当前Auth/ALS及失败出箱。公共`@rental-os/platform-server/integration-payment`只负责签名、验签和受控运输。退款额度、实款、原回调键和unknown恢复仍由Rental决定；首响应丢失后只核原操作。客户端金额与对账合同从根出口读取，纯金额和Stripe工具分别使用`/payment-money`、`/stripe-payment`。[原支付入口](../../apps/api/src/modules/integrations/README.md) · [公共支付运输](../platform-server/src/modules/integrations/README.md#支付运输)
 
-企业HTTP按需要登记 `/http-enterprise-read`、`/http-enterprise-merchant`、`/http-enterprise-handoff-merchant` 与 `/http-enterprise-workflows`。从 `/http-enterprise-applications` 的 `RENTAL_ENTERPRISE_HTTP` 取得令牌，并按[原企业接线](../../apps/api/src/modules/enterprise/enterprise-http.providers.ts)绑定实际参加者。客户路径仍使用本人/企业授权，商户与行政交接保留各自营运范围；专用文件读取前后复验，缺真实文件配置继续拒绝。财务读取的可选装配保留原不可用状态，类型/声明在[包配置](package.json)逐项对应；普通与可选 AI 的[标准根装配](../../apps/rental-api/src/app.module.ts)已供给实际企业应用和 HTTP，[AI 根](../../apps/rental-api/src/ai-app.module.ts)另行选择原参加者。独立冷安装、真实业务运行和完整兼容验收分别取证。
+企业HTTP按需要登记 `/http-enterprise-read`、`/http-enterprise-merchant`、`/http-enterprise-handoff-merchant` 与 `/http-enterprise-workflows`。从 `/http-enterprise-applications` 的 `RENTAL_ENTERPRISE_HTTP` 取得令牌，并按[原企业接线](../../apps/api/src/modules/enterprise/enterprise-http.providers.ts)绑定实际参加者。客户路径仍使用本人/企业授权，商户与行政交接保留各自营运范围；专用文件读取前后复验，缺真实文件配置继续拒绝。财务读取的可选装配保留原不可用状态，类型/声明在[包配置](package.json)逐项对应；普通与可选 AI 的[标准根装配](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/app.module.ts)已供给实际企业应用和 HTTP，[AI 根](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/ai-app.module.ts)另行选择原参加者。独立冷安装、真实业务运行和完整兼容验收分别取证。
 
 品类解析和身份子出口同样使用服务端 peer。宿主供给本表只读方法后创建 `RentalCategoryResolver`，普通读取使用同一数据源，业务提交点传入自己的事务视图。`forVersion` 定位原发布引用，`forWorkspace` 每次重读当前绑定，`openingOptions` 返回最多100项及明确截断状态。旧 API 的 Nest provider 继续承担这条装配。[原 provider](../../apps/api/src/modules/rental-core/rental-category-resolver.service.ts)
 

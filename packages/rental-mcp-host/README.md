@@ -9,7 +9,7 @@
 3. 在受控启动源码中实现 `bootstrapRentalAiMcp` 的 `createOriginalHost(host, dependencies)`，从 `host.rental.auth`、`host.guard` 和 `dependencies.database` 绑定当前实例。使用本包的原工厂返回同一个 MCP 总路由。
 4. 宿主将该路由交给标准 Node HTTP 适配。原始流先进入 MCP 处理器，随后才进入 Nest 的 body parser、CORS 和普通业务链。退出时先等待 MCP 排空，再关闭 AI 和数据库。
 
-配置、参数类型和来源由正式出口提供。可选的审查、MFA、工具发布、字段释放与计量来源按已有业务政策接入，原请求每次复验当前授权。启动与构建步骤见 [Rental 宿主说明](../../apps/rental-api/README.md#可选-mcp-http-参加者)。
+配置、参数类型和来源由正式出口提供。可选的审查、MFA、工具发布、字段释放与计量来源按已有业务政策接入，原请求每次复验当前授权。启动与构建步骤见 [Rental 宿主说明](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/README.md#显式选装-mcp仅新装开发)。
 
 ## 源码路线
 
@@ -31,7 +31,7 @@
 
 旧组合宿主的 `apps/api/src/modules/auth/original-mcp-*.ts` 通过正式出口消费这些相同实现。运输、协议和 SQL 仓储继续由 [MCP 服务包](../mcp-server/README.md)提供，业务对象及最终裁定沿 [Rental Core](../rental-core/README.md)读取。
 
-选装宿主的 [MCP 装配](../../apps/rental-api/src/mcp-host.ts)从 `@rental-os/rental-mcp-host/capability-mapping` 加载本包映射，并与通用 MCP 工厂一并显式传给原参加者。映射依赖 shared 的同源运行时工具码，返回通用 `McpReadTool`；同一原 Guard、Native 事务、持久计量与字段释放继续决定实际读取。旧 `@rental-os/mcp-server/capability-mapping` 导入须迁到本包子出口；通用包不保留反向兼容转发。包版本仍为 `0.1.0`，发布者须将生产者、消费者和锁文件作为同一兼容变更核定。
+选装宿主的 [MCP 装配](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/mcp-host.ts)从 `@rental-os/rental-mcp-host/capability-mapping` 加载本包映射，并与通用 MCP 工厂一并显式传给原参加者。映射依赖 shared 的同源运行时工具码，返回通用 `McpReadTool`；同一原 Guard、Native 事务、持久计量与字段释放继续决定实际读取。旧 `@rental-os/mcp-server/capability-mapping` 导入须迁到本包子出口；通用包不保留反向兼容转发。包版本仍为 `0.1.0`，发布者须将生产者、消费者和锁文件作为同一兼容变更核定。
 
 原 [目录意图权威](src/original-mcp-catalog-goal-intent-authority.ts)同时供给通用存储的必需 `acceptsNextInput` 端口。该端口只核同源目录输入及原 50 条限制；当前身份、Guard、适用验证、同 Native 锁和提交后复验仍由原 `withCurrent` / `withTransition` 负责。校验器不能作为业务授权或目标采用收据。
 

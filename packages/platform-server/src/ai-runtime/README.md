@@ -27,7 +27,7 @@ import { createPersistentAiTaskRunner, type AiTaskRunnerDependencies }
 | [准备资源端口](task-run-preparation.ports.ts) | 关联原准备、预占和同一租约；原收据不是新的执行时钟或额度 |
 | [公共任务状态](../../../platform-contracts/src/ai-task.ts) | 原任务/步骤状态、版本及结果的单源；shared草案继续再导出 |
 | [原持久化组合](../../../ai-native-server/src/runtime/runner/persistent-task-runner.composition.ts) | 通过兼容出口使用本 Runner；真实仓储、批准、Gateway及业务适配仍由所选宿主供给 |
-| [所选 Rental AI 宿主](../../../../apps/rental-api/src/ai-composition.ts) | 复用当前原 Auth/Guard/任务与业务实例，不重建运行器或清空旧任务 |
+| [所选 Rental AI 宿主](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/ai-composition.ts) | 复用当前原 Auth/Guard/任务与业务实例，不重建运行器或清空旧任务 |
 
 原 `ai-native-server/runtime/runner` 和 API 路径再导出本包的同一 Runner 与错误类，保持 `instanceof`、held preparation、原租约和结果处理语义。原 SQL 结果中的 Prisma 正文类型留在其私有适配；公共 Runner 合同没有 ORM 或行业实体。
 

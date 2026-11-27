@@ -6,11 +6,11 @@
 
 新安装可以选用独立的[公共 AI 数据发行 `0.2.0`](README.public.md)。[公共 schema](prisma-public/schema.prisma)和[公共 SQL](prisma-public/20261126000000-initial.sql)包含 74 个 AI 模型、15 个枚举及 220 条语句。`prisma-public/` 与旧 `prisma/` 分开。[公共来源表](prisma-public/provenance.json)逐模型、枚举、语句绑定旧材料；[发行工厂](src/public-data-package.ts)只打包公共入口及材料。工作区的 `0.1.1` 元数据仅维持旧消费者，公共归档独立使用 `0.2.0`，既有固定 `0.1.1` 归档继续按原发布摘要读取。
 
-[Rental 扩展](../../apps/rental-api/src/ai-data-extension.ts)通过 `@rental-os/rental-api/ai-data-extension` 贡献 12 个模型、1 个枚举及 [31 条 SQL](../../apps/rental-api/prisma/ai-extension/20261126000000-initial.sql)，包括报价选单、批准重准备、预约交接、履约检查和业务失败出箱。它把原 Rental 关系接回同一 Prisma Client。公共 41 + 公共 AI 74 + Rental 121 + Rental AI 12，组合为 **248 模型、35 枚举**。公共 AI 物理观察在该组合中同时核对扩展对公共 AI 表追加的六条原外键。[扩展来源表](../../apps/rental-api/prisma/ai-extension/provenance.json)
+[Rental 扩展](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/ai-data-extension.ts)通过 `@rental-os/rental-api/ai-data-extension` 贡献 12 个模型、1 个枚举及 [31 条 SQL](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/prisma/ai-extension/20261126000000-initial.sql)，包括报价选单、批准重准备、预约交接、履约检查和业务失败出箱。它把原 Rental 关系接回同一 Prisma Client。公共 41 + 公共 AI 74 + Rental 121 + Rental AI 12，组合为 **248 模型、35 枚举**。公共 AI 物理观察在该组合中同时核对扩展对公共 AI 表追加的六条原外键。[扩展来源表](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/prisma/ai-extension/provenance.json)
 
-公共新安装可以用现有平台数据能力合同准备迁移。[新装 Rental 准备入口](../../apps/rental-api/src/ai-fresh-deployment.ts)生成 `lockVersion: 2`，执行次序为公共底座、原 Rental、公共 AI、Rental 扩展。扩展保留自身账名 `post-capability.rental.rental.20261126000000-ai-extension`。
+公共新安装可以用现有平台数据能力合同准备迁移。[新装 Rental 准备入口](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/ai-fresh-deployment.ts)生成 `lockVersion: 2`，执行次序为公共底座、原 Rental、公共 AI、Rental 扩展。扩展保留自身账名 `post-capability.rental.rental.20261126000000-ai-extension`。
 
-固定宿主可以从 `@rental-os/rental-api/ai-data-extension` 调用 [`createFreshRentalAiDataAvailability`](../../apps/rental-api/src/ai-data-extension.ts)，传入完整 v2 锁、底座及 Rental 原数据计划、公共 AI 归档字节、固定 Rental 扩展来源和字节。返回的只读准入函数使用调用者选定的 Client 或原事务，按顺序核对四段原 Prisma 账及实际物理结构。当前 Rental 标准入口尚未消费 v2，原混合安装仍沿下文的 58 份迁移及原收据。
+固定宿主可以从 `@rental-os/rental-api/ai-data-extension` 调用 [`createFreshRentalAiDataAvailability`](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/ai-data-extension.ts)，传入完整 v2 锁、底座及 Rental 原数据计划、公共 AI 归档字节、固定 Rental 扩展来源和字节。返回的只读准入函数使用调用者选定的 Client 或原事务，按顺序核对四段原 Prisma 账及实际物理结构。当前 Rental 标准入口尚未消费 v2，原混合安装仍沿下文的 58 份迁移及原收据。
 
 零 Core 宿主可从 [public-data-admission](src/public-data-admission.ts) 创建选装数据观察函数。它读取真实选定锁及固定公共归档，结合原公共数据计划和当前数据库或同一事务的原 Prisma 账与结构来核可用性。它是宿主装配入口，公共数据发行归档仍由原三条窄出口构成。
 
@@ -46,7 +46,7 @@ const prepared = createAiNativeDataPreparation({ baseSchema, contribution: ai })
 
 ## 持久模型与服务消费者
 
-完整模型及关系以[本包 schema](prisma/schema.prisma)和[来源清单](prisma/provenance.json)为准。按服务接点阅读下列模型族，再沿[原请求工厂](../ai-native-server/src/runtime/ai-native-application.providers.ts)和[独立 AI 装配](../../apps/rental-api/src/ai-composition.ts)定位实际调用方。表中导航覆盖原持久职责，方法是否发布由所选宿主的 HTTP 与工具政策裁定。
+完整模型及关系以[本包 schema](prisma/schema.prisma)和[来源清单](prisma/provenance.json)为准。按服务接点阅读下列模型族，再沿[原请求工厂](../ai-native-server/src/runtime/ai-native-application.providers.ts)和[独立 AI 装配](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/ai-composition.ts)定位实际调用方。表中导航覆盖原持久职责，方法是否发布由所选宿主的 HTTP 与工具政策裁定。
 
 | 持久职责 | 仓储与服务入口 | 提交及读取边界 |
 | --- | --- | --- |
@@ -116,8 +116,8 @@ const prepared = createAiNativeDataPreparation({ baseSchema, contribution: ai })
 ## 实际宿主消费者
 
 - 首次 schema 准备使用源码入口的 `rental-ai` 模式，先公共与 Rental，再追加同一 AI 贡献，供本宿主独占 generated/client。数据包与生成声明的模式须一致。[schema 准备](../../scripts/prepare-selected-prisma-schema.cjs) · [所选 Client 编译器](../../scripts/build-selected-prisma.cjs)
-- `createRentalDeploymentFiles` 核固定公共、Rental 及显式 AI 完整包，组合最终 schema / 迁移 / 部署锁。CLI 只写本宿主的新候选目录，结果保持 prepared / pending。[部署准备](../../apps/rental-api/src/prepare-deployment.ts)
-- `composeRentalAiApplication` 从部署锁定位同一安装包，用 requireAiNativeDataPackage 和 MySQL 计划供给实际装配。原账 / 物理观察由同一 Native 提供，AI 请求再核 requireDataCapabilityAvailable("ai-native")，普通 Rental 使用自己的原准入路径。[AI 装配](../../apps/rental-api/src/ai-assembly.ts) · [同一宿主](../../apps/rental-api/src/assembly.ts) · [宿主构建与运行](../../apps/rental-api/README.md)
+- `createRentalDeploymentFiles` 核固定公共、Rental 及显式 AI 完整包，组合最终 schema / 迁移 / 部署锁。CLI 只写本宿主的新候选目录，结果保持 prepared / pending。[部署准备](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/prepare-deployment.ts)
+- `composeRentalAiApplication` 从部署锁定位同一安装包，用 requireAiNativeDataPackage 和 MySQL 计划供给实际装配。原账 / 物理观察由同一 Native 提供，AI 请求再核 requireDataCapabilityAvailable("ai-native")，普通 Rental 使用自己的原准入路径。[AI 装配](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/ai-assembly.ts) · [同一宿主](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/assembly.ts) · [宿主构建与运行](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/README.md)
 
 以上入口沿用原混合版本，需要已声明的 Rental 数据前置。选择数据、准备迁移、当前物理 / 原账可用和 AI 工具发布各由对应入口核定。
 
@@ -151,7 +151,7 @@ const observations = createMysqlCoreDeploymentObservation({
 | [所选源码类型](../../scripts/check-selected-prisma-types.cjs) | rental-ai 组合、官方 Prisma 5.22 声明及所选源码 / 出口 | WASM / generator 与严格编译只驻内存，真实 Client 和数据库另验 |
 | [固定发行](../../scripts/verify-rental-distribution.cjs) | 明确 --commit 的真实配置 emit、AI 完整包 / 归档 / 安装准备和正式出口 | 固定 Git 树与内存产物，冷安装 / Docker / OS 部署另验 |
 | [历史宿主打包](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/tests/rental-host-package.test.cjs) | 普通 / AI 同版包、部署锁、所选 Client 与 CLI 文件运输 | 使用 `46db0945…` 完整检出的原锁和旧双 Core 宿主；显式内存文件 / 运输 fixture，真实迁移与启动另验 |
-| [AI 宿主组合](../../apps/rental-api/test/ai-composition.test.cjs) | 同一数据贡献与原 AI / Rental 依赖、HTTP 和恢复消费者 | 依赖、SQL、授权与外部运输按用例明确的 fixture 取证 |
+| [AI 宿主组合](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/rental-api/test/ai-composition.test.cjs) | 同一数据贡献与原 AI / Rental 依赖、HTTP 和恢复消费者 | 依赖、SQL、授权与外部运输按用例明确的 fixture 取证 |
 
 本版 schema 与来源材料可逐字节核 102 个原模型 / 枚举块、58 份 SQL 和所有提取 / 排除范围，组合目标为 247 模型 / 35 枚举。createAiNativeDataPreparation 输出 60 文件并保持 pending，完整构建包以五个真实出口及固定摘要另行校验。阶段执行次数、命令与固定版本保留在原开发记录。
 

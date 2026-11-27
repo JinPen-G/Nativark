@@ -76,13 +76,13 @@
 
 附加出口提供[原提案、批准和消费](src/approval-persistence.ts)、[知识存储](src/knowledge-persistence.ts)、[平台正文保留](src/platform-retention.ts)和[Task 事件观察](src/task-observation.ts)，以及给 Core 宿主使用的[窄事务及结果参加者](src/runtime/public-rental-adapter-ports.ts)。宿主注册原对象 ACL、批准依据、文件来源和同事务业务效果后，才能开放相应入口。Rental 工具枚举及效果确认继续由 Rental 注册，公共投影不携带 Rental 或旧 Shared。旧导入与历史收据沿原兼容包装器。
 
-完整原组合宿主从 [服务装配](../../apps/api/src/application-services.module.ts) 使用这些工厂。[独立 AI 宿主](../../apps/rental-api/src/ai-app.module.ts) 则显式选择 AI 数据贡献，由 [同实例装配](../../apps/rental-api/src/ai-composition.ts) 提供原 Auth、Guard、Core、数据库和文件权限。只有该宿主 [实际登记并审核的处理器](../../apps/rental-api/src/ai-http-policy.ts) 才发布为可调用能力；工厂、类型或合同存在不等于该宿主已开放全部 AI 路由。
+完整原组合宿主从 [服务装配](../../apps/api/src/application-services.module.ts) 使用这些工厂。[独立 AI 宿主](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/ai-app.module.ts) 则显式选择 AI 数据贡献，由 [同实例装配](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/ai-composition.ts) 提供原 Auth、Guard、Core、数据库和文件权限。只有该宿主 [实际登记并审核的处理器](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/ai-http-policy.ts) 才发布为可调用能力；工厂、类型或合同存在不等于该宿主已开放全部 AI 路由。
 
 [批准订单授权桥](src/runtime/approval-execution/approved-order-route.authority.ts) 在进入隔离 Guard 前捕获原请求权威；完整 Guard 和身份一致性通过后，准备、读取与执行回调恢复同一原 ALS store。原 Task/批准/Core 事务和幂等仍由真实参加者裁定，失应答保持 unknown，不按新键重发。
 
 Task 准入与人工批准/重新准备复用[同一服务政策读取](src/runtime/task-service-admission.ts)。现代 BYOK 的平台金额为零或未配置时，仍核服务开关、场景政策、凭据配置和计划期限；平台付费与旧政策继续按原金额及层级门槛核定。人工批准在其原事务中读取这些政策，并将配置和计划修订绑定到确认依据，独立人工权限、提交前复核和批准消费由原服务执行。
 
-Core 停用后的已有回答及模型结果核对，由宿主 [只读处理器闭集](../../apps/rental-api/src/ai-http-policy.ts) 明确开放。原读取器仍执行当前主体、Task/Run 来源、原键和对象权限检查；缺结果保持未知。读取不创建任务、不领取新调用、不恢复模型执行，也不恢复已撤销的成员权限。
+Core 停用后的已有回答及模型结果核对，由宿主 [只读处理器闭集](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/ai-http-policy.ts) 明确开放。原读取器仍执行当前主体、Task/Run 来源、原键和对象权限检查；缺结果保持未知。读取不创建任务、不领取新调用、不恢复模型执行，也不恢复已撤销的成员权限。
 
 ## 入口与调用方
 
@@ -117,9 +117,9 @@ Core 停用后的已有回答及模型结果核对，由宿主 [只读处理器�
 
 [Booking 跨渠道转接](src/runtime/scenes/client-booking-transfer-host.ts)由原签发/消费仓储保存短期引用，目标端重新通过 ClientAuth 后只绑定同一客户、空间和原 Draft。双方政策按固定渠道顺序锁定，ClientAuth/Tenant/Core 先于 Draft 锁，原材料正文保留源渠道绑定。目标端消费后沿原受理、唯一 attempt 和 Core 幂等键提交，较短的转接期限在订单事务末次等待后仍须有效；历史签发/消费收据不延长期限或重新派发。
 
-员工图片/语音识别从[原请求工厂](src/runtime/inspection-assist/inspection-assist.composition.ts)进入[标准识别组合](src/runtime/inspection-assist/inspection-standard.application.ts)。所选宿主保留最初 Guard 形成的请求身份，资源授权仍复核当前员工、空间、地点、订单及检查阶段；旧宿主继续使用自己的隔离身份作用域。冻结输入、Task 创建、显式执行、原结果引用及[调用账务](src/runtime/staff-inspection-accounting.composition.ts)各有独立入口，执行复用原 Gateway 单账和累计资源。结果保存只追加待核候选，人工采用/更正和原 Core 履约提交分别办理。独立宿主从[精确处理器清单](../../apps/rental-api/src/ai-http-policy.ts)发布上述操作，员工端通过[原运输工厂](../rental-core/clients/staff/inspection-transport.ts)读取和确认。
+员工图片/语音识别从[原请求工厂](src/runtime/inspection-assist/inspection-assist.composition.ts)进入[标准识别组合](src/runtime/inspection-assist/inspection-standard.application.ts)。所选宿主保留最初 Guard 形成的请求身份，资源授权仍复核当前员工、空间、地点、订单及检查阶段；旧宿主继续使用自己的隔离身份作用域。冻结输入、Task 创建、显式执行、原结果引用及[调用账务](src/runtime/staff-inspection-accounting.composition.ts)各有独立入口，执行复用原 Gateway 单账和累计资源。结果保存只追加待核候选，人工采用/更正和原 Core 履约提交分别办理。独立宿主从[精确处理器清单](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/ai-http-policy.ts)发布上述操作，员工端通过[原运输工厂](../rental-core/clients/staff/inspection-transport.ts)读取和确认。
 
-租户预算经[原管理应用](src/runtime/budget/budget-management.application.ts)和[租户 Controller 包装](../../apps/rental-api/src/ai-budget-http.ts)进入同一设置服务。所选宿主保留最初 Guard 的请求身份，配置 Scope、政策 CAS/收据及平台费率采用的原事务先核 Auth/Tenant/Core，写入后复验当前权威；丢失提交应答只核对原操作。BYOK 保留调用与 Token 单位约束，租户自定费率入口继续拒绝。平台管理方法沿独立平台授权宿主办理。
+租户预算经[原管理应用](src/runtime/budget/budget-management.application.ts)和[租户 Controller 包装](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/ai-budget-http.ts)进入同一设置服务。所选宿主保留最初 Guard 的请求身份，配置 Scope、政策 CAS/收据及平台费率采用的原事务先核 Auth/Tenant/Core，写入后复验当前权威；丢失提交应答只核对原操作。BYOK 保留调用与 Token 单位约束，租户自定费率入口继续拒绝。平台管理方法沿独立平台授权宿主办理。
 
 [价格历史工厂](src/runtime/budget/gateway-pricing-request.composition.ts)只按当前管理权限读取原价格、采用和输入上限依据，输入上限另核同一调用主体、空间和内容摘要。宿主以精确处理器闭集保留停新/Core停用后的原收据读取，撤权或身份变化仍拒绝。设置和历史接口均复用原 shared/DTO/OpenAPI；它们的挂载不启用模型执行，也不替代租户 AI 服务设置中的平台额度申请与空间分配。
 
@@ -133,7 +133,7 @@ Core 停用后的已有回答及模型结果核对，由宿主 [只读处理器�
 
 经营政策由[原请求工厂](src/runtime/automation/human-automation-policy-request.composition.ts)进入[政策管理服务](src/runtime/automation/human-automation-policy-management.service.ts)。所选宿主保留最初 Guard 的请求身份，内部配置权限核验先由原 Guard 填充自己的验证作用域，再核当前主体与范围。确认授权和政策写入共用原事务，复用 Auth/Tenant/Core 参加者、政策 CAS 和原操作键，提交前复核当前权限及所有嵌套准备的期限。
 
-发现、预览与原收据读取不签发执行权。显式准备和提交记录政策边界，重复或丢失提交应答沿原键核对；原影子/人工确认约束、过期政策停用及旧宿主兼容路径继续由原管理服务裁定。直接消费者是[经营政策客户端](../rental-core/admin/task-center/api/aiAutomationPolicies.ts)，宿主从[实际处理器](../../apps/rental-api/src/ai-http-policy.ts)发布十个操作及三项停用后原读取。
+发现、预览与原收据读取不签发执行权。显式准备和提交记录政策边界，重复或丢失提交应答沿原键核对；原影子/人工确认约束、过期政策停用及旧宿主兼容路径继续由原管理服务裁定。直接消费者是[经营政策客户端](../rental-core/admin/task-center/api/aiAutomationPolicies.ts)，宿主从[实际处理器](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/ai-http-policy.ts)发布十个操作及三项停用后原读取。
 
 经营待办的[原请求工厂](src/runtime/automation/human-automation-request.composition.ts)分别接收营运和员工二十个操作。所选宿主保留最初 Guard 的同一身份对象，内部业务 Guard 复验后经原受控桥返回该请求，供 Core 核定原资源。[候选服务](src/runtime/business-events/business-failure-candidate.service.ts)、[持久批次](src/runtime/business-events/pending-candidate-batch.repository.ts)和[Task 创建](src/runtime/automation/automation-failure-task.service.ts)继续使用原 Outbox、输入和 Task 仓储。
 
@@ -141,13 +141,13 @@ Core 停用后的已有回答及模型结果核对，由宿主 [只读处理器�
 
 直接消费者为[经营待办客户端](../rental-core/admin/task-center/api/aiAutomationReviews.ts)的十六个方法，写入应答不明沿原操作读取。每端停新/Core停用后的读取闭集是 `readPendingBatch/readCreation/readQueue/read/forEvent/operation/readGrant`，`readCandidate` 因可能更新过期标记归写入。解释由[独立解释应用](src/runtime/automation/automation-explanation.application.ts)承接原 Task 的读取、准备和明确启动，其当前事务依赖由同一 provider 注入。离线验证沿[原事务入口](test/original-scene-transactions.test.cjs)及原前端工厂，SQL运输与回滚替身的范围独立于真实 MySQL 和宿主验收。
 
-当前租户页面的额度申请、空间分配及调用记录经[租户额度 Controller](../../apps/rental-api/src/ai-credit-http.ts)进入[原额度服务](src/runtime/budget/ai-credit.service.ts)。所选宿主绑定最初 Guard 的同一 ALS 身份，申请与分配在原事务中复用[Auth/Tenant/Core 参加者](src/runtime/tenant-model-config-transactions.ts)，提交前复验权限，丢应答只核原操作收据。历史调用在有界快照中读取原 invocation、usage 和账务依据，BYOK 不生成金额，缺用量不补零，查询和游标继续核当前租户及空间范围。平台批准保留独立管理授权与原增额语义。
+当前租户页面的额度申请、空间分配及调用记录经[租户额度 Controller](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/ai-credit-http.ts)进入[原额度服务](src/runtime/budget/ai-credit.service.ts)。所选宿主绑定最初 Guard 的同一 ALS 身份，申请与分配在原事务中复用[Auth/Tenant/Core 参加者](src/runtime/tenant-model-config-transactions.ts)，提交前复验权限，丢应答只核原操作收据。历史调用在有界快照中读取原 invocation、usage 和账务依据，BYOK 不生成金额，缺用量不补零，查询和游标继续核当前租户及空间范围。平台批准保留独立管理授权与原增额语义。
 
 [平台模型设置](src/runtime/platform-model-settings.application.ts)保留所选宿主最初 Guard 的原请求身份，继续由原平台配置权威区分查看和管理权限。Scope 初始化及[加密配置保存](src/runtime/platform-model-connection.ts)的原事务通过[平台事务参加者](src/runtime/platform-management-transaction.ts)锁定当前 SaaS 主体、会话和所选数据依据，提交前再次复核。未选择独立宿主时沿原隔离请求作用域。目录和能力证据按有界查询读取，保存保留原 CAS、操作收据及未知结果语义；前端通过[同源客户端工厂](../ai-native-admin/src/platform-model-settings/platformAiSettings.ts)消费五个操作，写请求关闭认证刷新后的自动重发。
 
-[平台预算设置](src/runtime/budget/platform-budget-settings.composition.ts)与[费率审阅](src/runtime/budget/platform-reviewed-gateway-price.service.ts)通过同一管理应用接入所选宿主，保留最初 Guard 的 SaaS 请求身份。政策 CAS 与原操作收据、不可变费率记录在各自原事务中取得平台事务参加者，写后复核当前权威。[平台预算 Controller](../../apps/rental-api/src/ai-budget-http.ts)分别声明三读两写，原前端客户端使用相同公共合同。
+[平台预算设置](src/runtime/budget/platform-budget-settings.composition.ts)与[费率审阅](src/runtime/budget/platform-reviewed-gateway-price.service.ts)通过同一管理应用接入所选宿主，保留最初 Guard 的 SaaS 请求身份。政策 CAS 与原操作收据、不可变费率记录在各自原事务中取得平台事务参加者，写后复核当前权威。[平台预算 Controller](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/ai-budget-http.ts)分别声明三读两写，原前端客户端使用相同公共合同。
 
-[平台额度审批](src/runtime/budget/ai-credit.service.ts)复用同一额度服务和原账本，由[平台额度 Controller](../../apps/rental-api/src/ai-credit-http.ts)挂载申请列表、批准决定和原决定读取。目标租户来自持久申请，管理租户与目标租户按固定顺序锁定，再由原平台参加者锁定主体和会话。新增批准在同一事务复核目标状态、CAS、原操作键及金额上限，提交前再次核权；已提交的同键决定允许在目标冻结后按当前平台读写权限核对，金额只增加一次。
+[平台额度审批](src/runtime/budget/ai-credit.service.ts)复用同一额度服务和原账本，由[平台额度 Controller](https://github.com/JinPen-G/Zelo-rental-core/blob/dfb929a71e9e5802c0077ca8552f38f7b301f604/workspace/apps/rental-api/src/ai-credit-http.ts)挂载申请列表、批准决定和原决定读取。目标租户来自持久申请，管理租户与目标租户按固定顺序锁定，再由原平台参加者锁定主体和会话。新增批准在同一事务复核目标状态、CAS、原操作键及金额上限，提交前再次核权；已提交的同键决定允许在目标冻结后按当前平台读写权限核对，金额只增加一次。
 
 Rental 的通知缓存和草稿仓储通过 `@rental-os/rental-core/notification-draft` 消费以下组合：
 
@@ -185,4 +185,4 @@ build/lint 使用[显式所选Client编译器](../../scripts/build-selected-pris
 
 Prisma 的类型由宿主所选 schema 生成。SQL、Decimal、空值单例和错误类使用 [公共 Prisma 运行值](../platform-server/src/prisma-runtime.ts)；本包不要求生成 `node_modules/.prisma/client`，也不在运行时重定向 `require`。
 
-原 [业务事件合同验证](../../tests/ai-native-events-contracts.test.cjs)仍经兼容入口消费唯一实现。[独立宿主权限回归](../../apps/rental-api/test/ai-composition.test.cjs)检查真实 Auth、Guard、所选数据准入与知识文件 ACL。离线核验使用本仓库原守卫、当前所选 schema 的官方 DMMF / 类型及事务 fixture；真实数据库约束、迁移、外部投递和正式宿主运行分别验收。
+原 [业务事件合同验证](../../tests/ai-native-events-contracts.test.cjs)仍经兼容入口消费唯一实现。[独立宿主权限回归](https://github.com/JinPen-G/Zelo/blob/46db0945dee92ac916f7265e95948943fc8b641d/apps/rental-api/test/ai-composition.test.cjs)检查真实 Auth、Guard、所选数据准入与知识文件 ACL。离线核验使用本仓库原守卫、当前所选 schema 的官方 DMMF / 类型及事务 fixture；真实数据库约束、迁移、外部投递和正式宿主运行分别验收。
