@@ -16,6 +16,7 @@ const packageShapes = new Map([
   ['2d6b422be72a6d4f1373ad8de3f1f491e9a40d9450e1a54c944b7d3b164f3e3b', 'ecd9f801f0e9d5f871ad95782942f794645b523282490ceabb23192f2e04c4d6'],
   ['691cd5e26ab2a7c4699fceecd34eb70fbf4eae0e15192b875511fb13c05e447d', '25d80b0e0fbeae7dfbf8cfc889d52e33772cb36f43a700156bf5c082042a07ca'],
   ['971ae3b1967475d8c9df84c972a8679db691e3f2f8c2577763e4806d0a913508', 'ecd9f801f0e9d5f871ad95782942f794645b523282490ceabb23192f2e04c4d6'],
+  ['b88cab5633e560a796405e1c430e8876ebc8ab5264163d5c074820ebf7e619cf', 'ecd9f801f0e9d5f871ad95782942f794645b523282490ceabb23192f2e04c4d6'],
 ]);
 const migrations = [
   { id: 'mcp.0001-oauth', file: 'mysql-oauth-schema.sql', sha256: 'aa8f6004c1be402bd6adeda56bba9275d820cfdea43d52483429e684b5ddded4', requires: [] },
@@ -25,17 +26,19 @@ const migrations = [
   { id: 'mcp.0005-catalog-adoption', file: 'mysql-catalog-goal-adoption-schema.sql', sha256: '1b3e6d471224bf49c77da04d6970829634979cc340786907f1348e2ec098e929', requires: ['mysql-catalog-goal-intent-schema.sql'] }
 ] as const;
 
-export const MCP_DATA_CAPABILITY_VERSION = '0.1.1';
+export const MCP_DATA_CAPABILITY_VERSION = '0.1.2';
 
 /** 本数据版仅声明已核定的公共数据基线；运行时业务依赖仍由原宿主提供。 */
 export function mcpDataPrerequisites(): CorePlatformDataCapabilityRelease['prerequisites'] {
   return { platform: { minInclusive: '0.1.9', maxExclusive: '0.1.10' }, cores: [] };
 }
 
-function releaseMetadata(): Omit<CorePlatformDataCapabilityRelease, 'source' | 'sha256' | 'files'> {
+function releaseMetadata(version = MCP_DATA_CAPABILITY_VERSION): Omit<CorePlatformDataCapabilityRelease, 'source' | 'sha256' | 'files'> {
+  // 平台发行版本与公共数据版本分开；旧包的许可范围不能随新 SDK 扩大。
+  if (version !== '0.1.1' && version !== MCP_DATA_CAPABILITY_VERSION) throw new Error('MCP 发行版本不受支持');
   return {
-    id: 'mcp', version: MCP_DATA_CAPABILITY_VERSION,
-    compatibility: { platform: { minInclusive: '0.1.0', maxExclusive: '0.3.0' },
+    id: 'mcp', version,
+    compatibility: { platform: { minInclusive: '0.1.0', maxExclusive: version === '0.1.1' ? '0.3.0' : '0.4.0' },
       contract: { minInclusive: '0.1.1', maxExclusive: '0.2.0' } },
     runtime: { node: { minInclusive: '22.0.0', maxExclusive: '25.0.0' } },
     schema: { ...schema },
@@ -54,11 +57,11 @@ function bytesFor(files: ReadonlyMap<string, Uint8Array>, file: string): Uint8Ar
 function decode(bytes: Uint8Array): string { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
 
 /** 所有公开入口必须来自同一完整构建包；仅 SQL 材料摘要不能冒充包摘要。 */
-function checkPackage(files: ReadonlyMap<string, Uint8Array>): void {
+function checkPackage(files: ReadonlyMap<string, Uint8Array>, version = MCP_DATA_CAPABILITY_VERSION): void {
   const metadata = JSON.parse(decode(bytesFor(files, 'package.json'))) as {
     name?: unknown; version?: unknown; license?: unknown; exports?: Record<string, unknown>;
   };
-  if (metadata.name !== '@rental-os/mcp-server' || metadata.version !== MCP_DATA_CAPABILITY_VERSION
+  if (metadata.name !== '@rental-os/mcp-server' || metadata.version !== version
     || metadata.license !== 'MIT' || !metadata.exports || typeof metadata.exports !== 'object' || Array.isArray(metadata.exports))
     throw new Error('MCP 固定包身份或出口无效');
   const packageBuildPathsSha256 = packageShapes.get(digest(Buffer.from(JSON.stringify(metadata))));
@@ -98,9 +101,9 @@ export function createMcpDataRelease(input: {
 }
 
 function readVerified(files: ReadonlyMap<string, Uint8Array>, release: CorePlatformDataCapabilityRelease) {
-  checkPackage(files);
+  checkPackage(files, release.version);
   const { source: _source, sha256: _sha256, files: _files, ...metadata } = release;
-  if (!isDeepStrictEqual(metadata, releaseMetadata())) throw new Error('MCP 发行版本、schema、迁移或前置与本实现不一致');
+  if (!isDeepStrictEqual(metadata, releaseMetadata(release.version))) throw new Error('MCP 发行版本、schema、迁移或前置与本实现不一致');
   return { release, schema: decode(bytesFor(files, schema.file)),
     migrations: migrations.map(({ id, file, sha256 }) => ({ id, file, sha256, sql: decode(bytesFor(files, file)) })) };
 }

@@ -63,6 +63,12 @@ function installationSteps(report, { rootCommands, host }) {
       '沿原租户创建入口创建租户及首个管理员，受控交付临时口令；租户管理员改密后使用自己的会话。',
       '创建失应答先读取目标租户及原审计，不能重复创建；平台管理员账号不替代租户业务身份。'),
   ];
+  if (selectedCore && report.selection?.lockVersion === 2) steps.splice(1, 0,
+    step('phased-preparation', '部署者', '核原分阶段准备结果',
+      '所选完整 v2 锁、标准归档、后置扩展及原宿主准备材料已核同。', API + '#core公共-ai-的完整-v2-观察',
+      '从原宿主只读观察取得 prepared / deployment:pending；这是材料准备结果，数据库和实际运行分别核验。',
+      '缺原准备结果保持 not_checked；不拿 v2.base、v1 候选回执或已经登录补造成功，也不自动重建材料。',
+      { state: report.runtime.phasedInstallation?.preparation ?? 'not_checked' }));
   if (selectedCore) {
     steps.push(
       step('core-admission', '部署者 → SaaS 管理员', '核实际部署并登记 Core 准入',
@@ -96,6 +102,17 @@ function installationSteps(report, { rootCommands, host }) {
       : '按所属 Core＋AI 宿主核数据、已发布能力、当前权限及政策；普通业务不因未配置模型而失效。',
     '保留原授权与操作结果；纯读取 MCP 不要求平台模型配置或云预算，委托服务端模型才走原 Gateway 与模型账。'));
   const member = report.runtime.member;
+  const phased = report.runtime.phasedInstallation;
+  if (phased?.selectionMatches) {
+    const migration = steps.find(item => item.id === 'migration');
+    migration.state = phased.database.state;
+    migration.observation = phased.postCapability;
+    const account = steps.find(item => item.id === 'platform-account');
+    account.observation = phased.initialization;
+    const ai = steps.find(item => item.id === 'ai-readiness');
+    if (ai) { ai.state = phased.database.state === 'ready' ? 'data-observed' : 'needs-observation-or-action';
+      ai.authorization = 'not_checked'; }
+  }
   if (member?.state === 'observed') {
     for (const [id, field, ready] of [['core-admission', 'deploymentAdmission', 'accepting'],
       ['tenant-grant', 'tenantGrant', 'enabled'], ['member-assignment', 'memberAssignment', 'assigned'],

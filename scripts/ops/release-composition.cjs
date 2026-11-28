@@ -4,6 +4,7 @@
 const { createHash } = require("node:crypto");
 const { posix } = require("node:path");
 const { isDeepStrictEqual } = require("node:util");
+const { publicDataSdkFor } = require("../rental-host-lock.cjs");
 
 const CONTEXT_FILE = "rental-host.context.json";
 const SOURCE_FILE = "development.workspace.json";
@@ -23,6 +24,7 @@ const AI_RELEASES = new Map([
   ["0.1.1", { dataVersion: "0.1.0", schema: "prisma/schema.prisma", entries: ["data", "prisma-schema", "preparation", "data-package", "mysql-data"] }],
   ["0.2.0", { dataVersion: "0.2.0", schema: "prisma-public/schema.prisma", entries: ["public-data", "public-data-package", "public-mysql-data"] }],
   ["0.2.2", { dataVersion: "0.2.0", schema: "prisma-public/schema.prisma", entries: ["public-data", "public-data-package", "public-mysql-data"] }],
+  ["0.2.4", { dataVersion: "0.2.0", schema: "prisma-public/schema.prisma", entries: ["public-data", "public-data-package", "public-mysql-data"] }],
 ]);
 const MCP_MIGRATIONS = [
   ["mcp.0001-oauth", "mysql-oauth-schema.sql"],
@@ -133,7 +135,7 @@ function verifyAiData(capability, context, files, digests) {
   const material = verifyCapabilityFiles(capability, files, digests, variant.schema, "AI",
     context.ledgerVersion === 2 ? "public-ai-data/" : CAPABILITY_ROOTS["ai-native"]);
   verifyCapabilityExports(material, variant.entries, "default", "AI");
-  if (capability.version === "0.2.0" || capability.version === "0.2.2") {
+  if (["0.2.0", "0.2.2", "0.2.4"].includes(capability.version)) {
     const [initial] = capability.data.migrations;
     requireEvidence(material.declared.size === 12 && material.declared.has("prisma-public/provenance.json")
       && capability.data.migrations.length === 1 && initial.id === "ai-native.20261126000000-public-initial"
@@ -146,7 +148,7 @@ function verifyAiData(capability, context, files, digests) {
 }
 
 function verifyMcpData(capability, files, digests) {
-  requireEvidence(["0.1.0", "0.1.1"].includes(capability.version) && capability.data?.version === "0.1.0", "MCP 数据包发行版本不一致");
+  requireEvidence(["0.1.0", "0.1.1", "0.1.2"].includes(capability.version) && capability.data?.version === "0.1.0", "MCP 数据包发行版本不一致");
   const material = verifyCapabilityFiles(capability, files, digests, "prisma/schema.prisma", "MCP");
   verifyCapabilityExports(material, ["data-capability", "mysql-data"], "import", "MCP");
   requireEvidence(material.metadata.exports?.["./data-contribution.json"] === `./${MCP_MANIFEST}`, "MCP 缺少正式包内数据清单出口");
@@ -214,8 +216,9 @@ function verifyDeployment(files, deployment, lock, capabilities, digests, phased
       sha256: "11954e36e6553b70d8613d5b4f00f44f7a2bb3abbf16b758919a331e87e4d86b", source: lock.cores[0].manifest.source };
     const prerequisites = { core: { version: { minInclusive: "0.1.0", maxExclusive: "0.1.2" },
       migration: { id: "rental.20261119030000-initial", sha256: "59e69aadf4db0138561ec9233955941da32a2f27f576583bd7915b9f1a7d05ae" } },
-      capability: { id: "ai-native", version: ai.version === "0.2.2"
-        ? { minInclusive: "0.2.2", maxExclusive: "0.2.3" } : { minInclusive: "0.2.0", maxExclusive: "0.2.1" },
+      capability: { id: "ai-native", version: ai.version === "0.2.4"
+        ? { minInclusive: "0.2.4", maxExclusive: "0.2.5" } : ai.version === "0.2.2"
+          ? { minInclusive: "0.2.2", maxExclusive: "0.2.3" } : { minInclusive: "0.2.0", maxExclusive: "0.2.1" },
       migration: { id: ai.data.migrations[0].id, sha256: ai.data.migrations[0].sha256 } } };
     requireEvidence(phased.postCapability?.length === 1 && isDeepStrictEqual(post, { coreId: "rental", migration, prerequisites })
       && deployment.installation === "fresh-ai" && isDeepStrictEqual(deployment.postCapability, phased.postCapability)
@@ -334,7 +337,7 @@ function verifyPublicSdk(files, source, context, field, dataSdk) {
   requireEvidence(sdk && original, "公共保留缺少实际 SDK 收据");
   const { installedFiles, ...receipt } = sdk;
   const name = dataSdk ? "@rental-os/ai-native-data" : "@rental-os/ai-native-server";
-  const version = dataSdk ? "0.2.3" : "0.2.1";
+  const version = dataSdk ? publicDataSdkFor(sdk).version : "0.2.1";
   const owner = dataSdk ? "apps/rental-api" : "packages/rental-ai-adapters";
   const alias = dataSdk ? "@rental-os/public-ai-data" : name;
   const archive = `vendor/${dataSdk ? "ai-native-data" : "ai-native-server"}-public-${version}.tgz`;
@@ -424,7 +427,7 @@ function verifyPreparedRental(files, expectedContextSha256, { requireFixedBuild 
         ...(freshAi ? { aiDataSha256: context.aiDataSha256 } : {}) }), "正式两阶段原归档摘要不一致");
   }
   if (freshAi) {
-    requireEvidence(["0.2.0", "0.2.2"].includes(capabilities[0].version)
+    requireEvidence(["0.2.0", "0.2.2", "0.2.4"].includes(capabilities[0].version)
       && isDeepStrictEqual(capabilities[0].source, platform), "公共保留的数据发行须与底座同源");
     verifyPublicSdk(files, source, context, "publicRetention", false);
     verifyPublicSdk(files, source, context, "publicAiDataSdk", true);

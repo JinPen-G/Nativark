@@ -123,6 +123,10 @@
       "types": "./dist/core-package-assembly.d.ts",
       "default": "./dist/core-package-assembly.js"
     },
+    "./core-package-deployment": {
+      "types": "./dist/core-package-deployment.d.ts",
+      "default": "./dist/core-package-deployment.js"
+    },
     "./core-packages/openapi": {
       "types": "./dist/core-packages/openapi.d.ts",
       "default": "./dist/core-packages/openapi.js"
@@ -213,6 +217,9 @@
       ],
       "core-package-assembly": [
         "dist/core-package-assembly.d.ts"
+      ],
+      "core-package-deployment": [
+        "dist/core-package-deployment.d.ts"
       ],
       "core-packages/openapi": [
         "dist/core-packages/openapi.d.ts"
