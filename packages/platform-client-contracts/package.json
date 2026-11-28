@@ -1,0 +1,14 @@
+{
+  "name": "@rental-os/platform-client-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "可选客户与员工客户端贡献及页面寿命合同，不提供认证或业务授权",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist", "README.md", "LICENSE"],
+  "scripts": { "build": "tsc -p tsconfig.json", "lint": "tsc -p tsconfig.json --noEmit" },
+  "dependencies": { "@rental-os/core-contracts": "0.1.0" },
+  "devDependencies": { "typescript": "5.9.3" }
+}
