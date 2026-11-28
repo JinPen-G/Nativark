@@ -7,7 +7,7 @@ import { ChangeTicketStateSchema, TicketIdSchema, TicketSchema } from "./contrac
 import { TicketReceiptSchema } from "./http";
 import { TicketAiRouteStateSchema } from "./ai-status";
 
-const ref = z.string().uuid(), revision = z.number().int().min(1).max(4294967295), textHash = z.string().regex(/^[a-f0-9]{64}$/u);
+const ref = z.string().uuid(), revision = z.number().int().min(1).max(4294967295), textHash = z.string().regex(/^[a-f0-9]{64}$/);
 export const TicketsStartOriginalSchema = z.object({ version: z.literal("example-tickets-start-1"),
   principal: z.object({ tenantId: TicketIdSchema, subjectId: TicketIdSchema, audience: z.literal("operator") }).strict(),
   command: ChangeTicketStateSchema, fact: TicketSchema }).strict().superRefine((value, context) => {
@@ -44,15 +44,15 @@ const counts = { completedSteps: z.number().int().nonnegative(), cleanupFailed: 
 const outcome = z.union([
   z.object({ status: z.enum(["succeeded", "partially_succeeded", "paused", "cancel_requested", "cancelled", "unknown"]), ...counts }).strict(),
   z.object({ status: z.literal("unavailable"), ...counts, stopReason: z.literal("input_limit_reached").optional(), nextAction: z.literal("manual_handoff").optional() }).strict(),
-  z.object({ status: z.literal("failed"), ...counts, errorCode: z.string().regex(/^[A-Z][A-Z0-9_]{0,127}$/u) }).strict()
+  z.object({ status: z.literal("failed"), ...counts, errorCode: z.string().regex(/^[A-Z][A-Z0-9_]{0,127}$/) }).strict()
 ]);
 const result = z.object({ taskId: ref, runId: ref, taskStatus: z.enum(AI_TASK_STATUSES_DRAFT), taskRevision: revision,
   runStatus: z.enum(AI_TASK_STATUSES_DRAFT), runRevision: revision, operationId: TicketIdSchema, ticketId: TicketIdSchema,
   step: z.object({ stepId: ref, status: z.enum(AI_STEP_STATUSES_DRAFT), effect: z.enum(["none", "possible", "committed"]), revision, resultId: ref.nullable() }).strict().nullable(),
   approvalConsumption: z.enum(["not_observed", "reserved", "committed", "unknown", "failed_no_effect"]),
   business: z.enum(["committed", "not_confirmed"]), originalReceipt: TicketReceiptSchema.nullable(),
-  resources: z.array(z.object({ kind: z.enum(["steps", "calls", "active_ms", "output_bytes"]), maximum: z.string().regex(/^[1-9][0-9]*$/u),
-    consumed: z.string().regex(/^(0|[1-9][0-9]*)$/u), reserved: z.string().regex(/^(0|[1-9][0-9]*)$/u) }).strict()).length(4).nullable(),
+  resources: z.array(z.object({ kind: z.enum(["steps", "calls", "active_ms", "output_bytes"]), maximum: z.string().regex(/^[1-9][0-9]*$/),
+    consumed: z.string().regex(/^(0|[1-9][0-9]*)$/), reserved: z.string().regex(/^(0|[1-9][0-9]*)$/) }).strict()).length(4).nullable(),
   retryable: z.literal(false), execution: z.literal("not_invoked"), taskReconciliationRequired: z.boolean(),
   result: z.object({ resultId: ref, status: z.enum(["succeeded", "failed", "unknown"]), errorCode: z.string().nullable(),
     completeMeasurement: z.boolean(), observedAt: z.string().datetime() }).strict().nullable() }).strict();
@@ -60,7 +60,7 @@ export const TICKETS_AI_TASK_RESPONSES = { status: TicketAiRouteStateSchema, pre
   originalInput: z.object({ binding: TicketsStartBindingDataSchema.nullable(), retryable: z.literal(false), absence: z.literal("not_proof_of_no_commit") }).strict(),
   createTask: originalTask, originalTask, prepareApproval: approval, approval, decide: approval, execute: outcome, observeInterrupted: outcome, result } as const;
 export const TICKETS_AI_TASK_HTTP = Object.fromEntries(Object.entries(TICKETS_AI_TASK_INPUTS).map(([action, body]) =>
-  [action, { path: `/ai/${action}`, body, response: TICKETS_AI_TASK_RESPONSES[action as TicketsAiTaskAction] }])) as {
+  [action, { path: `/ai/${action.replace(/[A-Z]/gu, letter => `-${letter.toLowerCase()}`)}`, body, response: TICKETS_AI_TASK_RESPONSES[action as TicketsAiTaskAction] }])) as {
     [Action in TicketsAiTaskAction]: { path: string; body: typeof TICKETS_AI_TASK_INPUTS[Action]; response: typeof TICKETS_AI_TASK_RESPONSES[Action] }
   };
 export type TicketsAiTaskResponses = { [Action in TicketsAiTaskAction]: z.infer<typeof TICKETS_AI_TASK_RESPONSES[Action]> };

@@ -6,7 +6,7 @@ import { Body, Controller, Header, HttpCode, HttpException, Inject, Module, Para
 import { z } from "zod";
 import { CoreHttpContributionSchema, CoreOpenApiContributionSchema, coreOpenApiSchema } from "@rental-os/core-contracts";
 import { createTicketsHttpContribution, createTicketsOpenApi, TicketError } from "@rental-os/example-tickets-core";
-import { TICKETS_AI_TASK_RESPONSES } from "@rental-os/example-tickets-core/ai-http";
+import { TicketsStartOriginalSchema, TICKETS_AI_TASK_RESPONSES } from "@rental-os/example-tickets-core/ai-http";
 import { TICKETS_AI_INPUTS, type TicketsAiAction, type TicketsAiRequests, type TicketsAiRequest } from "./tickets-application.mjs";
 import { TicketsAiPolicySchema, TicketsAiPublicationReceiptSchema } from "./tickets-publication.mjs";
 
@@ -25,26 +25,53 @@ const descriptions: Record<TicketsAiAction, string> = { status: "读取工单内
   execute: "经原Runner执行已批准的同一工单动作", observeInterrupted: "计量观察原中断任务，不重放工具", result: "核对原任务、批准消费和工单收据" };
 export const TICKETS_AI_HTTP = Object.fromEntries(Object.entries(TICKETS_AI_INPUTS).map(([name, body]) => {
   const action = name as TicketsAiAction;
-  return [action, { path: `ai/${action}`, method: "POST" as const, body, response: responses[action], write: writes.has(action),
+  return [action, { path: `ai/${action.replace(/[A-Z]/gu, letter => `-${letter.toLowerCase()}`)}`, method: "POST" as const, body, response: responses[action], write: writes.has(action),
     permission: ["prepareInput", "createTask", "prepareApproval", "execute"].includes(action) ? "start" as const : "read" as const,
     purpose: historical.has(action) ? "original_receipt" as const : "business" as const, summary: descriptions[action] }];
 })) as { [Action in TicketsAiAction]: { path: string; method: "POST"; body: typeof TICKETS_AI_INPUTS[Action]; response: typeof responses[Action];
   write: boolean; permission: "read" | "start"; purpose: "business" | "original_receipt"; summary: string } };
 export type TicketsAiResponses = { [Action in TicketsAiAction]: z.infer<typeof responses[Action]> };
 
+/** 仅补此HTTP合同的联合/null与原事实跨字段约束；标量仍由正式转换器校验。
+ * OpenAPI 3.0不能表达字段相等，明确登记该约束；运行时继续使用同一个superRefine。
+ */
+function describeAiSchema(schema: z.ZodTypeAny): Record<string, unknown> {
+  if (schema === TicketsStartOriginalSchema) return { ...describeAiSchema(TicketsStartOriginalSchema.innerType()),
+    "x-field-equalities": ["fact.tenantId=principal.tenantId", "fact.id=command.ticketId", "fact.revision=command.expectedRevision"] };
+  if (schema instanceof z.ZodOptional) return describeAiSchema(schema.unwrap());
+  if (schema instanceof z.ZodNullable) {
+    const result: Record<string, unknown> = { ...describeAiSchema(schema.unwrap()), nullable: true };
+    if (Array.isArray(result.enum)) result.enum = [...result.enum, null];
+    return result;
+  }
+  if (schema instanceof z.ZodNull) return { type: "string", nullable: true, enum: [null] };
+  if (schema instanceof z.ZodUnion) return { anyOf: schema.options.map(describeAiSchema) };
+  if (schema instanceof z.ZodDiscriminatedUnion) return { oneOf: schema.options.map(describeAiSchema), discriminator: { propertyName: schema.discriminator } };
+  if (schema instanceof z.ZodArray) return { ...coreOpenApiSchema(schema), items: describeAiSchema(schema.element) };
+  if (schema instanceof z.ZodObject) {
+    if (!(schema._def.catchall instanceof z.ZodNever) || schema._def.unknownKeys !== "strict")
+      throw new Error("工单AI文档只接受闭合对象");
+    const entries = Object.entries(schema.shape) as [string, z.ZodTypeAny][];
+    return { type: "object", additionalProperties: false,
+      properties: Object.fromEntries(entries.map(([key, value]) => [key, describeAiSchema(value)])),
+      required: entries.filter(([, value]) => !(value instanceof z.ZodOptional)).map(([key]) => key) };
+  }
+  return coreOpenApiSchema(schema);
+}
+
 export function createTicketsAiHttpContribution() {
   const regular = createTicketsHttpContribution();
   return CoreHttpContributionSchema.parse({ ...regular, routes: [...regular.routes, ...Object.entries(TICKETS_AI_HTTP).map(([action, route]) => ({
-    id: `ai.${action}`, path: `/${route.path}`, method: route.method, audiences: ["operator"],
+    id: `ai.${route.path.slice(3)}`, path: `/${route.path}`, method: route.method, audiences: ["operator"],
     permissions: [{ resource: "ticket", action: route.permission }], purpose: route.purpose, startsNewBusiness: false }))] });
 }
 export function createTicketsAiOpenApi() {
   const document = createTicketsOpenApi(), json = (name: string) => ({ "application/json": { schema: { $ref: `#/components/schemas/${name}` } } });
   for (const [action, route] of Object.entries(TICKETS_AI_HTTP)) {
     const name = `example-tickets.ai.${action}`;
-    document.schemas[`${name}.Request`] = coreOpenApiSchema(route.body);
+    document.schemas[`${name}.Request`] = describeAiSchema(route.body);
     document.schemas[`${name}.Response`] = { type: "object", required: ["data", "requestId"], properties: {
-      data: coreOpenApiSchema(route.response), requestId: { type: "string" } } };
+      data: describeAiSchema(route.response), requestId: { type: "string" } } };
     document.paths[`/api/cores/example-tickets/${route.path}`] = { post: { operationId: name, summary: route.summary,
       security: [{ bearerAuth: [] }], requestBody: { required: true, content: json(`${name}.Request`) },
       "x-core-permissions": [`example-tickets:ticket:${route.permission}`], "x-core-audiences": ["operator"],
@@ -73,8 +100,9 @@ class TicketsAiController {
   constructor(@Inject(token) private readonly requests: TicketsAiRequests) {}
   @Post(":action") @HttpCode(200) @Header("Cache-Control", "no-store")
   async consume(@Param("action") name: string, @Req() request: TicketsAiHttpRequest, @Body() body: unknown) {
-    if (!Object.hasOwn(TICKETS_AI_HTTP, name)) throw new HttpException({ code: "AI_INVALID_INPUT", retryable: false }, 400);
-    const action = name as TicketsAiAction, route = TICKETS_AI_HTTP[action];
+    const selected = Object.entries(TICKETS_AI_HTTP).find(([, route]) => route.path === `ai/${name}`);
+    if (!selected) throw new HttpException({ code: "AI_INVALID_INPUT", retryable: false }, 400);
+    const action = selected[0] as TicketsAiAction, route = selected[1];
     let called = false;
     try {
       const command = route.body.parse(body); called = true;

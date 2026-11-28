@@ -406,7 +406,7 @@ jobs:
             return json.data ?? json;
           }
           const core = (action, token, data) => request(management + action, token, { coreId: 'example-tickets', ...data });
-          const ai = (action, token, data, expected = 200) => request(api + '/ai/' + action, token, data, expected);
+          const ai = (action, token, data, expected = 200) => request(api + '/ai/' + action.replace(/[A-Z]/g, letter => '-' + letter.toLowerCase()), token, data, expected);
           async function login(code, account, password) {
             const old = await request('/api/auth/login', undefined, { tenantCode: code, account, password }, 201), changed = 'Tickets9-' + randomUUID();
             return { token: (await request('/api/auth/change-password', old.accessToken, { currentPassword: password, newPassword: changed }, 201)).accessToken, password: changed };

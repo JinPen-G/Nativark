@@ -29,7 +29,7 @@ export const TICKETS_HTTP = {
 /** 宿主Guard政策与Nest/OpenAPI来自同一HTTP声明，Core业务服务继续核当前范围/原结果。 */
 export function createTicketsHttpContribution(): CoreHttpContribution {
   return CoreHttpContributionSchema.parse({ coreId: TICKETS_CORE_ID, implementationVersion: TICKETS_CORE_VERSION,
-    routes: Object.entries(TICKETS_HTTP).map(([id, route]) => ({ id, method: route.method, path: `/${route.path}`,
+    routes: Object.entries(TICKETS_HTTP).map(([id, route]) => ({ id: id.replace(/[A-Z]/gu, letter => `-${letter.toLowerCase()}`), method: route.method, path: `/${route.path}`,
       audiences: ["operator"], permissions: [{ resource: "ticket", action: route.permission }],
       purpose: route.purpose, startsNewBusiness: route.startsNewBusiness })) });
 }

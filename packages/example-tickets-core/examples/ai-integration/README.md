@@ -114,7 +114,9 @@ export function composeTicketsReads(
 
 ## 完整宿主的接点
 
-选装入口为 `@rental-os/example-tickets-core/ai`；普通包不会加载它。`createTicketsAiHttpContribution()` 和 `createTicketsAiOpenApi()`必须与同一标准AI包及原Guard组合。`TicketsAiHttpModule`提供 `POST /api/cores/example-tickets/ai/<action>`，动作集合由 `TICKETS_AI_HTTP`声明，未知动作拒绝。发布另核当前`system:params:manage`，新工作核`example-tickets:ticket:start`，批准和执行各自重新核原依据；原结果读口不恢复新工作权。
+选装入口为 `@rental-os/example-tickets-core/ai`；普通包不会加载它。`createTicketsAiHttpContribution()` 和 `createTicketsAiOpenApi()`必须与同一标准AI包及原Guard组合。`TicketsAiHttpModule`提供 `POST /api/cores/example-tickets/ai/<action>`，动作集合由 `TICKETS_AI_HTTP`声明；URL使用小写单连字符（如`prepare-input`、`create-task`、`prepare-approval`、`original-task`），程序动作名仍为`prepareInput`等。未知动作拒绝。发布另核当前`system:params:manage`，新工作核`example-tickets:ticket:start`，批准和执行各自重新核原依据；原结果读口不恢复新工作权。
+
+OpenAPI从同一输入/输出schema投影，联合状态和仅null分支使用OpenAPI 3.0的显式表示。原事实的tenant、对象ID和修订相等约束登记在`x-field-equalities`；它是文档说明，运行时仍由原`superRefine`及服务权威执行，不以文档约束替代校验。
 
 请求顺序是`prepareInput`保存受权事实 → `createTask`创建原任务 → `prepareApproval`计量准备并释放租约 → `approval`展示原提案 → `decide`记录人类决定 → `execute`明确执行 → `result`读取原收据。写请求失败、断线或超时后只用`originalInput`、`originalTask`、`approval`、`result`核对原引用，不换操作键或自动重发。`observeInterrupted`仅接原Runner的恢复观察，不能证明未消耗或重新派发工具。发布也有独立的`publicationOperation`原结果读口。
 

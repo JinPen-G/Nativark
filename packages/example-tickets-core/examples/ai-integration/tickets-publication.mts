@@ -21,7 +21,7 @@ export const TicketsAiPolicySchema = z.object({ revision, enabled: z.boolean(), 
 const policySchema = TicketsAiPolicySchema;
 export const TicketsAiPublicationCommandSchema = policySchema.omit({ revision: true }).extend({ operationId: z.string().uuid(), expectedRevision: revision.nullable() }).strict();
 export const TicketsAiPublicationReceiptSchema = z.object({ version: z.literal("example-tickets-ai-publication-1"), operationId: z.string().uuid(),
-  scopeId: z.string().uuid(), commandHash: z.string().regex(/^[a-f0-9]{64}$/u), policy: policySchema, policyHash: z.string().regex(/^[a-f0-9]{64}$/u) }).strict();
+  scopeId: z.string().uuid(), commandHash: z.string().regex(/^[a-f0-9]{64}$/), policy: policySchema, policyHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
 const receiptSchema = TicketsAiPublicationReceiptSchema;
 const conflict = () => new TicketsAiSceneError("basis_changed", "TICKETS_AI_BASIS_CHANGED");
 const unavailable = () => new TicketsAiSceneError("authority_unavailable");
