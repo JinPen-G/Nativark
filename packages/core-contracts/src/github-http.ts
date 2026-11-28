@@ -8,6 +8,8 @@ export class GitHubCoreReadError extends Error {
 export type GitHubFetcher = typeof fetch;
 /** 仅服务端瞬时使用；不得放入 pin、索引、浏览器协议或操作日志。 */
 export interface GitHubPrivateCredential { repository: string; token: string }
+// GitHub 安装 token 支持更长的 ghs_ 前缀 JWT；有界接收，不解析或替它授予权限。
+export const GITHUB_PRIVATE_TOKEN_PATTERN = /^[A-Za-z0-9_.-]{20,4096}$(?![\s\S])/;
 export const GITHUB_API = "https://api.github.com";
 const headers = { "User-Agent": "Zelo-Core", "X-GitHub-Api-Version": "2026-03-10" };
 const downloadHosts = new Set(["api.github.com", "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"]);
@@ -39,7 +41,7 @@ async function readResponse(url: string, binary: boolean, limit: number, fetcher
     const prefix = repository && `/repos/${repository[1]}`;
     if (!prefix || !target || target.origin !== GITHUB_API || target.username || target.password || target.hash
       || target.search || target.pathname !== prefix && !target.pathname.startsWith(`${prefix}/`)
-      || !/^[A-Za-z0-9_]{20,512}$(?![\s\S])/.test(credential.token))
+      || !GITHUB_PRIVATE_TOKEN_PATTERN.test(credential.token))
       throw new GitHubCoreReadError("source_denied", "私有来源凭据或请求范围不符合已核定 GitHub 仓库");
     authorization = `Bearer ${credential.token}`;
   }

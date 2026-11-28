@@ -7,7 +7,7 @@ import {
   coreOpenApiSchema, type CoreOpenApiContribution, type PlatformOpenApiDocument
 } from "@rental-os/core-contracts";
 import { GitHubCoreDiscoveryQuerySchema } from "@rental-os/core-contracts/github-discovery";
-import { GitHubCoreReleasePinSchema, GitHubCoreReleaseSelectionSchema, GitHubCoreRepositorySchema } from "@rental-os/core-contracts/github";
+import { GitHubCoreReleasePinSchema, GitHubCoreReleaseSelectionSchema, GitHubCoreRepositorySchema, GitHubPrivateTokenSchema } from "@rental-os/core-contracts/github";
 import { CORE_PACKAGE_HTTP, CORE_PACKAGE_HTTP_BASE } from "../core-package-ports";
 import { CORE_PACKAGE_PREFLIGHT_HTTP, CorePackageInspectRequestSchema, CorePackageUpdatePlanRequestSchema } from "../core-package-preflight/ports";
 import { CORE_PACKAGE_SELECTION_HTTP } from "../core-package-selection/protocol";
@@ -229,7 +229,7 @@ function schemas(): CoreOpenApiContribution["schemas"] {
       revision: { ...timestamp, nullable: true } }),
     [`${namespace}.SavePrivateSource`]: object({ expectedRevision: { ...timestamp, nullable: true }, enabled: flag,
       repositories: { ...list(ref("RepositoryURL")), maxItems: 100, uniqueItems: true },
-      token: { type: "string", pattern: "^[A-Za-z0-9_]{20,512}$", writeOnly: true }, revokeToken: { ...flag, default: false }
+      token: { ...coreOpenApiSchema(GitHubPrivateTokenSchema), writeOnly: true }, revokeToken: { ...flag, default: false }
     }, ["expectedRevision", "enabled", "repositories"])
   };
 }

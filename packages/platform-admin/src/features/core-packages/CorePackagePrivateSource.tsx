@@ -34,7 +34,7 @@ function SourceForm({ api, current, updated, blocked, signal }: { api: CorePacka
         <Input.TextArea rows={3} maxLength={24000} placeholder="https://github.com/owner/repository" />
       </Form.Item>
       <Form.Item label={en ? "New token (blank keeps current credential)" : "新凭据（留空保留原值）"}>
-        <Input.Password value={secret} maxLength={512} autoComplete="new-password" onChange={event => setSecret(event.target.value)} />
+        <Input.Password value={secret} maxLength={4096} autoComplete="new-password" onChange={event => setSecret(event.target.value)} />
       </Form.Item>
       <SaveButton form={form} label={en ? "Save source" : "保存来源"} pending={busy} disabled={blocked || uncertain}
         onSave={values => save({ expectedRevision: current.revision, enabled: values.enabled,

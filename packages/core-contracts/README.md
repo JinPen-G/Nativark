@@ -518,6 +518,8 @@ Node专用出口 `@rental-os/core-contracts/github` 提供 `inspectGitHubCoreRel
 
 服务端调用 `inspectGitHubCoreRelease(selection, fetcher, credential)`、`downloadGitHubCoreRelease(pin, fetcher, credential)` 或 `verifyGitHubCoreRelease(pin, fetcher, credential)`。`credential` 为仅在服务端瞬时使用的 `{ repository, token }`，必须由宿主先核当前 SaaS 管理身份、已启用的加密来源配置和允许仓库范围。它不属于 pin、清单、原候选、锁或浏览器响应。合同层不读取本机环境、Git 凭据或用户登录信息；缺显式凭据时私有读取返回 `source_denied`。
 
+凭据输入复用 `GitHubPrivateTokenSchema`，有界接受最长 4096 字符的 opaque 或 JWT 格式，拒绝空白和控制字符，不按长度认定真实权限。GitHub 的新安装 token 是带 `ghs_` 前缀、包含两个点号的 JWT，约 520 字符；到期、组织批准和仓库权限仍由远端实际请求确认。本工具不解析或代发安装 token，也不自动续期；管理员可轮换已获权的细粒度 PAT 或安装 token，过期即停止新获取。格式依据见 [GitHub 官方变更说明](https://github.blog/changelog/2026-05-15-github-app-installation-tokens-per-request-override-header)。
+
 私有读取在固定仓库 API 路径核 `private: true`、未归档、规范名称与实际 ID，再按原 Tag 解引用、Release/资产 ID、长度、SHA-256 和包内来源逐项核验。Bearer 只出现在该仓库首次 `https://api.github.com/repos/<owner>/<repo>/…` 请求。元数据跳转拒绝；资产跳转仍限定原 GitHub HTTPS 主机，所有后续跳转请求均不带 Authorization，即便跳回 API 同源也不重发凭据。异常不输出响应体、签名下载地址或秘密。
 
 `verifyGitHubCoreRelease` 只读当前远端权限与完整 pin，供缓存命中、候选及部署边界复用；验证成功不形成可长期复用的授权。宿主仍须在操作前后及原提交事务内核当前身份和来源配置修订。凭据轮换、停用、仓库移出范围或远端撤权后，缓存和原候选不能代替本次获取资格；已安装运行权、原收据、数据和租户/成员授权由各自原入口保持。此合同本身不提供通用部署执行器。

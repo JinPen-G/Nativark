@@ -236,7 +236,7 @@ jobs:
             const headers = { ...json, Authorization: `Bearer ${changed.accessToken}` };
             // 仅在既有独占库核来源配置，不访问 GitHub；合成 token 不具有外部获取权限。
             const sourcePath = '/api/platform/core-packages/private-source', repositories = ['https://github.com/zelo-ci/private-source-smoke'];
-            const sourceToken = 'github_pat_ci_' + randomBytes(24).toString('hex');
+            const sourceToken = 'ghs_ci_' + randomBytes(384).toString('base64url') + '.ci.signature';
             const saveSource = value => body(sourcePath, { method: 'POST', headers, body: JSON.stringify(value) });
             const beforeSource = await body(sourcePath, { headers });
             const configured = await saveSource({ expectedRevision: beforeSource.revision, enabled: true, repositories, token: sourceToken });

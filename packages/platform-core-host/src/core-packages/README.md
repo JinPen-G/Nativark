@@ -27,7 +27,7 @@ const access = createPlatformCorePackageHttpAccess();
 
 仓库候选始终未审核，包状态为 unchecked。发布元数据、包校验、下载、受控部署注册、租户授权和业务生效分别判定。声明兼容来自实际底座包版本和原 `checkCoreCombination`，安装状态由实际包及受控部署证据判断。GitHub 离线或限流时，当前目录继续独立查询。
 
-完整公共接入使用 `composePlatformCorePackageAssembly` 和 `CorePackageAssemblyModule.register`，共用当前数据库、账号、注册目录和实际提交意图审计。宿主配置绝对存储根并准备 `releases`、`candidates` 普通子目录。原 Core 与四组包管理政策经 `createPlatformCorePackageAssemblyHttpAccess` 合并为唯一准入 provider，路径匹配须唯一。[公共装配](../core-package-assembly.ts) · [公共 API 供给](../../../../apps/platform-api/src/core-assembly.ts)
+完整公共接入使用 `composePlatformCorePackageAssembly` 和 `CorePackageAssemblyModule.register`，共用当前数据库、账号、注册目录和实际提交意图审计。宿主配置绝对存储根并准备 `releases`、`candidates` 普通子目录。原 Core 与读取、预检、发行选择、候选准备及私有来源政策经 `createPlatformCorePackageAssemblyHttpAccess` 合并为唯一准入 provider，路径匹配须唯一。[公共装配](../core-package-assembly.ts) · [公共 API 供给](../../../../apps/platform-api/src/core-assembly.ts)
 
 固定包预检和候选准备继续复用原 install、update 和 deployment，由宿主供给实际包来源、完整材料及独占存储。零 Core 公共宿主可通过启动锁、本地底座引用与实际运行模块目录供给标准底座证据，原数据状态沿同一 MySQL 观察读取；缺证据时保留 `unavailable`，注册目录返回实际空集合。可信旧路径许可来自宿主精确策略，按 Core ID 传给下载、检查、原部署生成器和文件准备。[当前发行读取](../core-package-deployment.ts) · [固定包预检](../core-package-preflight/README.md) · [候选准备与原结果读取](../core-package-preparation/README.md)
 

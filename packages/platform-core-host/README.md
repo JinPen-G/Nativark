@@ -78,7 +78,7 @@ Rental 与双 Core 从同一已核部署目录取得全量所选清单，只为 
 
 ## Core 包管理接入
 
-`composePlatformCorePackageAssembly` 共用当前 Core 应用的 `database`、`users` 和 `catalogue`，由 `CorePackageAssemblyModule.register` 在同一 Nest 容器供给四组 Controller。通过 `createPlatformCorePackageAssemblyHttpAccess(packages, coreHttp)` 合并原 Core 准入，再交给唯一 `coreHttpProvider`。当前主体经过原签名 Guard 和应用事务复验，重复或未登记路径拒绝。[完整读取路线](src/core-packages/README.md)
+`composePlatformCorePackageAssembly` 共用当前 Core 应用的 `database`、`users` 和 `catalogue`，由 `CorePackageAssemblyModule.register` 在同一 Nest 容器供给读取、预检、发行选择、候选准备及私有来源五组 Controller。通过 `createPlatformCorePackageAssemblyHttpAccess(packages, coreHttp)` 合并原 Core 准入，再交给唯一 `coreHttpProvider`。当前主体经过原签名 Guard 和应用事务复验，重复或未登记路径拒绝。[完整读取路线](src/core-packages/README.md)
 
 宿主使用 `createPlatformCorePackageAudit<HostTransaction>()` 写入原 `operationLog` 事务。发行与候选发布前记录 `requested` 提交意图并复验当前主体，文件发布后的提交失应答或撤权沿原引用 / SHA 返回 `unknown`。发行引用与候选分别保存到 `storageDirectory/releases` 和 `storageDirectory/candidates`。根目录使用宿主配置的绝对路径，部署方须预先准备普通目录与服务账户访问权。[发行存储](src/core-package-selection/README.md) · [候选准备](src/core-package-preparation/README.md)
 

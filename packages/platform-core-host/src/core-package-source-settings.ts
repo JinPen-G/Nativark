@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
-import { GitHubCoreRepositorySchema } from "@rental-os/core-contracts/github";
+import { GitHubCoreRepositorySchema, GitHubPrivateTokenSchema } from "@rental-os/core-contracts/github";
 import { CoreAccessError } from "@rental-os/core-host";
 import type { CoreHostSqlClient, CoreHostSqlTransaction } from "@rental-os/core-host/mysql";
 import { PlatformPrincipalAuthority } from "@rental-os/platform-server/principal";
@@ -17,7 +17,7 @@ import type { CorePackagePrivateSourceAccess } from "./core-package-source-acces
 const platformTenant = "tenant_platform", capability = "core-package", provider = "github";
 const repositories = z.array(GitHubCoreRepositorySchema).max(100)
   .refine(values => new Set(values.map(value => value.toLowerCase())).size === values.length, "允许仓库不得重复");
-const token = z.string().regex(/^[A-Za-z0-9_]{20,512}$(?![\s\S])/, "GitHub token 格式无效");
+const token = GitHubPrivateTokenSchema;
 export const CorePackageSourceSettingsRequestSchema = z.object({
   expectedRevision: z.string().datetime().nullable(), enabled: z.boolean(), repositories,
   token: token.optional(), revokeToken: z.boolean().default(false)

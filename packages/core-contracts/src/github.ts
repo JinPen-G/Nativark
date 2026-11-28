@@ -8,12 +8,15 @@ import { CoreArtifactHashSchema, CoreIdSchema, CoreSourceSchema } from "./manife
 import { CoreReleaseVersionSchema } from "./version";
 import type { CoreHostVersions } from "./compatibility";
 import { prepareCoreInstall } from "./install";
-import { GITHUB_API, GitHubCoreReadError, officialRentalReleaseSource, readGitHubJson, readGitHubResponse,
+import { GITHUB_API, GITHUB_PRIVATE_TOKEN_PATTERN, GitHubCoreReadError, officialRentalReleaseSource, readGitHubJson, readGitHubResponse,
   resolveGitHubRepository, type GitHubFetcher, type GitHubPrivateCredential } from "./github-http";
 export { GitHubCoreReadError } from "./github-http";
 export type { GitHubPrivateCredential } from "./github-http";
 export { GitHubCoreDiscoveryQuerySchema, createGitHubCoreDiscovery } from "./github-discovery";
 export type { GitHubCoreDiscoveryPage, GitHubCoreDiscoveryResult } from "./github-discovery";
+
+/** 服务端凭据输入与传输使用同一有界字符合同；真实类型、到期与权限由 GitHub 核定。 */
+export const GitHubPrivateTokenSchema = z.string().min(20).max(4096).regex(GITHUB_PRIVATE_TOKEN_PATTERN, "GitHub token 格式无效");
 
 export const GitHubCoreRepositorySchema = z.string().regex(/^https:\/\/github\.com\/[a-zA-Z0-9][a-zA-Z0-9-]*\/[a-zA-Z0-9_.-]+$(?![\s\S])/)
   .refine(value => !value.endsWith(".git") && ![".", ".."].includes(value.split("/").at(-1)!), "使用https://github.com/owner/repo仓库地址，不带.git后缀");
