@@ -43,10 +43,11 @@ export async function prepareTicketsStart(service: Pick<TicketsService, "prepare
     command: input, fact: await service.prepareStart(principal, input) });
 }
 
-export function ticketsStartFingerprint(value: TicketsStartBinding): string {
+export function ticketsStartActionInput(value: TicketsStartBinding) {
   const binding = TicketsStartBindingSchema.parse(value);
-  return hash({ tool: TICKETS_START_TOOL.code, version: TICKETS_START_TOOL.version, source: binding.source });
+  return { tool: TICKETS_START_TOOL.code, version: TICKETS_START_TOOL.version, source: binding.source };
 }
+export const ticketsStartFingerprint = (value: TicketsStartBinding): string => hash(ticketsStartActionInput(value));
 
 export const ticketsStartCatalogue = Object.freeze({ admits(action: Readonly<AiProposalPayloadDraft<string, string>["actions"][number]>) {
   return action.toolCode === TICKETS_START_TOOL.code && action.toolVersion === TICKETS_START_TOOL.version
