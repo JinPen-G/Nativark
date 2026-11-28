@@ -94,6 +94,7 @@ async function initialization(database: PrismaClient, transaction: Prisma.Transa
 export async function observeInstallation(database: PrismaClient, selected: InstallationSelection): Promise<InstallationObservation> {
   const result: InstallationObservation = { checked: false, state: "unknown", reason: "database_unavailable",
     selectionSha256: selected.sha256, applied: 0, pending: selected.migrations.length, initialization: { state: "not_checked" } };
+  let stage = "metadata_visibility";
   try {
     return await database.$transaction(async (tx): Promise<InstallationObservation> => {
       // information_schema 只显示本账号可见对象。没有库级可见性不能把零行断言为空库。
@@ -121,6 +122,7 @@ export async function observeInstallation(database: PrismaClient, selected: Inst
       }
       if (!name || revoked || !routineVisible || ["SELECT", "SHOW VIEW", "TRIGGER", "EVENT"].some(value => !permissions.has(value)))
         return { ...result, reason: "metadata_visibility_unverified" };
+      stage = "database_inventory";
       const objects = await tx.$queryRaw<Array<{ name: string; kind: string }>>`
         SELECT TABLE_NAME AS name, TABLE_TYPE AS kind FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()
         UNION ALL SELECT ROUTINE_NAME, 'ROUTINE' FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA=DATABASE()
@@ -130,6 +132,7 @@ export async function observeInstallation(database: PrismaClient, selected: Inst
       if (!objects.length) return { ...result, state: "empty", reason: "no_database_objects" };
       if (!objects.some(row => row.name === "_prisma_migrations" && row.kind === "BASE TABLE"))
         return { ...result, state: "incompatible", reason: "original_ledger_missing" };
+      stage = "original_ledger";
       const receipts = await tx.$queryRaw<Receipt[]>`
         SELECT migration_name AS name, checksum, finished_at AS finished, rolled_back_at AS rolledBack,
           (logs IS NOT NULL AND logs <> '') AS failed FROM _prisma_migrations ORDER BY started_at, id
@@ -144,6 +147,7 @@ export async function observeInstallation(database: PrismaClient, selected: Inst
         result.pending--;
       }
       const applied = selected.migrations.slice(0, result.applied);
+      stage = "physical_observation";
       if (result.pending) {
         // 公共 AI 的回填由 AI 数据所有者核定；未完成 AI 链不能用通用 DDL 解析器补出成功。
         if (applied.some(item => !selected.platform.migrationNames.includes(item.name)))
@@ -162,12 +166,13 @@ export async function observeInstallation(database: PrismaClient, selected: Inst
         ...(selected.capability ? { dataCapabilities: [{ ...selected.capability, capabilityId: "ai-native" }] } : {}) }).read();
       if (data.platform.execution?.state !== "ready" || selected.capability && data.dataCapabilities?.[0]?.execution.state !== "ready")
         return { ...result, state: "unknown", reason: "physical_observation_unavailable" };
+      stage = "initialization_observation";
       return { ...result, state: "ready", reason: "original_ledger_and_physical_match", data,
         initialization: await initialization(database, tx) };
     }, { isolationLevel: "RepeatableRead", timeout: 30_000 });
   } catch {
     // Prisma/SQL 错误可能包含连接串或行内容，只公布固定原因。
-    return { ...result, state: "unknown", reason: "database_or_physical_observation_unavailable" };
+    return { ...result, state: "unknown", reason: stage + "_unavailable" };
   }
 }
 

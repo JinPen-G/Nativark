@@ -115,7 +115,7 @@ function versions(value, api) {
   return { state: 'observed', authority: 'running-host-package-and-database-observation',
     platform: member(raw.platform, api.core.CorePlatformReleaseSchema, 'platform'),
     cores: raw.cores.map(entry => ({ id: api.core.CorePackagePinSchema.parse(entry.locked).manifest.id,
-      ...member(entry, api.core.CorePackagePinSchema, 'core') })),
+      registered: entry.registered === true, ...member(entry, api.core.CorePackagePinSchema, 'core') })),
     capabilities: (raw.dataCapabilities ?? []).map(entry => ({ id: api.core.CorePlatformDataCapabilityReleaseSchema.parse(entry.locked).id,
       ...member(entry, api.core.CorePlatformDataCapabilityReleaseSchema, 'platform-capability') })) };
 }
@@ -139,7 +139,7 @@ async function run(options, api, environment = process.env, fetcher = fetch) {
   if (options.command === 'status') {
     const current = versions(await read('catalogue'), api);
     const available = current.state === 'observed' && [current.platform, ...current.cores, ...current.capabilities]
-      .every(item => item.availability === 'available');
+      .every(item => item.availability === 'available') && current.cores.every(item => item.registered);
     return { exitCode: available ? 0 : 1, status: available ? 'observed' : 'unavailable', current };
   }
   if (options.command === 'plan') {
@@ -202,5 +202,14 @@ async function main(args = process.argv.slice(2)) {
       recovery: '核进程指定的原宿主、会话和正式合同；已发 prepare 时先按同摘要读取 receipt，不重试写入。' })); return 2;
   }
 }
+async function readRunningVersions(environment = process.env) {
+  try { return await run({ command: 'status' }, contracts(), environment); }
+  catch { return { exitCode: 2, status: 'unknown', current: { state: 'unavailable' } }; }
+}
+async function readPreparationReceipt(sha256, environment = process.env) {
+  if (!files.HASH.test(sha256 ?? '')) return { exitCode: 2, status: 'unknown' };
+  try { return await run({ command: 'receipt', sha256 }, contracts(), environment); }
+  catch { return { exitCode: 2, status: 'unknown', sha256 }; }
+}
 if (require.main === module) main().then(code => { process.exitCode = code; });
-module.exports = { argumentsFor, connection, requestHost, versions, preparation, run, main };
+module.exports = { argumentsFor, connection, requestHost, versions, preparation, run, readRunningVersions, readPreparationReceipt, main };

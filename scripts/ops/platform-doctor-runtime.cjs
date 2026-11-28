@@ -52,11 +52,13 @@ async function openInstallation(options, environment = process.env) {
   const { diagnose } = require('./platform-doctor.cjs');
   const report = diagnose({ ...options, steps: false, database: false }, environment);
   const required = ['node', 'root', 'manifest', 'npm-lock', 'dependencies', 'client'];
-  if (required.some(id => !report.checks.some(check => check.id === id && check.state === 'pass'))
-    || report.checks.some(check => check.id.startsWith('source:') && check.state !== 'pass')
-    || report.checks.some(check => ['profile:source', 'profile:selection', 'lock:node', 'lock:receipt', 'lock:receipt-digest',
+  const localIssues = report.checks.filter(check => required.includes(check.id) && check.state !== 'pass'
+    || check.id.startsWith('source:') && check.state !== 'pass'
+    || ['profile:source', 'profile:selection', 'lock:node', 'lock:receipt', 'lock:receipt-digest',
       'lock:source', 'lock:contract', 'compatibility', 'deployment-lock'].includes(check.id)
-      && ['invalid', 'missing'].includes(check.state))) throw Error('local_prerequisites');
+      && ['invalid', 'missing'].includes(check.state)).map(({ id, state }) => ({ id, state }));
+  for (const id of required) if (!report.checks.some(check => check.id === id)) localIssues.push({ id, state: 'not_checked' });
+  if (localIssues.length) throw Object.assign(Error('local_prerequisites'), { localIssues });
   const target = databaseTarget(environment);
   const entry = files.localDependency(root, path.join(host, 'dist/installation.js'));
   files.ordinary(entry);
@@ -107,6 +109,7 @@ async function readInstallation(options, environment = process.env) {
     const reason = Object.hasOwn(reasons, error?.message) ? error.message : 'local_selection_or_database_unavailable';
     return { state: 'unknown', checked: false, reason,
       initialization: { state: 'not_checked' },
+      ...(reason === 'local_prerequisites' ? { localIssues: error.localIssues } : {}),
       repair: reasons[reason] ?? '核对本树正式依赖/构建、唯一 Client 和固定锁；数据库错误原文不进入输出。' };
   } finally { if (context) await context.close().catch(() => {}); }
 }

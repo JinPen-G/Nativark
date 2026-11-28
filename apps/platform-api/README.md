@@ -24,6 +24,10 @@ node scripts/ops/platform-doctor.cjs --profile selected-core --root <组合目�
 
 **默认数据库为 `unknown / 未检查`。** 默认命令不读取原迁移账、账号或真实服务。获准读取所选库后，可在工具同树显式使用 `--profile platform|public-ai --database`，把[真实安装观察](#显式安装与真实就绪)合入报告。工具不读取 `.env`、不输出连接串、密钥、初始化口令或底层异常；诊断不执行下载、生成、初始化、Seed、迁移、授权或启动。部署准入、租户授权、成员分配、绑定和业务就绪仍由所属权威提供，数据库就绪不会代替这些状态。
 
+另可显式添加 `--service`，使用下方升级入口的进程 API 地址和当前 SaaS 会话，从原包管理 `catalogue` 取得底座/Core/能力的实际版本与数据可用状态。运行集合、版本、来源和摘要须与本地 `--lock` 选择一致；不匹配或缺观察不会放行。此读口适用于提供正式部署观察的 Core＋AI 宿主，缺失的装配和业务权威仍保持未检查；它不直接连接该 Core 的库，也不代替租户/成员/绑定就绪。
+
+已准备候选时可加 `--service --prepared <原sha256>`，在同一报告读取原 `preparation-receipt`，比较候选与本地所选组合；`candidatePreparation: recorded` 只表示原候选及其文件核定。候选尚未运行时，当前版本仍按实际宿主显示，不会因为有准备回执改成已部署。
+
 修复命令仅供使用者按自己的环境许可显式办理。后续初始化见下方五步；实际 Core 准入和授权见[公共宿主](../../packages/platform-core-host/README.md#部署准入与存量切换)，升级与中断恢复沿[原固定来源及升级预检](../../packages/core-contracts/README.md#分别更新底座或一个-core)。缺失应答按原操作和收据核对，不重跑初始化、迁移或业务动作。
 
 ## 从诊断到初始化与就绪

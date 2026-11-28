@@ -26,7 +26,7 @@ async function main(args = process.argv.slice(2), environment = process.env) {
     if (!['status', 'migrate', 'initialize'].includes(command) || !rest.includes('--profile')
       || command !== 'migrate' && approval || command === 'migrate' && !approval) throw Error('usage');
     options = parseArguments(rest);
-    if (options.help || options.database || options.steps || options.profile === 'selected-core') throw Error('usage');
+    if (options.help || options.database || options.service || options.steps || options.profile === 'selected-core') throw Error('usage');
   } catch { console.error('安装参数无效；运行 --help 核对显式组合及操作。'); return 2; }
   if (command === 'status') {
     const observation = await readInstallation(options, environment);

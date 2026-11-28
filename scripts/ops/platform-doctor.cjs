@@ -17,11 +17,12 @@ const HELP = `Zelo 安装组合只读诊断
 node scripts/ops/platform-doctor.cjs [--root <源码或解包目录>] [--profile platform|public-ai|selected-core]
   [--host <目标根下的宿主目录>] [--lock <绝对JSON路径>]
   [--core <Core-ID=绝对包目录>] [--capability <能力-ID=绝对包目录>]
-  [--platform-package <绝对tgz路径>] [--steps] [--database] [--json]
+  [--platform-package <绝对tgz路径>] [--steps] [--database] [--service [--prepared <原候选摘要>]] [--json]
 
 默认 platform：零 Core。public-ai：零 Core + 公共 AI。selected-core：由锁选择 Core 及可选能力，须提供 --host。
 默认仅检查本地材料和进程配置。--database 须显式 --profile，在工具同树读取所选数据库的原账/结构/账号。
 不读 .env，不下载、安装、迁移、初始化、授权或启服务。selected-core 的数据库观察须由所属宿主提供。
+--service 显式读取进程指定的原包管理 catalogue，使用当前 SaaS 会话；运行组合须与本地所选锁一致。
 退出 0：所检查的本地前置无缺项；1：缺项/冲突；2：用法错误或本地检查不完整。
 未选 --database 时库与账号保持未检查；数据库就绪不表示运行、登录、授权或业务可用。`;
 
@@ -30,11 +31,11 @@ function parseArguments(args) {
   const seen = new Set();
   for (let index = 0; index < args.length; index++) {
     const flag = args[index];
-    if (['--json', '--help', '--steps', '--database'].includes(flag)) {
+    if (['--json', '--help', '--steps', '--database', '--service'].includes(flag)) {
       if (seen.has(flag)) throw Error('usage');
       options[flag.slice(2)] = true; seen.add(flag); continue;
     }
-    if (!['--root', '--profile', '--host', '--lock', '--core', '--capability', '--platform-package'].includes(flag)
+    if (!['--root', '--profile', '--host', '--lock', '--core', '--capability', '--platform-package', '--prepared'].includes(flag)
         || !args[index + 1] || args[index + 1].startsWith('--')) throw Error('usage');
     const value = args[++index];
     if (flag === '--core' || flag === '--capability') {
@@ -51,7 +52,8 @@ function parseArguments(args) {
   if (!['platform', 'public-ai', 'selected-core'].includes(options.profile)) throw Error('usage');
   if (options.profile === 'selected-core' ? !options.host : options.host) throw Error('usage');
   if (options.host) files.relativeFile(options.root, options.host);
-  if (options.database && !seen.has('--profile')) throw Error('usage');
+  if ((options.database || options.service) && !seen.has('--profile')) throw Error('usage');
+  if (options.prepared && (!options.service || !files.HASH.test(options.prepared))) throw Error('usage');
   for (const key of ['lock', 'platform-package']) if (options[key] && !path.isAbsolute(options[key])) throw Error('usage');
   return options;
 }
@@ -445,6 +447,43 @@ async function main(args = process.argv.slice(2)) {
         repair: 'node scripts/ops/platform-doctor-install.cjs status --profile ' + options.profile + '；按公开安装入口核缺项，未知时不执行。' });
       if (report.nextSteps) report.nextSteps = installationSteps(report, { host: options.host ?? 'apps/platform-api',
         rootCommands: /local-dev-preflight\.cjs/u.test(files.json(path.join(options.root, 'package.json')).scripts?.dev ?? '') });
+      finish(report);
+    }
+    if (options.service) {
+      report.scope = options.database ? 'explicit-database-and-service-read-only' : 'explicit-service-read-only';
+      const observed = await require('./platform-doctor-upgrade.cjs').readRunningVersions();
+      report.runtime.versions = observed.current ?? { state: 'unavailable' };
+      let matches = false;
+      const current = observed.current;
+      if (current?.state === 'observed' && report.selection) {
+        const same = (declared, actual) => Boolean(actual) && declared.sha256 === actual.sha256
+          && declared.version === actual.version && isDeepStrictEqual(declared.source, actual.source);
+        const members = (declared, actual) => declared.length === actual.length && declared.every(item =>
+          actual.some(member => member.id === item.id && same(item, member.current)));
+        matches = same(report.selection.platform, current.platform.current) && members(report.selection.cores, current.cores)
+          && members(report.selection.capabilities, current.capabilities);
+      }
+      report.runtime.version = matches && observed.exitCode === 0 ? 'observed' : 'unknown';
+      report.checks.push({ id: 'service:versions', required: true,
+        state: observed.exitCode === 0 && matches ? 'pass' : current?.state === 'observed' && report.selection && !matches ? 'invalid' : 'not_checked',
+        message: matches ? '原宿主当前包/数据观察与本地所选完整组合一致。' : '当前版本读取缺少权威，或与本地所选组合不一致。',
+        repair: '核 PLATFORM_DOCTOR_API_URL、当前 SaaS 会话及原宿主部署观察；使用同一固定锁，Core＋AI 由所属宿主供给。' });
+      if (options.prepared) {
+        const receipt = await require('./platform-doctor-upgrade.cjs').readPreparationReceipt(options.prepared);
+        const candidate = receipt.candidate;
+        const same = (expected, actual) => expected && actual && expected.sha256 === actual.sha256
+          && expected.version === actual.version && isDeepStrictEqual(expected.source, actual.source);
+        const members = (expected, actual) => expected.length === actual.length && expected.every(item =>
+          actual.some(entry => entry.id === item.id && same(item, entry)));
+        const selected = report.selection;
+        const matched = receipt.exitCode === 0 && selected && candidate && same(selected.platform, candidate.platform)
+          && members(selected.cores, candidate.cores) && members(selected.capabilities, candidate.capabilities);
+        report.runtime.candidatePreparation = matched ? 'recorded' : receipt.exitCode === 0 ? 'selection_conflict' : 'unknown';
+        report.runtime.preparationReceipt = receipt;
+        report.checks.push({ id: 'service:preparation', required: true, state: matched ? 'pass' : receipt.exitCode === 0 ? 'invalid' : 'not_checked',
+          message: matched ? '同摘要原候选已记录且与所选组合一致；实际部署另看当前版本。' : '原候选回执未核定或不是所选组合。',
+          repair: '按原 sha256 核 preparation-receipt、候选固定锁和当前权限；不换摘要重发。' });
+      }
       finish(report);
     }
     console.log(options.json ? JSON.stringify(report, null, 2) : formatReport(report));
