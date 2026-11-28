@@ -464,8 +464,8 @@ jobs:
         working-directory: ${{ env.CI_DIR }}/source
         shell: bash
         env:
-          CORE_AI_PLATFORM_COMMIT: 6d46f4943f7a0538f04e7ee2d908827d8345a666
-          CORE_AI_RENTAL_COMMIT: daa798c4394858c70db7b6e13c7b0742aa02cb74
+          CORE_AI_PLATFORM_COMMIT: 5a6bbbf7593414a122a060018cb1abd87f1c20bf
+          CORE_AI_RENTAL_COMMIT: 297966fc65f0d7ba282b5c9d8fb9ca337a2623b4
         run: |
           set -euo pipefail
           task="$GITHUB_WORKSPACE/$CI_DIR"
