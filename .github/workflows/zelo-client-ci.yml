@@ -515,8 +515,12 @@ jobs:
                 const upstream = forward(origin + request.url, { method: request.method, headers: request.headers }, result => {
                   requestHistory.push({ method: request.method, path: request.url, status: result.statusCode });
                   if (requestHistory.length > 12) requestHistory.shift();
-                  // 原服务已返回后丢失一次应答，只模拟网络失联；不伪造成功/收据，不再次派发。
-                  if (lose) { result.resume(); result.on('end', () => response.destroy()); return; }
+                  // 原状态头已到客户端后扣住正文，让原运输自身超时；空应答直接断连会触发 Chrome 连接重试。
+                  // 原成功必须来自服务端，不伪造正文/收据；客户端超时关闭连接后由 finally 统一收尾。
+                  if (lose) {
+                    assert.equal(result.statusCode, 201, '原取消未成功，不能作为提交后失应答样本');
+                    response.writeHead(result.statusCode, result.headers); response.flushHeaders(); result.resume(); return;
+                  }
                   if (hold || holdStaff) {
                     const chunks = []; result.on('data', chunk => chunks.push(chunk));
                     result.on('end', () => {

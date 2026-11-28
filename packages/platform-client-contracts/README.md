@@ -31,4 +31,4 @@
 
 本包为可选源码候选，根 workspace/lock 已显式登记；单独准备同版依赖后使用 `npm run build` 或 `npm run lint`，不隐式安装依赖、启动服务或迁移。本包构建配置包含 DOM 类型以核对上游公共合同源码，运行代码不读取 window、AbortController、Storage 或 wx。
 
-Zelo 接入基线为 `d6ccb0dcad63ee2e06043b71c2651f326c7e8e3a`，首个固定业务贡献为独立 Rental `34baba2cdd50d1a46241069448621e460265cdb5`。实际接线与当前缺口见[客户端模板](../../templates/platform-clients/README.md)；业务页面/API 不复制到本包。类型和进程内宿主替身不能代替真实 Auth、撤权、数据库、微信开发者工具或真机验收。
+Zelo 接入基线为 `d6ccb0dcad63ee2e06043b71c2651f326c7e8e3a`，首个业务贡献来自独立 Rental；当前固定双仓组合、实际接线与缺口统一见[客户端模板](../../templates/platform-clients/README.md)。业务页面/API 不复制到本包。类型和进程内宿主替身不能代替真实 Auth、撤权、数据库、微信开发者工具或真机验收。
