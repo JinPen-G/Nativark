@@ -23,7 +23,7 @@ npm run export:platform -- --repo . --repository https://github.com/JinPen-G/Nat
 
 ## 五步快速接入
 
-准备 Node.js 22 LTS、npm 锁定依赖和独立 MySQL 开发库，环境配置见[根 README](../../README.md#本地运行)。默认无Core的[API宿主](../../apps/platform-api/README.md)和[后台宿主](../../apps/platform-admin/README.md)提供公共框架。先[取得固定工单示例](#取得固定工单示例)，再按下面五步开发，运行前置沿各宿主说明准备。
+准备 Node.js 22 LTS、npm 锁定依赖和独立 MySQL 开发库，环境配置见[根 README](../../README.md#本地运行)。默认无Core的[API宿主](../../apps/platform-api/README.md)和[后台宿主](../../apps/platform-admin/README.md)提供公共框架。可以先用[安全生成命令](#安全生成最小-core)创建新 Core 骨架，再[取得固定工单示例](#取得固定工单示例)参考完整业务与宿主接入；运行前置沿各宿主说明准备。
 
 1. **从最小Core确定业务和标识。** 以工单包为参考，在自己的Core中实现实体、状态、校验和存储。维护[业务合同](../example-tickets-core/src/contracts.ts)、[清单](../example-tickets-core/src/manifest.ts)及[独立迁移](../example-tickets-core/migrations/001-tickets.sql)，更换Core ID、名称、版本和业务字段。Core自行选择租户或自己的容器范围；会员、库存、金额等领域规则由业务决定。清单使用本文的唯一schema，固定声明来源、兼容范围、权限、入口和数据版本。
 2. **提供同源服务与API。** 参考[服务](../example-tickets-core/src/service.ts)、[HTTP合同](../example-tickets-core/src/http.ts)、[服务端贡献](../example-tickets-core/src/server.ts)和[Nest适配](../example-tickets-core/src/nest.ts)。复用公共当前身份、Core授权与成员范围，业务再校验角色、对象及提交条件；OpenAPI从同一请求/响应schema生成。Core可以省略AI贡献，普通业务仍按原权限工作。
@@ -64,6 +64,37 @@ AI工具可选，不提供时不要扫描API或数据库自行补工具。
 ### 快速路径之外按需查阅
 
 查功能从下方能力索引开始；查字段和注册规则沿正式源码；查宿主、数据或界面分别看对应模块README。后续章节提供包检查、服务端/HTTP/页面贡献、独立更新和GitHub发现的详细参考。
+
+## 安全生成最小 Core
+
+在固定公开底座工作区准备同版开发依赖并构建本包后，可直接使用包内命令。`platform-source.json` 是显式提供的来源 JSON，包含 `repository` 和 40 位小写 `commit`；官方底座的稳定来源使用 `https://github.com/JinPen-G/Nativark`。Git 工作区须位于该提交，接入合同、根锁与共用 TS 配置没有未提交差异；公开底座归档则按原 `platform.source.json` 回执核来源和合同文件摘要。命令不访问网络。
+
+```sh
+npm run build -w @rental-os/core-contracts
+node packages/core-contracts/dist/create.js --workspace . --target packages/acme-notes-core --id acme-notes --package @acme/notes-core --platform-source platform-source.json
+```
+
+也可从包脚本运行：`npm run create -w @rental-os/core-contracts -- --workspace ../.. --target packages/acme-notes-core --id acme-notes --package @acme/notes-core --platform-source <来源JSON绝对路径>`。npm 在包目录执行脚本，路径按该目录解释。`--help` 显示同一用法；成功 stdout 为 `created` JSON，包含真实目标、文件集合及命名空间；失败退出 1，并给出文件、字段及修复方向。
+
+生成器只在所选工作区的 `packages/<新目录>` 写入模板，目标须不存在或为空的普通目录。目录名使用小写字母、数字和单个连字符；包名采用小写 `name` 或 `@scope/name`，不使用范围/版本后缀。Core ID 沿正式 schema，并限定派生 MySQL 表名不超过 64 字符（当前模板的 Core ID 最多 53 字符）。目标或其父路径经过链接、存在同名 npm 包/已登记 Core、已有未装配的同 ID 模板时，均拒绝生成。
+
+| 命名空间 | `acme-notes` 的生成结果 |
+| --- | --- |
+| HTTP | `/api/cores/acme-notes/items` |
+| 精确权限 | `acme-notes:item:read` |
+| OpenAPI | `acme-notes.list.Response` |
+| 原迁移账名称 | `core.acme-notes.items.initial` |
+| MySQL 表 | `core_acme_notes_items` |
+
+同一工作区的生成操作使用 `packages/.core-scaffold.lock` 独占锁。常规失败只回退本次创建的文件和目录，保留调用方原有空目录；崩溃遗留锁须核定原操作已退出后处理，命令不自动抢占、重命名或覆盖已有成果。冲突检查读取正式 workspace 能力目录以及 `packages/`、`apps/` 的直接子包，未知动态身份须先在所属 Core 的正式清单中明确，不把生成器当作全局 Core 名称注册中心。
+
+产物包含业务 schema、需真实授权/存储适配的列表读口、同源 HTTP/OpenAPI、接收真实组件的后台贡献工厂、清单工厂、独立 SQL、标准打包命令及公开 README/许可。模板没有账号、密钥、业务 Seed、默认角色或 AI 工具。`core.scaffold.json` 保存底座完整来源、依赖精确版本与公开手册的 LF 文本摘要；迁移继续核原字节。Core 自己的发行来源在提交实际源码后传给清单/打包入口，生成时不伪造发行 SHA。
+
+生成后按本 Core README 显式加入所选底座 workspace、核对锁并准备开发依赖。`@rental-os/core-contracts` 使用所选固定底座的同名 workspace；本包是私有 workspace，不能把版本号当作 npm 公网发行。生成器不改根 package/lock，不复制底座或作者环境，也不安装依赖。标准包仍复用 `corePackageFiles`、`inspectCorePackageFiles`、`renderCoreGuide`、`createCoreArchive` 及原 `check`/`prepare-install`；没有第二套安装器。
+
+Node 开发调用使用 `@rental-os/core-contracts/scaffold` 的 `createCoreProject` 与 `CoreScaffoldOptionsSchema`，该出口需要本包的 TypeScript 开发依赖供现有能力索引使用，公共运行时总出口不加载生成器。[生成实现](src/scaffold.ts) · [CLI](src/create.ts) · [最小模板](templates/minimal/README.md.tpl)
+
+首版骨架尚需开发者实现持久化适配、实际 HTTP 挂载及列表/详情/表单组件。生成、编译、静态包检查与注册分别有自己的结果；真实部署准入、租户授权、成员分配、绑定、数据与页面行为仍按五步接入和各宿主说明办理，不能由骨架编译成功推导业务已可用。
 
 ## 取得固定工单示例
 
