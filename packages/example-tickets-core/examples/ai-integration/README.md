@@ -155,7 +155,9 @@ MCP的`/service`、`/persistent-oauth-authorization`、`/persistent-oauth-tokens
 - 工单外发仅`id/subject/state/revision`；原收据仅原operationId及对象`id/state/revision`，保持`historicalSnapshot:true`。不外发tenant/user、说明或受派者。
 - `original(grantId)`只给当前原Auth确认的本人回读原目标、预算和调用状态。撤回授权或原签名到期后，新合法登录仍可查看本人的原账；这不恢复工具权限。`reserved/unknown`保留占用、原callId与`retryable:false`，不因TTL或缺行退款/重发，也不把`returned`当作客户端收到或业务提交证明。
 
-[选装SQL材料](migrations/001-tenant-mcp.sql)只定义工单自有的政策、同意、grant、目标及绑定五表；不修改原MCP五份SQL，不包含账号/业务Seed或token明文。它须通过宿主显式后置迁移接入同一数据计划，当前尚未登记到标准包/安装贡献，不可直接执行作为安装替代。服务装配、人工同意页面、当前可用性与真实OAuth往返仍待完成；本阶段仅核内存类型、原生ESM装包加载及缺原身份拒绝，未验真实数据库。
+[选装SQL](../../migrations/002-tenant-mcp.sql)只定义工单自有的政策、同意、grant、目标及绑定五表；不修改原MCP五份SQL，不包含账号/业务Seed或token明文。五表只引用自身，沿正式Core迁移链追加到MCP选装包，数据版为`0.1.1`；普通工单及内置AI包保持原`0.1.0`链。`pack:core:mcp`声明`entries.ai=dist-mcp/index-mcp.mjs`与MCP 0.1.2能力前置，复用`check`、`prepare-install`及标准归档。运行物理观察同时核原工单三表与选装五表，缺任一仍不可用。完整安装材料见[宿主准备说明](../../../../apps/example-tickets-api/README.md#工单mcp安装材料)。
+
+服务装配、人工同意页面、当前可用性与真实OAuth往返仍待完成；已核内存类型、标准包与选装SQL摘要/结构解析，以及参加者原生ESM装包加载及缺原身份拒绝，未验真实数据库。目录未发布的内置AI权益明确显示拒绝；原目录查询失败仍保持不可用，不用这一区分兜底其他异常。
 
 可用性UI和宿主装配继续沿本端口接线。两个MCP reader只可在真实权威已齐备的宿主选用，缺失时保持`unavailable`，不能把默认未配置当成完整MCP验收。
 

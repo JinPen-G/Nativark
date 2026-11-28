@@ -8,12 +8,14 @@
     "prebuild": "npm run build -w @rental-os/platform-api && npm run build -w @rental-os/example-tickets-core",
     "build": "tsc -p tsconfig.json",
     "build:ai": "tsc -p tsconfig.ai.json",
+    "build:mcp": "tsc -p tsconfig.mcp.json",
     "prelint": "npm run build -w @rental-os/platform-api && npm run build -w @rental-os/example-tickets-core",
     "lint": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/main.js",
     "start:ai": "node dist-ai/ai-main.mjs",
     "prepare:deployment": "node dist/prepare-deployment.js",
     "prepare:deployment:ai": "node dist-ai/prepare-ai-deployment.mjs",
+    "prepare:deployment:mcp": "node dist-mcp/prepare-mcp-deployment.mjs",
     "register:permissions": "node dist/register-permissions.js"
   },
   "dependencies": {
@@ -39,10 +41,12 @@
   },
   "peerDependencies": {
     "@rental-os/ai-native-data": "0.2.5",
-    "@rental-os/ai-native-server": "0.2.1"
+    "@rental-os/ai-native-server": "0.2.1",
+    "@rental-os/mcp-server": "0.1.2"
   },
   "peerDependenciesMeta": {
     "@rental-os/ai-native-data": { "optional": true },
-    "@rental-os/ai-native-server": { "optional": true }
+    "@rental-os/ai-native-server": { "optional": true },
+    "@rental-os/mcp-server": { "optional": true }
   }
 }

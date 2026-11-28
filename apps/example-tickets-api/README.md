@@ -37,6 +37,20 @@ SaaS 的四组 Core 包管理 Controller 也从同一[应用工厂](src/assembly
 
 读取源从六个公共包的正式静态入口核 `platform-host.context.json` 同源编译证据，要求 `host=example-tickets` 及 `apps/example-tickets-api/prisma-deployment/core.deployment.lock.json` 等于当前锁。实际公共 schema、所选公共数据计划中的全部原 SQL 和完整工单包须与固定归档逐字节一致；只允许一个工单Core和空数据能力集合。版本读取复用本宿主的原Prisma账及物理观察，更新材料读取本身不查库。缺配置、固定引用或运行收据保持 unavailable，已有但不一致的材料拒绝读取。受控组合仍可通过 `composeTicketsApplication` 的第三个参数显式注入来源，生产默认不使用替代证据；候选准备沿原待部署状态保存。[公共数据计划](../platform-api/src/platform-data.ts)
 
+## 工单MCP安装材料
+
+纯读取MCP使用独立选装包与公共Client，不需要AI数据模型、平台模型或云模型预算。先构建同一固定源码的公共/工单包与MCP 0.1.2包，再执行`npm run build:mcp -w @rental-os/example-tickets-core`和`npm run build:mcp -w @rental-os/example-tickets-api`。MCP完整材料须按其`package.json.files`和全部`dist`收集，保留原LICENSE/README/元数据与五份SQL；`createMcpDataRelease`会拒绝不完整、不同版本或摘要不符的材料，依赖安装目录不能冒充该材料包。
+
+```sh
+npm run pack:core:mcp -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> <固定完整SHA> <底座来源JSON> <新工单MCP包.tgz>
+# 按正式prepare-install/check取得完整包目录后，五个参数均使用当前宿主内的绝对路径：
+node apps/example-tickets-api/dist-mcp/prepare-mcp-deployment.mjs <底座发行JSON> <MCP固定来源JSON> <完整MCP包目录> <完整工单MCP包目录> <apps/platform-api下的新部署目录>
+```
+
+[准备器](src/prepare-mcp-deployment.mts)复用正式包摘要、兼容及迁移生成入口，生成v1部署锁、同库公共14份/Core 2份/MCP 5份迁移和公共schema。工单MCP数据版为0.1.1，普通工单及内置AI候选保持原0.1.0；历史`001-tickets.sql`逐字不变。新增五表只互相引用，按Core迁移顺序执行，运行准入另核MCP能力的完整原账及物理观察。所有授权、发布、目标和绑定表初始为空，不seed角色或通配权限。
+
+该入口只准备新目录，返回`prepared/deployment:pending`，不连接数据库或执行迁移。API、权限登记与后台核包都从同一部署锁取得能力版本。可启动的MCP服务、人工同意页面和真实往返仍在接入，当前不得将安装材料准备通过称为MCP已可用；普通业务仍可独立运行。
+
 ## 可选工单AI宿主
 
 默认 `start` 保持普通工单。显式 `npm run build:ai -w @rental-os/example-tickets-api` 编译选装入口，`npm run start:ai -w @rental-os/example-tickets-api` 使用同一启动、关闭、原Guard与数据库实例。前置是同一固定源码的公共AI Client、`ai-native-server@0.2.1`、`ai-native-data@0.2.5`及含`entries.ai`的完整工单`0.2.0`包；普通工单数据版本仍为`0.1.0`。构建顺序先完成公共AI服务端与工单`build:ai`，再构建本宿主普通入口和AI入口，不能用普通41模型Client启动AI入口。

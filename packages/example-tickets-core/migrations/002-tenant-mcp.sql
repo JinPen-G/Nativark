@@ -1,5 +1,6 @@
 -- 工单tenant宿主的可选授权记录；不是默认安装、账号Seed或第二套OAuth凭据账。
--- 须在正式mcp数据能力之后由显式宿主装配。原5份MCP SQL及其历史迁移保持不变。
+-- 仅MCP选装包声明本迁移；五表只引用本迁移自有表，不依赖MCP表的建表顺序。
+-- 运行准入仍须同库核定正式MCP数据能力。原5份MCP SQL及其历史迁移保持不变。
 -- 不存bearer/code/refresh token或OAuth state原文，不自动清理未决同意/原结果。
 CREATE TABLE `example_tickets_mcp_policies` (
   `tenant_id` VARCHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,

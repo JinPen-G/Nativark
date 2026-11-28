@@ -3,3 +3,4 @@ export { createTicketsMcpReadTools, TICKETS_MCP_READ_NAMES, type TicketsMcpReadD
 export { createTicketsMcpTenant, TicketsMcpPolicySchema, TicketsMcpPublishSchema, TICKETS_MCP_SCOPES,
   TICKETS_MCP_TRANSACTION, TicketsMcpError, type TicketsMcpTenant, type TicketsMcpGrant, type TicketsMcpBusiness } from "./tickets-mcp-tenant.mjs";
 export { createTicketsMcpReadHost } from "./tickets-mcp-read-host.mjs";
+export { createTicketsMcpDataPlan } from "./tickets-mcp-data.mjs";

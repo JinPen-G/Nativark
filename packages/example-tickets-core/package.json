@@ -94,6 +94,8 @@
     "pack:core": "node dist/metadata.js package",
     "prepack:core:ai": "npm run build && npm run build:ai",
     "pack:core:ai": "node dist/metadata.js package:ai",
+    "prepack:core:mcp": "npm run build && npm run build:mcp",
+    "pack:core:mcp": "node dist/metadata.js package:mcp",
     "prelint:admin": "npm run build",
     "lint:admin": "tsc -p admin/tsconfig.json"
   },

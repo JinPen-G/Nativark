@@ -83,6 +83,10 @@ export class TicketsAiAuthority {
 
   async entitlement(tx: Tx, tenantId: string) {
     this.active();
+    // 新宿主尚未发布功能目录时是明确缺权益；原订阅锁要求目录已存在，不能把此观察变成驱动不可用。
+    // 只有确认无行才归类拒绝；读取异常仍抛出。已存在项继续沿原锁/期限/授权复核。
+    if (!await tx.subscriptionFeatureCatalog.findUnique({ where: { code: feature } }))
+      throw new TicketsAiSceneError("entitlement_denied", "AI_ACCESS_DENIED");
     await this.subscriptions.lockCategoryCommercialContext(tenantId, tx, [feature]);
     const current = await this.subscriptions.readCategoryCommercialContext(tenantId, tx, this.clock(), [feature]);
     const rows = current.entitlements.filter(row => row.code === feature);

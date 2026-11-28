@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import { CoreDeploymentLockSchema } from "@rental-os/core-contracts";
+import { CoreDeploymentLockSchema, coreDeploymentHostVersions } from "@rental-os/core-contracts";
 import { requireCorePackagePin } from "@rental-os/core-contracts/install";
 import { platformAdminVite } from "../../packages/platform-admin/config/vite";
 import { apiProxyTarget, loadViteEnvironment, publicEnvironmentDefinitions } from "../../config/environment.cjs";
@@ -18,7 +18,7 @@ export default defineConfig(({ mode }) => {
   if (lock.cores.length !== 1 || lock.cores[0].manifest.id !== "example-tickets") throw new Error("工单后台只装配所选工单Core");
   const require = createRequire(import.meta.url);
   const root = resolve(dirname(require.resolve("@rental-os/example-tickets-core")), "..");
-  const { manifest } = requireCorePackagePin(root, lock.cores[0], lock.platform.versions);
+  const { manifest } = requireCorePackagePin(root, lock.cores[0], coreDeploymentHostVersions(lock));
   const platform = platformAdminVite(), virtual = "\0selected-core-manifest";
   return {
     envDir: false,

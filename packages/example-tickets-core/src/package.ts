@@ -16,8 +16,9 @@ export function packTicketsPackage(input: {
   platformTask: string;
   host?: CoreHostVersions;
   ai?: boolean;
+  mcp?: boolean;
 }) {
-  const manifest = createTicketsManifest(input.source, { ai: input.ai }), root = resolve(input.directory);
+  const manifest = createTicketsManifest(input.source, { ai: input.ai, mcp: input.mcp }), root = resolve(input.directory);
   const sourceDirectory = CorePackagePathSchema.parse(input.sourceDirectory);
   for (let directory = root; ; directory = dirname(directory)) {
     const stat = lstatSync(directory);

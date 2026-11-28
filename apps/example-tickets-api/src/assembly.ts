@@ -1,5 +1,5 @@
 /** 示例宿主只选择工单Core，公共实现通过正式出口复用；实际版本/来源由显式部署锁提供。 */
-import { CoreDeploymentLockSchema, type CoreDeploymentLock, type CoreHttpContribution } from "@rental-os/core-contracts";
+import { CoreDeploymentLockSchema, coreDeploymentHostVersions, type CoreDeploymentLock, type CoreHttpContribution } from "@rental-os/core-contracts";
 import { createCoreDeployedCatalogue, createCoreTransactionCatalogues, type CoreDeploymentAvailability } from "@rental-os/core-host";
 import { createMysqlCoreDeploymentObservation, type CoreMysqlDataPlan } from "@rental-os/core-host/mysql-deployment";
 import type { CoreHostSqlTransaction } from "@rental-os/core-host/mysql";
@@ -27,6 +27,8 @@ export interface TicketsOptionalCapabilities {
   http: CoreHttpContribution;
   data: readonly (CoreMysqlDataPlan & { capabilityId: string })[];
   files: ReadonlyMap<string, ReadonlyMap<string, Uint8Array>>;
+  /** 本Core选装数据的完整观察，不能替换清单或略过原迁移。 */
+  coreData?: CoreMysqlDataPlan;
 }
 
 export function composeTicketsApplication(database: PlatformDatabaseClient, input: CoreDeploymentLock,
@@ -38,14 +40,17 @@ export function composeTicketsApplication(database: PlatformDatabaseClient, inpu
     throw new Error("本示范宿主须选择同一工单包及显式装配的数据能力");
   const dependencies = createPublicCoreDependencies<PublicDatabaseTransaction>(database), platformPlan = createPublicPlatformDataPlan();
   if (!isDeepStrictEqual(lock.platform.data, platformPlan.data)) throw new Error("部署锁的公共数据基线与当前宿主不一致");
-  const { manifest } = requireTicketsDeploymentPackage(pin, lock.platform.versions);
+  const { manifest } = requireTicketsDeploymentPackage(pin, coreDeploymentHostVersions(lock));
+  if (selected?.coreData && (!isDeepStrictEqual(selected.coreData.data, manifest.data)
+    || !isDeepStrictEqual(selected.coreData.migrationNames, manifest.data.migrations.map(m => corePrismaMigrationName(manifest.id, m.id)))))
+    throw new Error("工单选装数据观察须完整对应已核包中的原迁移链");
   let catalogue: ReturnType<typeof createCoreDeployedCatalogue>;
   const http = selected?.http ?? createTicketsHttpContribution();
   const observation = (source: Pick<CoreHostSqlTransaction, "$queryRaw">) =>
     createMysqlCoreDeploymentObservation({ database: source, platform: platformPlan,
-      cores: [{ coreId: manifest.id, data: manifest.data,
+      cores: [{ coreId: manifest.id, ...(selected?.coreData ?? { data: manifest.data,
         migrationNames: manifest.data.migrations.map(migration => corePrismaMigrationName(manifest.id, migration.id)),
-        readPhysical: readTicketsPhysicalData }], ...(selected ? { dataCapabilities: selected.data } : {}) });
+        readPhysical: readTicketsPhysicalData }) }], ...(selected ? { dataCapabilities: selected.data } : {}) });
   const catalogueForTransaction = createCoreTransactionCatalogues((transaction: PublicDatabaseTransaction) =>
     createCoreDeployedCatalogue({ lock, registrations: [...catalogue.registrations.values()],
       http: [http], observations: observation(transaction) }));

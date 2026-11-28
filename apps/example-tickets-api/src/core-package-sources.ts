@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
-  CORE_CONTRACT_VERSION, CoreDeploymentLockSchema, type CoreDataObservation, type CoreDeploymentLock
+  CORE_CONTRACT_VERSION, CoreDeploymentLockSchema, coreDeploymentHostVersions, type CoreDataObservation, type CoreDeploymentLock
 } from "@rental-os/core-contracts";
 import { CORE_ARCHIVE_LIMITS, createCoreArchive, readCoreArchive } from "@rental-os/core-contracts/archive";
 import { readCorePackageFiles, readPackageArtifacts } from "@rental-os/core-contracts/package";
@@ -94,7 +94,7 @@ export function createTicketsCorePackageSources(input: TicketsCorePackageSources
     const platformFiles = readCoreArchive(artifact.bytes, artifact.release.sha256).files;
     const directory = await readPlatformRuntime(platformFiles, lock);
     if (!directory) return;
-    const tickets = requireTicketsDeploymentPackage(pin, lock.platform.versions);
+    const tickets = requireTicketsDeploymentPackage(pin, coreDeploymentHostVersions(lock));
     if (!isDeepStrictEqual(tickets.manifest, pin.manifest)
       || relative(resolve(directory, "packages/example-tickets-core"), tickets.root) !== "")
       throw new Error("实际工单包与当前固定部署上下文不一致");
