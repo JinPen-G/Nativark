@@ -6,9 +6,11 @@ import type { PlatformCoreTransaction } from "../ports";
 import type { CorePackagePreparationRecord, CorePackagePreparationUnavailable } from "./ports";
 
 const reference = z.string().min(1).max(128).regex(/^[a-zA-Z0-9][a-zA-Z0-9._:-]*$(?![\s\S])/);
+/** 文档复用原输入约束；运行时在该约束之后统一派发身份。 */
+export const CorePackageDeploymentDispatchIdInputSchema = z.string().length(36).uuid();
 export const CorePackageDeploymentRequestSchema = z.object({
   // UUID 大小写是同一身份，不能在区分大小写的存储中保留两份派发绑定。
-  sha256: CoreArtifactHashSchema, dispatchId: z.string().length(36).uuid().toLowerCase(), approvalReference: reference
+  sha256: CoreArtifactHashSchema, dispatchId: CorePackageDeploymentDispatchIdInputSchema.toLowerCase(), approvalReference: reference
 }).strict();
 export const CorePackageDeploymentQuerySchema = CorePackageDeploymentRequestSchema.pick({ sha256: true, dispatchId: true });
 export const CorePackageDeploymentOperationSchema = CorePackageDeploymentRequestSchema.extend({

@@ -16,7 +16,8 @@ import { CORE_PACKAGE_PREPARATION_HTTP } from "../core-package-preparation/proto
 import { CorePackagePreparationRequestSchema, CorePackagePrepareRequestSchema, CorePackagePreparationQuerySchema } from "../core-package-preparation/ports";
 import { CORE_PACKAGE_SOURCE_HTTP } from "../core-package-source-protocol";
 import { CORE_PACKAGE_DEPLOYMENT_HTTP } from "../core-package-preparation/deployment-protocol";
-import { CorePackageDeploymentRequestSchema, CorePackageDeploymentQuerySchema } from "../core-package-preparation/deployment-ports";
+import { CorePackageDeploymentDispatchIdInputSchema, CorePackageDeploymentRequestSchema,
+  CorePackageDeploymentQuerySchema } from "../core-package-preparation/deployment-ports";
 
 type Schema = Record<string, unknown>;
 const namespace = "PlatformCorePackage";
@@ -38,6 +39,10 @@ const extend = (base: Schema, properties: Record<string, Schema>, required = Obj
 
 function schemas(): CoreOpenApiContribution["schemas"] {
   const sha256 = coreOpenApiSchema(CoreArtifactHashSchema);
+  // 原转换器不执行大小写归一，显式投影同源输入约束和运行时规则。
+  const dispatchId = { ...coreOpenApiSchema(CorePackageDeploymentDispatchIdInputSchema), "x-normalization": "lowercase" };
+  const deploymentRequest = extend(coreOpenApiSchema(CorePackageDeploymentRequestSchema.omit({ dispatchId: true })), { dispatchId });
+  const deploymentQuery = extend(coreOpenApiSchema(CorePackageDeploymentQuerySchema.omit({ dispatchId: true })), { dispatchId });
   const version = coreOpenApiSchema(CoreReleaseVersionSchema);
   const coreId = coreOpenApiSchema(CoreIdSchema);
   const range = { ...coreOpenApiSchema(CoreVersionRangeSchema.innerType()),
@@ -226,11 +231,11 @@ function schemas(): CoreOpenApiContribution["schemas"] {
     [`${namespace}.PreparationRequest`]: coreOpenApiSchema(CorePackagePreparationRequestSchema),
     [`${namespace}.PrepareRequest`]: coreOpenApiSchema(CorePackagePrepareRequestSchema),
     [`${namespace}.PreparationQuery`]: coreOpenApiSchema(CorePackagePreparationQuerySchema),
-    [`${namespace}.DeploymentRequest`]: coreOpenApiSchema(CorePackageDeploymentRequestSchema),
-    [`${namespace}.DeploymentQuery`]: coreOpenApiSchema(CorePackageDeploymentQuerySchema),
+    [`${namespace}.DeploymentRequest`]: deploymentRequest,
+    [`${namespace}.DeploymentQuery`]: deploymentQuery,
     [`${namespace}.DeploymentResult`]: variants(ref("Unavailable"),
-      extend(coreOpenApiSchema(CorePackageDeploymentQuerySchema), { status: values("pending", "unknown") }),
-      extend(coreOpenApiSchema(CorePackageDeploymentQuerySchema), { status: values("succeeded", "failed"),
+      extend(deploymentQuery, { status: values("pending", "unknown") }),
+      extend(deploymentQuery, { status: values("succeeded", "failed"),
         receipt: text, current: ref("DeploymentLock") })),
     [`${namespace}.PrivateSource`]: object({ provider: values("github"), enabled: flag,
       repositories: { ...list(ref("RepositoryURL")), maxItems: 100, uniqueItems: true }, credentialConfigured: flag,
