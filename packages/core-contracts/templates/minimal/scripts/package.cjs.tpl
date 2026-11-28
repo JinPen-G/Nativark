@@ -37,7 +37,7 @@ try {
   const guide = Buffer.from(read(path.resolve(args[2])).toString('utf8').replace(/\r\n/g, '\n'));
   if (createHash('sha256').update(guide).digest('hex') !== scaffold.platform.guideSha256) throw new Error('公开手册不是生成时固定的同版材料');
   const { createManifest } = require('../dist/manifest');
-  const { createOpenApi } = require('../dist/http');
+  const { createOpenApi } = require('../dist/openapi');
   const manifest = createManifest(source), metadata = JSON.parse(read(path.join(root, 'package.json')));
   if (manifest.id !== scaffold.id || metadata.name !== scaffold.packageName || manifest.version !== metadata.version)
     throw new Error('Core ID、npm 包名或版本与当前源码不一致');

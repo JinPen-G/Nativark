@@ -1,6 +1,6 @@
 /** 只输出元数据，不创建文件、连接数据库、挂载 HTTP 或授权角色。 */
 import { createManifest } from "./manifest";
-import { createOpenApi } from "./http";
+import { createOpenApi } from "./openapi";
 
 try {
   const [command, ...args] = process.argv.slice(2);

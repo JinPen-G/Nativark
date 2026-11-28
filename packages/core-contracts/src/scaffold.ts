@@ -1,5 +1,5 @@
 /**
- * Node 开发工具：在固定公开底座的 packages 下生成一个新 Core，不安装依赖或改宿主。
+ * Node 开发工具：在固定公开底座的 packages 下生成 Core 与包内宿主材料，不安装依赖或改公共宿主。
  * 复用正式清单、HTTP、页面及打包合同；生成和静态检查均不授予业务使用权。
  */
 import { execFileSync } from "node:child_process";
@@ -90,21 +90,29 @@ function platformMaterials(workspace: string, source: CoreScaffoldOptions["platf
   const platform = z.object({ version: CoreReleaseVersionSchema }).passthrough().parse(JSON.parse(readPinned("package.json").toString("utf8")));
   if (!isCoreVersionSupported(platform.version, { minInclusive: "0.2.2", maxExclusive: "0.3.0" }))
     return fail("platform_version", "package.json", "version", "当前模板支持底座 >=0.2.2 <0.3.0，请选择兼容的固定来源");
-  const metadata = z.object({ name: z.literal("@rental-os/core-contracts"), version: z.string(),
-    dependencies: z.object({ zod: z.string() }), devDependencies: z.object({ "@types/node": z.string(), typescript: z.string() })
-  }).passthrough().parse(JSON.parse(readPinned("packages/core-contracts/package.json").toString("utf8")));
-  const dependencies = { "@rental-os/core-contracts": metadata.version, zod: metadata.dependencies.zod };
-  for (const value of [...Object.values(dependencies), ...Object.values(metadata.devDependencies)])
-    if (!/^\d+\.\d+\.\d+$/.test(value)) return fail("dependency_unpinned", "packages/core-contracts/package.json", "dependencies", "模板只使用固定版本依赖");
   const lock = z.object({ lockfileVersion: z.literal(3), packages: z.record(z.object({ version: z.string().optional() }).passthrough()) })
     .passthrough().parse(JSON.parse(readPinned("package-lock.json").toString("utf8")));
-  for (const [name, version] of Object.entries({ zod: dependencies.zod, ...metadata.devDependencies })) {
-    const resolved = lock.packages[`packages/core-contracts/node_modules/${name}`] ?? lock.packages[`node_modules/${name}`];
-    if (resolved?.version !== version) return fail("dependency_mismatch", "package-lock.json", name, "固定根锁与合同包依赖版本不同，请使用同一来源的完整锁");
+  const dependencies: Record<string, string> = {}, devDependencies: Record<string, string> = {};
+  for (const name of ["core-contracts", "core-host", "platform-contracts", "platform-core-host", "platform-server", "platform-admin", "platform-api"]) {
+    const directory = `${name === "platform-api" ? "apps" : "packages"}/${name}`;
+    const metadata = z.object({ name: z.literal(`@rental-os/${name}`), version: CoreReleaseVersionSchema }).passthrough()
+      .parse(JSON.parse(readPinned(`${directory}/package.json`).toString("utf8")));
+    if (lock.packages[directory]?.version !== metadata.version)
+      return fail("dependency_mismatch", "package-lock.json", directory, "公共包与固定根锁不同，请使用同一底座材料");
+    dependencies[metadata.name] = metadata.version;
   }
+  // 直接依赖全部取同一根锁的实际解析版本，不把上游范围写成浮动模板依赖。
+  const pin = (names: readonly string[]) => Object.fromEntries(names.map(name => {
+    const version = lock.packages[`node_modules/${name}`]?.version;
+    if (!version || !/^\d+\.\d+\.\d+$/.test(version)) return fail("dependency_unpinned", "package-lock.json", name, "缺少可复用的固定直接依赖版本");
+    return [name, version];
+  }));
+  Object.assign(dependencies, pin(["zod", "@prisma/client", "@nestjs/common", "@nestjs/core", "@nestjs/config", "@nestjs/platform-express",
+    "class-validator", "class-transformer", "reflect-metadata", "rxjs", "react", "react-dom", "react-router-dom", "@tanstack/react-query", "motion"]));
+  Object.assign(devDependencies, pin(["@types/node", "@types/react", "@types/react-dom", "typescript", "vite", "@vitejs/plugin-react", "tailwindcss", "@tailwindcss/vite"]));
   const guide = readPinned(CORE_GUIDE_SOURCE_FILE);
   // 公开 Markdown 的检出换行可随系统变化；迁移/源码回执仍核原字节。
-  return { dependencies, devDependencies: metadata.devDependencies, guideSha256: hash(Buffer.from(guide.toString("utf8").replace(/\r\n/g, "\n"))) };
+  return { dependencies, devDependencies, guideSha256: hash(Buffer.from(guide.toString("utf8").replace(/\r\n/g, "\n"))) };
 }
 
 function checkConflicts(workspace: string, target: string, coreId: string, packageName: string, inspectSource = false) {
@@ -180,12 +188,14 @@ export function createCoreProject(input: CoreScaffoldOptions) {
   const { coreId, packageName, target, platformSource } = parsed.data;
   const workspace = ordinaryPackageDirectory(parsed.data.workspace);
   const parent = ordinaryPackageDirectory(join(workspace, "packages"));
+  const tablePrefix = `core_${coreId.replace(/-/g, "_")}`;
   const namespaces = { api: `/api/cores/${coreId}`, permission: `${coreId}:item:read`,
-    schema: `${coreId}.`, migration: `core.${coreId}.items.initial`, table: `core_${coreId.replace(/-/g, "_")}_items` };
-  if (namespaces.table.length > 64) return fail("namespace_invalid", "create", "coreId", "派生 MySQL 表名超过 64 字符，请缩短 Core ID（最多 53 字符）");
+    schema: `${coreId}.`, migration: `core.${coreId}.items.initial`, table: `${tablePrefix}_items` };
+  if (`${tablePrefix}_operation_item`.length > 64)
+    return fail("namespace_invalid", "create", "coreId", "派生 MySQL 表/约束名超过 64 字符，请缩短 Core ID（最多 44 字符）");
   checkConflicts(workspace, target, coreId, packageName);
   const materials = platformMaterials(workspace, platformSource);
-  const files = templateFiles({ CORE_ID: coreId, PACKAGE_NAME: packageName, TABLE: namespaces.table,
+  const files = templateFiles({ CORE_ID: coreId, PACKAGE_NAME: packageName, TABLE: namespaces.table, TABLE_PREFIX: tablePrefix,
     PLATFORM_URL: `${platformSource.repository.replace(/\.git$/, "")}/blob/${platformSource.commit}`,
     PLATFORM_SHA: platformSource.commit, TARGET: target,
     DEPENDENCIES: json(materials.dependencies).trim(), DEV_DEPENDENCIES: json(materials.devDependencies).trim() });

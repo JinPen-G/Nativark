@@ -1,39 +1,29 @@
-/** 处理器、Guard 政策与 OpenAPI 共用同一声明；HTTP 挂载和当前主体读取沿受控宿主。 */
-import { CoreHttpContributionSchema, CoreOpenApiContributionSchema, coreOpenApiSchema, type CorePrincipal } from "@rental-os/core-contracts";
-import { CORE_ID, CORE_VERSION, ListQuerySchema, ListResponseSchema } from "./contracts";
-import type { ItemService } from "./service";
+/** 业务schema、Nest路由、Guard政策与OpenAPI的同源声明；当前租户只来自原身份。 */
+import { z } from "zod";
+import { CoreHttpContributionSchema } from "@rental-os/core-contracts";
+import { CORE_ID, CORE_VERSION, IdSchema, ItemViewSchema, ListQuerySchema, ListResponseSchema,
+  CreateItemSchema, UpdateItemSchema, ArchiveItemSchema, ReceiptSchema, ReceiptLookupSchema } from "./contracts";
 
+export const HTTP_BASE = "cores/{{CORE_ID}}";
+const params = z.object({ itemId: IdSchema }).strict();
+export const ErrorBodySchema = z.object({ code: z.string(), message: z.string() }).strict();
 export const HTTP = {
-  list: { method: "GET", path: "/items", summary: "读取当前成员可见条目（至多50条）",
-    query: ListQuerySchema, response: ListResponseSchema, permission: { resource: "item", action: "read" } }
+  list: { method: "GET", path: "items", permission: "read", purpose: "business", startsNewBusiness: false,
+    summary: "读取本人的条目页与同范围总数", query: ListQuerySchema, response: ListResponseSchema },
+  get: { method: "GET", path: "items/:itemId", permission: "read", purpose: "business", startsNewBusiness: false,
+    summary: "读取本人的条目详情", params, response: ItemViewSchema },
+  receipt: { method: "GET", path: "operations/:operationId", permission: "read", purpose: "original_receipt", startsNewBusiness: false,
+    summary: "核对本人的原操作回执", params: z.object({ operationId: IdSchema }).strict(), response: ReceiptLookupSchema },
+  create: { method: "POST", path: "items", permission: "create", purpose: "business", startsNewBusiness: true,
+    summary: "创建条目", body: CreateItemSchema, response: ReceiptSchema },
+  update: { method: "POST", path: "items/:itemId/update", permission: "update", purpose: "business", startsNewBusiness: false,
+    summary: "编辑未归档条目", params, body: UpdateItemSchema.omit({ itemId: true }), response: ReceiptSchema },
+  archive: { method: "POST", path: "items/:itemId/archive", permission: "archive", purpose: "business", startsNewBusiness: false,
+    summary: "归档条目并保留历史", params, body: ArchiveItemSchema.omit({ itemId: true }), response: ReceiptSchema }
 } as const;
 export function createHttpContribution() {
   return CoreHttpContributionSchema.parse({ coreId: CORE_ID, implementationVersion: CORE_VERSION,
-    routes: Object.entries(HTTP).map(([id, route]) => ({ id, method: route.method, path: route.path,
-      audiences: ["operator"], permissions: [route.permission], purpose: "business", startsNewBusiness: false })) });
-}
-export function createApi(service: ItemService, current: () => CorePrincipal) {
-  return { async list(query: unknown) {
-    HTTP.list.query.parse(query);
-    return HTTP.list.response.parse(await service.list(current()));
-  } };
-}
-export function createOpenApi() {
-  const route = HTTP.list, name = `${CORE_ID}.list`;
-  return CoreOpenApiContributionSchema.parse({
-    paths: { [`/api/cores/${CORE_ID}${route.path}`]: { get: {
-      operationId: name, summary: route.summary, security: [{ bearerAuth: [] }],
-      "x-core-permissions": [`${CORE_ID}:${route.permission.resource}:${route.permission.action}`],
-      "x-core-audiences": ["operator"], "x-core-purpose": "business", "x-core-starts-new-business": false,
-      description: "需正式宿主挂载、原会话、Core/成员授权、精确权限及真实数据适配；未装配不可用。",
-      responses: {
-        200: { description: "当前授权下的列表", content: { "application/json": { schema: { $ref: `#/components/schemas/${name}.Response` } } } },
-        400: { description: "不接受租户或其他查询字段" }, 401: { description: "会话缺失或失效" },
-        403: { description: "当前业务权限或对象范围不足" }, 503: { description: "Core/数据/适配尚未就绪" }
-      }
-    } } },
-    schemas: { [`${name}.Response`]: { type: "object", required: ["data", "requestId"], properties: {
-      data: coreOpenApiSchema(route.response), requestId: { type: "string" }
-    } } }
-  });
+    routes: Object.entries(HTTP).map(([id, route]) => ({ id, method: route.method, path: `/${route.path}`,
+      audiences: ["operator"], permissions: [{ resource: "item", action: route.permission }],
+      purpose: route.purpose, startsNewBusiness: route.startsNewBusiness })) });
 }

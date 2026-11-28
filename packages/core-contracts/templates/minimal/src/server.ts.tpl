@@ -5,6 +5,7 @@ import { CORE_ID, CORE_VERSION, DATA_READABLE } from "./contracts";
 export interface ScopeAuthority {
   resolveAuthorizedBinding(request: CoreScopeRequest): Promise<CoreBinding | undefined>;
   readReadiness: CoreServerContribution["readReadiness"];
+  assessRemoval?: CoreServerContribution["assessRemoval"];
 }
 export function createServer(authority: ScopeAuthority): CoreServerContribution {
   return {
@@ -24,6 +25,7 @@ export function createServer(authority: ScopeAuthority): CoreServerContribution 
         || typeof authority?.readReadiness !== "function")
         return { status: "unavailable", code: "core_adapter_unavailable", message: "缺少当前数据与业务就绪依据" };
       return authority.readReadiness(binding);
-    }
+    },
+    ...(authority?.assessRemoval ? { assessRemoval: authority.assessRemoval.bind(authority) } : {})
   };
 }
