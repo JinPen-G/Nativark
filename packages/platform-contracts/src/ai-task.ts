@@ -30,10 +30,15 @@ export const AI_IMAGE_MODEL_STEP_CODE = "ai.model.image" as const;
 export const AI_AUDIO_MODEL_STEP_CODE = "ai.model.audio" as const;
 export const AI_TEXT_CAPABILITY_PROBE_STEP_CODE = "ai.capability.text.probe" as const;
 
+/** Core 与资源种类各使用 1–64 位小写标识，沿 Core ID 的单连字符规则。
+ * 标识只定位事实；宿主仍按已登记 Core、当前 scope 和对象权限读取原结果。 */
+export const AI_CORE_FACT_RESOURCE_TYPE_PATTERN = "^core:[a-z](?:[a-z0-9]|-(?=[a-z0-9])){0,63}:[a-z](?:[a-z0-9]|-(?=[a-z0-9])){0,63}$(?![\\s\\S])";
+export type AiCoreFactResourceType = `core:${string}:${string}`;
+
 /** 来源是资源引用而非任意下载 URL；打开时重新鉴权，不把引用本身当能力令牌。 */
 export interface AiFactReference {
   scope: AiExecutionScope;
-  resourceType: "order" | "quote" | "configuration" | "report" | "inspection" | "knowledge";
+  resourceType: "order" | "quote" | "configuration" | "report" | "inspection" | "knowledge" | AiCoreFactResourceType;
   resourceId: string;
   observedAt: string;
   /** 缺历史依据不能伪装为当前规则或已冻结快照；兼容办理建议须显式标记来源。 */
