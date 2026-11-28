@@ -261,6 +261,8 @@ function projectPhasedInstallation(value, expected, api) {
   result.runtimeClient = observed.runtimeClient ? 'verified' : 'not_checked';
   if (!observed.runtimeClient) result.issues.push({ scope: 'materials', code: 'runtime_identity_unverified' });
   result.preparation = observed.preparation ? 'prepared' : 'not_checked';
+  // 运行和数据观察不能补造原准备结果；缺任一必需材料仍保持未检查。
+  if (!observed.preparation) result.issues.push({ scope: 'materials', code: 'materials_unavailable' });
   result.initialization = observed.initialization;
   result.database.initialization = observed.initialization.platform;
 

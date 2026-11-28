@@ -100,7 +100,7 @@ v2 分阶段新装锁的 `postCapability` 在诊断中保留原迁移、来源�
 node scripts/ops/platform-doctor.cjs --profile selected-core --root <组合根目录> --host apps/rental-api --lock <完整v2锁绝对JSON> --platform-package <原底座绝对tgz> --core rental=<标准包绝对目录> --capability ai-native=<公共数据包绝对目录> --service --steps --json
 ```
 
-`runtime.phasedInstallation` 分别展示原准备结果、已运行包身份、Client、基础原账、每项后置迁移及物理状态、平台/Core 初始化。`ready` 仅表示这一份安装观察齐全；租户开通、成员分配、绑定、业务和模型权限仍沿原入口核定，不由安装观察授予。缺字段、版本/摘要冲突、v1 锁、未结束原迁移或无可靠物理依据都不能返回成功；不自动安装、初始化、迁移或换键重试。
+`runtime.phasedInstallation` 分别展示原准备结果、已运行包身份、Client、基础原账、每项后置迁移及物理状态、平台/Core 初始化。`ready` 仅表示这一份安装观察齐全；原准备结果缺失时，即使已观察到运行与数据就绪，整体仍未检查，`--steps` 单列原分阶段准备缺项。租户开通、成员分配、绑定、业务和模型权限仍沿原入口核定，不由安装观察授予。缺字段、版本/摘要冲突、v1 锁、未结束原迁移或无可靠物理依据都不能返回成功；不自动安装、初始化、迁移或换键重试。
 
 `--root` 可指向原 `rental-host.context.json` 运行归档：诊断核该上下文的实际文件表，保留其中的开发来源证明，不把源码文件表误用于已投影运行包。标准包字节核同后，若只剩旧 API 路径许可，v2 本地检查仍为 `not_checked`；只有同一包摘要的正式宿主完整运行观察才能补足其可信策略依据。其他清单、迁移、摘要或兼容错误继续拒绝，v1 规则不变。
 
@@ -136,6 +136,10 @@ import {
 完整 v2 运行材料使用 `@rental-os/platform-core-host/core-package-deployment` 的 `readPhasedPlatformRuntimeEvidence` 核原上下文及公共六包，再与所属宿主原选择器的实际 Client/Core/AI 扩展核验合并。它接收完整 v2 锁；原 `readPlatformRuntimeEvidence` 仍只接受 v1。缺公共运行证据或原选择器任一部分时，`installed/runtimeClient` 不能补为已核。[边界及签名](../../packages/platform-core-host/README.md#分阶段新装的只读运行证据)
 
 Rental 宿主沿原 `CORE_PACKAGE_STORAGE_ROOT` 和 `CORE_PLATFORM_PACKAGE_REFERENCE` 选择底座材料：在受管目录的 `archives/index.json` 登记与完整锁中 `base.platform` 一致的标准底座归档，实际 `.tgz` 放同一 `archives/` 目录。诊断的 `--platform-package` 也选择这份已核字节。缺原登记或归档时保持材料未检查，不能用运行上下文、源码目录或 `v2.base` 代替标准归档证据；登记不办理下载、部署或 v1 升级。索引格式复用[原包来源入口](../../packages/platform-core-host/src/core-package-preflight/README.md)。
+
+可复现的新装观察组合固定为 Zelo `5a6bbbf7593414a122a060018cb1abd87f1c20bf` 与 Rental `7fec0e1a4fcd681425b11d58c47a82f37e79f561`，准备方式见该版 [Rental 公开入口](https://github.com/JinPen-G/Zelo-rental-core/blob/7fec0e1a4fcd681425b11d58c47a82f37e79f561/workspace/apps/rental-api/README.md#新装-rental-与公共-ai)。该底座同时保留工单候选 `0.1.6` 的 0.3 兼容声明，Rental 双 Core 示例宿主也引用同版，原目录/权限回归使用同一来源；这些是待评审的固定开发源码，尚非正式发行。按同一组 SHA 准备 `--fresh-ai` 运行包、标准底座归档和原索引；先做本地材料诊断，缺选装包时按报告补齐明确材料，数据库保持未知。原打包结果 `prepared / deployment: pending` 也不代表迁移已执行。
+
+该宿主启动门禁要求完整 18 条原迁移（公共 14、Rental 2、公共 AI 1、Rental 扩展 1）通过原账与物理检查，不能为了提前提供 HTTP 状态绕过门禁。按原说明显式迁移和初始化 SaaS，再使用当前 SaaS 会话读取上面的诊断。品类尚未初始化时，报告可同时显示数据 `ready` 和安装 `incomplete / initialization_required`；在核定环境显式执行 `node apps/rental-api/dist-ai/ai-fresh-initialize.js` 后，用同一身份重读平台及 Core 的原初始化状态/收据、每阶段原账和完整安装 `ready`。重复执行该原入口保留已有品类及初始化收据；观察命令本身不会触发它。租户授权和具体业务可用性继续分别办理。
 
 原因码白名单为 `materials_unavailable`、`runtime_identity_unverified`、`deployment_changed`、`ledger_unavailable`、`ledger_incomplete`、`ledger_mismatch`、`physical_unavailable`、`physical_mismatch`、`initialization_unchecked`、`initialization_required`、`initialization_conflict`、`observation_unavailable`。其他安全代码投影为 `host_prerequisite`，均阻止整体 ready；原异常文字不进入诊断。未知/缺观察退出 2，已知冲突或待初始化退出 1，完整安装观察通过退出 0；整条 doctor 还会综合本地材料与成员检查。
 
