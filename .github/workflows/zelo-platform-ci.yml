@@ -612,7 +612,11 @@ jobs:
             const origin = 'http://127.0.0.1:3093';
             const response = await fetch(origin + '/api/auth/login', { method: 'POST', signal: AbortSignal.timeout(10000),
               headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tenantCode: 'platform', account: 'admin', password: process.env.SEED_PLATFORM_PASSWORD }) });
-            assert.equal(response.status, 201); const body = await response.json(), token = (body.data ?? body).accessToken; assert(token);
+            assert.equal(response.status, 201); const body = await response.json(); let token = (body.data ?? body).accessToken; assert(token);
+            const changed = await fetch(origin + '/api/auth/change-password', { method: 'POST', signal: AbortSignal.timeout(10000),
+              headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+              body: JSON.stringify({ currentPassword: process.env.SEED_PLATFORM_PASSWORD, newPassword: process.env.SEED_PLATFORM_PASSWORD + '-Changed8!' }) });
+            assert.equal(changed.status, 201); const changedBody = await changed.json(); token = (changedBody.data ?? changedBody).accessToken; assert(token);
             const root = process.cwd(), args = [path.join(process.argv[2], 'scripts/ops/platform-doctor.cjs'), '--profile', 'selected-core',
               '--root', root, '--host', 'apps/rental-api', '--lock', process.env.RENTAL_DEPLOYMENT_LOCK,
               '--core', 'rental=' + path.join(root, 'packages/rental-core'), '--capability', 'ai-native=' + path.join(root, 'public-ai-data'),
