@@ -148,7 +148,7 @@ function verifyAiData(capability, context, files, digests) {
 }
 
 function verifyMcpData(capability, files, digests) {
-  requireEvidence(["0.1.0", "0.1.1"].includes(capability.version) && capability.data?.version === "0.1.0", "MCP 数据包发行版本不一致");
+  requireEvidence(["0.1.0", "0.1.1", "0.1.2"].includes(capability.version) && capability.data?.version === "0.1.0", "MCP 数据包发行版本不一致");
   const material = verifyCapabilityFiles(capability, files, digests, "prisma/schema.prisma", "MCP");
   verifyCapabilityExports(material, ["data-capability", "mysql-data"], "import", "MCP");
   requireEvidence(material.metadata.exports?.["./data-contribution.json"] === `./${MCP_MANIFEST}`, "MCP 缺少正式包内数据清单出口");
