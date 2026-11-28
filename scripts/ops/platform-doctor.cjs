@@ -336,6 +336,10 @@ function inspectSelection(options, environment, receipt, report, add) {
   try {
     input = (input.lockVersion === 2 ? load('deployment').CorePhasedMigrationLockSchema : api.CoreDeploymentLockSchema).parse(input);
     lock = input.lockVersion === 2 ? input.base : input;
+    if (input.lockVersion === 2) report.selection.postCapability = input.postCapability.map(item => ({
+      coreId: item.coreId, migration: { id: item.migration.id, sha256: item.migration.sha256,
+        source: files.source(item.migration.source) }, prerequisites: item.prerequisites,
+      state: 'declaration-only' }));
     add('deployment-lock', 'pass', '通过本工具同树 @rental-os/core-contracts 正式 schema；仅检查材料。');
   } catch {
     add('deployment-lock', 'invalid', '固定部署锁未通过正式合同，或该版合同未提供所需锁解析器。', CONTRACT_GUIDE);
@@ -453,7 +457,10 @@ async function main(args = process.argv.slice(2)) {
     }
     if (options.service) {
       report.scope = options.database ? 'explicit-database-and-service-read-only' : 'explicit-service-read-only';
-      const observed = await require('./platform-doctor-upgrade.cjs').readRunningVersions();
+      // v1 catalogue/receipt 不包含后置扩展；不能只匹配 v2.base 就证明完整 v2 已运行或已准备。
+      const phased = report.selection?.lockVersion === 2;
+      const observed = phased ? { exitCode: 2, current: { state: 'unavailable', reason: 'phased_runtime_observation_unavailable' } }
+        : await require('./platform-doctor-upgrade.cjs').readRunningVersions();
       report.runtime.versions = observed.current ?? { state: 'unavailable' };
       let matches = false;
       const current = observed.current;
@@ -469,9 +476,12 @@ async function main(args = process.argv.slice(2)) {
       report.checks.push({ id: 'service:versions', required: true,
         state: observed.exitCode === 0 && matches ? 'pass' : current?.state === 'observed' && report.selection && !matches ? 'invalid' : 'not_checked',
         message: matches ? '原宿主当前包/数据观察与本地所选完整组合一致。' : '当前版本读取缺少权威，或与本地所选组合不一致。',
-        repair: '核 PLATFORM_DOCTOR_API_URL、当前 SaaS 会话及原宿主部署观察；使用同一固定锁，Core＋AI 由所属宿主供给。' });
+        repair: phased ? '所选 v2 组合须由原宿主提供完整锁、实际包及后置扩展的原账/物理观察；v1 catalogue 不能代替。'
+          : '核 PLATFORM_DOCTOR_API_URL、当前 SaaS 会话及原宿主部署观察；使用同一固定锁，Core＋AI 由所属宿主供给。' });
       if (options.prepared) {
-        const receipt = await require('./platform-doctor-upgrade.cjs').readPreparationReceipt(options.prepared);
+        const receipt = phased ? { exitCode: 2, status: 'unknown', sha256: options.prepared,
+          reason: 'phased_preparation_receipt_unavailable' }
+          : await require('./platform-doctor-upgrade.cjs').readPreparationReceipt(options.prepared);
         const candidate = receipt.candidate;
         const same = (expected, actual) => expected && actual && expected.sha256 === actual.sha256
           && expected.version === actual.version && isDeepStrictEqual(expected.source, actual.source);
@@ -484,7 +494,8 @@ async function main(args = process.argv.slice(2)) {
         report.runtime.preparationReceipt = receipt;
         report.checks.push({ id: 'service:preparation', required: true, state: matched ? 'pass' : receipt.exitCode === 0 ? 'invalid' : 'not_checked',
           message: matched ? '同摘要原候选已记录且与所选组合一致；实际部署另看当前版本。' : '原候选回执未核定或不是所选组合。',
-          repair: '按原 sha256 核 preparation-receipt、候选固定锁和当前权限；不换摘要重发。' });
+          repair: phased ? 'v2 新装材料不能套用仅记录 v1 的候选回执；须由原宿主提供完整分阶段原结果。'
+            : '按原 sha256 核 preparation-receipt、候选固定锁和当前权限；不换摘要重发。' });
       }
       finish(report);
     }

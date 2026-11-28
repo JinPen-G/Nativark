@@ -73,6 +73,8 @@ node scripts/ops/platform-doctor.cjs --profile platform --database --steps
 
 公共 AI 将 `--profile platform` 替换为 `--profile public-ai`，并提供 `CORE_DEPLOYMENT_LOCK_FILE` 和 `PLATFORM_AI_DATA_PACKAGE_DIR`，或显式 `--lock` / `--capability ai-native=<绝对包目录>`。执行前后须使用同一选择。`selected-core` 暂不执行通用迁移或账号编排，继续由所属固定宿主提供数据和生命周期；材料诊断仍支持 Core＋AI。
 
+v2 分阶段新装锁的 `postCapability` 在诊断中保留原迁移、来源和前置声明。当前 v1 `catalogue`/准备回执不包含该后置阶段，不能拿 `v2.base` 的匹配当作完整运行或准备成功；`--service`/`--prepared` 保持未检查，等待所属宿主的完整分阶段读口。当前成员的准入/绑定就绪可单独读取，也不代替整库数据观察。
+
 | 原库观察 | 含义与可继续入口 |
 | --- | --- |
 | `unknown` | 未取得完整元数据可见性、连接/结构读取失败，或 AI 部分迁移需所属数据所有者恢复；停止写入 |
@@ -127,7 +129,7 @@ node scripts/ops/platform-doctor-upgrade.cjs receipt --sha256 <同一摘要>
 3. 仅 `maintenance_bridge_checked` 且 `migration: not_required` 可进入已批准维护窗口；结果仍为 `deployment: pending`。部署者核两个配置确指同一原库，停止旧 API 并等待原在途处理结束，在新目录再次 `status --profile platform --lock <新锁>`，随后按原 `npm start`/服务管理入口启动新目录。新旧不得同时处理业务，不执行迁移、重新初始化或业务 Seed。新包归档索引、`CORE_PLATFORM_PACKAGE_REFERENCE` 和 `CORE_DEPLOYMENT_LOCK_FILE` 指向新版本的固定材料。
 4. 用原登录入口验证既有口令，回读配置、角色授权和 `platform-doctor-upgrade status` 的实际新版本。旧候选仍按原 SHA `receipt` 回读；桥接不另造候选收据。首次切换失败时先停新进程，确认原账/数据未变化且旧程序仍可读，再用保留的旧目录、旧锁及原配置恢复。任何数据变化、未知在途操作或旧版不再可读，都转数据所有者的恢复流程，不能倒写迁移账或直接覆盖运行文件。
 
-`bridge` 不改包校验器、锁、文件、账号、权限或服务，不自动下载新版本。运行版本变化、当前会话失效、候选文件变更和库状态不明均拒绝继续；重新开始只读核对不等于重新执行任何业务动作。执行权限仍来自本次部署窗口。
+`bridge` 不改包校验器、锁、文件、账号、权限或服务，不自动下载新版本。原 HTTP 不公开数据库连接身份，因此 `database.matchesRunningHost` 保持 `not_checked`，两端指向同一原库仍须部署者核配置。运行版本变化、当前会话失效、候选文件变更和库状态不明均拒绝继续；重新开始只读核对不等于重新执行任何业务动作。执行权限仍来自本次部署窗口。
 
 ## 默认零 Core 的五步
 

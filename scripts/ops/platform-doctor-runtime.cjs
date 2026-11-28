@@ -154,7 +154,8 @@ async function inspectBridge(options, previous, environment = process.env) {
     return { exitCode: 0, status: 'maintenance_bridge_checked', scope: 'zero-core-unchanged-data',
       previous: { version: baseline.platform.versions.platform, source: files.source(baseline.platform.source), sha256: baseline.platform.sha256 },
       candidate: { version: candidate.platform.versions.platform, source: files.source(candidate.platform.source), sha256: candidate.platform.sha256 },
-      database: { state: observation.state, initialization: observation.initialization.state, applied: observation.applied, pending: observation.pending },
+      database: { state: observation.state, initialization: observation.initialization.state, applied: observation.applied, pending: observation.pending,
+        matchesRunningHost: 'not_checked' },
       migration: 'not_required', deployment: 'pending', authorization: 'operator-maintenance-window-required',
       recovery: '保留旧目录/锁/配置，停旧后在新目录重新 status；启动失败先停止新进程，沿同库原账复核旧版可读条件再恢复旧目录。不得并行启动或改迁移账。' };
   } catch (error) {
