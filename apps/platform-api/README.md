@@ -100,7 +100,7 @@ v2 分阶段新装锁的 `postCapability` 在诊断中保留原迁移、来源�
 node scripts/ops/platform-doctor.cjs --profile selected-core --root <组合根目录> --host apps/rental-api --lock <完整v2锁绝对JSON> --platform-package <原底座绝对tgz> --core rental=<标准包绝对目录> --capability ai-native=<公共数据包绝对目录> --service --steps --json
 ```
 
-`runtime.phasedInstallation` 分别展示原准备结果、已运行包身份、Client、基础原账、每项后置迁移及物理状态、平台/Core 初始化。`ready` 仅表示这一份安装观察齐全；租户开通、成员分配、绑定、业务和模型权限仍沿原入口核定，不由安装观察授予。缺字段、版本/摘要冲突、v1 锁、未结束原迁移或无可靠物理依据都不能返回成功；不自动安装、初始化、迁移或换键重试。
+`runtime.phasedInstallation` 分别展示原准备结果、已运行包身份、Client、基础原账、每项后置迁移及物理状态、平台/Core 初始化。`ready` 仅表示这一份安装观察齐全；原准备结果缺失时，即使已观察到运行与数据就绪，整体仍未检查，`--steps` 单列原分阶段准备缺项。租户开通、成员分配、绑定、业务和模型权限仍沿原入口核定，不由安装观察授予。缺字段、版本/摘要冲突、v1 锁、未结束原迁移或无可靠物理依据都不能返回成功；不自动安装、初始化、迁移或换键重试。
 
 `--root` 可指向原 `rental-host.context.json` 运行归档：诊断核该上下文的实际文件表，保留其中的开发来源证明，不把源码文件表误用于已投影运行包。标准包字节核同后，若只剩旧 API 路径许可，v2 本地检查仍为 `not_checked`；只有同一包摘要的正式宿主完整运行观察才能补足其可信策略依据。其他清单、迁移、摘要或兼容错误继续拒绝，v1 规则不变。
 

@@ -63,6 +63,12 @@ function installationSteps(report, { rootCommands, host }) {
       '沿原租户创建入口创建租户及首个管理员，受控交付临时口令；租户管理员改密后使用自己的会话。',
       '创建失应答先读取目标租户及原审计，不能重复创建；平台管理员账号不替代租户业务身份。'),
   ];
+  if (selectedCore && report.selection?.lockVersion === 2) steps.splice(1, 0,
+    step('phased-preparation', '部署者', '核原分阶段准备结果',
+      '所选完整 v2 锁、标准归档、后置扩展及原宿主准备材料已核同。', API + '#core公共-ai-的完整-v2-观察',
+      '从原宿主只读观察取得 prepared / deployment:pending；这是材料准备结果，数据库和实际运行分别核验。',
+      '缺原准备结果保持 not_checked；不拿 v2.base、v1 候选回执或已经登录补造成功，也不自动重建材料。',
+      { state: report.runtime.phasedInstallation?.preparation ?? 'not_checked' }));
   if (selectedCore) {
     steps.push(
       step('core-admission', '部署者 → SaaS 管理员', '核实际部署并登记 Core 准入',
