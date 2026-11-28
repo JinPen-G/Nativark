@@ -7,6 +7,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { isDeepStrictEqual } = require("node:util");
 const { isFullCommit, isPackagePath, readJson, sha256 } = require("./release-composition.cjs");
+const { publicDataSdkFor } = require("../rental-host-lock.cjs");
 
 function releaseDependencyInputs(workspace) {
   const source = readJson(workspace.files.get("development.workspace.json"), "固定投影来源");
@@ -45,14 +46,14 @@ function releaseDependencyInputs(workspace) {
   }
   const dataSdk = source.publicAiDataSdk;
   if (dataSdk !== undefined) {
-    const archive = "vendor/ai-native-data-public-0.2.3.tgz";
-    const install = "apps/rental-api/node_modules/@rental-os/public-ai-data";
+    const definition = publicDataSdkFor(dataSdk);
+    const { archive, install } = definition;
     const bytes = workspace.files.get(archive);
     const entry = readJson(lock, "固定投影 npm 锁").packages?.[install];
     const owner = readJson(inputs.get("apps/rental-api/package.json"), "公共数据 SDK 宿主");
     const declared = source.files?.find(item => item.path === archive);
     if (!dataSdk || dataSdk.name !== "@rental-os/ai-native-data" || dataSdk.alias !== "@rental-os/public-ai-data"
-      || dataSdk.version !== "0.2.3" || !isFullCommit(dataSdk.source?.commit)
+      || dataSdk.version !== definition.version || !isFullCommit(dataSdk.source?.commit)
       || source.ai !== true || source.installation !== "fresh-ai" || dataSdk.archive !== archive || dataSdk.install !== install
       || !isDeepStrictEqual(dataSdk.source, source.platform?.source) || !(bytes instanceof Uint8Array) || !bytes.length
       || dataSdk.sha256 !== sha256(bytes) || declared?.sha256 !== dataSdk.sha256 || declared.bytes !== bytes.length

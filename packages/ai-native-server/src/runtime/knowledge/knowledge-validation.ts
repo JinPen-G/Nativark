@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { type AiExecutionContext, type AiExecutionScope } from '@rental-os/platform-contracts/ai-gateway';
 import { AI_KNOWLEDGE_DRAFT_VERSION, type AiKnowledgeChunkDraft, type AiKnowledgeDocumentDraft, type AiMemoryDraft } from '@rental-os/platform-contracts';
 import { requestFingerprint } from '@rental-os/platform-contracts/request-fingerprint';
+import { AI_CORE_FACT_RESOURCE_TYPE_PATTERN, type AiCoreFactResourceType } from '@rental-os/platform-contracts/ai-task';
 import type { KnowledgeAuthorizationPort, KnowledgeAuthorizationRequest, KnowledgeGrant, KnowledgeRecord, MemoryConfirmation } from './knowledge.ports';
 import { KnowledgeError, unavailable } from './knowledge-errors';
 
@@ -18,7 +19,10 @@ const locatorSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('section'), sectionId: id, paragraph: z.number().int().min(1).max(100000) }).strict(),
 ]);
 export const documentSourceSchema = z.object({ kind: z.literal('document'), documentId: id, documentVersion: id, chunkId: id, scope: scopeSchema, aclRevision: z.number().int().positive(), locator: locatorSchema }).strict();
-export const factSchema = z.object({ scope: scopeSchema, resourceType: z.enum(['order', 'quote', 'configuration', 'report', 'inspection', 'knowledge']), resourceId: id, observedAt: time, basis: z.discriminatedUnion('kind', [
+export const factSchema = z.object({ scope: scopeSchema, resourceType: z.union([
+  z.enum(['order', 'quote', 'configuration', 'report', 'inspection', 'knowledge']),
+  z.custom<AiCoreFactResourceType>(value => typeof value === 'string' && new RegExp(AI_CORE_FACT_RESOURCE_TYPE_PATTERN).test(value))
+]), resourceId: id, observedAt: time, basis: z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('current') }).strict(), z.object({ kind: z.literal('snapshot'), version: id }).strict(),
   z.object({ kind: z.literal('missing'), reason: z.enum(['snapshot_missing', 'source_unavailable']) }).strict(),
   z.object({ kind: z.literal('legacy_current_fallback'), reason: z.literal('snapshot_missing') }).strict(),

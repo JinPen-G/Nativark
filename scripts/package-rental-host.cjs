@@ -12,7 +12,7 @@ const { isDeepStrictEqual } = require('node:util');
 const { selectedCompilerOptions, samePrismaSchema, prismaSchemaTokens } = require('./build-selected-prisma.cjs');
 const { compileRentalPlatformSource, requireMatchingPublicRuntime, publicDirectories } = require('./rental-platform-build.cjs');
 const { selectWorkspaces, projectHostLock, lockedDependency, hostDirectory,
-  retentionSdk, retentionSdkLock, isRetentionSdkDependency, publicDataSdk, isPublicDataSdkDependency } = require('./rental-host-lock.cjs');
+  retentionSdk, retentionSdkLock, isRetentionSdkDependency, publicDataSdk, publicDataSdkFor, isPublicDataSdkDependency } = require('./rental-host-lock.cjs');
 const root = path.resolve(__dirname, '..');
 const targetNodeVersion = '24.13.0';
 const sourceProvenanceFile = 'development.workspace.json';
@@ -337,7 +337,8 @@ const schemaTokens = ${prismaSchemaTokens.toString()};
 for (const item of receipt.files) if (digest(fs.readFileSync(path.join(root, item.file))) !== item.sha256)
   throw Error('镜像输入摘要变化：' + item.file);
 for (const item of receipt.clients) {
-  const schemaFile = item.directory === 'apps/platform-api/generated/client' ? 'apps/platform-api/prisma/schema.prisma'
+  const schemaFile = item.directory === 'apps/platform-api/generated/client'
+    ? (item.mode === 'platform-capabilities' ? 'apps/platform-api/prisma-deployment/schema.prisma' : 'apps/platform-api/prisma/schema.prisma')
     : item.directory === 'apps/rental-api/generated/client' ? 'apps/rental-api/prisma-deployment/schema.prisma' : undefined;
   if (!schemaFile) throw Error('镜像 Client 目录未登记');
   const source = fs.readFileSync(path.join(root, schemaFile), 'utf8');
@@ -799,7 +800,10 @@ function createRentalHostContext(input) {
     for (const [file, bytes] of aiFiles) files.set('public-ai-data/' + file, bytes);
   }
   if (publicRetention) files.set(retentionSdk.archive, sourceFiles.get(retentionSdk.archive));
-  if (publicAiDataSdk) files.set(publicDataSdk.archive, sourceFiles.get(publicDataSdk.archive));
+  if (publicAiDataSdk) {
+    const archive = publicDataSdkFor(publicAiDataSdk.metadata).archive;
+    files.set(archive, sourceFiles.get(archive));
+  }
   files.set('rental-host.deployment-provenance.json', json(describeRentalDeployment(api, lock, deploymentFiles, platform, phased?.postCapability)));
   if (sourceProvenanceBytes) files.set(sourceProvenanceFile, sourceProvenanceBytes);
   let buildProvenance;

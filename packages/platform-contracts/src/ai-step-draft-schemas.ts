@@ -1,6 +1,6 @@
 /** Original C04 Step shapes. Business tool codes are fixed by the host's
  * registered catalogue and checked again at the persistence boundary. */
-import { AI_ERROR_CODES } from './ai-task';
+import { AI_CORE_FACT_RESOURCE_TYPE_PATTERN, AI_ERROR_CODES } from './ai-task';
 import { leafClosed as closed, leafEnum as choice, leafId as id, leafList,
   leafRef as ref, leafInt, type AiLeafSchemaDraft } from './ai-leaf-schema';
 
@@ -15,7 +15,10 @@ const unknownError = closed({ ...errorProperties, code: choice("AI_RESULT_UNKNOW
 const knownError = closed({ ...errorProperties, code: choice(...AI_ERROR_CODES.filter(code => code !== "AI_RESULT_UNKNOWN")), retryable: { type: "boolean" }, nextAction: choice("none", "clarify", "reconfirm", "reauthorize", "reconcile", "retry_later", "manual") });
 
 export const AI_TASK_FACT_SCHEMA = closed({
-    scope: ref("AiExecutionScope"), resourceType: choice("order", "quote", "configuration", "report", "inspection", "knowledge"),
+    scope: ref("AiExecutionScope"), resourceType: { oneOf: [
+      choice("order", "quote", "configuration", "report", "inspection", "knowledge"),
+      { type: "string", pattern: AI_CORE_FACT_RESOURCE_TYPE_PATTERN }
+    ] },
     resourceId: id(), observedAt: timestamp,
     basis: { oneOf: [
       closed({ kind: choice("current") }),
