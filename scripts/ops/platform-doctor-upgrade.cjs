@@ -139,13 +139,13 @@ async function run(options, api, environment = process.env, fetcher = fetch) {
   if (options.command === 'status') {
     const current = versions(await read('catalogue'), api);
     const available = current.state === 'observed' && [current.platform, ...current.cores, ...current.capabilities]
-      .every(item => item.availability === 'available') && current.cores.every(item => item.registered);
+      .every(item => item.availability === 'available' && item.current) && current.cores.every(item => item.registered);
     return { exitCode: available ? 0 : 1, status: available ? 'observed' : 'unavailable', current };
   }
   if (options.command === 'plan') {
     const current = versions(await read('catalogue'), api);
     if (current.state !== 'observed' || [current.platform, ...current.cores, ...current.capabilities]
-      .some(item => item.availability !== 'available' || !item.current)) return { exitCode: 1, status: 'unavailable', current,
+      .some(item => item.availability !== 'available' || !item.current) || current.cores.some(item => !item.registered)) return { exitCode: 1, status: 'unavailable', current,
       repair: '当前宿主缺完整运行/数据观察，停止候选办理。' };
     const value = await read('plan-update', options.request);
     if (value.status !== 'inspected' || value.plan?.status !== 'checked') return { exitCode: 1, status: 'unavailable', current,

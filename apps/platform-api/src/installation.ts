@@ -30,14 +30,24 @@ export interface InstallationObservation {
   state: "unknown" | "incompatible" | "migration_incomplete" | "empty" | "migration_pending" | "ready";
   reason: string;
   selectionSha256: string;
-  applied: number;
-  pending: number;
+  applied: number | null;
+  pending: number | null;
   initialization: { state: "not_checked" | "uninitialized" | "initialized" | "conflict";
     receipt?: "recorded" | "not_found"; mustChangePassword?: boolean };
   interrupted?: { migration: string; sha256: string; state: "failed" | "unknown" };
   data?: CoreDataObservation;
 }
 const hash = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
+
+function grantCoversDatabase(scope: string, name: string | null | undefined): boolean {
+  if (!name) return false;
+  if (scope === "*.*") return true;
+  // SHOW GRANTS 保留数据库模式的 \_ / \%（官方 MySQL 镜像会转义库名）。
+  // 只接纳还原后恰为当前库的模式，不推测其他通配模式或特殊反斜线库名。
+  const quoted = /^`((?:[^`]|``)+)`\.\*$/.exec(scope);
+  return Boolean(quoted && !name.includes("\\")
+    && quoted[1].replaceAll("``", "`").replace(/\\([_%])/g, "$1") === name);
+}
 
 /** AI 计划由同树正式 AI SDK 解析固定包后提供；公共构建不静态依赖可选 SDK。 */
 export function selectInstallation(input: { profile: InstallationProfile; lock?: unknown; capability?: CoreMysqlDataPlan }): InstallationSelection {
@@ -93,7 +103,7 @@ async function initialization(database: PrismaClient, transaction: Prisma.Transa
 /** 必须由显式命令传入 Client。无法读取不是空库；未结束原收据不自动重放。 */
 export async function observeInstallation(database: PrismaClient, selected: InstallationSelection): Promise<InstallationObservation> {
   const result: InstallationObservation = { checked: false, state: "unknown", reason: "database_unavailable",
-    selectionSha256: selected.sha256, applied: 0, pending: selected.migrations.length, initialization: { state: "not_checked" } };
+    selectionSha256: selected.sha256, applied: null, pending: null, initialization: { state: "not_checked" } };
   let stage = "metadata_visibility";
   try {
     return await database.$transaction(async (tx): Promise<InstallationObservation> => {
@@ -102,13 +112,12 @@ export async function observeInstallation(database: PrismaClient, selected: Inst
       const databases = await tx.$queryRaw<Array<{ name: string | null }>>`SELECT DATABASE() AS name`;
       const grants = await tx.$queryRaw<Array<Record<string, string>>>`SHOW GRANTS FOR CURRENT_USER`;
       const name = databases[0]?.name;
-      const scoped = name ? "`" + name.replaceAll("`", "``") + "`.*" : undefined;
       const permissions = new Set<string>();
       let routineVisible = false, revoked = false;
       for (const row of grants) for (const text of Object.values(row)) {
         if (/^REVOKE\b/.test(text)) revoked = true;
         const match = /^GRANT (.+) ON (.+) TO /.exec(text);
-        if (!match || match[2] !== "*.*" && match[2] !== scoped) continue;
+        if (!match || !grantCoversDatabase(match[2], name)) continue;
         const values = match[1].split(", ");
         if (values.includes("ALL PRIVILEGES")) {
           for (const permission of ["SELECT", "SHOW VIEW", "TRIGGER", "EVENT"]) permissions.add(permission);
@@ -129,7 +138,7 @@ export async function observeInstallation(database: PrismaClient, selected: Inst
         UNION ALL SELECT EVENT_NAME, 'EVENT' FROM information_schema.EVENTS WHERE EVENT_SCHEMA=DATABASE()
         UNION ALL SELECT TRIGGER_NAME, 'TRIGGER' FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA=DATABASE()`;
       result.checked = true;
-      if (!objects.length) return { ...result, state: "empty", reason: "no_database_objects" };
+      if (!objects.length) return { ...result, state: "empty", reason: "no_database_objects", applied: 0, pending: selected.migrations.length };
       if (!objects.some(row => row.name === "_prisma_migrations" && row.kind === "BASE TABLE"))
         return { ...result, state: "incompatible", reason: "original_ledger_missing" };
       stage = "original_ledger";
@@ -137,6 +146,8 @@ export async function observeInstallation(database: PrismaClient, selected: Inst
         SELECT migration_name AS name, checksum, finished_at AS finished, rolled_back_at AS rolledBack,
           (logs IS NOT NULL AND logs <> '') AS failed FROM _prisma_migrations ORDER BY started_at, id
         LIMIT ${selected.migrations.length + 1}`;
+      result.applied = 0;
+      result.pending = selected.migrations.length;
       for (const [index, row] of receipts.entries()) {
         const expected = selected.migrations[index];
         if (!expected || row.name !== expected.name || row.checksum !== expected.sha256 || row.rolledBack)
