@@ -3,13 +3,15 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
-import { z } from "zod";
+import { createRequire } from "node:module";
+import { ForbiddenException, UnauthorizedException } from "@nestjs/common";
+import type { infer as ZodInfer } from "zod";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type { PlatformAuthService, PlatformPrincipalAuthority } from "@rental-os/platform-server";
 import { getRequestIdentity, runWithRequestIdentity } from "@rental-os/platform-server/request-identity";
 import { hasEffectivePermission } from "@rental-os/platform-server/permission-match";
 import { requestFingerprint as hash } from "@rental-os/platform-contracts/request-fingerprint";
-import { TicketIdSchema, type TicketsService } from "@rental-os/example-tickets-core";
+import { TicketIdSchema, TicketError, type TicketsService, type TicketAiRouteState } from "@rental-os/example-tickets-core";
 import { createPrismaOAuthStore } from "@rental-os/mcp-server/prisma-oauth-store";
 import { createPrismaPublicClientRegistry } from "@rental-os/mcp-server/prisma-public-client-registry";
 import { createPublicClientAuthorization } from "@rental-os/mcp-server/public-client-authorization";
@@ -17,33 +19,30 @@ import type { OriginalOAuthConsentAuthority } from "@rental-os/mcp-server/persis
 import type { CurrentOAuthGrant, OriginalOAuthAccessAuthority, OriginalOAuthGrantAuthority } from "@rental-os/mcp-server/persistent-oauth-tokens";
 
 type Tx = Prisma.TransactionClient;
+const { z } = createRequire(import.meta.url)("zod") as typeof import("zod");
 export interface TicketsMcpBusiness {
   withTransaction<T>(native: Tx, consume: (service: TicketsService) => Promise<T>): Promise<T>;
 }
 const uuid = z.string().uuid(), revision = z.number().int().min(1).max(2147483647);
 const seconds = z.number().int().positive().safe(), digest = z.string().regex(/^[a-f0-9]{64}$/);
 const clientId = z.string().min(1).max(200).regex(/^[\x21-\x7e]+$/);
-export const TICKETS_MCP_SCOPES = Object.freeze(["example-tickets:read", "example-tickets:receipt"] as const);
-const scopes = z.array(z.enum(TICKETS_MCP_SCOPES)).min(1).max(2).refine(value => new Set(value).size === value.length);
-export const TicketsMcpPolicySchema = z.object({ revision, enabled: z.boolean(), clientId, clientRevision: revision,
-  resource: z.string().url().max(2048), scopes, expiresAt: seconds, fieldPolicy: z.literal("tickets-summary-v1"),
-  discovery: z.object({ windowSeconds: z.number().int().min(1).max(3600), limit: z.number().int().min(1).max(1000000) }).strict() }).strict();
-export const TicketsMcpPublishSchema = TicketsMcpPolicySchema.omit({ revision: true }).extend({ operationId: uuid, expectedRevision: revision.nullable() }).strict();
+export { TICKETS_MCP_SCOPES, TicketsMcpPolicySchema, TicketsMcpPublishSchema } from "@rental-os/example-tickets-core/mcp-http";
+import { TICKETS_MCP_SCOPES, TicketsMcpPolicySchema, TicketsMcpPublishSchema } from "@rental-os/example-tickets-core/mcp-http";
 const principalSchema = z.object({ tenantId: TicketIdSchema, subjectId: TicketIdSchema, audience: z.literal("operator") }).strict();
 const sessionSchema = z.object({ sessionId: uuid, expiresAt: seconds, workspaceId: TicketIdSchema.nullable() }).strict();
 const ownerSchema = z.object({ principal: principalSchema, session: sessionSchema }).strict();
-type Owner = z.infer<typeof ownerSchema>;
+type Owner = ZodInfer<typeof ownerSchema>;
 const consentSchema = ownerSchema.extend({ id: uuid, revision: z.union([z.literal(1), z.literal(2)]), requestHash: digest,
   policyHash: digest, policy: TicketsMcpPolicySchema, redirectUri: z.string().url().max(2048), expiresAt: seconds, reviewHash: digest,
   decision: z.enum(["pending", "approved", "denied"]), grantId: uuid.nullable(), grantSubject: uuid.nullable() }).strict();
-type Consent = z.infer<typeof consentSchema>;
+type Consent = ZodInfer<typeof consentSchema>;
 const grantSchema = ownerSchema.extend({ id: uuid, subject: uuid, consentId: uuid, requestHash: digest,
   policyHash: digest, policy: TicketsMcpPolicySchema, expiresAt: seconds }).strict();
-export type TicketsMcpGrant = z.infer<typeof grantSchema> & { revision: number; revoked: boolean };
+export type TicketsMcpGrant = ZodInfer<typeof grantSchema> & { revision: number; revoked: boolean };
 export const TICKETS_MCP_TRANSACTION = { isolationLevel: "Serializable", maxWait: 2500, timeout: 15000 } as const;
 export class TicketsMcpError extends Error {
   readonly retryable = false;
-  constructor(readonly kind: "denied" | "unavailable" | "changed" | "unknown") { super(`TICKETS_MCP_${kind.toUpperCase()}`); }
+  constructor(readonly kind: "denied" | "unavailable" | "changed" | "unknown", readonly availability?: TicketAiRouteState) { super(`TICKETS_MCP_${kind.toUpperCase()}`); }
 }
 const fail = () => new TicketsMcpError("unavailable"), deny = () => new TicketsMcpError("denied"), changed = () => new TicketsMcpError("changed");
 const live = (signal: AbortSignal) => { if (signal.aborted) throw fail(); };
@@ -73,7 +72,8 @@ export function createTicketsMcpTenant(input: { database: PrismaClient;
     const lease = await input.principals.lock(native, who.principal, who.principal.tenantId);
     const user = await lease.revalidate();
     if (user.isSaasAdmin || who.session.expiresAt <= Date.now() / 1000
-      || requireRead && !hasEffectivePermission(user.permissions, "example-tickets:ticket:read")) throw deny();
+      || requireRead && !hasEffectivePermission(user.permissions, "example-tickets:ticket:read"))
+      throw new TicketsMcpError("denied", { state: "denied", reason: "permission_denied" });
     return lease;
   };
   const coreIn = (native: Tx, who: Owner) => input.tickets.withTransaction(native,
@@ -89,7 +89,9 @@ export function createTicketsMcpTenant(input: { database: PrismaClient;
   async function published(native: Tx, who: Owner, selectedClient: string, signal: AbortSignal) {
     const policy = await readPolicy(native, who.principal.tenantId, selectedClient);
     const registration = await registrations.readIn(native, selectedClient, signal);
-    if (!policy?.enabled || policy.expiresAt <= Date.now() / 1000 || !registration?.enabled
+    if (!policy) throw new TicketsMcpError("denied", { state: "unpublished", reason: "tool_not_published" });
+    if (policy.expiresAt <= Date.now() / 1000) throw new TicketsMcpError("denied", { state: "unpublished", reason: "publication_expired" });
+    if (!policy.enabled || !registration?.enabled
       || registration.revision !== policy.clientRevision || registration.expiresAt <= Date.now() / 1000
       || policy.scopes.some(scope => !registration.scopes.includes(scope))) throw deny();
     return { policy, registration };
@@ -149,6 +151,16 @@ export function createTicketsMcpTenant(input: { database: PrismaClient;
   }
   const projection = (grant: TicketsMcpGrant): CurrentOAuthGrant => ({ id: grant.id, subject: grant.subject, revision: grant.revision,
     clientId: grant.policy.clientId, resource: resource.href, scopes: [...grant.policy.scopes], expiresAt: grant.expiresAt });
+  const grantForOAuth = async (native: Tx, id: string, signal: AbortSignal) => {
+    try { return await currentGrant(native, id, signal); }
+    catch (error) {
+      // 只有原权威明确拒绝才是无有效grant；数据/账/结构异常继续交原OAuth不可用分支。
+      if (error instanceof ForbiddenException || error instanceof UnauthorizedException
+        || error instanceof TicketsMcpError && error.kind === "denied"
+        || error instanceof TicketError && ["denied", "not_found"].includes(error.code)) return undefined;
+      throw error;
+    }
+  };
   const store = createPrismaOAuthStore(input.database, { async record(native, authorization, signal) {
     const who = currentBrowser().owner, consent = await readConsent(native, authorization.authorizationId);
     if (!consent || !same(consent.principal, who.principal) || consent.decision !== "approved"
@@ -156,10 +168,10 @@ export function createTicketsMcpTenant(input: { database: PrismaClient;
     live(signal); await audit(native, who, "code-issued", authorization);
   } });
   const access: OriginalOAuthAccessAuthority = { async current(id, transaction, signal) {
-    const grant = await currentGrant(store.native(transaction), id, signal); return grant && projection(grant);
+    const grant = await grantForOAuth(store.native(transaction), id, signal); return grant && projection(grant);
   } };
   const issuance: OriginalOAuthGrantAuthority = { async current(id, selectedClient, clientRevision, transaction, signal) {
-    const grant = await currentGrant(store.native(transaction), id, signal);
+    const grant = await grantForOAuth(store.native(transaction), id, signal);
     return grant && grant.policy.clientId === selectedClient && grant.policy.clientRevision === clientRevision ? projection(grant) : undefined;
   }, async revocationOwner(id, selectedClient, transaction, signal) {
     // 原凭据先证明family归属；停用客户端/会话也可撤回本人原族，不恢复新访问权。

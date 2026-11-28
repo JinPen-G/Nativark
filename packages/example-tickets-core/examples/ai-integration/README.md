@@ -146,7 +146,7 @@ MCP的`/service`、`/persistent-oauth-authorization`、`/persistent-oauth-tokens
 
 ## tenant MCP 参加者
 
-`npm run build:mcp -w @rental-os/example-tickets-core`单独编译`/mcp`出口。普通构建、AI入口与普通标准包不加载它。[tenant参加者](tickets-mcp-tenant.mts)提供显式发布、持久人工同意/grant与原授权撤回；[读取宿主参加者](tickets-mcp-read-host.mts)提供两个工具的同事务业务权限、固定字段投影、原持久计量和原账回读。此阶段尚未提供可启动的MCP宿主，不能将这些工厂的存在标为业务可用。
+`npm run build:mcp -w @rental-os/example-tickets-core`单独编译`/mcp`出口。普通构建、AI入口与普通标准包不加载它。[tenant参加者](tickets-mcp-tenant.mts)提供显式发布、持久人工同意/grant与原授权撤回；[读取宿主参加者](tickets-mcp-read-host.mts)提供两个工具的同事务业务权限、固定字段投影、原持久计量和原账回读。[显式MCP宿主](../../../../apps/example-tickets-api/src/mcp-main.mts)复用原协议、唯一数据库与生命周期，[人工授权页](../../../../apps/example-tickets-admin/src/tickets-mcp.tsx)复用公共后台身份与请求围栏。安装和启动沿[公开步骤](../../../../apps/example-tickets-api/README.md#启动与人工授权)，实际可用性仍取当前原权威。
 
 - 浏览器控制面须先经原Guard建ALS，再由`withBrowser`重核签名会话。OAuth身份取该已核会话的持久定位，随后同Native锁定并复核原账号、租户、角色与Core准入；没有客户端自报tenant或workspace。
 - `prepareConsent`核原客户端注册、PKCE和精确回调，保存请求及已阅摘要。`decide`只消费同一持久待决记录，批准与grant及审计一起提交。发布政策使用当前`system:params:manage`、精确client修订、scopes、有效期和显式discovery限额，无默认允许值。
@@ -157,9 +157,9 @@ MCP的`/service`、`/persistent-oauth-authorization`、`/persistent-oauth-tokens
 
 [选装SQL](../../migrations/002-tenant-mcp.sql)只定义工单自有的政策、同意、grant、目标及绑定五表；不修改原MCP五份SQL，不包含账号/业务Seed或token明文。五表只引用自身，沿正式Core迁移链追加到MCP选装包，数据版为`0.1.1`；普通工单及内置AI包保持原`0.1.0`链。`pack:core:mcp`声明`entries.ai=dist-mcp/index-mcp.mjs`与MCP 0.1.2能力前置，复用`check`、`prepare-install`及标准归档。运行物理观察同时核原工单三表与选装五表，缺任一仍不可用。完整安装材料见[宿主准备说明](../../../../apps/example-tickets-api/README.md#工单mcp安装材料)。
 
-服务装配、人工同意页面、当前可用性与真实OAuth往返仍待完成；已核内存类型、标准包与选装SQL摘要/结构解析，以及参加者原生ESM装包加载及缺原身份拒绝，未验真实数据库。目录未发布的内置AI权益明确显示拒绝；原目录查询失败仍保持不可用，不用这一区分兜底其他异常。
+同源`/mcp-http`出口只含浏览器DTO/路由/OpenAPI，不加载Node或MCP运行时。人工页面展示实际外发投影，明确同意/字段绑定/返回客户端分别执行；code和token不进入页面文本或存储。写请求关闭认证重发，原标记按会话与同意记录隔离；原结果不明时保留引用。SaaS注册、租户发布、个人同意、读取绑定四者分别核权，无默认许可。
 
-可用性UI和宿主装配继续沿本端口接线。两个MCP reader只可在真实权威已齐备的宿主选用，缺失时保持`unavailable`，不能把默认未配置当成完整MCP验收。
+已核内存类型、标准包与选装SQL摘要/结构解析，以及参加者原生ESM组合加载及缺原身份拒绝；真实数据库、OAuth往返与Chrome仍由独占CI验收，未通过前不声明A04完成。目录未发布的内置AI权益明确显示拒绝；原目录查询失败仍保持不可用，不用这一区分兜底其他异常。MCP限额耗尽、未发布和发布到期保留所属原因，其余缺失权威保持不可用。
 
 ## 必要验证与边界
 

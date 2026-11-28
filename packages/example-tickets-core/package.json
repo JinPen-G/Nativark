@@ -17,6 +17,7 @@
       "ai-http": [
         "dist/ai-http.d.ts"
       ],
+      "mcp-http": ["dist/mcp-http.d.ts"],
       "package": [
         "dist/package.d.ts"
       ],
@@ -57,6 +58,7 @@
       "types": "./dist/ai-http.d.ts",
       "default": "./dist/ai-http.js"
     },
+    "./mcp-http": { "types": "./dist/mcp-http.d.ts", "default": "./dist/mcp-http.js" },
     "./package": {
       "types": "./dist/package.d.ts",
       "default": "./dist/package.js"

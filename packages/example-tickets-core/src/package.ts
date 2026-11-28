@@ -25,8 +25,9 @@ export function packTicketsPackage(input: {
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("工单打包根须为不经过链接的普通目录");
     if (dirname(directory) === directory) break;
   }
-  // 仅AI选装包加载同次编译的可选出口；Node版本沿清单，普通打包没有AI运行依赖。
+  // 仅显式选装包加载同次编译的可选出口；Node版本沿清单，普通打包没有AI运行依赖。
   const openapi = input.ai ? (require("../dist-ai/index.mjs") as { createTicketsAiOpenApi(): CoreOpenApiContribution }).createTicketsAiOpenApi()
+    : input.mcp ? (require("./mcp-http") as { createTicketsMcpOpenApi(): CoreOpenApiContribution }).createTicketsMcpOpenApi()
     : createTicketsOpenApi();
   const generated = new Map<string, Uint8Array>([
     ["core.manifest.json", Buffer.from(JSON.stringify(manifest, null, 2) + "\n")],

@@ -69,6 +69,10 @@ export function composeTicketsApplication(database: PlatformDatabaseClient, inpu
     observeInTransaction: transaction => observation(transaction).read() });
   return {
     tickets,
+    // 此处固定为createCoreDeployedCatalogue的数据库级观察，第二参数不参与它的数据检查；不构造业务主体。
+    requireCoreDataAvailable: (transaction: Pick<CoreHostSqlTransaction, "$queryRaw">) =>
+      createCoreDeployedCatalogue({ lock, registrations: [...catalogue.registrations.values()], http: [http],
+        observations: observation(transaction) }).availability.requireAvailable(manifest.id, ""),
     requireDataCapabilityAvailable: (capabilityId: string, transaction: Pick<CoreHostSqlTransaction, "$queryRaw">) =>
       createCoreDeployedCatalogue({ lock, registrations: [...catalogue.registrations.values()], http: [http],
         observations: observation(transaction) }).requireDataCapabilityAvailable(capabilityId),

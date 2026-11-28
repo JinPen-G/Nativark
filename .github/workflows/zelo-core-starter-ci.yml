@@ -321,6 +321,7 @@ jobs:
           console.log('API持久重启后条目修订与原操作回执保持');
           NODE
       - name: 固定公共AI材料与工单AI标准包
+        id: tickets-ai-materials
         working-directory: ${{ env.CI_DIR }}/source
         shell: bash
         run: |
@@ -557,6 +558,232 @@ jobs:
             try { console.error(redact(await dom('return document.body.innerText'))); } catch {}
             throw error;
           } finally { await driver(session, undefined, 'DELETE'); }
+          NODE
+      - name: 准备独立工单MCP组合
+        id: tickets-mcp-materials
+        if: ${{ !cancelled() && steps.tickets-ai-materials.outcome == 'success' }}
+        working-directory: ${{ env.CI_DIR }}/source
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$GITHUB_WORKSPACE/$CI_DIR"
+          # 前一宿主已在EXIT排空；本组合重生唯一公共Client，不使用AI数据或模型。
+          npm run prisma:generate -w @rental-os/platform-api
+          npm run build -w @rental-os/example-tickets-api
+          npm run build -w @rental-os/mcp-server
+          npm run build:mcp -w @rental-os/example-tickets-core
+          npm run build:mcp -w @rental-os/example-tickets-api
+          mkdir "$task/mcp-data" "$task/prepared-mcp"
+          npm pack -w @rental-os/mcp-server --ignore-scripts --pack-destination "$task" > "$task/mcp-pack-name.txt"
+          tar -xzf "$task/rental-os-mcp-server-0.1.2.tgz" --strip-components=1 -C "$task/mcp-data"
+          node packages/example-tickets-core/dist/metadata.js package:mcp https://github.com/JinPen-G/Zelo "$GITHUB_SHA" \
+            "$task/platform-identity.json" "$task/tickets-mcp.tgz" > "$task/tickets-mcp-package.json"
+          node --input-type=module - "$task" <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { readCorePackageFiles } from '@rental-os/core-contracts/package';
+          import { CORE_ARCHIVE_LIMITS } from '@rental-os/core-contracts/archive';
+          import { CoreDeploymentLockSchema, coreDeploymentHostVersions } from '@rental-os/core-contracts';
+          import { createMcpDataRelease } from '@rental-os/mcp-server/data-capability';
+          const task = process.argv[2], read = name => JSON.parse(readFileSync(join(task, name)));
+          const source = { repository: 'https://github.com/JinPen-G/Zelo', commit: process.env.GITHUB_SHA };
+          writeFileSync(join(task, 'mcp-source.json'), JSON.stringify(source), { flag: 'wx' });
+          const files = readCorePackageFiles(join(task, 'mcp-data'), CORE_ARCHIVE_LIMITS.fileBytes, CORE_ARCHIVE_LIMITS.totalBytes);
+          const release = createMcpDataRelease({ source, files });
+          const lock = CoreDeploymentLockSchema.parse({ lockVersion: 1, platform: read('platform-release.json'), cores: [], dataCapabilities: [release] });
+          writeFileSync(join(task, 'mcp-host.json'), JSON.stringify(coreDeploymentHostVersions(lock)), { flag: 'wx' });
+          writeFileSync(join(task, 'tickets-mcp-config.json'), JSON.stringify({ enabled: true, origin: 'https://127.0.0.1:5194/',
+            reviewedUntil: Math.floor(Date.now() / 1000) + 3600, tableCollation: 'utf8mb4_0900_ai_ci' }), { flag: 'wx' });
+          NODE
+          core_hash=$(node -p "require(process.argv[1]).sha256" "$task/tickets-mcp-package.json")
+          node packages/core-contracts/dist/prepare-install.js "$task/tickets-mcp.tgz" "$core_hash" "$task/prepared-mcp" "$task/mcp-host.json" > "$task/tickets-mcp-prepared.json"
+          selected=$(node -p "require(process.argv[1]).directory" "$task/tickets-mcp-prepared.json")
+          node packages/core-contracts/dist/check.js "$selected" --host "$task/mcp-host.json" --json
+          node apps/example-tickets-api/dist-mcp/prepare-mcp-deployment.mjs "$task/platform-release.json" "$task/mcp-source.json" \
+            "$task/mcp-data" "$selected" "$PWD/apps/platform-api/prisma-deployment-tickets-mcp"
+          tar -xzf "$task/tickets-mcp.tgz" -C packages/example-tickets-core
+          export CORE_DEPLOYMENT_LOCK="$PWD/apps/platform-api/prisma-deployment-tickets-mcp/core.deployment.lock.json"
+          export API_PROXY_TARGET=http://127.0.0.1:3094 VITE_API_BASE_URL=/api
+          npm run build -w @rental-os/example-tickets-admin
+      - name: 工单tenant MCP人工授权与持久读取
+        if: ${{ !cancelled() && steps.tickets-mcp-materials.outcome == 'success' }}
+        working-directory: ${{ env.CI_DIR }}/source
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$GITHUB_WORKSPACE/$CI_DIR"
+          MYSQL_PWD=zelo_ci_root_only mysql -h 127.0.0.1 -u root -e "CREATE DATABASE zelo_tickets_mcp_ci CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci; GRANT ALL ON zelo_tickets_mcp_ci.* TO 'zelo_ci'@'%';"
+          export DATABASE_URL='mysql://zelo_ci:zelo_ci_database_only@127.0.0.1:3306/zelo_tickets_mcp_ci?connection_limit=4'
+          export CORE_DEPLOYMENT_LOCK="$PWD/apps/platform-api/prisma-deployment-tickets-mcp/core.deployment.lock.json"
+          export PLATFORM_MCP_DATA_PACKAGE_DIR="$task/mcp-data" TICKETS_MCP_CONFIGURATION="$task/tickets-mcp-config.json"
+          export AUTH_TOKEN_SECRET="$(openssl rand -hex 32)" SEED_PLATFORM_PASSWORD="TicketsMcp9-$(openssl rand -hex 12)"
+          export API_PORT=3094 API_PROXY_TARGET=http://127.0.0.1:3094 DATABASE_CONNECT_ON_START=true
+          node node_modules/prisma/build/index.js migrate deploy --schema apps/platform-api/prisma-deployment-tickets-mcp/schema.prisma
+          npm run initialize -w @rental-os/platform-api
+          node apps/example-tickets-api/dist-mcp/mcp-main.mjs > "$task/tickets-mcp-api.log" 2>&1 &
+          api_pid=$!
+          trap 'kill "$api_pid" ${web_pid:+"$web_pid"} ${driver_pid:+"$driver_pid"} ${tls_pid:+"$tls_pid"} 2>/dev/null || true; wait || true' EXIT
+          node node_modules/vite/bin/vite.js preview apps/example-tickets-admin --config apps/example-tickets-admin/vite.config.ts --host 127.0.0.1 --port 5195 --strictPort > "$task/tickets-mcp-web.log" 2>&1 &
+          web_pid=$!
+          openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 1 -keyout "$task/mcp-tls.key" -out "$task/mcp-tls.crt" \
+            -subj '/CN=127.0.0.1' -addext 'subjectAltName=IP:127.0.0.1' > "$task/mcp-tls.log" 2>&1
+          chmod 600 "$task/mcp-tls.key"
+          # 本job唯一loopback TLS入口；保留已核Host，不接任何外部主机。
+          node --input-type=module - "$task" > "$task/tickets-mcp-tls.log" 2>&1 <<'NODE' &
+          import { createServer } from 'node:https';
+          import { request } from 'node:http';
+          import { readFileSync } from 'node:fs';
+          const task = process.argv[2];
+          const server = createServer({ key: readFileSync(task + '/mcp-tls.key'), cert: readFileSync(task + '/mcp-tls.crt') }, (incoming, outgoing) => {
+            const path = new URL(incoming.url, 'https://127.0.0.1:5194').pathname;
+            if (path === '/ci-callback') { outgoing.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' }); outgoing.end('客户端回调已到达'); return; }
+            const api = path === '/mcp' || path.startsWith('/oauth/') || path.startsWith('/.well-known/') || path.startsWith('/api/');
+            const upstream = request({ hostname: '127.0.0.1', port: api ? 3094 : 5195, path: incoming.url, method: incoming.method, headers: incoming.headers }, result => {
+              outgoing.writeHead(result.statusCode, result.headers); result.pipe(outgoing);
+            });
+            upstream.on('error', () => { if (!outgoing.headersSent) outgoing.writeHead(503); outgoing.end(); }); incoming.pipe(upstream);
+          });
+          server.listen(5194, '127.0.0.1'); process.on('SIGTERM', () => { server.closeAllConnections(); server.close(); });
+          NODE
+          tls_pid=$!
+          export NODE_EXTRA_CA_CERTS="$task/mcp-tls.crt"
+          if ! curl --cacert "$task/mcp-tls.crt" -fsS --retry 30 --retry-delay 1 --retry-max-time 60 --retry-connrefused --max-time 5 https://127.0.0.1:5194/api/health -o "$task/tickets-mcp-health.json"; then
+            node -e 'const fs=require("node:fs");for(const p of process.argv.slice(1)){let t=fs.readFileSync(p,"utf8");for(const k of ["DATABASE_URL","AUTH_TOKEN_SECRET","SEED_PLATFORM_PASSWORD"])if(process.env[k])t=t.replaceAll(process.env[k],"[redacted]");console.error(t.slice(-5000));}' "$task/tickets-mcp-api.log" "$task/tickets-mcp-web.log" "$task/tickets-mcp-tls.log"
+            exit 1
+          fi
+          "$CHROMEWEBDRIVER/chromedriver" --port=9515 --allowed-ips=127.0.0.1 > "$task/tickets-mcp-browser.log" 2>&1 &
+          driver_pid=$!
+          curl -fsS --retry 10 --retry-delay 1 --retry-connrefused --max-time 5 http://127.0.0.1:9515/status -o "$task/tickets-mcp-browser-status.json"
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { randomUUID, randomBytes, createHash } from 'node:crypto';
+          import { resolve } from 'node:path';
+          const origin = 'https://127.0.0.1:5194', api = '/api/cores/example-tickets', secrets = [];
+          let stage = 'login', session;
+          const redact = value => { let text = String(value ?? ''); for (const secret of [...secrets, process.env.AUTH_TOKEN_SECRET, process.env.SEED_PLATFORM_PASSWORD])
+            if (secret) text = text.replaceAll(secret, '[redacted]'); return text.slice(0, 1600); };
+          async function request(path, token, data, expected = 200, method = data === undefined ? 'GET' : 'POST') {
+            const response = await fetch(origin + path, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+              ...(data === undefined ? {} : { body: JSON.stringify(data) }), signal: AbortSignal.timeout(35000) });
+            const json = await response.json(); assert.equal(response.status, expected, `${stage} ${path}: ${response.status}, code=${json?.error?.code ?? json?.code ?? 'unavailable'}`); return json.data ?? json;
+          }
+          const core = (action, token, data) => request('/api/platform/core-host/' + action, token, { coreId: 'example-tickets', ...data });
+          const control = (action, token, data, expected = 200) => request(api + '/mcp/' + action.replace(/[A-Z]/g, letter => '-' + letter.toLowerCase()), token, data, expected);
+          async function login(account, password, tenantCode = 'mcp-tickets-one', change = true) {
+            let auth = await request('/api/auth/login', undefined, { tenantCode, account, password }, 201); secrets.push(auth.accessToken, password);
+            if (change) { password = 'Mcp9-' + randomUUID(); auth = await request('/api/auth/change-password', auth.accessToken, { currentPassword: arguments[1], newPassword: password }, 201); secrets.push(auth.accessToken, password); }
+            return { token: auth.accessToken, password };
+          }
+          async function driver(path, data, method = data === undefined ? 'GET' : 'POST') {
+            const response = await fetch('http://127.0.0.1:9515' + path, { method, headers: { 'Content-Type': 'application/json' },
+              ...(data === undefined ? {} : { body: JSON.stringify(data) }), signal: AbortSignal.timeout(30000) });
+            const { value } = await response.json(); assert(response.ok && !value?.error, `浏览器 ${path}: ${redact(value?.message)}`); return value;
+          }
+          const dom = (script, ...args) => driver(session + '/execute/sync', { script, args });
+          async function waitFor(read, label) {
+            const deadline = Date.now() + 30000;
+            do { const result = await read(); if (result) return result; await new Promise(resolve => setTimeout(resolve, 200)); } while (Date.now() < deadline);
+            throw Error('页面等待超时：' + label);
+          }
+          async function fill(selector, text) {
+            const element = await waitFor(() => dom('return document.querySelector(arguments[0])', selector), selector), id = element['element-6066-11e4-a52e-4f735466cecf'];
+            await driver(`${session}/element/${id}/clear`, {}); await driver(`${session}/element/${id}/value`, { text });
+          }
+          async function click(label) {
+            const element = await waitFor(async () => {
+              const buttons = await dom('return [...document.querySelectorAll("button")].filter(e => e.checkVisibility({visibilityProperty:true,opacityProperty:true}) && !e.disabled && e.getAttribute("aria-disabled") !== "true")');
+              for (const button of buttons) if (await driver(`${session}/element/${button['element-6066-11e4-a52e-4f735466cecf']}/computedlabel`) === label) return button;
+            }, label); await driver(`${session}/element/${element['element-6066-11e4-a52e-4f735466cecf']}/click`, {});
+          }
+          const text = label => waitFor(() => dom('return document.body.innerText.includes(arguments[0])', label), label);
+          try {
+            const saas = await login('admin', process.env.SEED_PLATFORM_PASSWORD, 'platform');
+            await core('deployment-admission', saas.token, { state: 'accepting', expectedRevision: 0, operationId: randomUUID() });
+            const tenant = await request('/api/platform/tenants', saas.token, { tenantCode: 'mcp-tickets-one', tenantName: 'MCP工单测试', adminAccount: 'admin', adminDisplayName: '测试管理员' }, 201);
+            const admin = await login('admin', tenant.temporaryPassword), tenantId = tenant.tenant.tenantId;
+            let tenantGrant = await core('tenant-grants', saas.token, { tenantId, state: 'enabled', expectedRevision: 0, operationId: randomUUID() });
+            await core('member-assignments', admin.token, { userId: tenant.admin.id, state: 'assigned', expectedRevision: 0, operationId: randomUUID() });
+            await core('bindings', admin.token, { expectedRevision: 0, operationId: randomUUID() });
+            const permissions = ['read', 'create'].map(action => 'example-tickets:ticket:' + action);
+            const role = await request('/api/platform/roles', admin.token, { code: 'MCP_READER', name: '读取成员', scope: 'operator', enabledBusinessScopes: [], permissions, dataScope: 'own', isActive: true }, 201);
+            assert.equal(role.fixedAllPermissions, false); assert(!role.permissions.includes('*'));
+            const user = await request('/api/platform/users', admin.token, { account: 'reader', displayName: 'MCP成员', roleIds: [role.id], isPlatformAdmin: false, isActive: true }, 201);
+            const actor = await login('reader', user.temporaryPassword);
+            let assignment = await core('member-assignments', admin.token, { userId: user.id, state: 'assigned', expectedRevision: 0, operationId: randomUUID() });
+            const created = await request(api + '/tickets', actor.token, { operationId: randomUUID(), subject: '人工批准外发摘要', description: '内部说明不得外发' });
+            const ticketId = created.ticket.id, clientId = 'tickets-ci-public-client', scopes = ['example-tickets:read', 'example-tickets:receipt'];
+            const expiresAt = Math.floor(Date.now() / 1000) + 3600;
+            stage = 'explicit-client-and-publication';
+            const registered = await request(api + '/mcp-clients/save', saas.token, { operationKey: randomUUID(), expectedRevision: 0,
+              registration: { clientId, enabled: true, expiresAt, redirectUris: [origin + '/ci-callback'], scopes } });
+            assert.equal(registered.state, 'saved');
+            await request(api + '/mcp-clients/read', actor.token, { clientId }, 403);
+            const policy = { operationId: randomUUID(), expectedRevision: null, clientId, clientRevision: registered.registration.revision,
+              enabled: true, resource: origin + '/mcp', scopes, expiresAt, fieldPolicy: 'tickets-summary-v1', discovery: { windowSeconds: 60, limit: 100 } };
+            await control('publish', actor.token, policy, 403); await control('publish', admin.token, policy);
+            assert.equal((await control('configuration', actor.token, {})).model, 'client_paid');
+            const verifier = randomBytes(32).toString('base64url'), oauthState = randomUUID(), authorization = new URL(origin + '/oauth/authorize');
+            authorization.search = new URLSearchParams({ response_type: 'code', client_id: clientId, redirect_uri: origin + '/ci-callback', resource: origin + '/mcp',
+              scope: scopes.join(' '), state: oauthState, code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256' }).toString();
+            stage = 'chrome-human-consent';
+            const browser = await driver('/session', { capabilities: { alwaysMatch: { browserName: 'chrome', acceptInsecureCerts: true,
+              'goog:chromeOptions': { args: ['--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1440,1000', '--lang=zh-CN',
+                '--disable-background-networking', '--disable-component-update', '--no-first-run', '--disable-sync', '--no-proxy-server',
+                '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1', `--user-data-dir=${resolve(process.env.GITHUB_WORKSPACE, process.env.CI_DIR, 'tickets-mcp-browser-profile')}`] } } } });
+            session = '/session/' + browser.sessionId;
+            await driver(session + '/url', { url: origin + '/login' });
+            await fill('#tenantCode', 'mcp-tickets-one'); await fill('#account', 'reader'); await fill('#password', actor.password); await click('进入工作台');
+            await waitFor(() => dom('return location.pathname !== "/login"'), '登录完成');
+            await driver(session + '/url', { url: authorization.href }); await text('客户端授权请求');
+            await click('核对授权范围'); await text(clientId); await click('同意读取范围'); await text('已同意所示范围');
+            const grantId = await dom('return document.querySelector("input[aria-label=原授权编号]").value'); assert.match(grantId, /^[a-f0-9-]{36}$/);
+            await click('读取原授权与用量'); await text('原授权记录可读'); await fill('input[aria-label=工单编号]', ticketId);
+            await click('审核当前对象'); await text('人工批准外发摘要');
+            const fields = await dom('return document.querySelector("pre[aria-label=待外发字段]").textContent');
+            assert.deepEqual(Object.keys(JSON.parse(fields)).sort(), ['id', 'revision', 'state', 'subject']); assert(!fields.includes('内部说明不得外发'));
+            await click('确认字段并绑定读取'); await click('检查当前可用性'); await text('当前读取可用');
+            await click('返回原客户端'); await waitFor(() => dom('return location.pathname === "/ci-callback"'), '原客户端回调');
+            const callback = new URL(await driver(session + '/url')); assert.equal(callback.searchParams.get('state'), oauthState);
+            const code = callback.searchParams.get('code'); assert(code); secrets.push(code);
+            await driver(session, undefined, 'DELETE'); session = undefined;
+            stage = 'token-and-persistent-read';
+            const response = await fetch(origin + '/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: new URLSearchParams({ grant_type: 'authorization_code', code, client_id: clientId, redirect_uri: origin + '/ci-callback', resource: origin + '/mcp', code_verifier: verifier }) });
+            assert.equal(response.status, 200); const token = await response.json(); secrets.push(token.access_token, token.refresh_token); assert(token.access_token);
+            let sequence = 0;
+            async function rpc(method, params, expected = 200) {
+              const reply = await fetch(origin + '/mcp', { method: 'POST', headers: { Authorization: 'Bearer ' + token.access_token,
+                'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-11-25' },
+                body: JSON.stringify({ jsonrpc: '2.0', id: ++sequence, method, params }), signal: AbortSignal.timeout(35000) });
+              assert.equal(reply.status, expected, stage + ' MCP HTTP'); const raw = await reply.text(); if (expected !== 200) return;
+              const data = raw.startsWith('data:') || raw.includes('\ndata:') ? JSON.parse(raw.split('\n').find(line => line.startsWith('data:')).slice(5)) : JSON.parse(raw);
+              return data;
+            }
+            assert.equal((await rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'tickets-ci', version: '1' } })).result.protocolVersion, '2025-11-25');
+            const listed = await rpc('tools/list', {}); assert.deepEqual(listed.result.tools.map(tool => tool.name).sort(), ['example_tickets_get', 'example_tickets_receipt']);
+            const read = await rpc('tools/call', { name: 'example_tickets_get', arguments: { ticketId } }); assert.equal(read.result.isError, undefined);
+            const content = read.result.structuredContent ?? JSON.parse(read.result.content.find(item => item.type === 'text').text);
+            assert.deepEqual(content, { id: ticketId, subject: created.ticket.subject, state: 'open', revision: 1 });
+            let original = await control('original', actor.token, { grantId }); assert.equal(original.budget.consumedCalls, 1); assert.equal(original.calls[0].state, 'returned');
+            const goalId = original.goal.id;
+            stage = 'revoked-member-and-core-stop';
+            assignment = await core('member-assignments', admin.token, { userId: user.id, state: 'revoked', expectedRevision: assignment.revision, operationId: randomUUID() });
+            await rpc('tools/list', {}, 401);
+            tenantGrant = await core('tenant-grants', saas.token, { tenantId, state: 'disabled', expectedRevision: tenantGrant.revision, operationId: randomUUID() });
+            tenantGrant = await core('tenant-grants', saas.token, { tenantId, state: 'enabled', expectedRevision: tenantGrant.revision, operationId: randomUUID() });
+            await rpc('tools/list', {}, 401);
+            await core('member-assignments', admin.token, { userId: user.id, state: 'assigned', expectedRevision: assignment.revision, operationId: randomUUID() });
+            stage = 'original-cumulative-limit';
+            // 同一个已批准输入与原目标，覆盖原20次额度；不换grant、任务或会话重置。
+            for (let index = 1; index < 20; index++) { const next = await rpc('tools/call', { name: 'example_tickets_get', arguments: { ticketId } }); assert.equal(next.result.isError, undefined); }
+            const denied = await rpc('tools/call', { name: 'example_tickets_get', arguments: { ticketId } }); assert(denied.error || denied.result?.isError);
+            original = await control('original', actor.token, { grantId }); assert.equal(original.goal.id, goalId); assert.equal(original.budget.consumedCalls, 20);
+            // 该actor的原登录与Chrome同意会话不同：原账可读，但不能借另一会话重新绑定或清零。
+            const grant = await control('grant', actor.token, { grantId }); await control('revoke', actor.token, { grantId, expectedRevision: grant.grant.revision });
+            await rpc('tools/list', {}, 401); assert.equal((await control('original', actor.token, { grantId })).budget.consumedCalls, 20);
+            console.log('tenant MCP：正式包/同库、原身份人工同意与字段审核、PKCE/OAuth、持久读取/原账、撤权/停用重开/累计限额通过；无平台模型或AI权益');
+          } catch (error) { console.error('工单MCP阶段：' + stage); if (session) { try { console.error(redact(await dom('return document.body.innerText'))); } catch {} } throw error; }
+          finally { if (session) await driver(session, undefined, 'DELETE'); }
           NODE
       - name: 清理本 job 临时材料
         if: always()

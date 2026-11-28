@@ -1,13 +1,14 @@
 /** 工单示范启动入口。固定部署锁由进程指定本地文件，显式运行才监听/连接业务数据库。 */
 import "reflect-metadata";
 import { readFileSync } from "node:fs";
-import { ValidationPipe } from "@nestjs/common";
+import { ValidationPipe, type INestApplication } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { CORE_CONTRACT_VERSION, CoreDeploymentLockSchema } from "@rental-os/core-contracts";
 import { requestIdentityMiddleware } from "@rental-os/platform-server";
 import { ticketsApplicationModule } from "./app.module";
 
-export async function bootstrapTickets(select: (lock: ReturnType<typeof CoreDeploymentLockSchema.parse>) => unknown | Promise<unknown> = ticketsApplicationModule) {
+export async function bootstrapTickets(select: (lock: ReturnType<typeof CoreDeploymentLockSchema.parse>) => unknown | Promise<unknown> = ticketsApplicationModule,
+  beforeListen?: (app: INestApplication) => void | Promise<void>) {
   if (!process.env.DATABASE_URL || !process.env.AUTH_TOKEN_SECRET || !process.env.CORE_DEPLOYMENT_LOCK)
     throw new Error("示范宿主须配置DATABASE_URL、AUTH_TOKEN_SECRET与固定CORE_DEPLOYMENT_LOCK路径");
   const lock = CoreDeploymentLockSchema.parse(JSON.parse(readFileSync(process.env.CORE_DEPLOYMENT_LOCK, "utf8")));
@@ -23,6 +24,8 @@ export async function bootstrapTickets(select: (lock: ReturnType<typeof CoreDepl
     // 只按部署方声明的代理跳数解析客户端地址；缺省不采信转发头。
     if (trustProxyHops > 0) app.getHttpAdapter().getInstance().set("trust proxy", trustProxyHops);
     app.use(requestIdentityMiddleware);
+    // 可选原协议入口须在Nest的body parser之前接收流；生命周期由同一宿主负责排空。
+    await beforeListen?.(app);
     app.setGlobalPrefix("api");
     app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
     app.enableShutdownHooks();

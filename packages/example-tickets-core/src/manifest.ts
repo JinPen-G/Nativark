@@ -43,11 +43,13 @@ export function createTicketsManifest(source: CoreManifest["source"], options: {
     ] },
     requires: options.mcp ? [{ capability: "mcp", version: { minInclusive: "0.1.2", maxExclusive: "0.2.0" } }] : [],
     assets: ["package.json", ...["contracts", "service", "server", "manifest", "mysql", "http", "nest", "openapi", "metadata", "package", "platform-host", "ai-status", "ai-http"].map(name => `dist/${name}.js`),
+      // 闭合浏览器DTO不依赖MCP运行时；同一后台构建可按已核清单决定是否呈现选装页。
+      "dist/mcp-http.js", "dist/mcp-http.d.ts",
       ...["index", "contracts", "service", "server", "manifest", "mysql", "http", "nest", "openapi", "metadata", "package", "platform-host", "ai-status", "ai-http"].map(name => `dist/${name}.d.ts`),
       ...(options.ai ? ["index", "tickets-application", "tickets-authority", "tickets-approval", "tickets-publication", "tickets-plan",
         "tickets-runner", "tickets-results", "tickets-evidence", "tickets-start", "tickets-http"].flatMap(name =>
         [...(name === "index" ? [] : [`dist-ai/${name}.mjs`]), `dist-ai/${name}.d.mts`]) : []),
-      ...(options.mcp ? ["index-mcp", "tickets-reads", "tickets-mcp-tenant", "tickets-mcp-read-host", "tickets-mcp-data"].flatMap(name =>
+      ...(options.mcp ? ["index-mcp", "tickets-reads", "tickets-mcp-tenant", "tickets-mcp-read-host", "tickets-mcp-data", "tickets-mcp-application", "tickets-mcp-http", "tickets-mcp-clients"].flatMap(name =>
         [...(name === "index-mcp" ? [] : [`dist-mcp/${name}.mjs`]), `dist-mcp/${name}.d.mts`]) : [])]
   });
 }

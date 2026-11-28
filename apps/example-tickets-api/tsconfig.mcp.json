@@ -7,7 +7,7 @@
     "noEmitOnError": true,
     "paths": { "@prisma/client": ["../platform-api/generated/client/index.d.ts"] }
   },
-  "files": ["src/prepare-mcp-deployment.mts"],
+  "files": ["src/prepare-mcp-deployment.mts", "src/mcp-main.mts"],
   "include": [],
   "exclude": ["dist", "dist-ai", "dist-mcp"]
 }

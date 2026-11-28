@@ -7,6 +7,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import type { CorePrincipal } from "@rental-os/core-contracts";
 import { TICKETS_HTTP, type TicketsService } from "@rental-os/example-tickets-core";
+import { TicketsMcpReleasedFieldsSchema } from "@rental-os/example-tickets-core/mcp-http";
 import { requestFingerprint as hash } from "@rental-os/platform-contracts/request-fingerprint";
 import { consumeRateLimitBucket, PLATFORM_API_RATE_LIMIT_TABLE } from "@rental-os/platform-server/public-rate-limit";
 import { createPersistentOAuthAccessReader } from "@rental-os/mcp-server/persistent-oauth-tokens";
@@ -60,6 +61,21 @@ export function createTicketsMcpReadHost(input: { database: PrismaClient; tenant
     if (expected.subject !== actual.subject || expected.clientId !== actual.clientId || expected.resource !== actual.resource
       || !equal(expected.scopes, actual.scopes)) throw new TicketsMcpError("denied");
   };
+  // 人工预览与真正外发使用同一个字段投影；描述、受理人及tenant不离开业务边界。
+  const project = (grant: TicketsMcpGrant, name: string, value: unknown) => {
+    scope(grant, name);
+    if (kind(name) === "get") {
+      const ticket = TICKETS_HTTP.get.response.parse(value);
+      if (ticket.tenantId !== grant.principal.tenantId) throw new TicketsMcpError("denied");
+      return TicketsMcpReleasedFieldsSchema.parse({ id: ticket.id, subject: ticket.subject, state: ticket.state, revision: ticket.revision });
+    }
+    const original = TICKETS_HTTP.receipt.response.parse(value);
+    if (original.status === "unavailable") return TicketsMcpReleasedFieldsSchema.parse({ status: "unavailable", receipt: null, historicalSnapshot: true });
+    const { receipt } = original;
+    if (receipt.ticket.tenantId !== grant.principal.tenantId) throw new TicketsMcpError("denied");
+    return TicketsMcpReleasedFieldsSchema.parse({ status: "recorded", historicalSnapshot: true, receipt: { operationId: receipt.operationId,
+      ticket: { id: receipt.ticket.id, state: receipt.ticket.state, revision: receipt.ticket.revision } } });
+  };
   async function readGoal(native: Tx, ownerKey: string): Promise<Goal | undefined> {
     const rows = await native.$queryRaw<Array<{ id: string; tenant_id: string; user_id: string; record_json: unknown }>>`
       SELECT id, tenant_id, user_id, record_json FROM example_tickets_mcp_goals WHERE owner_key = ${ownerKey} FOR UPDATE`;
@@ -76,7 +92,8 @@ export function createTicketsMcpReadHost(input: { database: PrismaClient; tenant
     if (rows.length) {
       const budget = captureOriginalMcpReadBudgetSnapshot(rows[0], goal.target.goalId, goal.target);
       if (!equal(budget.target, goal.target) || budget.consumedCalls >= 20 || budget.concurrentReads >= 2
-        || budget.consumedActiveMs + budget.reservedActiveMs >= 300000) throw new TicketsMcpError("denied");
+        || budget.consumedActiveMs + budget.reservedActiveMs >= 300000)
+        throw new TicketsMcpError("denied", { state: "denied", reason: "limit_reached" });
     }
   }
   const current = () => { const entry = active.getStore(); if (!entry?.active) throw new TicketsMcpError("unavailable"); return entry; };
@@ -116,18 +133,8 @@ export function createTicketsMcpReadHost(input: { database: PrismaClient; tenant
     accounting,
     release: { async project(authorization, name, value, signal) {
       const entry = current(); live(signal);
-      if (name !== entry.tool || !equal(authorization, entry.authorization)) throw new TicketsMcpError("denied"); scope(entry.grant, name);
-      if (kind(name) === "get") {
-        const ticket = TICKETS_HTTP.get.response.parse(value);
-        if (ticket.tenantId !== entry.grant.principal.tenantId) throw new TicketsMcpError("denied");
-        return { id: ticket.id, subject: ticket.subject, state: ticket.state, revision: ticket.revision };
-      }
-      const original = TICKETS_HTTP.receipt.response.parse(value);
-      if (original.status === "unavailable") return { status: "unavailable", receipt: null, historicalSnapshot: true };
-      const { receipt } = original;
-      if (receipt.ticket.tenantId !== entry.grant.principal.tenantId) throw new TicketsMcpError("denied");
-      return { status: "recorded", historicalSnapshot: true, receipt: { operationId: receipt.operationId,
-        ticket: { id: receipt.ticket.id, state: receipt.ticket.state, revision: receipt.ticket.revision } } };
+      if (name !== entry.tool || !equal(authorization, entry.authorization)) throw new TicketsMcpError("denied");
+      return project(entry.grant, name, value);
     } }
   };
   const integration = createTicketsMcpReadTools({ providers, outputSchemas, currentPrincipal: () => current().grant.principal,
@@ -163,9 +170,21 @@ export function createTicketsMcpReadHost(input: { database: PrismaClient; tenant
     const captured = captureMcpReadInput(command), authorityHash = approvalHash(grant);
     const reviewHash = hash({ version: "tickets-mcp-read-review-1", tool, inputHash: captured.inputHash,
       authorityHash, factHash: hash(original), fields: grant.policy.fieldPolicy });
-    return { tool, command, inputHash: captured.inputHash, authorityHash, reviewHash };
+    return { tool, command, inputHash: captured.inputHash, authorityHash, reviewHash, released: project(grant, tool, original) };
   };
   return Object.freeze({ readTools: integration.readTools, protocolTraffic,
+    available: (grantId: string, ticketId: string, signal: AbortSignal) => tenant.withBrowserGrant(grantId, async (native, grant) => {
+      const selected = await review(native, grant, TICKETS_MCP_READ_NAMES.get, { ticketId });
+      const goal = await readGoal(native, keyFor(grant.principal)); live(signal);
+      if (!goal || goal.authorityHash !== selected.authorityHash || goal.target.grantId !== grantId) throw new TicketsMcpError("denied");
+      await checkBudget(native, goal);
+      const key = bindingKey(goal.target.goalId, selected.tool, selected.inputHash);
+      const bindings = await native.$queryRaw<Array<{ goal_id: string; record_json: unknown }>>`
+        SELECT goal_id, record_json FROM example_tickets_mcp_read_bindings WHERE binding_key = ${key} FOR UPDATE`;
+      const expected = { key, goalId: goal.target.goalId, tool: selected.tool, inputHash: selected.inputHash, authorityHash: goal.authorityHash };
+      if (bindings.length !== 1 || bindings[0].goal_id !== goal.target.goalId || !equal(decode(bindings[0].record_json), expected)) throw new TicketsMcpError("denied");
+      live(signal);
+    }, signal),
     original: (grantId: string, signal: AbortSignal) => tenant.withBrowserOwnedGrant(grantId, async (native, grant) => {
       const goal = await readGoal(native, keyFor(grant.principal)); live(signal);
       const absent = { goal: null, budget: null, calls: [], retryable: false as const, absence: "not_proof_of_no_commit" as const };
@@ -190,7 +209,7 @@ export function createTicketsMcpReadHost(input: { database: PrismaClient; tenant
     preview: (grantId: string, tool: string, value: unknown, signal: AbortSignal) => tenant.withBrowserGrant(grantId, async (native, grant) => {
       const selected = await review(native, grant, tool, value); live(signal);
       return { tool: selected.tool, input: selected.command, fieldPolicy: grant.policy.fieldPolicy,
-        reviewHash: selected.reviewHash, executionGranted: false as const };
+        released: selected.released, reviewHash: selected.reviewHash, executionGranted: false as const };
     }, signal),
     authorizeRead: (grantId: string, tool: string, value: unknown, reviewedHash: string, signal: AbortSignal) => tenant.withBrowserGrant(grantId, async (native, grant) => {
       const selected = await review(native, grant, tool, value); live(signal);

@@ -49,7 +49,27 @@ node apps/example-tickets-api/dist-mcp/prepare-mcp-deployment.mjs <底座发行J
 
 [准备器](src/prepare-mcp-deployment.mts)复用正式包摘要、兼容及迁移生成入口，生成v1部署锁、同库公共14份/Core 2份/MCP 5份迁移和公共schema。工单MCP数据版为0.1.1，普通工单及内置AI候选保持原0.1.0；历史`001-tickets.sql`逐字不变。新增五表只互相引用，按Core迁移顺序执行，运行准入另核MCP能力的完整原账及物理观察。所有授权、发布、目标和绑定表初始为空，不seed角色或通配权限。
 
-该入口只准备新目录，返回`prepared/deployment:pending`，不连接数据库或执行迁移。API、权限登记与后台核包都从同一部署锁取得能力版本。可启动的MCP服务、人工同意页面和真实往返仍在接入，当前不得将安装材料准备通过称为MCP已可用；普通业务仍可独立运行。
+该入口只准备新目录，返回`prepared/deployment:pending`，不连接数据库或执行迁移。API、权限登记与后台核包都从同一部署锁取得能力版本。下方提供显式服务和人工页面步骤；真实OAuth与数据库仍须沿独占CI验收，安装材料准备通过不代表MCP已经可用。普通业务仍可独立运行。
+
+### 启动与人工授权
+
+获准的新装环境应用准备器返回的schema迁移，并沿普通入口初始化、登记部署准入、租户授权、成员分配和绑定。将同一完整工单MCP包供给实际workspace后，使用公共schema生成唯一Client；普通工单及MCP共用原Auth和同一数据库。`DATABASE_URL`须明确`connection_limit>=2`，原OAuth/业务事务与持久计量短事务使用不同连接。
+
+```sh
+# 以下三个配置路径均为部署者已核定的绝对路径；不会自动迁移或创建默认发布。
+export CORE_DEPLOYMENT_LOCK=/absolute/source/apps/platform-api/prisma-deployment-mcp/core.deployment.lock.json
+export PLATFORM_MCP_DATA_PACKAGE_DIR=/absolute/complete-mcp-package
+export TICKETS_MCP_CONFIGURATION=/absolute/private/tickets-mcp.json
+npm run start:mcp -w @rental-os/example-tickets-api
+```
+
+`tickets-mcp.json`为闭合配置：`enabled`、精确HTTPS根`origin`、本次部署审核到期秒数`reviewedUntil`和实际表排序规则`tableCollation`（例如MySQL 8.4新库的`utf8mb4_0900_ai_ci`）。TLS入口按该origin转发`/mcp`、`/oauth/*`、`/.well-known/*`、普通`/api/*`及同源后台；保留核定Host，禁止不受控请求绕过代理。路由、Origin和注册回调不接受通配符。配置失效停止新访问，原结果回读/撤回仍核当前原身份。
+
+SaaS管理员沿同源OpenAPI的`/api/cores/example-tickets/mcp-clients/{read,save,operation}`显式登记public client、精确回调、两个工单scope与到期时间，使用原注册CAS和操作收据。租户管理员再调用`/api/cores/example-tickets/mcp/publish`，明确客户端修订、scope、字段策略、到期时间与发现限流；当前`system:params:manage`在同事务复核。注册和发布各自不能生成个人grant。所有写入沿原operationKey/operationId，失应答只读原结果。
+
+外部客户端从正式`/oauth/authorize`发起PKCE S256请求，服务检查原注册后跳转同源`/cores/example-tickets/mcp-authorization`。用户沿原登录进入，核对范围后明确同意或拒绝；同意只保存grant，不执行工单。用户读取原grant，在页面审核实际待外发字段并绑定原工单，然后选择“返回原客户端”，由原AS签发一次code。客户端沿`/oauth/token`换取受限凭据，再调用`/mcp`。字段审核、调用与返回都复核当前权限、发布及原计量，客户端模型自付，不需要平台AI权益或模型预算。
+
+[显式宿主](src/mcp-main.mts) · [人工页面](../example-tickets-admin/src/tickets-mcp.tsx) · [同源控制面合同](../../packages/example-tickets-core/src/mcp-http.ts) · [原目标/额度及未验边界](../../packages/example-tickets-core/examples/ai-integration/README.md#tenant-mcp-参加者)
 
 ## 可选工单AI宿主
 

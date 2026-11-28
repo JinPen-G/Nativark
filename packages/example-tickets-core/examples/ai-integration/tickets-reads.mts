@@ -7,10 +7,8 @@ import { TICKETS_HTTP, type TicketsService } from "@rental-os/example-tickets-co
 import type { McpReadTools } from "@rental-os/mcp-server";
 import { fromJsonSchema, snapshotJson, type JsonSchemaType } from "@rental-os/mcp-server/original-read-tool";
 
-export const TICKETS_MCP_READ_NAMES = Object.freeze({
-  get: "example_tickets_get",
-  receipt: "example_tickets_receipt",
-});
+import { TICKETS_MCP_READ_NAMES } from "@rental-os/example-tickets-core/mcp-http";
+export { TICKETS_MCP_READ_NAMES } from "@rental-os/example-tickets-core/mcp-http";
 
 export interface TicketsMcpReadDependencies {
   /** 原生产宿主已装配的服务；保留当前 Core/成员/对象与原收据授权。 */

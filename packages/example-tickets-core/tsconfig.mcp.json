@@ -8,6 +8,8 @@
     "declaration": true,
     "paths": { "@prisma/client": ["../../apps/platform-api/generated/client/index.d.ts"] },
     "types": ["node"],
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
     "noEmitOnError": true
   },
   "files": ["examples/ai-integration/index-mcp.mts"],

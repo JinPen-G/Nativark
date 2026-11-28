@@ -13,7 +13,7 @@ const names = {
   pending_approval: ["待批准", "Awaiting approval"], reconciliation_required: ["结果待核对", "Result needs reconciliation"],
   unavailable: ["暂不可用", "Unavailable"]
 } as const;
-const reasons: Record<TicketAiRouteState["reason"], readonly [string, string]> = {
+export const ticketAiReasons: Record<TicketAiRouteState["reason"], readonly [string, string]> = {
   host_not_selected: ["此宿主尚未启用该入口，普通工单操作仍可按原权限使用。", "This host has not enabled this entry. Ordinary tickets remain subject to their current access."],
   identity_adapter_missing: ["尚未接通适用的可信身份入口。请联系部署管理员。", "The required trusted identity entry is not connected. Contact your deployment administrator."],
   task_adapter_missing: ["任务执行入口尚未接通。请联系部署管理员。", "Task execution is not connected. Contact your deployment administrator."],
@@ -45,7 +45,7 @@ export function TicketAiPanel({ ticketId, ticketRevision }: { ticketId: string; 
   const reload = async () => { const result = await query.refetch(); if (result.isError) throw result.error; };
   const route = (label: string, state: TicketAiRouteState) => <Alert
     type={state.state === "available" ? "success" : state.state === "pending_approval" || state.state === "reconciliation_required" ? "warning" : "info"}
-    title={`${label} · ${names[state.state][en ? 1 : 0]}`} description={reasons[state.reason][en ? 1 : 0]} />;
+    title={`${label} · ${names[state.state][en ? 1 : 0]}`} description={ticketAiReasons[state.reason][en ? 1 : 0]} />;
   return <ListSection title={text("可选 AI", "Optional AI")} extra={<ActionButton intent="refresh"
     label={text("重新读取", "Reload")} disabled={query.isFetching} onAction={reload} />}>
     <QueryState loading={query.isPending || query.isFetching} error={query.error} onRetry={reload}>

@@ -10,6 +10,8 @@
 
 ## 接入只看这三处
 
+选装MCP标准包时，清单明确选择`dist-mcp/index-mcp.mjs`才注册“外部读取授权”页面。原登录用户在`/cores/example-tickets/mcp-authorization`核对注册客户端、回调及scope，明确同意后读取原grant，审核实际工单字段并绑定原目标，再返回原客户端。页面不注册客户端、不替租户发布、不自动批准/签发/重发，原用量与撤回沿同一授权记录读取。详情的MCP状态不猜测最近grant；持有明确grant的人工页才显示该对象的当前读取条件。[宿主配置](../example-tickets-api/README.md#启动与人工授权)
+
 1. [main](src/main.tsx)取得工单页面贡献，调用 `registerCoreAdminPages`，将注册表和唯一会话交给 `createPlatformAdminApplication`。菜单、直接路由与面包屑共用该注册表，无须修改公共应用内部。
 2. [工单页面](../../packages/example-tickets-core/admin/index.tsx)从 `@rental-os/platform-admin/core` 使用 `CorePage`、`useCoreForm`、`CoreList` 和 `useCoreRequest`。页面声明名称、权限、父级和操作，框架复用原设计与请求围栏。
 3. [Vite配置](vite.config.ts)用 `CORE_DEPLOYMENT_LOCK` 核已准备标准包的标识、版本、固定来源和摘要，仅将核定清单交给前端。API 使用同一包与锁，[服务端说明](../example-tickets-api/README.md)负责数据库和授权步骤。
