@@ -29,7 +29,14 @@ export function bindClientBrowser(view: ClientView, target: Window) {
   target.addEventListener("pagehide", pageHide);
   target.document.addEventListener("visibilitychange", foreground);
   navigate();
+  const unsubscribe = view.subscribe(() => {
+    // 身份/范围切换丢弃对象参数时同时清掉地址栏中的旧定位；不会从 URL 采用任何身份。
+    const destination = view.getSnapshot().destination;
+    const hash = destination ? clientHash(destination) : "#/";
+    if (hash !== target.location.hash) target.history.replaceState(null, "", hash);
+  });
   return () => {
+    unsubscribe();
     target.removeEventListener("hashchange", navigate); target.removeEventListener("pageshow", pageShow);
     target.removeEventListener("pagehide", pageHide); target.document.removeEventListener("visibilitychange", foreground);
   };

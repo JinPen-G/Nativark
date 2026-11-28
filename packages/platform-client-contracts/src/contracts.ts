@@ -80,6 +80,8 @@ export interface ClientDestination {
 export interface ClientPageRequest {
   readonly params: Readonly<Record<string, string>>;
   readonly search: string;
+  /** 原页面返回的安全版本/预览定位；不是权限或批准，服务端仍校验当前事实。 */
+  readonly actionBasis?: string;
 }
 export interface ClientItem {
   readonly id: string;
@@ -93,6 +95,7 @@ export interface ClientPageData {
   readonly description?: string;
   readonly items: readonly ClientItem[];
   readonly emptyText: string;
+  readonly actionBasis?: string;
 }
 
 /** 只持久化原服务生成的安全定位；不保存密码、令牌或完整业务正文。 */

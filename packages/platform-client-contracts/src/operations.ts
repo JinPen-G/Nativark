@@ -51,7 +51,7 @@ export function createClientOperations(runtime: ClientRuntime, store: ClientOper
     async execute(routeId: string, actionId: string, request: ClientPageRequest,
       values: Readonly<Record<string, string>> = {}): Promise<ClientOperationResult> {
       const { contribution, action } = binding(routeId, actionId), owner = runtime.scope();
-      const input = Object.freeze({ ...values }), page = { params: Object.freeze({ ...request.params }), search: request.search };
+      const input = Object.freeze({ ...values }), page = { params: Object.freeze({ ...request.params }), search: request.search, actionBasis: request.actionBasis };
       const epoch = runtime.getRevision();
       const current = () => {
         const state = runtime.getSnapshot();
@@ -71,12 +71,14 @@ export function createClientOperations(runtime: ClientRuntime, store: ClientOper
         if (!valid(prepared.reference) || prepared.reference.coreId !== contribution.coreId
           || prepared.reference.routeId !== routeId || prepared.reference.actionId !== actionId) throw new ClientError("unavailable");
         const candidate = capture(prepared.reference);
-        await store.save(owner, candidate); // 无持久定位时不派发，刷新页面仍只核对原键。
-        reference = candidate;
         if (!current()) throw new ClientError("stale");
-        const result = await runtime.withAccess(routeId, "action", "execute-operation", (_current, life) => prepared.execute(life), actionId,
-          { request: page, reference });
-        const accepted = await accept(owner, reference, result);
+        const result = await runtime.withAccess(routeId, "action", "execute-operation", async (_current, life) => {
+          await store.save(owner, candidate); // 持久化等待也在原寿命内，离开页面后不能迟到派发。
+          reference = candidate;
+          life.assertCurrent();
+          return prepared.execute(life);
+        }, actionId, { request: page, reference: candidate });
+        const accepted = await accept(owner, candidate, result);
         if (!current()) throw new ClientError("stale");
         return accepted;
       } catch (error) {

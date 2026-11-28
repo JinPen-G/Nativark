@@ -1,0 +1,31 @@
+{
+  "name": "@rental-os/platform-client-wechat",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "微信客户与员工分立入口共用的原生页面适配",
+  "exports": {
+    ".": "./src/index.ts",
+    "./build": "./build.mjs"
+  },
+  "files": [
+    "src",
+    "build.mjs",
+    "view.wxml",
+    "view.wxss",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@rental-os/platform-client-contracts": "0.1.0",
+    "@rental-os/platform-admin": "0.1.0"
+  },
+  "devDependencies": {
+    "miniprogram-api-typings": "5.2.3",
+    "typescript": "5.9.3"
+  },
+  "type": "module"
+}

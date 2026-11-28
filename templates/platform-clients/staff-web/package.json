@@ -1,0 +1,23 @@
+{
+  "name": "@rental-os/client-template-staff-web",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "build": "vite build",
+    "lint": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@rental-os/platform-client-contracts": "0.1.0",
+    "@rental-os/platform-client-web": "0.1.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "typescript": "5.9.3",
+    "vite": "8.2.1"
+  },
+  "type": "module"
+}

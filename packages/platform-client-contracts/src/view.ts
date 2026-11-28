@@ -24,6 +24,7 @@ export function createClientView(runtime: ClientRuntime, store?: ClientOperation
   const operations = store ? createClientOperations(runtime, store) : undefined;
   const listeners = new Set<() => void>();
   let generation = 0, readSequence = 0, sessionAttempt = 0, disposed = false, suspended = false;
+  let queuedDestination: ClientDestination | undefined;
   let state: ClientViewState = { session: runtime.getSnapshot(), generation, request: { params: {}, search: "" },
     page: { status: "idle" }, pending: [], busy: false, scopeChoices: [] };
   const current = (value: number) => !disposed && value === generation;
@@ -66,6 +67,7 @@ export function createClientView(runtime: ClientRuntime, store?: ClientOperation
   function navigate(destination?: ClientDestination) {
     const target = destination ?? (runtime.routes.find(route => route.navigation !== false)
       ? { routeId: runtime.routes.find(route => route.navigation !== false)!.id } : undefined);
+    queuedDestination = state.session.status === "authenticated" ? undefined : target;
     clear(target && { routeId: target.routeId, params: Object.freeze({ ...target.params }) },
       { params: Object.freeze({ ...target?.params }), search: "" });
     if (target) {
@@ -77,8 +79,9 @@ export function createClientView(runtime: ClientRuntime, store?: ClientOperation
   }
   const unsubscribe = runtime.subscribe(() => {
     // 同步清展示。排队读取时再核代次，旧任务不会在新账号中发起请求。
-    const destination = state.destination && { routeId: state.destination.routeId };
-    clear(destination);
+    const destination = queuedDestination ?? (state.destination && { routeId: state.destination.routeId });
+    clear(destination, { params: Object.freeze({ ...queuedDestination?.params }), search: "" });
+    if (state.session.status === "authenticated") queuedDestination = undefined;
     const expected = generation;
     void Promise.resolve().then(() => {
       if (!current(expected) || suspended || state.session.status !== "authenticated") return;
@@ -129,12 +132,12 @@ export function createClientView(runtime: ClientRuntime, store?: ClientOperation
       } catch (error) { if (current(expected) && code(error) !== "stale") update({ feedback: { status: "error", code: code(error) } }); }
     },
     signIn(fields: Readonly<Record<string, string>>) { return sessionChange(() => runtime.signIn(fields)); },
-    signOut() { return sessionChange(() => runtime.signOut()); },
+    signOut() { queuedDestination = undefined; return sessionChange(() => runtime.signOut()); },
     selectScope(id: string) { return sessionChange(() => runtime.selectScope(id)); },
     refreshSession() { return sessionChange(() => runtime.refresh()); },
     execute(actionId: string, values: Readonly<Record<string, string>>) {
       if (!operations || state.page.status !== "ready" || !state.destination || state.receiptError) return Promise.resolve();
-      const { routeId } = state.destination, request = state.request;
+      const { routeId } = state.destination, request = { ...state.request, actionBasis: state.page.data?.actionBasis };
       return action(() => operations.execute(routeId, actionId, request, values));
     },
     readReceipt(reference: ClientOperationReference) {
