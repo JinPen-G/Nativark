@@ -348,6 +348,21 @@ jobs:
           curl -fsS --retry 30 --retry-delay 1 --retry-max-time 60 --retry-connrefused --max-time 5 http://127.0.0.1:3094/api/health -o "$task/health.json"
           openssl req -x509 -newkey rsa:2048 -nodes -keyout "$task/localhost.key" -out "$task/localhost.crt" \
             -days 1 -subj /CN=localhost -addext subjectAltName=DNS:localhost,IP:127.0.0.1 2> "$task/certificate.log"
+          # runner 缺中文字体；仅为本 job 取得固定 OFL 字体，不写系统字体/用户缓存或客户端发行包。
+          mkdir "$task/fonts" "$task/font-cache"
+          font_source=https://raw.githubusercontent.com/notofonts/noto-cjk/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Sans
+          curl -fsSL --max-time 60 "$font_source/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf" -o "$task/fonts/NotoSansCJKsc-Regular.otf"
+          curl -fsSL --max-time 30 "$font_source/LICENSE" -o "$task/fonts/LICENSE"
+          printf '%s  %s\n' 2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b "$task/fonts/NotoSansCJKsc-Regular.otf" \
+            6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2 "$task/fonts/LICENSE" | sha256sum --check
+          export FONTCONFIG_FILE="$task/fonts.conf"
+          cat > "$FONTCONFIG_FILE" <<FONTCONFIG
+          <?xml version="1.0"?><!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+          <fontconfig><dir>$task/fonts</dir><cachedir>$task/font-cache</cachedir>
+          <alias><family>sans-serif</family><prefer><family>Noto Sans CJK SC</family></prefer></alias></fontconfig>
+          FONTCONFIG
+          fc-cache -f
+          test "$(fc-match -f '%{family}' 'sans-serif:lang=zh-cn')" = 'Noto Sans CJK SC'
           google-chrome --version
           "$CHROMEWEBDRIVER/chromedriver" --version
           setsid "$CHROMEWEBDRIVER/chromedriver" --port=9515 --allowed-ips=127.0.0.1 > "$task/browser.log" 2>&1 &
@@ -494,7 +509,7 @@ jobs:
           // 真实 API 只在当前 job 的回环接口。HTTPS 代理保留请求身份/响应，不签发凭据或改写业务结果。
           const servers = [];
           const cancelPath = `/api/client/v1/orders/${cancelOrder.id}/cancel`;
-          const executionPath = `/api/staff/v1/rental/v1/orders/${serviceOrder.id}/services/${occurrence.occurrenceId}/execution`;
+          const executionPath = `/api/staff/v1/rental/v1/orders/${encodeURIComponent(serviceOrder.id)}/services/${encodeURIComponent(occurrence.occurrenceId)}/execution`;
           let loseCancelResponse = true, cancelDispatches = 0, serviceDispatches = 0, dispatchedCancelKey;
           let holdCustomerRead = false, heldRead, oldReadFinished = false;
           let holdStaffRead = false, heldStaffRead, oldStaffReadFinished = false;
