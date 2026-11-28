@@ -234,14 +234,17 @@ jobs:
           assert.equal((await request(api + `/items/${created.item.id}`, editor)).revision, 3);
 
           // W3C WebDriver直接驱动同一正式页面；只轮询DOM读取，不重发页面写动作。
+          function redact(value) {
+            let message = String(value ?? '');
+            for (const secret of [saas, editor, first.token, second.token, ...passwords.values(), process.env.AUTH_TOKEN_SECRET, process.env.SEED_PLATFORM_PASSWORD])
+              if (secret) message = message.replaceAll(secret, '[redacted]');
+            return message.slice(0, 800);
+          }
           async function driver(path, data, method = data === undefined ? 'GET' : 'POST') {
             const response = await fetch('http://127.0.0.1:9515' + path, { method, headers: { 'Content-Type': 'application/json' },
               ...(data === undefined ? {} : { body: JSON.stringify(data) }), signal: AbortSignal.timeout(30000) });
             const { value } = await response.json();
-            let message = String(value?.message ?? '');
-            for (const secret of [saas, editor, first.token, second.token, ...passwords.values(), process.env.AUTH_TOKEN_SECRET, process.env.SEED_PLATFORM_PASSWORD])
-              if (secret) message = message.replaceAll(secret, '[redacted]');
-            assert(response.ok && !value?.error, `浏览器 ${path}: ${value?.error ?? response.status} ${message.slice(0, 500)}`); return value;
+            assert(response.ok && !value?.error, `浏览器 ${path}: ${value?.error ?? response.status} ${redact(value?.message)}`); return value;
           }
           const browser = await driver('/session', { capabilities: { alwaysMatch: { browserName: 'chrome',
             'goog:chromeOptions': { args: ['--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1440,1000', '--lang=zh-CN',
@@ -262,7 +265,12 @@ jobs:
             await driver(`${sessionPath}/element/${field}/value`, { text });
           }
           async function click(label) {
-            const button = await waitFor(() => dom('return [...document.querySelectorAll("button")].find(e => e.textContent.trim() === arguments[0] && e.checkVisibility({visibilityProperty:true,opacityProperty:true}) && !e.disabled) ?? null', label), label);
+            const button = await waitFor(async () => {
+              const candidates = await dom('return [...document.querySelectorAll("button")].filter(e => e.checkVisibility({visibilityProperty:true,opacityProperty:true}) && !e.disabled && e.getAttribute("aria-disabled") !== "true")');
+              // 原动效按钮同时保留视觉字形和读屏文案，按浏览器计算的可访问名称定位。
+              for (const candidate of candidates) if (await driver(`${sessionPath}/element/${candidate['element-6066-11e4-a52e-4f735466cecf']}/computedlabel`) === label) return candidate;
+              return undefined;
+            }, label);
             await driver(`${sessionPath}/element/${button['element-6066-11e4-a52e-4f735466cecf']}/click`, {});
           }
           const text = label => waitFor(() => dom('return document.body.innerText.includes(arguments[0])', label), label);
@@ -283,6 +291,11 @@ jobs:
             const errors = (await driver(sessionPath + '/log', { type: 'browser' })).filter(entry => entry.level === 'SEVERE' && /(?:Uncaught|TypeError|ReferenceError)/.test(entry.message));
             assert.equal(errors.length, 0, '正式页面存在未处理脚本错误');
             console.log('预装Chrome真实页面：登录、列表、新建、详情、编辑、确认归档及公开说明筛选通过，同库HTTP回读一致');
+          } catch (error) {
+            try { console.error(JSON.stringify({ page: await dom('return location.pathname'), visible: redact(await dom('return document.body.innerText')),
+              errors: (await driver(sessionPath + '/log', { type: 'browser' })).filter(entry => entry.level === 'SEVERE').slice(-5).map(entry => redact(entry.message)) })); }
+            catch { console.error('浏览器诊断不可读，保留原失败'); }
+            throw error;
           } finally { await driver(sessionPath, undefined, 'DELETE'); }
           // 仅保存本job的短期会话，供重启回读；不打印、不上传，always清理。
           writeFileSync(resolve(process.env.GITHUB_WORKSPACE, process.env.CI_DIR, 'restart.json'), JSON.stringify({ editor, itemId: created.item.id, operationId: archived.operationId }), { mode: 0o600, flag: 'wx' });
