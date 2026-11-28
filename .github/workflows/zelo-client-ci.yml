@@ -16,8 +16,8 @@ concurrency:
 
 # 仅按已核固定成果更新；不能用活动分支、修改清单或放宽门禁凑兼容。
 env:
-  ZELO_COMMIT: e2af5fc4886a70d6298402d8f7925b2172376c7c
-  RENTAL_COMMIT: 34baba2cdd50d1a46241069448621e460265cdb5
+  ZELO_COMMIT: 6d46f4943f7a0538f04e7ee2d908827d8345a666
+  RENTAL_COMMIT: 5b008083b7cf76c2127216d163f529e5526136a6
   CI_DIR: output/.tmp/zelo-client-ci
 
 jobs:
@@ -139,14 +139,28 @@ jobs:
           test "$(git -C "$task/rental" rev-parse HEAD)" = "$RENTAL_COMMIT"
           test "$(git -C "$task/client" rev-parse HEAD)" = "$GITHUB_SHA"
           npm ci --workspace @rental-os/core-contracts --include-workspace-root --ignore-scripts --no-audit --no-fund --cache "$task/npm-cache"
-          npm run build -w @rental-os/core-contracts
           node <<'NODE'
           const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path');
-          const { CoreManifestSchema, isCoreVersionSupported, CORE_CONTRACT_VERSION } = require('@rental-os/core-contracts');
+          const { readBuildSnapshot } = require('./scripts/rental-build-snapshot.cjs');
+          const { readIndependentRentalSource, composeRentalBuildSnapshot } = require('./scripts/prepare-rental-workspace.cjs');
+          const { createBuild } = require('./scripts/check-rental-package-build.cjs');
           const task = path.resolve(process.env.GITHUB_WORKSPACE, process.env.CI_DIR);
           const read = file => JSON.parse(fs.readFileSync(path.join(task, file), 'utf8'));
           const platform = read('platform/package.json'), rental = read('rental/package.json');
-          const manifest = CoreManifestSchema.parse(read('rental/core.manifest.json'));
+          const support = readBuildSnapshot(process.env.ZELO_COMMIT, process.cwd(), ['package.json', 'package-lock.json',
+            'tsconfig.base.json', 'packages/platform-contracts', 'packages/core-contracts']);
+          const core = readIndependentRentalSource(path.join(task, 'rental'), process.env.RENTAL_COMMIT, { mode: 'development' });
+          const build = createBuild(path.resolve('node_modules'), { snapshot: composeRentalBuildSnapshot(support, core), quiet: true });
+          build.compile('packages/platform-contracts/tsconfig.json');
+          build.compile('packages/core-contracts/tsconfig.json');
+          // 发现清单可保留历史发行；候选范围来自固定源码的正式工厂，产物只驻内存。
+          const config = 'packages/rental-core/tsconfig.client-manifest.json';
+          build.virtual.set(path.resolve(config).split(path.sep).join('/'), JSON.stringify({ extends: './tsconfig.json',
+            files: ['src/manifest.ts'], include: [] }));
+          build.compile(config);
+          const { CoreManifestSchema, isCoreVersionSupported, CORE_CONTRACT_VERSION } = build.load(build.exported('@rental-os/core-contracts', true));
+          const { createRentalManifest } = build.load(build.exported('@rental-os/rental-core/manifest', true));
+          const manifest = CoreManifestSchema.parse(createRentalManifest({ source: core.source, assets: [] }));
           const sdk = read('platform/packages/ai-native-data/package.public.json');
           const { publicDataSdkFor } = require('./scripts/rental-host-lock.cjs');
           const publicDataSdk = publicDataSdkFor(sdk);
@@ -155,6 +169,8 @@ jobs:
           const source = fs.readFileSync(path.join(task, 'client/templates/platform-clients/rental/config.ts'), 'utf8');
           const missing = [];
           assert.equal(manifest.id, 'rental');
+          assert.equal(manifest.version, rental.version);
+          if (rental.exports?.['./clients/contribution'] !== './clients/contribution/index.ts') missing.push('Rental 缺少正式客户端贡献出口');
           if (!isCoreVersionSupported(platform.version, manifest.compatibility.platform)) missing.push('Rental 清单尚不支持所选底座 ' + platform.version);
           if (!isCoreVersionSupported(CORE_CONTRACT_VERSION, manifest.compatibility.contract)) missing.push('Rental 清单不支持所选 Core 合同');
           if (publicDataSdk.version !== sdk.version) missing.push(`新装锁 SDK ${publicDataSdk.version} 与同源 SDK ${sdk.version} 不符`);
@@ -162,6 +178,7 @@ jobs:
           if (adapter.peerDependencies['@rental-os/rental-core'] !== rental.version) missing.push('客户端可选 peer 尚未采用所选 Rental 版本');
           if (!source.includes(`RENTAL_CLIENT_SOURCE = "${process.env.RENTAL_COMMIT}"`)) missing.push('客户端固定来源与 CI 所选 Rental 不符');
           const report = { client: process.env.GITHUB_SHA, platform: process.env.ZELO_COMMIT, rental: process.env.RENTAL_COMMIT,
+            rentalVersion: manifest.version, compatibility: manifest.compatibility, manifestSource: '@rental-os/rental-core/manifest',
             state: missing.length ? 'unavailable' : 'ready_for_host_attempt', missing,
             browserExecuted: false, databaseChecked: false, wechatExecuted: false, a03Accepted: false };
           fs.writeFileSync(path.join(task, 'combination.json'), JSON.stringify(report, null, 2));

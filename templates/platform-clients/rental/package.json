@@ -9,7 +9,7 @@
   "files": ["*.ts", "LICENSE"],
   "scripts": { "build": "tsc -p tsconfig.json", "lint": "tsc -p tsconfig.json" },
   "dependencies": { "@rental-os/platform-client-contracts": "0.1.0" },
-  "peerDependencies": { "@rental-os/rental-core": "0.2.1" },
+  "peerDependencies": { "@rental-os/rental-core": "0.2.2" },
   "peerDependenciesMeta": { "@rental-os/rental-core": { "optional": true } },
   "devDependencies": { "typescript": "5.9.3", "miniprogram-api-typings": "5.2.3" }
 }
