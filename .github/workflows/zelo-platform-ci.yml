@@ -139,8 +139,51 @@ jobs:
           node node_modules/@prisma/engines/scripts/postinstall.js
           npm run db:generate
           npm run build
+          for tool in platform-doctor platform-doctor-install platform-doctor-upgrade; do
+            node "scripts/ops/$tool.cjs" --help > /dev/null
+          done
+          if [[ "$CI_PROFILE" == public-ai ]]; then
+            export CORE_DEPLOYMENT_LOCK_FILE="$PWD/apps/platform-api/prisma-deployment/core.deployment.lock.json"
+            export PLATFORM_AI_DATA_PACKAGE_DIR="$PWD/public-ai-data" PLATFORM_AI_PROFILE_ID=ci-public-profile
+          fi
+          approval=$(node scripts/ops/platform-doctor-install.cjs status --profile "$CI_PROFILE" |
+            node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{const r=JSON.parse(s);if(r.state!=="empty"){console.error(r);process.exit(1)}process.stdout.write(r.migrationApproval)})')
+          node --input-type=module <<'INSTALL_GATES'
+          import { strict as assert } from 'node:assert';
+          import { createRequire } from 'node:module';
+          import { spawnSync } from 'node:child_process';
+          const require = createRequire(process.cwd() + '/package.json');
+          const { PrismaClient } = require('./apps/platform-api/generated/client');
+          const db = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
+          const invoke = (command, extra = []) => {
+            const result = spawnSync(process.execPath, ['scripts/ops/platform-doctor-install.cjs', command,
+              '--profile', process.env.CI_PROFILE, ...extra], { encoding: 'utf8' });
+            return { code: result.status, value: JSON.parse(result.stdout) };
+          };
+          let created = false;
+          try {
+            const refused = invoke('migrate', ['--approve', '0'.repeat(64)]);
+            assert.equal(refused.code, 1); assert.equal(refused.value.status, 'refused');
+            assert.equal(invoke('status').value.state, 'empty');
+            await db.$executeRaw`CREATE TABLE zp01_unknown_probe (id INT PRIMARY KEY)`; created = true;
+            const unknown = invoke('status'); assert.equal(unknown.code, 1); assert.equal(unknown.value.state, 'incompatible');
+            assert.equal(invoke('migrate', ['--approve', unknown.value.migrationApproval]).value.status, 'refused');
+            assert.equal(invoke('initialize').value.status, 'refused');
+            const objects = await db.$queryRaw`SELECT TABLE_NAME AS name FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()`;
+            assert.deepEqual(objects, [{ name: 'zp01_unknown_probe' }], '未知旧库拒绝不得添加迁移账或账号表');
+            console.log('A01：未批准迁移与无原账旧库均拒绝，未产生初始化或迁移写入');
+          } finally {
+            if (created) await db.$executeRaw`DROP TABLE zp01_unknown_probe`;
+            await db.$disconnect();
+          }
+          INSTALL_GATES
+          node scripts/ops/platform-doctor-install.cjs migrate --profile "$CI_PROFILE" --approve "$approval"
           npm run db:migrate:deploy
+          node scripts/ops/platform-doctor-install.cjs initialize --profile "$CI_PROFILE"
           npm run db:initialize
+          node scripts/ops/platform-doctor-install.cjs status --profile "$CI_PROFILE" |
+            node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{const r=JSON.parse(s);if(r.state!=="ready"||r.initialization.state!=="initialized"||r.initialization.receipt!=="recorded"){console.error(r);process.exit(1)}})'
+          SEED_PLATFORM_PASSWORD=RepeatCheck9 node scripts/ops/platform-doctor-install.cjs initialize --profile "$CI_PROFILE"
           # The selected AI host may use its local database. The smoke has no provider or supplier credentials.
           if [[ "$CI_PROFILE" == public-ai ]]; then
             export CORE_DEPLOYMENT_LOCK_FILE="$PWD/apps/platform-api/prisma-deployment/core.deployment.lock.json"
@@ -207,3 +250,212 @@ jobs:
             console.log('公共 AI：选装 API 和后台、显式授权、单连接模型保存及原键收据通过');
           }
           NODE
+          if [[ "$CI_PROFILE" == platform ]]; then
+            # A01 使用本 job 的独占库；固定两版公共数据完全一致后只切换程序。
+            kill "$api_pid" "$web_pid"
+            wait "$api_pid" "$web_pid" || true
+            api_pid= web_pid=
+            export CI_UPGRADE_ROOT="$task/upgrade"
+            test ! -e "$CI_UPGRADE_ROOT"
+            cleanup_upgrade() {
+              test "$CI_UPGRADE_ROOT" = "$GITHUB_WORKSPACE/$CI_DIR/upgrade" && test ! -L "$CI_UPGRADE_ROOT" || return 1
+              rm -rf -- "$CI_UPGRADE_ROOT"
+              test ! -e "$CI_UPGRADE_ROOT"
+            }
+            trap cleanup_upgrade EXIT
+            mkdir -p "$CI_UPGRADE_ROOT/storage/archives" "$CI_UPGRADE_ROOT/storage/candidates"
+            for pair in previous:016086943419e3462fc7763a856f97de6d32b279 candidate:f3bfce5800ea971af6148e843f1e63437d5fa94a; do
+              label="${pair%%:*}" commit="${pair#*:}"
+              git -C "$task/source" fetch --no-tags --depth=1 origin "$commit"
+              test "$(git -C "$task/source" rev-parse "$commit^{commit}")" = "$commit"
+              node "$task/source/packages/core-contracts/dist/export-platform.js" --repo "$task/source" \
+                --repository https://github.com/JinPen-G/Nativark --commit "$commit" \
+                --out "$CI_UPGRADE_ROOT/storage/archives/$label.tgz" > "$CI_UPGRADE_ROOT/$label.source.json"
+              mkdir "$CI_UPGRADE_ROOT/$label"
+              tar -xzf "$CI_UPGRADE_ROOT/storage/archives/$label.tgz" -C "$CI_UPGRADE_ROOT/$label"
+              (
+                cd "$CI_UPGRADE_ROOT/$label"
+                npm ci --ignore-scripts --no-audit --no-fund --cache "$task/npm-cache"
+                node node_modules/@prisma/engines/scripts/postinstall.js
+                npm run db:generate
+                npm run build -w @rental-os/platform-api
+              )
+            done
+            node --input-type=module <<'UPGRADE'
+          import { strict as assert } from 'node:assert';
+          import { createRequire } from 'node:module';
+          import { readFileSync, writeFileSync, openSync, closeSync, renameSync } from 'node:fs';
+          import { createHash } from 'node:crypto';
+          import { join } from 'node:path';
+          import { spawn } from 'node:child_process';
+          import { once } from 'node:events';
+          import { createServer } from 'node:http';
+          import { isDeepStrictEqual } from 'node:util';
+          const require = createRequire(process.cwd() + '/package.json'), root = process.env.CI_UPGRADE_ROOT;
+          const api = require('@rental-os/core-contracts'), storage = join(root, 'storage');
+          const read = file => JSON.parse(readFileSync(file, 'utf8'));
+          const write = (file, value) => writeFileSync(file, JSON.stringify(value) + '\n', { flag: 'wx' });
+          const releases = new Map();
+          for (const [label, version] of [['previous', '0.2.1'], ['candidate', '0.2.2']]) {
+            const source = read(join(root, label + '.source.json'));
+            assert.equal(source.version, version);
+            const data = require(join(root, label, 'apps/platform-api/dist/platform-data.js')).createPublicPlatformDataPlan().data;
+            const release = api.CorePlatformReleaseSchema.parse({ source: source.source, sha256: source.sha256, data,
+              versions: { platform: version, contract: api.CORE_CONTRACT_VERSION, node: process.versions.node, capabilities: {} } });
+            releases.set(label, release);
+            write(join(root, label + '.lock.json'), api.CoreDeploymentLockSchema.parse({ lockVersion: 1, platform: release, cores: [] }));
+          }
+          assert(isDeepStrictEqual(releases.get('previous').data, releases.get('candidate').data), '本次程序升级不得改变迁移链');
+          const toolsSource = read('platform.source.json'), toolsVersion = read('package.json').version;
+          assert(api.compareCoreReleaseVersions(toolsVersion, '0.2.2') > 0, '含新入口的发行必须使用严格前进版本');
+          const toolsArchive = join(root, 'storage/archives/tools.tgz');
+          assert.equal(root, join(process.env.GITHUB_WORKSPACE, process.env.CI_DIR, 'upgrade'));
+          renameSync(join(process.env.GITHUB_WORKSPACE, process.env.CI_DIR, 'platform.tgz'), toolsArchive);
+          const toolsRelease = api.CorePlatformReleaseSchema.parse({ source: toolsSource.source,
+            sha256: createHash('sha256').update(readFileSync(toolsArchive)).digest('hex'),
+            data: require('./apps/platform-api/dist/platform-data.js').createPublicPlatformDataPlan().data,
+            versions: { platform: toolsVersion, contract: api.CORE_CONTRACT_VERSION, node: process.versions.node, capabilities: {} } });
+          releases.set('tools', toolsRelease);
+          write(join(root, 'tools.lock.json'), api.CoreDeploymentLockSchema.parse({ lockVersion: 1, platform: toolsRelease, cores: [] }));
+          write(join(storage, 'archives/index.json'), { format: 'core-package-archives-1', artifacts: [...releases].map(([label, release]) =>
+            ({ reference: label, file: label + '.tgz', artifact: { kind: 'platform', release } })) });
+          const { PrismaClient } = require('./apps/platform-api/generated/client');
+          const database = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
+          const origin = 'http://127.0.0.1:3091';
+          let child, proxy, session, stage = 'start-previous';
+          const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+          const stop = async () => {
+            if (!child || child.exitCode !== null || child.signalCode !== null) return;
+            const exited = once(child, 'exit'); child.kill('SIGTERM');
+            const timer = setTimeout(() => child.kill('SIGKILL'), 10000);
+            try { await exited; } finally { clearTimeout(timer); }
+          };
+          const start = async label => {
+            const cwd = label === 'tools' ? process.cwd() : join(root, label), log = openSync(join(root, label + '.log'), 'a');
+            try { child = spawn(process.execPath, ['apps/platform-api/dist/main.js'], { cwd,
+              env: { ...process.env, CORE_PACKAGE_STORAGE_ROOT: storage,
+                CORE_DEPLOYMENT_LOCK_FILE: join(root, label + '.lock.json'), CORE_PLATFORM_PACKAGE_REFERENCE: label },
+              stdio: ['ignore', log, log] }); } finally { closeSync(log); }
+            for (let attempt = 0; attempt < 60; attempt++) {
+              assert(child.exitCode === null && child.signalCode === null, '固定宿主提前退出');
+              try { const response = await fetch(origin + '/api/health', { signal: AbortSignal.timeout(1000) });
+                if (response.ok) return; } catch {}
+              await pause(500);
+            }
+            throw Error('health_unavailable');
+          };
+          const request = async (path, body, token = session) => {
+            const response = await fetch(origin + '/api/' + path, { method: body === undefined ? 'GET' : 'POST',
+              headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+              ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(45000) });
+            assert(response.ok, `原 HTTP ${path}: ${response.status}`); const json = await response.json(); return json.data ?? json;
+          };
+          const cli = async (args, address = origin, script = 'platform-doctor-upgrade') => {
+            const process = spawn(globalThis.process.execPath, ['scripts/ops/' + script + '.cjs', ...args], {
+              env: { ...globalThis.process.env, PLATFORM_DOCTOR_API_URL: address, PLATFORM_DOCTOR_ACCESS_TOKEN: session },
+              stdio: ['ignore', 'pipe', 'pipe'] });
+            let stdout = ''; process.stdout.on('data', chunk => { stdout += chunk; }); process.stderr.resume();
+            const [code] = await once(process, 'exit'); return { code, value: JSON.parse(stdout) };
+          };
+          const snapshot = async () => ({
+            roles: await database.role.findMany({ orderBy: { id: 'asc' } }),
+            grants: await database.rolePermission.findMany({ orderBy: [{ roleId: 'asc' }, { permissionId: 'asc' }] }),
+            assignments: await database.userRole.findMany({ orderBy: [{ userId: 'asc' }, { roleId: 'asc' }] }),
+            configuration: await database.systemParameterSet.findMany({ orderBy: { id: 'asc' } }),
+            migrations: await database.$queryRaw`SELECT id, migration_name, checksum, finished_at, rolled_back_at, applied_steps_count FROM _prisma_migrations ORDER BY started_at, id`,
+            initializations: await database.operationLog.count({ where: { action: 'platform.initialized' } }),
+            preparations: await database.operationLog.count({ where: { action: 'core.package.preparation.requested' } })
+          });
+          try {
+            await start('previous');
+            const login = await request('auth/login', { tenantCode: 'platform', account: 'admin', password: process.env.SEED_PLATFORM_PASSWORD }, null);
+            session = login.accessToken;
+            const password = process.env.SEED_PLATFORM_PASSWORD + '-Upgrade8!';
+            session = (await request('auth/change-password', { currentPassword: process.env.SEED_PLATFORM_PASSWORD, newPassword: password })).accessToken;
+            const config = await request('platform/security-baseline'); config.masking.email = true;
+            const saved = await fetch(origin + '/api/platform/security-baseline', { method: 'PUT',
+              headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session }, body: JSON.stringify({ config }) });
+            assert(saved.ok, '原安全配置保存失败');
+            await saved.body.cancel();
+            stage = 'current-and-candidate';
+            const current = await cli(['status']); if (current.code) console.error(current.value); assert.equal(current.code, 0);
+            assert.equal(current.value.current.platform.current.version, '0.2.1');
+            const plan = await cli(['plan', '--kind', 'platform', '--reference', 'candidate']);
+            if (plan.code) console.error(plan.value);
+            assert.equal(plan.code, 0); assert.equal(plan.value.status, 'candidate'); assert.equal(plan.value.migrations.length, 0);
+            assert.equal(plan.value.candidate.platform.version, '0.2.2');
+            const sha256 = plan.value.sha256;
+            stage = 'lost-preparation-response';
+            // 转发至真实原宿主，等其提交原候选后断开客户端；不合成业务成功响应。
+            let published;
+            proxy = createServer(async (incoming, outgoing) => {
+              try {
+                assert.equal(incoming.url, '/api/platform/core-packages/prepare');
+                const chunks = []; for await (const chunk of incoming) chunks.push(chunk);
+                const response = await fetch(origin + incoming.url, { method: 'POST',
+                  headers: { 'Content-Type': 'application/json', Authorization: incoming.headers.authorization }, body: Buffer.concat(chunks) });
+                assert(response.ok); const json = await response.json(); published = json.data ?? json;
+                outgoing.destroy();
+              } catch { outgoing.destroy(); }
+            });
+            proxy.listen(0, '127.0.0.1'); await once(proxy, 'listening');
+            const interrupted = await cli(['prepare', '--kind', 'platform', '--reference', 'candidate', '--sha256', sha256],
+              'http://127.0.0.1:' + proxy.address().port);
+            assert.equal(interrupted.code, 2); assert.equal(interrupted.value.status, 'unknown'); assert.equal(interrupted.value.sha256, sha256);
+            if (published?.status !== 'prepared') console.error({ preparation: published?.status ?? 'no_response',
+              reason: /^[a-z_]+$/.test(published?.error?.code ?? '') ? published.error.code : 'unavailable' });
+            assert.equal(published?.status, 'prepared');
+            proxy.closeAllConnections(); await new Promise(resolve => proxy.close(resolve)); proxy = undefined;
+            const preparedAt = published.record.preparedAt, before = await snapshot();
+            assert.equal(before.initializations, 1); assert.equal(before.preparations, 1);
+            stage = 'original-receipt-after-restart';
+            await stop(); await start('previous');
+            const receipt = await cli(['receipt', '--sha256', sha256]);
+            assert.equal(receipt.code, 0); assert.equal(receipt.value.status, 'recorded'); assert.equal(receipt.value.preparedAt, preparedAt);
+            assert(isDeepStrictEqual(before, await snapshot()), '只读恢复不得新增原操作或改变数据');
+            stage = 'compatible-runtime-switch';
+            await stop(); await start('candidate');
+            const updated = await cli(['status']); assert.equal(updated.code, 0);
+            assert.equal(updated.value.current.platform.current.version, '0.2.2');
+            const afterReceipt = await cli(['receipt', '--sha256', sha256]);
+            assert.equal(afterReceipt.code, 0); assert.equal(afterReceipt.value.preparedAt, preparedAt);
+            session = (await request('auth/login', { tenantCode: 'platform', account: 'admin', password }, null)).accessToken;
+            assert.equal((await request('platform/security-baseline')).masking.email, true);
+            assert(isDeepStrictEqual(before, await snapshot()), '兼容程序升级须保留配置、角色授权、原迁移和初始化/准备记录');
+            console.log('A01：固定 0.2.1 → 0.2.2 兼容程序升级、真实准备失应答、重启原摘要恢复及配置/授权/迁移保留通过');
+            stage = 'new-tools-maintenance-bridge';
+            const oldRefusal = await cli(['plan', '--kind', 'platform', '--reference', 'tools']);
+            assert.equal(oldRefusal.code, 1, '旧版未知脚本拒绝不能被放宽');
+            assert(oldRefusal.value.inspectionIssues.some(issue => issue.code === 'platform_source_mismatch'), '须确认旧源码白名单拒绝原因');
+            const bridge = await cli(['bridge', '--profile', 'platform', '--lock', join(root, 'tools.lock.json'),
+              '--platform-package', toolsArchive, '--previous-lock', join(root, 'candidate.lock.json'),
+              '--previous-package', join(storage, 'archives/candidate.tgz')], origin, 'platform-doctor-install');
+            if (bridge.code) console.error(bridge.value);
+            assert.equal(bridge.code, 0); assert.equal(bridge.value.status, 'maintenance_bridge_checked');
+            assert.equal(bridge.value.deployment, 'pending');
+            await stop();
+            const stopped = await cli(['status', '--profile', 'platform', '--lock', join(root, 'tools.lock.json')], origin, 'platform-doctor-install');
+            assert.equal(stopped.code, 0); assert.equal(stopped.value.state, 'ready');
+            await start('tools');
+            const tools = await cli(['status']); assert.equal(tools.code, 0);
+            assert.equal(tools.value.current.platform.current.version, toolsVersion);
+            session = (await request('auth/login', { tenantCode: 'platform', account: 'admin', password }, null)).accessToken;
+            assert.equal((await request('platform/security-baseline')).masking.email, true);
+            assert(isDeepStrictEqual(before, await snapshot()), '桥接不得重置配置/授权/原账或重复初始化');
+            stage = 'unchanged-data-application-restore';
+            await stop(); await start('candidate');
+            assert.equal((await cli(['status'])).value.current.platform.current.version, '0.2.2');
+            session = (await request('auth/login', { tenantCode: 'platform', account: 'admin', password }, null)).accessToken;
+            assert.equal((await request('platform/security-baseline')).masking.email, true);
+            assert(isDeepStrictEqual(before, await snapshot()), '同数据应用恢复不得修改原账或权限');
+            await stop(); await start('tools');
+            assert.equal((await cli(['status'])).value.current.platform.current.version, toolsVersion);
+            assert.equal((await cli(['receipt', '--sha256', sha256])).value.preparedAt, preparedAt);
+            console.log('A01：含新工具归档的只读桥接、真实运行切换与同数据应用恢复通过；候选来源：' + toolsSource.source.commit);
+          } catch { console.error('A01 兼容升级未完成，阶段：' + stage); process.exitCode = 1; }
+          finally {
+            if (proxy) { proxy.closeAllConnections(); await new Promise(resolve => proxy.close(resolve)); }
+            await stop(); await database.$disconnect();
+          }
+          UPGRADE
+          fi

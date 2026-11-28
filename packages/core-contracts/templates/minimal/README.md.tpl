@@ -65,7 +65,7 @@ node packages/core-contracts/dist/check.js <返回的directory> --host <宿主�
 npm run prepare:deployment -w {{PACKAGE_NAME}} -- <固定底座发行JSON> <已准备Core目录> <新部署目录>
 ```
 
-返回的新目录包含 `core.deployment.lock.json`、数据源 schema 和公共原迁移加本 Core 原迁移，仍为 pending。数据库先区分空库、已初始化且兼容、未知或不兼容旧库；读失败不是空库，未知旧库停止并沿原升级办法处理。安装办理顺序可对照[固定公共安装说明](https://github.com/JinPen-G/Zelo/blob/a471b9472804a6bf0a9b5681a94650b9929c87b5/apps/platform-api/README.md#从诊断到初始化与就绪)，实际依赖仍以本包固定的底座材料为准。
+返回的新目录包含 `core.deployment.lock.json`、数据源 schema 和公共原迁移加本 Core 原迁移，仍为 pending。数据库先区分空库、已初始化且兼容、未知或不兼容旧库；读失败不是空库，未知旧库停止并沿原升级办法处理。账号与准入顺序对照[固定公共安装说明](https://github.com/JinPen-G/Zelo/blob/e42ffbe38a5f31b3080aa51310f208a96f835d37/apps/platform-api/README.md#从诊断到初始化与就绪)，实际依赖仍以本包固定的底座材料为准。该说明中的 `platform`/`public-ai` 安装命令只处理各自组合；`selected-core` 不代办本 Core 的迁移和账号步骤，继续使用下面的组合 schema 与原公共初始化。
 
 只有在明确获准的目标环境，才执行组合迁移及公共初始化：
 
