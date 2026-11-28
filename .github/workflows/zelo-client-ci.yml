@@ -577,7 +577,9 @@ jobs:
                 '--disable-background-networking', '--disable-component-update', '--no-first-run', '--disable-sync', '--no-proxy-server',
                 '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1', `--user-data-dir=${resolve(task, 'browser-profile')}`] } } } });
             const prefix = '/session/' + browser.sessionId, dom = (script, ...args) => driver(prefix + '/execute/sync', { script, args });
-            async function waitFor(read, label, timeout = 15000) {
+            // 原页面/动作串行读取上下文、地点、业务与交付前准入；观察不能早于单次运输的 30 秒期限。
+            // 仅延长观察，不再次触发点击、请求或动作；原同键、单次派发及范围断言保持。
+            async function waitFor(read, label, timeout = 45000) {
               const deadline = Date.now() + timeout;
               do { const result = await read(); if (result) return result; await new Promise(resolve => setTimeout(resolve, 150)); } while (Date.now() < deadline);
               // 只记录展示反馈和状态码，不保存页面正文、凭据或请求内容。
