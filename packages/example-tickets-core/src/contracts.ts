@@ -2,7 +2,7 @@
 import { z } from "zod";
 
 export const TICKETS_CORE_ID = "example-tickets";
-export const TICKETS_CORE_VERSION = "0.1.5";
+export const TICKETS_CORE_VERSION = "0.1.6";
 export const TICKETS_DATA_VERSION = "0.1.0";
 /** 当前工单实现可读取的原绑定版本范围；物理数据版本和迁移账由宿主另行核验。 */
 export const TICKETS_DATA_READABLE = Object.freeze({ minInclusive: "0.1.0", maxExclusive: "0.2.0" });

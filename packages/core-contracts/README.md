@@ -92,6 +92,8 @@ node packages/core-contracts/dist/create.js --workspace . --target packages/acme
 
 `core.scaffold.json` 保存底座完整来源、七个公共 workspace 和外部依赖的精确版本，以及公开手册的 LF 文本摘要。公共包元数据与外部解析版本都核同一根锁；迁移继续核原字节。Core 自己的发行来源在提交实际源码后传给清单/打包入口，生成时不伪造发行 SHA。
 
+生成器与生成清单共同支持底座 `>=0.2.2 <0.4.0`、Core 合同 `>=0.1.1 <0.2.0`；0.3 系列新增安装工具仍沿用这些公共接点及原迁移。范围只声明兼容，实际包与宿主必须固定到同一来源并完成下述检查；0.4 及以后继续拒绝，须另核合同与运行组合。含 Core 的数据计划由生成宿主准备，不套用零 Core 安装/升级计划。
+
 生成后按本 Core README 显式加入所选底座 workspace、核对锁并准备开发依赖。公共包使用所选固定底座的同名 workspace，不能把版本号当作 npm 公网发行。生成器不改根 package/lock，不复制底座或作者环境，也不安装依赖。标准包仍复用 `corePackageFiles`、`inspectCorePackageFiles`、`renderCoreGuide`、`createCoreArchive` 及原 `check`/`prepare-install`；部署准备复用原 `createCoreMigrationDeployment`，只产生 pending 材料。
 
 Node 开发调用使用 `@rental-os/core-contracts/scaffold` 的 `createCoreProject` 与 `CoreScaffoldOptionsSchema`，该出口需要本包的 TypeScript 开发依赖供现有能力索引使用，公共运行时总出口不加载生成器。[生成实现](src/scaffold.ts) · [CLI](src/create.ts) · [最小模板](templates/minimal/README.md.tpl)

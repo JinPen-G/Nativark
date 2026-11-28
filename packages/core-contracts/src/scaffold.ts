@@ -88,8 +88,8 @@ function platformMaterials(workspace: string, source: CoreScaffoldOptions["platf
     }
   }
   const platform = z.object({ version: CoreReleaseVersionSchema }).passthrough().parse(JSON.parse(readPinned("package.json").toString("utf8")));
-  if (!isCoreVersionSupported(platform.version, { minInclusive: "0.2.2", maxExclusive: "0.3.0" }))
-    return fail("platform_version", "package.json", "version", "当前模板支持底座 >=0.2.2 <0.3.0，请选择兼容的固定来源");
+  if (!isCoreVersionSupported(platform.version, { minInclusive: "0.2.2", maxExclusive: "0.4.0" }))
+    return fail("platform_version", "package.json", "version", "当前模板支持底座 >=0.2.2 <0.4.0，请选择兼容的固定来源");
   const lock = z.object({ lockfileVersion: z.literal(3), packages: z.record(z.object({ version: z.string().optional() }).passthrough()) })
     .passthrough().parse(JSON.parse(readPinned("package-lock.json").toString("utf8")));
   const dependencies: Record<string, string> = {}, devDependencies: Record<string, string> = {};

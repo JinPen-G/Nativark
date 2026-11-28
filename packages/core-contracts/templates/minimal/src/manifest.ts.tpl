@@ -9,7 +9,7 @@ export function createManifest(source: CoreManifest["source"]): CoreManifest {
   return CoreManifestSchema.parse({
     manifestVersion: 1, id: CORE_ID, name: CORE_ID, description: "租户范围的本人条目与持久化开发模板",
     author: "{{PACKAGE_NAME}} contributors", version: CORE_VERSION, source, license: "MIT",
-    compatibility: { platform: { minInclusive: "0.2.2", maxExclusive: "0.3.0" },
+    compatibility: { platform: { minInclusive: "0.2.2", maxExclusive: "0.4.0" },
       contract: { minInclusive: "0.1.1", maxExclusive: "0.2.0" } },
     runtime: { node: { minInclusive: "22.12.0", maxExclusive: "25.0.0" } },
     entries: { server: "dist/index.js", admin: "admin/index.tsx", openapi: "openapi.json" },
