@@ -1,0 +1,449 @@
+name: Zelo 可选客户端宿主
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zelo-client-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# 仅按已核固定成果更新；不能用活动分支、修改清单或放宽门禁凑兼容。
+env:
+  ZELO_COMMIT: e2af5fc4886a70d6298402d8f7925b2172376c7c
+  RENTAL_COMMIT: 34baba2cdd50d1a46241069448621e460265cdb5
+  CI_DIR: output/.tmp/zelo-client-ci
+
+jobs:
+  combination:
+    name: 固定组合前检（不是 A03 验收）
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - name: 检出客户端候选
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          path: ${{ env.CI_DIR }}/client
+          persist-credentials: false
+      - name: 检出已核底座
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.ZELO_COMMIT }}
+          path: ${{ env.CI_DIR }}/platform
+          persist-credentials: false
+      - name: 检出固定 Rental
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: JinPen-G/Zelo-rental-core
+          ref: ${{ env.RENTAL_COMMIT }}
+          path: ${{ env.CI_DIR }}/rental
+          persist-credentials: false
+      - name: 固定 Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.13.0
+      - name: 使用原版本合同读取组合缺项
+        id: check
+        working-directory: ${{ env.CI_DIR }}/platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$GITHUB_WORKSPACE/$CI_DIR"
+          test "$(git rev-parse HEAD)" = "$ZELO_COMMIT"
+          test "$(git -C "$task/rental" rev-parse HEAD)" = "$RENTAL_COMMIT"
+          test "$(git -C "$task/client" rev-parse HEAD)" = "$GITHUB_SHA"
+          npm ci --workspace @rental-os/core-contracts --include-workspace-root --ignore-scripts --no-audit --no-fund --cache "$task/npm-cache"
+          npm run build -w @rental-os/core-contracts
+          node <<'NODE'
+          const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path');
+          const { CoreManifestSchema, isCoreVersionSupported, CORE_CONTRACT_VERSION } = require('@rental-os/core-contracts');
+          const task = path.resolve(process.env.GITHUB_WORKSPACE, process.env.CI_DIR);
+          const read = file => JSON.parse(fs.readFileSync(path.join(task, file), 'utf8'));
+          const platform = read('platform/package.json'), rental = read('rental/package.json');
+          const manifest = CoreManifestSchema.parse(read('rental/core.manifest.json'));
+          const sdk = read('platform/packages/ai-native-data/package.public.json');
+          const { publicDataSdkFor } = require('./scripts/rental-host-lock.cjs');
+          const publicDataSdk = publicDataSdkFor(sdk);
+          const host = read('rental/workspace/apps/rental-api/package.json');
+          const adapter = read('client/templates/platform-clients/rental/package.json');
+          const source = fs.readFileSync(path.join(task, 'client/templates/platform-clients/rental/config.ts'), 'utf8');
+          const missing = [];
+          assert.equal(manifest.id, 'rental');
+          if (!isCoreVersionSupported(platform.version, manifest.compatibility.platform)) missing.push('Rental 清单尚不支持所选底座 ' + platform.version);
+          if (!isCoreVersionSupported(CORE_CONTRACT_VERSION, manifest.compatibility.contract)) missing.push('Rental 清单不支持所选 Core 合同');
+          if (publicDataSdk.version !== sdk.version) missing.push(`新装锁 SDK ${publicDataSdk.version} 与同源 SDK ${sdk.version} 不符`);
+          if (host.peerDependencies['@rental-os/public-ai-data'] !== publicDataSdk.declaration) missing.push('Rental 新装宿主 SDK 声明与同源归档不符');
+          if (adapter.peerDependencies['@rental-os/rental-core'] !== rental.version) missing.push('客户端可选 peer 尚未采用所选 Rental 版本');
+          if (!source.includes(`RENTAL_CLIENT_SOURCE = "${process.env.RENTAL_COMMIT}"`)) missing.push('客户端固定来源与 CI 所选 Rental 不符');
+          const report = { client: process.env.GITHUB_SHA, platform: process.env.ZELO_COMMIT, rental: process.env.RENTAL_COMMIT,
+            state: missing.length ? 'unavailable' : 'ready_for_host_attempt', missing,
+            browserExecuted: false, databaseChecked: false, wechatExecuted: false, a03Accepted: false };
+          fs.writeFileSync(path.join(task, 'combination.json'), JSON.stringify(report, null, 2));
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `ready=${missing.length === 0}\n`);
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## 客户端固定组合\n\n状态：${report.state}。此前检不表示真实宿主或 A03 通过。\n\n`
+            + missing.map(reason => '- ' + reason).join('\n') + '\n\n' + [report.client, report.platform, report.rental].map(sha => '`' + sha + '`').join(' / ') + '\n');
+          console.log(JSON.stringify(report));
+          NODE
+      - name: 保存无凭据的组合结果
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: zelo-client-combination-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.CI_DIR }}/combination.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: 清理前检材料
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$GITHUB_WORKSPACE/$CI_DIR"
+          test "$CI_DIR" = output/.tmp/zelo-client-ci
+          test "$(realpath -m "$task")" = "$GITHUB_WORKSPACE/output/.tmp/zelo-client-ci"
+          rm -rf -- "$task"
+          test ! -e "$task"
+
+  web-host:
+    name: 独立 v2 宿主与客户员工 Web
+    needs: combination
+    if: needs.combination.outputs.ready == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    services:
+      mysql:
+        image: mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb
+        env:
+          MYSQL_ROOT_PASSWORD: zelo_client_ci_root_only
+          MYSQL_DATABASE: zelo_client_ci
+          MYSQL_USER: zelo_ci
+          MYSQL_PASSWORD: zelo_client_ci_database_only
+        ports:
+          - 127.0.0.1:3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 --silent"
+          --health-interval=5s --health-timeout=3s --health-retries=30
+    steps:
+      - name: 检出客户端候选
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          path: ${{ env.CI_DIR }}/client
+          persist-credentials: false
+      - name: 检出已核底座
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.ZELO_COMMIT }}
+          path: ${{ env.CI_DIR }}/platform
+          persist-credentials: false
+      - name: 检出固定 Rental
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: JinPen-G/Zelo-rental-core
+          ref: ${{ env.RENTAL_COMMIT }}
+          path: ${{ env.CI_DIR }}/rental
+          persist-credentials: false
+      - name: 固定 Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.13.0
+      - name: 沿 Rental 原入口准备固定 v2 新装包
+        working-directory: ${{ env.CI_DIR }}/platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$GITHUB_WORKSPACE/$CI_DIR"
+          test "$(git rev-parse HEAD)" = "$ZELO_COMMIT"
+          test "$(git -C "$task/rental" rev-parse HEAD)" = "$RENTAL_COMMIT"
+          test "$(git -C "$task/client" rev-parse HEAD)" = "$GITHUB_SHA"
+          npm ci --include=dev --ignore-scripts --no-audit --no-fund --cache "$task/npm-cache"
+          mkdir "$task/temporary"
+          export DATABASE_URL=mysql://offline:offline@127.0.0.1:1/rental_os_offline
+          export AI_OFFLINE_WRITE_ROOT="$task/temporary" AI_OFFLINE_AUDIT="$task/temporary/audit.log"
+          export TEMP="$task/temporary" TMP="$task/temporary" TMPDIR="$task/temporary" XDG_CACHE_HOME="$task/temporary"
+          guard="$PWD/tests/fixtures/ai-native/prisma-offline-preload.cjs"
+          node --no-compilation-cache --max-old-space-size=6144 --require "$guard" \
+            "$task/rental/tools/prepare-workspace.cjs" --framework-repo "$PWD" --framework-commit "$ZELO_COMMIT" \
+            --repository https://github.com/JinPen-G/Nativark --core-commit "$RENTAL_COMMIT" \
+            --mode development --profile host --fresh-ai --out "$task/temporary/dependencies.tgz"
+          mkdir "$task/dependencies"
+          tar -xzf "$task/temporary/dependencies.tgz" -C "$task/dependencies"
+          (cd "$task/dependencies"; npm ci --include=dev --ignore-scripts --no-audit --no-fund --cache "$task/npm-cache")
+          node --no-compilation-cache --max-old-space-size=6144 --require "$guard" \
+            scripts/package-rental-host.cjs --development --fresh-ai --repo "$PWD" \
+            --repository https://github.com/JinPen-G/Nativark --commit "$ZELO_COMMIT" \
+            --core-repo "$task/rental" --core-commit "$RENTAL_COMMIT" \
+            --deps "$task/dependencies/node_modules" --output "$task/temporary/host.tgz"
+          test ! -e "$AI_OFFLINE_AUDIT"
+          mkdir "$task/host"
+          tar -xzf "$task/temporary/host.tgz" -C "$task/host"
+          node - "$task/host" <<'NODE'
+          const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path');
+          const root = process.argv[2], read = file => JSON.parse(fs.readFileSync(path.join(root, file)));
+          const receipt = read('rental-host.context.json'), source = read('development.workspace.json');
+          assert.equal(receipt.installation, 'fresh-ai'); assert.equal(receipt.sourceMode, 'development');
+          assert.equal(receipt.releaseApproved, false); assert.equal(receipt.serverUpdateEligible, false);
+          assert.equal(source.platform.source.commit, process.env.ZELO_COMMIT);
+          assert.equal(source.core.source.commit, process.env.RENTAL_COMMIT);
+          const lock = read('apps/rental-api/prisma-deployment/core.deployment.lock.json');
+          assert.equal(lock.lockVersion, 2); assert.equal(lock.postCapability.length, 1);
+          assert.deepEqual(lock.base.dataCapabilities.map(row => row.id), ['ai-native']);
+          const migrations = fs.readdirSync(path.join(root, 'apps/rental-api/prisma-deployment/migrations'), { withFileTypes: true })
+            .filter(row => row.isDirectory()).map(row => row.name).sort();
+          assert.equal(migrations.length, 18);
+          assert.equal(migrations.at(-1), 'post-capability.rental.rental.20261127000000-ai-extension');
+          NODE
+      - name: 只为两个 Web 装配所选客户端源码和原锁
+        working-directory: ${{ env.CI_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$GITHUB_WORKSPACE/$CI_DIR"
+          mkdir web
+          git -C platform archive "$ZELO_COMMIT" | tar -x -C web
+          git -C client archive "$GITHUB_SHA" packages/platform-client-contracts packages/platform-client-web \
+            templates/platform-clients/customer-web templates/platform-clients/staff-web templates/platform-clients/rental | tar -x -C web
+          mkdir web/packages/rental-core
+          git -C rental archive "$RENTAL_COMMIT" package.json LICENSE src clients/contribution tsconfig.client-contribution.json tsconfig.contracts.json | tar -x -C web/packages/rental-core
+          node <<'NODE'
+          const assert = require('node:assert/strict'), fs = require('node:fs');
+          const read = file => JSON.parse(fs.readFileSync(file)), root = read('web/package.json'), lock = read('web/package-lock.json');
+          const candidate = read('client/package-lock.json');
+          const selected = ['packages/platform-client-contracts', 'packages/platform-client-web', 'templates/platform-clients/rental',
+            'templates/platform-clients/customer-web', 'templates/platform-clients/staff-web'];
+          for (const directory of selected) {
+            assert(!root.workspaces.includes(directory)); root.workspaces.push(directory);
+            const metadata = read('web/' + directory + '/package.json'), link = 'node_modules/' + metadata.name;
+            assert(candidate.packages[directory] && candidate.packages[link]);
+            assert(!lock.packages[directory] && !lock.packages[link]);
+            lock.packages[directory] = candidate.packages[directory]; lock.packages[link] = candidate.packages[link];
+          }
+          // 原接线包同时提供微信类型，版本/来源/摘要直接取候选锁；没有新增解析或改旧依赖。
+          const wxTypes = 'node_modules/miniprogram-api-typings';
+          if (lock.packages[wxTypes]) assert.deepEqual(lock.packages[wxTypes], candidate.packages[wxTypes]);
+          else lock.packages[wxTypes] = candidate.packages[wxTypes];
+          const core = read('web/packages/rental-core/package.json'); root.workspaces.push('packages/rental-core');
+          lock.packages['packages/rental-core'] = Object.fromEntries(['name', 'version', 'license', 'dependencies', 'peerDependencies', 'peerDependenciesMeta']
+            .filter(key => core[key] !== undefined).map(key => [key, core[key]]));
+          lock.packages['node_modules/@rental-os/rental-core'] = { resolved: 'packages/rental-core', link: true };
+          lock.packages[''].workspaces = root.workspaces;
+          fs.writeFileSync('web/package.json', JSON.stringify(root, null, 2)); fs.writeFileSync('web/package-lock.json', JSON.stringify(lock, null, 2));
+          for (const [surface, port] of [['customer-web', 5194], ['staff-web', 5195]]) {
+            const config = { apiOrigin: `https://127.0.0.1:${port}`, tenantCode: 'client-ci', brand: { name: '客户端 CI 租户' } };
+            fs.writeFileSync(`web/templates/platform-clients/${surface}/connection.ts`, `export const connection = ${JSON.stringify(config)};\n`);
+          }
+          NODE
+          cd web
+          npm ci --include=dev --ignore-scripts --no-audit --no-fund --cache "$task/npm-cache"
+          npm run build -w @rental-os/core-contracts
+          npm run build -w @rental-os/platform-contracts
+          npm run build -w @rental-os/platform-client-contracts
+          npm run lint -w @rental-os/platform-client-web
+          npm run lint -w @rental-os/client-template-rental
+          npm run lint -w @rental-os/client-template-customer-web
+          npm run lint -w @rental-os/client-template-staff-web
+          npm run build -w @rental-os/client-template-customer-web
+          npm run build -w @rental-os/client-template-staff-web
+      - name: 独占 MySQL 初始化及真实客户员工页面
+        working-directory: ${{ env.CI_DIR }}/host
+        shell: bash
+        env:
+          DATABASE_URL: mysql://zelo_ci:zelo_client_ci_database_only@127.0.0.1:3306/zelo_client_ci?connection_limit=2
+          API_PORT: '3094'
+          RENTAL_AI_MODE: enabled
+          CORS_ALLOWED_ORIGINS: https://127.0.0.1:5194,https://127.0.0.1:5195
+        run: |
+          set -euo pipefail
+          task="$GITHUB_WORKSPACE/$CI_DIR"
+          export AUTH_TOKEN_SECRET="$(openssl rand -hex 32)" SEED_PLATFORM_PASSWORD="ClientCi9-$(openssl rand -hex 12)"
+          export RENTAL_DEPLOYMENT_LOCK="$PWD/apps/rental-api/prisma-deployment/core.deployment.lock.json"
+          export RENTAL_PUBLIC_AI_DATA_PACKAGE_DIR="$PWD/public-ai-data"
+          npm ci --include=dev --ignore-scripts --no-audit --no-fund --cache "$task/npm-cache"
+          node node_modules/@prisma/engines/scripts/postinstall.js
+          node node_modules/prisma/build/index.js generate --schema apps/platform-api/prisma/schema.prisma
+          node node_modules/prisma/build/index.js generate --schema apps/rental-api/prisma-deployment/schema.prisma
+          node verify-runtime.cjs
+          node node_modules/prisma/build/index.js migrate deploy --schema apps/rental-api/prisma-deployment/schema.prisma
+          node apps/platform-api/dist/initialize.js
+          node apps/rental-api/dist-ai/ai-fresh-initialize.js
+          node apps/rental-api/dist-ai/ai-fresh-main.js > "$task/api.log" 2>&1 &
+          api_pid=$!
+          trap 'kill "$api_pid" ${driver_pid:+"$driver_pid"} 2>/dev/null || true; wait || true' EXIT
+          curl -fsS --retry 30 --retry-delay 1 --retry-max-time 60 --retry-connrefused --max-time 5 http://127.0.0.1:3094/api/health -o "$task/health.json"
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout "$task/localhost.key" -out "$task/localhost.crt" \
+            -days 1 -subj /CN=localhost -addext subjectAltName=DNS:localhost,IP:127.0.0.1 2> "$task/certificate.log"
+          google-chrome --version
+          "$CHROMEWEBDRIVER/chromedriver" --version
+          "$CHROMEWEBDRIVER/chromedriver" --port=9515 --allowed-ips=127.0.0.1 > "$task/browser.log" 2>&1 &
+          driver_pid=$!
+          curl -fsS --retry 10 --retry-delay 1 --retry-connrefused --max-time 5 http://127.0.0.1:9515/status -o "$task/browser-status.json"
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { randomUUID } from 'node:crypto';
+          import { readFileSync, writeFileSync } from 'node:fs';
+          import { createServer } from 'node:https';
+          import { request as forward } from 'node:http';
+          import { resolve, extname, sep } from 'node:path';
+          const task = resolve(process.env.GITHUB_WORKSPACE, process.env.CI_DIR), origin = 'http://127.0.0.1:3094';
+          async function api(path, token, body, expected = body === undefined ? 200 : 201) {
+            const response = await fetch(origin + path, { method: body === undefined ? 'GET' : 'POST',
+              headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+              ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(15000) });
+            assert.equal(response.status, expected, `${path}: HTTP ${response.status}`);
+            const value = await response.json(); assert(Object.hasOwn(value, 'data')); return value.data;
+          }
+          const manage = (route, token, body) => api('/api/platform/core-host/' + route, token, { coreId: 'rental', ...body }, 200);
+          async function operatorLogin(tenantCode, account, initial) {
+            const session = await api('/api/auth/login', undefined, { tenantCode, account, password: initial });
+            return api('/api/auth/change-password', session.accessToken, { currentPassword: initial, newPassword: 'Client9-' + randomUUID() });
+          }
+          const saas = await operatorLogin('platform', 'admin', process.env.SEED_PLATFORM_PASSWORD);
+          const admission = await manage('deployment-admission/read', saas.accessToken, {});
+          await manage('deployment-admission', saas.accessToken, { state: 'accepting', expectedRevision: admission.revision, operationId: randomUUID() });
+          const tenant = await api('/api/platform/tenant-bootstrap', saas.accessToken, { tenantCode: 'client-ci', tenantName: '客户端 CI 租户',
+            categoryCode: 'camera', adminAccount: 'setup', adminDisplayName: 'CI准备管理员' });
+          const admin = await operatorLogin('client-ci', 'setup', tenant.temporaryPassword);
+          const tenantId = tenant.tenant.tenantId;
+          let grant = await manage('tenant-grants', saas.accessToken, { tenantId, state: 'enabled', expectedRevision: 0, operationId: randomUUID() });
+          await manage('member-assignments', admin.accessToken, { userId: tenant.adminUser.id, state: 'assigned', expectedRevision: 0, operationId: randomUUID() });
+          // 租户管理接口与订单空间各有原绑定；不能把一个范围的绑定冒充另一个。
+          await manage('bindings', admin.accessToken, { expectedRevision: 0, operationId: randomUUID() });
+          const spaces = await api('/api/platform/workspaces', admin.accessToken);
+          const workspace = spaces.find(row => row.isDefault); assert(workspace);
+          await manage('bindings', admin.accessToken, { container: { type: 'rental-workspace', id: workspace.id }, expectedRevision: 0, operationId: randomUUID() });
+          const role = await api('/api/platform/roles', admin.accessToken, { code: 'CLIENT_CI_STAFF', name: '客户端 CI 普通员工', scope: 'operator',
+            enabledBusinessScopes: [], permissions: ['rental-os:order:view', 'rental-os:order:operate'], dataScope: 'all', isActive: true });
+          assert.equal(role.fixedAllPermissions, false); assert(!role.permissions.includes('*'));
+          const staff = await api('/api/platform/users/access', admin.accessToken, { account: 'client-staff', displayName: 'CI普通员工', roleIds: [role.id],
+            isPlatformAdmin: false, isActive: true, workspaceAccesses: [{ workspaceId: workspace.id, roleId: role.id,
+              dataScope: 'all', locationScope: { mode: 'all', locationIds: [] }, isActive: true }] });
+          const assignment = await manage('member-assignments', admin.accessToken, { userId: staff.id, state: 'assigned', expectedRevision: 0, operationId: randomUUID() });
+          const staffPassword = 'Staff9-' + randomUUID();
+          const staffInitial = await api('/api/staff/v1/auth/login', undefined, { tenantCode: 'client-ci', account: staff.account, password: staff.temporaryPassword });
+          const staffChanged = await api('/api/staff/v1/auth/change-password', staffInitial.accessToken, { currentPassword: staff.temporaryPassword, newPassword: staffPassword });
+          assert.equal(staffChanged.user.isPlatformAdmin, false); assert.equal(staffChanged.user.isSaasAdmin, false);
+          await api('/api/staff/v1/auth/logout', undefined, { refreshToken: staffChanged.refreshToken });
+          const customerInitial = 'Member9-' + randomUUID(), customerPassword = 'Customer9-' + randomUUID();
+          const member = await api('/api/membership/personal', admin.accessToken, { name: 'CI普通客户', phone: '13800000001', channel: 'admin',
+            directApprove: true, temporaryPassword: customerInitial, idempotencyKey: randomUUID() });
+          assert(member.customerId);
+          const clientInitial = await api('/api/client/v1/auth/login', undefined, { tenantCode: 'client-ci', loginIdentifier: '13800000001', password: customerInitial, clientId: 'website' });
+          await api('/api/client/v1/auth/change-password', clientInitial.accessToken, { currentPassword: customerInitial, newPassword: customerPassword });
+          // 真实 API 只在当前 job 的回环接口。HTTPS 代理保留请求身份/响应，不签发凭据或改写业务结果。
+          const servers = [];
+          for (const [surface, port] of [['customer-web', 5194], ['staff-web', 5195]]) {
+            const root = resolve(task, 'web/templates/platform-clients', surface, 'dist');
+            const server = createServer({ key: readFileSync(resolve(task, 'localhost.key')), cert: readFileSync(resolve(task, 'localhost.crt')) }, (request, response) => {
+              if (request.url?.startsWith('/api/')) {
+                const upstream = forward(origin + request.url, { method: request.method, headers: request.headers }, result => {
+                  response.writeHead(result.statusCode, result.headers); result.pipe(response);
+                });
+                upstream.on('error', () => { response.writeHead(502); response.end(); }); request.pipe(upstream); return;
+              }
+              try {
+                const pathname = decodeURIComponent(new URL(request.url, 'https://localhost').pathname);
+                const file = resolve(root, '.' + (pathname === '/' ? '/index.html' : pathname));
+                assert(file.startsWith(root + sep));
+                const type = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' }[extname(file)] ?? 'application/octet-stream';
+                response.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' }); response.end(readFileSync(file));
+              } catch { response.writeHead(404); response.end(); }
+            });
+            servers.push(server); await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
+          }
+          async function driver(path, body, method = body === undefined ? 'GET' : 'POST') {
+            const response = await fetch('http://127.0.0.1:9515' + path, { method, headers: { 'Content-Type': 'application/json' },
+              ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(30000) });
+            const { value } = await response.json(); assert(response.ok && !value?.error, `浏览器 ${path}: ${value?.error ?? response.status}`); return value;
+          }
+          let browser;
+          try {
+            browser = await driver('/session', { capabilities: { alwaysMatch: { browserName: 'chrome', acceptInsecureCerts: true,
+              'goog:chromeOptions': { args: ['--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1440,1000', '--lang=zh-CN',
+                '--disable-background-networking', '--disable-component-update', '--no-first-run', '--disable-sync', '--no-proxy-server',
+                '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1', `--user-data-dir=${resolve(task, 'browser-profile')}`] } } } });
+            const prefix = '/session/' + browser.sessionId, dom = (script, ...args) => driver(prefix + '/execute/sync', { script, args });
+            async function waitFor(read, label) {
+              const deadline = Date.now() + 15000;
+              do { const result = await read(); if (result) return result; await new Promise(resolve => setTimeout(resolve, 150)); } while (Date.now() < deadline);
+              throw new Error('页面等待超时：' + label);
+            }
+            const text = value => waitFor(() => dom('return document.body.innerText.includes(arguments[0])', value), value);
+            async function click(label) {
+              const element = await waitFor(() => dom('return [...document.querySelectorAll("button")].find(e => e.checkVisibility() && !e.disabled && e.innerText.trim() === arguments[0]) ?? null', label), label);
+              await driver(`${prefix}/element/${element['element-6066-11e4-a52e-4f735466cecf']}/click`, {});
+            }
+            async function fill(selector, value) {
+              const element = await waitFor(() => dom('return document.querySelector(arguments[0])', selector), selector);
+              await driver(`${prefix}/element/${element['element-6066-11e4-a52e-4f735466cecf']}/value`, { text: value });
+            }
+            for (const [surface, port, account, password, empty] of [
+              ['customer-web', 5194, '13800000001', customerPassword, '暂无本人订单'],
+              ['staff-web', 5195, staff.account, staffPassword, '暂无受权订单'],
+            ]) {
+              await driver(prefix + '/url', { url: `https://127.0.0.1:${port}/` });
+              await text('重新登录'); await click('重新登录');
+              await fill('#login-account', account); await fill('#login-password', password); await click('登录'); await text(empty);
+              const audience = surface === 'customer-web' ? 'client' : 'staff';
+              // 此 GET 消费页面实际保存的原客户端凭据，核身份；不注入准备管理员的 token。
+              const observed = await driver(prefix + '/execute/async', { script: `const done = arguments[arguments.length - 1];
+                const key = Object.keys(sessionStorage).find(key => key.endsWith(':credentials'));
+                const credentials = JSON.parse(sessionStorage.getItem(key));
+                fetch('/api/${audience}/v1/auth/contribution-context', {headers:{Authorization:'Bearer '+credentials.accessToken}})
+                  .then(async response => done({status:response.status, context:(await response.json()).data}))
+                  .catch(() => done({status:0}));`, args: [] });
+              assert.equal(observed.status, 200); assert.equal(observed.context.audience, audience);
+              assert.equal(observed.context.subjectId, audience === 'client' ? member.customerId : staff.id);
+              assert.equal(observed.context.tenantId, tenantId);
+              await driver(prefix + '/window/rect', { width: 390, height: 844 });
+              assert(await dom('return document.documentElement.scrollWidth <= window.innerWidth'), '窄屏出现横向溢出');
+              writeFileSync(resolve(task, surface + '.png'), Buffer.from(await driver(prefix + '/screenshot'), 'base64'));
+              grant = await manage('tenant-grants', saas.accessToken, { tenantId, state: 'disabled', expectedRevision: grant.revision, operationId: randomUUID() });
+              await driver(prefix + '/url', { url: `https://127.0.0.1:${port}/#/rental.${audience === 'client' ? 'my-orders' : 'service-orders'}` });
+              await text('你没有此页面或操作的权限。');
+              assert(await dom('return !document.body.innerText.includes(arguments[0]) && !document.querySelector(".zc-items")', empty));
+              grant = await manage('tenant-grants', saas.accessToken, { tenantId, state: 'enabled', expectedRevision: grant.revision, operationId: randomUUID() });
+              await click('刷新页面'); await text(empty);
+              if (audience === 'staff') {
+                await manage('member-assignments', admin.accessToken, { userId: staff.id, state: 'revoked', expectedRevision: assignment.revision, operationId: randomUUID() });
+                await click('刷新页面'); await text('你没有此页面或操作的权限。');
+              }
+              await click('退出登录'); await text('使用你的' + (audience === 'client' ? '客户' : '员工') + '账号登录。');
+              assert(await dom('return Object.keys(sessionStorage).every(key => !key.endsWith(":credentials"))'));
+              await driver(prefix + '/window/rect', { width: 1440, height: 1000 });
+            }
+            writeFileSync(resolve(task, 'web-host.json'), JSON.stringify({ platform: process.env.ZELO_COMMIT, rental: process.env.RENTAL_COMMIT,
+              client: process.env.GITHUB_SHA, databaseChecked: true, browserExecuted: true,
+              evidence: ['original-client-and-staff-login', 'empty-core-page', 'narrow-layout', 'core-disable-direct-route', 'staff-revocation', 'logout'],
+              pending: ['real-order-action', 'scope-isolation', 'unknown-original-receipt', 'wechat-devtools', 'wechat-device'],
+              a03Accepted: false, releaseApproved: false }, null, 2));
+            console.log('真实客户/员工登录、空订单页、窄屏、停用/撤权及退出通过；业务动作、范围隔离和微信仍未验。');
+          } finally {
+            try { if (browser) await driver('/session/' + browser.sessionId, undefined, 'DELETE'); }
+            finally { for (const server of servers) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); } }
+          }
+          NODE
+      - name: 保存最小页面证据
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: zelo-client-web-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.CI_DIR }}/web-host.json
+            ${{ env.CI_DIR }}/customer-web.png
+            ${{ env.CI_DIR }}/staff-web.png
+          if-no-files-found: error
+          retention-days: 7
+      - name: 清理本 job 全部临时材料
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$GITHUB_WORKSPACE/$CI_DIR"
+          test "$CI_DIR" = output/.tmp/zelo-client-ci
+          test "$(realpath -m "$task")" = "$GITHUB_WORKSPACE/output/.tmp/zelo-client-ci"
+          rm -rf -- "$task"
+          test ! -e "$task"
