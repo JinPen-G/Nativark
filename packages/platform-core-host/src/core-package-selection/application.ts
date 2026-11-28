@@ -112,8 +112,8 @@ export function composePlatformCorePackageSelection<Tx extends PlatformCoreTrans
       const reference = corePackageReleaseReference(release), existing = await locked(original, () => read(reference));
       if (existing.status === "unavailable") return existing;
       if (existing.status === "recorded") return { status: "already_selected", record: existing.record };
-      const { repository, coreId, version, tag } = release;
-      const inspected = await inspect({ repository, coreId, version, tag });
+      const { repository, coreId, version, tag, visibility } = release;
+      const inspected = await inspect({ repository, coreId, version, tag, ...(visibility ? { visibility } : {}) });
       let dispatched = false;
       return locked(original, async (transaction, revalidate) => {
         if (inspected.status === "unavailable") return inspected;

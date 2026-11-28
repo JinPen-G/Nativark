@@ -492,7 +492,7 @@ node packages/core-contracts/dist/prepare-install.js <Core包.tgz> <SHA256> <既
 
 Core 作者先按前面的命令生成标准包，文件命名为 `<Core ID>-<版本>.tgz`，例如 `example-tickets-0.1.1.tgz`。在公开仓库创建 `v0.1.1` Tag 和非预发行 Release，将这个包作为 Release 资产上传。同仓多个 Core 使用 `example-tickets/v0.1.1` 形式的独立 Tag；清单中的 `source.repository` 和 `source.commit` 对应该仓库和 Tag 实际指向的提交。包内清单可在构建阶段注入固定来源，避免用未提交工作区或 `target_commitish` 的分支名替代提交。
 
-部署者先读取选定发行，将输出 JSON 保存为一份固定来源记录。下面的命令显式访问公开 GitHub，无需本机 Key；首版不读取环境变量或 Git 凭据来访问私有仓库。
+部署者先读取选定发行，将输出 JSON 保存为一份固定来源记录。下面的命令显式访问公开 GitHub，无需本机 Key；命令不读取环境变量或 Git 凭据来访问私有仓库。
 
 ```sh
 node packages/core-contracts/dist/github-release.js inspect <owner/repo> <Core ID> <版本> [Tag]
@@ -511,6 +511,22 @@ node packages/core-contracts/dist/github-release.js prepare <固定Release JSON>
 Node专用出口 `@rental-os/core-contracts/github` 提供 `inspectGitHubCoreRelease`、`prepareGitHubCoreRelease` 及两份输入 schema。两条命令成功退出0，失败退出1；成功stdout只有JSON，失败stderr不包含响应正文、签名下载URL或凭据。下载有时间/大小上限，仅跟随GitHub受支持的HTTPS资产地址，失败没有落地半包。固定内容的检查不证明发布者或代码已经审核。
 
 仓库可添加 `zelo-core` Topic 供发现入口检索。Topic 不发布版本、不安装也不授权。GitHub 行为依据[按 Tag 读取 Release](https://docs.github.com/en/rest/releases/releases#get-a-release-by-tag-name)、[资产与摘要](https://docs.github.com/en/rest/releases/assets#get-a-release-asset)、[读取引用](https://docs.github.com/en/rest/git/refs#get-a-reference)和[附注 Tag](https://docs.github.com/en/rest/git/tags#get-a-tag)。
+
+### 私有固定发行的服务端合同
+
+私有来源只支持 GitHub.com 上显式选定的固定 Release 资产，不参加公开 Topic 或仓库清单发现。`GitHubCoreReleaseSelectionSchema` 可显式携带 `visibility: "private"`；对应 pin 必须同时带 GitHub 实际数字 `repositoryId`。省略这两个字段仍是原公开 pin，原公开引用与摘要不变。私有仓库更名、转移、ID、Tag、提交或资产变化须停止并重新核定，不沿公开 Rental 更名特例放行。
+
+服务端调用 `inspectGitHubCoreRelease(selection, fetcher, credential)`、`downloadGitHubCoreRelease(pin, fetcher, credential)` 或 `verifyGitHubCoreRelease(pin, fetcher, credential)`。`credential` 为仅在服务端瞬时使用的 `{ repository, token }`，必须由宿主先核当前 SaaS 管理身份、已启用的加密来源配置和允许仓库范围。它不属于 pin、清单、原候选、锁或浏览器响应。合同层不读取本机环境、Git 凭据或用户登录信息；缺显式凭据时私有读取返回 `source_denied`。
+
+私有读取在固定仓库 API 路径核 `private: true`、未归档、规范名称与实际 ID，再按原 Tag 解引用、Release/资产 ID、长度、SHA-256 和包内来源逐项核验。Bearer 只出现在该仓库首次 `https://api.github.com/repos/<owner>/<repo>/…` 请求。元数据跳转拒绝；资产跳转仍限定原 GitHub HTTPS 主机，所有后续跳转请求均不带 Authorization，即便跳回 API 同源也不重发凭据。异常不输出响应体、签名下载地址或秘密。
+
+`verifyGitHubCoreRelease` 只读当前远端权限与完整 pin，供缓存命中、候选及部署边界复用；验证成功不形成可长期复用的授权。宿主仍须在操作前后及原提交事务内核当前身份和来源配置修订。凭据轮换、停用、仓库移出范围或远端撤权后，缓存和原候选不能代替本次获取资格；已安装运行权、原收据、数据和租户/成员授权由各自原入口保持。此合同本身不提供通用部署执行器。
+
+### 开发者发行材料与许可边界
+
+每个标准 Core 包沿原 `pack`/`check` 入口交付：清单中的作者、许可、唯一 Core ID、版本、稳定来源与完整提交，明确的底座/合同/Node/能力兼容范围，完整入口及 OpenAPI、指南与公开 README、LICENSE、原 SQL 迁移和逐文件摘要。发行说明写清维护者、前置、升级步骤、数据变化与恢复限制；按本仓库[发行规则](../../AGENTS.md#release-workflow)保留 MIT 与第三方许可，不包含根私有 docs、凭据、依赖目录或维护者环境。已有迁移、Tag、资产不能回写，修复使用新版本。
+
+公开社区发现始终标记 `unreviewed`；摘要、固定来源和私有访问成功分别证明内容一致或本次可读取，不能自动变为可信作者或代码审查结论。可信来源需维护者另有明确审核依据。软件许可、部署安装权、租户 Core 使用权、成员分配与模型消费账分别核定：购买、私有 token、下载缓存或包已安装均不授予其他权限。商业 Core 可沿原许可声明和部署/租户/成员权限接点集成已批准政策；本期不实现计价、试用、期限、离线宽限、收费、市场或分账，缺商业授权依据不能补为允许。
 
 [官方 Rental Core](https://github.com/JinPen-G/Zelo-rental-core)可从 `JinPen-G/Zelo-rental-core` 或 `JinPen-G/nativark-rental-core` 读取。读取器核定两个地址在 GitHub 上均为同一未归档公开仓库（ID `1470386426`），才会用改名前的 `https://github.com/JinPen-G/nativark-rental-core` 作为固定发行来源；`v0.1.15` 也保留该来源。两个地址生成同一 pin，包内身份和历史安装锁按原值核对。仅认可该官方更名；其他仓库的重定向不会取得另一来源的发行身份。已有来源不同的安装仍遵守 `source_conflict`。
 
