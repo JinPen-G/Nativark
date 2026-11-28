@@ -10,6 +10,8 @@
 
 Task/Run提交复用固定补片`831dbee0f699b68119fa11a53c34d7b1ff5769cd`的正式`@rental-os/ai-native-server/task-transitions`出口，Core事实类型消费其后继`1d6785212c032d2891f495c107978c1b0b9284df`。合并依赖为安装PR #11、Core模板PR #13、公共Task合同PR #16，再到本适配PR #15；不能用较早0.2.1源码的同名包替代这些固定出口。
 
+tenant MCP参加者精确消费固定补片`a3b6bc597d8962293460105520d2a7c6169329e2`的`mcp-server` **0.1.2**候选，平台发行兼容`>=0.1.0 <0.4.0`。旧0.1.1仍保持`<0.3.0`；数据版本仍为0.1.0，公共数据合同前置仍为`>=0.1.9 <0.1.10`，不能把它误写为平台发行0.3。原schema、五份SQL与来源摘要保持，当前候选未发布。
+
 在所选固定源码与已准备的公共AI SDK/专属Client下，先编译普通Core，再运行`npm run build:ai -w @rental-os/example-tickets-core`。普通`build`和`pack:core`不加载AI；选装使用`npm run pack:core:ai -w @rental-os/example-tickets-core -- <仓库HTTPS地址> <本次固定提交> <底座来源JSON> <新包.tgz>`。它增加`entries.ai`及本次实际编译的`dist-ai`文件，不改变工单SQL、数据版本或原角色。两种包通过完整清单及sha256区分，必须选择匹配的部署锁；选装入口的存在不等于数据已部署、权益已开通或工具已发布。
 
 ```ts

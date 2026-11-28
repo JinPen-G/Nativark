@@ -383,7 +383,7 @@ jobs:
           node apps/example-tickets-api/dist-ai/ai-main.mjs > "$task/tickets-ai-api.log" 2>&1 &
           api_pid=$!
           trap 'kill "$api_pid" ${web_pid:+"$web_pid"} ${driver_pid:+"$driver_pid"} 2>/dev/null || true; wait || true' EXIT
-          node node_modules/vite/bin/vite.js preview --config apps/example-tickets-admin/vite.config.ts --host 127.0.0.1 --port 5193 --strictPort > "$task/tickets-ai-web.log" 2>&1 &
+          node node_modules/vite/bin/vite.js preview apps/example-tickets-admin --config apps/example-tickets-admin/vite.config.ts --host 127.0.0.1 --port 5193 --strictPort > "$task/tickets-ai-web.log" 2>&1 &
           web_pid=$!
           if ! curl -fsS --retry 30 --retry-delay 1 --retry-max-time 60 --retry-connrefused --max-time 5 http://127.0.0.1:5193/api/health -o "$task/tickets-ai-health.json"; then
             node -e 'const fs=require("node:fs"); for(const name of process.argv.slice(1)){let value=fs.readFileSync(name,"utf8"); for(const key of ["DATABASE_URL","AUTH_TOKEN_SECRET","INTEGRATION_ENCRYPTION_KEY","SEED_PLATFORM_PASSWORD"])if(process.env[key])value=value.replaceAll(process.env[key],"[redacted]"); console.error(value.slice(-5000));}' "$task/tickets-ai-api.log" "$task/tickets-ai-web.log"
