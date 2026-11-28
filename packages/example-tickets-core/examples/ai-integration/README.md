@@ -1,0 +1,104 @@
+# 工单 Core 的可选 AI / MCP 接入
+
+本目录提供两个可执行的 **MCP 只读适配**：当前可见工单详情、本人原操作收据。它们调用普通 Core 的同一 `TicketsService`，复用 [HTTP / Zod 合同](../../src/http.ts)，不重写工单权限、状态转换或存储。普通 Core 无需导入本目录，也不需要模型或 MCP。[普通业务与安装](../../README.md)
+
+这是一份供宿主显式选用的源码示例，尚未接入工单宿主、Core 清单或生成器，也未发布新的 npm / Core 子出口。内置 AI 的批准、执行和完整业务验收仍需下述接线；两个读取工具不能代表完整 AI 业务闭环。
+
+## 来源与使用条件
+
+基线：Zelo `d6ccb0dcad63ee2e06043b71c2651f326c7e8e3a`。按同一固定组合使用 `example-tickets-core` 0.1.5、`mcp-server` 0.1.1、`core-contracts` 0.1.1；内置 AI 接点核对的是 `ai-native-server` 0.2.1。版本来源以各包 metadata、固定源码及实际发行资产为准；此说明不宣布这些源码候选已发布或已安装。
+
+[tickets-reads.mts](tickets-reads.mts) 是 ESM 消费者，仅使用包的正式出口。宿主将该源码纳入自己的受控构建，并提供同版依赖及真实权威。禁止深层导入其他包的 `src`、从模型生成的路径调用 API，或用另一个工作树的活动构建产物运行。
+
+## 两个读取工具
+
+| MCP 名称 | 唯一输入 | 原调用与范围 |
+| --- | --- | --- |
+| `example_tickets_get` | `{ ticketId }` | `TicketsService.get`；当前 operator、租户、Core 授权、成员分配和 read 权限，普通成员仅能读本人创建或获分派工单 |
+| `example_tickets_receipt` | `{ operationId }` | `TicketsService.receipt`；本人原操作、当前对象可见性与独立原收据准入，保留 `recorded / unavailable` |
+
+输入 schema 取原 `TICKETS_HTTP`，不接收 tenant、subject、audience、角色或自报权限。适配在每次原授权回调中读取当前主体，不比较或直接转换 OAuth issuer subject 与内部 user ID。结果仍按原完整 Zod 合同校验，再核对象 / 原键及租户一致性。原详情的 `description` 可以有 4,000 字符，内部校验保留完整内容；外发还必须通过独立字段许可和 MCP 的 2,000 字符限制，不能截断后伪称完整原结果。
+
+`receipt` 返回的工单是原操作时快照，不能当作当前状态。`unavailable` 不表示未执行、未消耗或可重试。超时、取消和断线后保留原 `operationId`，仅按原收据核对，不换键、不重发。本示例没有任何写方法或重试逻辑。
+
+## 显式装配到外部 MCP
+
+工厂没有默认权威；缺少 service、当前主体、发布、授权、持久计量、字段放行或闭合外发 schema 时返回 `unavailable` 和静态缺件码。它要求原 `withInvocation` 与 `withCall` 同时存在，保留整次调用和一次额度消费的原生命周期。`configured` 只说明接线形状齐全，不能在产品目录显示为“业务可用”。
+
+以下函数在宿主的受控装配模块中使用。参数必须来自该宿主当前的原 Auth / Guard / ALS、正式 OAuth / Core 准入和持久计量实现，代码不提供恒真授权或内存生产账。
+
+```ts
+import { createProtectedMcpEndpoint } from "@rental-os/mcp-server";
+import type { ProtectedMcpConfig, ResourceTokenVerifier } from "@rental-os/mcp-server";
+import { createTicketsMcpReadTools, type TicketsMcpReadDependencies } from "./tickets-reads.mjs";
+
+export function composeTicketsReads(
+  endpoint: Omit<ProtectedMcpConfig, "readTools">,
+  verifier: ResourceTokenVerifier,
+  dependencies: TicketsMcpReadDependencies,
+) {
+  const integration = createTicketsMcpReadTools(dependencies);
+  if (integration.status === "unavailable") return integration;
+  return {
+    status: "configured" as const,
+    endpoint: createProtectedMcpEndpoint({ ...endpoint, readTools: integration.readTools }, verifier),
+  };
+}
+```
+
+这里不启监听、不创建 OAuth grant、不填写平台模型配置。服务选装、TLS / 路由、原 verifier 与 `protocolTraffic`、数据准入和退出时 `endpoint.close()` 仍由 [正式 MCP 宿主](../../../mcp-server/README.md)负责。不要把 `tools[].read()` 直接暴露为 HTTP 或模型回调；必须经过上述正式端点的完整受控路径。
+
+| 注入项 | 必须来自何处、每次核什么 |
+| --- | --- |
+| `service` | 原 [工单平台装配](../../src/platform-host.ts)的服务，保留 [MySQL 执行](../../src/mysql.ts)的当前授权、对象范围与提交前复核 |
+| `currentPrincipal` | 当前 `authority.withRead` 回调内的可信请求上下文；身份变更或回调结束后不能复用。不能从工具参数、缓存或固定管理员对象构造 |
+| `providers.publication` | 当前已审查的精确工具、版本、client / grant / scopes、tenant / audience、权益 / 政策及字段许可；目录和调用均重新核定 |
+| `providers.authority` | 原 Controller 等价 Auth / Guard / ALS，核当前角色、对象范围及 Core 准入；映射已验证资源主体，消费后复核。不得跨原授权事务建立会争抢同一身份锁的嵌套事务 |
+| `providers.accounting` | 原持久目标、调用和适用额度；`withInvocation` 包裹整次工作，`withCall` 在原授权回调中消费一次。缺目标或原账拒绝，不因换 token / 进程或超时重置 |
+| `providers.release` | 当前已审查目的地 / 字段许可；返回完整、独立的外发投影，不能原样返回原服务对象或因 schema 通过而省略许可 |
+| `outputSchemas.get / receipt` | 与相同已审查投影一致的闭合 JSON Schema，根 `type: object`、`additionalProperties: false`。按实际获准字段提供，不默认公开姓名、tenantId、说明或其他私人字段 |
+| `providers.usage`（如使用） | 原完成观察，不能自行伪造使用时间或把服务器完成当作客户端已收到 |
+
+原 [read-tools](../../../mcp-server/src/read-tools.ts)负责当前发布 → 原授权 → 持久计量 → Core 读取 → 字段放行 → 当前复核与输出校验。撤权 / 停用不能被 `configured` 或旧目录缓存绕过；普通读取停止后，原收据仅在原独立善后权限仍成立时可读，不能恢复普通访问。
+
+外发 schema 与 `release` 要同时保留原键、`recorded / unavailable` 和原快照含义。原 transport 限制每字段 2,000 字符、数组 50 条及完整响应 64 KiB；超限整项不可用，不拆成未获授权的追加读取。
+
+本适配使用 `/original-read-tool` 的普通 JSON 快照及同版 schema 编译器。原完整工单继续用正式 Zod response 校验：Core 的 OpenAPI 3.0 转换器包含 `nullable` 和布尔 exclusive 边界，不能直接冒充 JSON Schema。已有 JSON Schema 原合同的 Core 可复用该出口的 `createClosedOriginalRead`。
+
+## 三条路线分别接入
+
+| 路线 | 身份、资源与模型账 |
+| --- | --- |
+| 普通 Core | 原 operator / tenant / 成员 / 对象范围与 Core 准入；不安装此适配、不启 AI 也可完成业务 |
+| 外部 MCP 纯读取、客户端自付模型 | 当前 OAuth 资源身份映射回原业务主体，仍核业务权限、政策、发布、字段和适用工具限额。纯读取不要求平台模型或平台模型预算；客户端模型自付，不把本地 Key 交给平台 |
+| 内置 AI 或实际委托服务端模型 | 原服务端任务身份、当前 tenant / audience / 角色 / 对象来源，固定场景与工具版本、权益 / 政策、累计 Task 资源。模型调用另走唯一 Gateway 和平台财务单账；不能调用供应商 SDK 或借客户端 Key 绕过 |
+
+本目录只实现第二条路线的两个 reader。内置 AI 不复用 OAuth token 充当服务端任务身份；MCP 成功也不代表内置 AI 通过。模型已配置、包已安装、工具已登记分别只是前置，均不代表真实业务可用。
+
+## 内置 AI、必要批准与正式动作的下一接点
+
+以下均为已核正式出口，不是本目录已经完成的装配。宿主必须固定工单场景、输入 / 对象来源与版本，再接同一 Core 的原方法。
+
+| 阶段 | 正式接点与工单落点 |
+| --- | --- |
+| 受权事实、任务与工具 | `@rental-os/ai-native-server/public-tenant-task-authority`、`/task-persistence`、`/task-steps`、`/task-measured-effects`；`TaskRegisteredExecutor.resolve(toolCode, toolVersion)` 只解析已发布工具，执行时调用当前受权 `TicketsService`，原输入从保存的 `inputRef` 取得，不从模型补造 |
+| 准备及必要批准 | `/approval-persistence` 的 `createPublicAiApprovalPersistence` 与 `/runtime/public-approval-persistence` 的 `ProposalCatalogue`、`AiApprovalAuthority`；批准绑定原输入 / 指纹、目标、提案修订、工单 expectedRevision、来源事实和工具版本。相关依据变化沿原规则拒绝或重新确认 |
+| 正式动作 | 原 `create / assign / start / close` 决定业务事实；更新沿原 `expectedRevision`，幂等沿原 `operationId`。`attachEffect(...).prepare(native, binding)` 与 `.commit(native, binding, resultRef)` 必须加入同一原业务事务；不能先扣批准再另开工单事务，也不能在 MCP 只读注册中执行动作 |
+| 原结果与 unknown | 原 `TicketsService.receipt(principal, operationId)` 与 `/task-persistence`、`/runtime/original-result-reads`、`/runtime/original-task-recovery-read`；保持原 actionId、操作键和结果引用，缺原证据不补成功、不重新派发 |
+| 任务资源与模型 | `/task-resource-ledger`、`/task-runner-resources`、`/task-measured-effects` 保持累计资源；需要服务端模型时接 `/public-tenant-gateway` 和 `/runtime/budget/public-budget-ledger`，恢复不重置账 |
+
+当前缺件：工单专属的已发布场景 / 工具版本、原任务输入与主体绑定、真实 MCP 发布 / 计量 / 字段权威，以及工单动作和 C05 批准消费的同事务适配。现有 `TicketExecution.run` 向领域层提供仓储与 `TicketAccess`，不暴露原 native 事务；`createMysqlTicketsExecution` 的事务和审计由其原作者管理。需要在所属宿主 / Core 的明确文件窗口中接好 `ApprovalEffectSource.resolve / assertCommitted` 及原动作收据，不能在本目录复制业务写入或建立第二套批准机制。[原批准消费](../../../ai-native-server/src/runtime/approval-consumption-persistence.repository.ts) · [工单执行边界](../../src/service.ts)
+
+统一生成器接入等待固定模板接口；可用性 UI、宿主装配、包出口和发行依赖另按明确窗口推进。缺件期间两个 reader 只可在真实权威已齐备的宿主选用，缺失时保持 `unavailable`。
+
+## 必要验证与边界
+
+准备原锁对应的受管依赖后，可复用仓库内存类型入口；`--deps` 可指向明确的只读第三方依赖目录。源码和公共包出口始终取本工作树，不生成 Client / dist，也不连接数据库：
+
+```sh
+node scripts/check-selected-prisma-types.cjs --mode platform --config packages/mcp-server/tsconfig.json packages/example-tickets-core/examples/ai-integration/tickets-reads.mts
+```
+
+离线执行按 [原守卫](../../../../tests/fixtures/ai-native/prisma-offline-preload.cjs)设置 `DATABASE_URL=mysql://offline:offline@127.0.0.1:1/rental_os_offline`，audit / TEMP / TMP / 缓存只写本树单一任务目录，结束后清理。这里的类型命令不代替正式包构建。原 [MCP 验证入口](../../../mcp-server/README.md#验证入口与证据范围)可核原注册及协议行为，不为本示例新增测试工程。
+
+宿主最终还须分别取得：真实身份和字段发布、Core 撤权 / 停用、原持久额度拒绝、批准依据变化、正式动作及 unknown 原收据、内置 AI 与外部 MCP 往返证据。类型检查、进程内替身冒烟和源码说明不代表真实数据库、OAuth、模型、供应商或完整业务验收通过。
