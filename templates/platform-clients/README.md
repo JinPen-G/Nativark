@@ -91,6 +91,8 @@ Rental 已有 `clients/staff/context.ts` 的 `createRentalStaffContext`：`loadC
 
 合入前还须核已定版组合，当前 `0.2.2` 只用于这次开发接线，不代表最终发行组合。缺真实权威仍失败关闭；离线替身不成为生产依赖。
 
+固定 `268b9bfb` 的真实首次员工改密尚有原 Guard 缺口：[CI 46124397790](https://github.com/JinPen-G/Zelo/actions/runs/46124397790) 已完成普通员工建号和 `/staff/v1/auth/login`，随后 `/staff/v1/auth/change-password` 返回 403。原 `src/http-auth.ts` 的 `mustChangePassword` 分支只允许 `/auth/*`，遗漏已经在员工政策及 Controller 登记的改密入口。须由 Rental 修复该精确恢复路径，仍保持 staff audience、原会话/密码及后续业务拒绝；不能用管理员 token、直接改库或放宽全体 staff 路由解决。CI 保留员工原改密断言，安排在独立客户链后执行；两端成功证据分别保存，某端失败不等于另一端或 A03 通过。
+
 ## 独立 Web 宿主 CI
 
 [zelo-client-ci.yml](../../.github/workflows/zelo-client-ci.yml) 固定 Node `24.13.0`、原 MySQL `8.4` 镜像摘要及 runner 预装的配套 Chrome/ChromeDriver，直接使用 W3C WebDriver，没有新增测试脚本或框架。独立源码 job 沿上述公开准备入口，对四端逐个执行原锁安装、必要类型和构建，每次输出只含一个端；它使用当前客户端提交所含的底座源码，不启动 API、数据库或浏览器，不能计为目标宿主通过。

@@ -360,13 +360,29 @@ jobs:
           import { request as forward } from 'node:http';
           import { resolve, extname, sep } from 'node:path';
           const task = resolve(process.env.GITHUB_WORKSPACE, process.env.CI_DIR), origin = 'http://127.0.0.1:3094';
+          const secrets = new Set([process.env.SEED_PLATFORM_PASSWORD, process.env.AUTH_TOKEN_SECRET]);
+          function retainSecrets(value) {
+            if (!value || typeof value !== 'object') return;
+            for (const [key, item] of Object.entries(value)) {
+              if (/password|token|secret/i.test(key) && typeof item === 'string' && item) secrets.add(item);
+              else if (typeof item === 'object') retainSecrets(item);
+            }
+          }
           async function api(path, token, body, expected = body === undefined ? 200 : 201, method = body === undefined ? 'GET' : 'POST') {
+            if (token) secrets.add(token); retainSecrets(body);
             const response = await fetch(origin + path, { method,
               headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}),
                 ...(method === 'POST' ? { 'Idempotency-Key': randomUUID() } : {}) },
               ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(15000) });
-            assert.equal(response.status, expected, `${path}: HTTP ${response.status}`);
-            const value = await response.json(); assert(Object.hasOwn(value, 'data')); return value.data;
+            const value = await response.json(); retainSecrets(value);
+            if (response.status !== expected) {
+              // 仅保留原公开错误字段，排除请求、认证信息及任意服务端对象。
+              const publicText = item => typeof item === 'string' ? item : Array.isArray(item) ? item.filter(row => typeof row === 'string') : undefined;
+              let reason = JSON.stringify({ code: publicText(value?.code), message: publicText(value?.message), error: publicText(value?.error) });
+              for (const secret of secrets) if (secret) reason = reason.split(secret).join('[redacted]');
+              assert.fail(`${path}: HTTP ${response.status}, expected ${expected}; ${reason.slice(0, 800)}`);
+            }
+            assert(Object.hasOwn(value, 'data')); return value.data;
           }
           const manage = (route, token, body) => api('/api/platform/core-host/' + route, token, { coreId: 'rental', ...body }, 200);
           async function operatorLogin(tenantCode, account, initial) {
@@ -397,10 +413,6 @@ jobs:
               dataScope: 'all', locationScope: { mode: 'all', locationIds: [] }, isActive: true }] });
           const assignment = await manage('member-assignments', admin.accessToken, { userId: staff.id, state: 'assigned', expectedRevision: 0, operationId: randomUUID() });
           const staffPassword = 'Staff9-' + randomUUID();
-          const staffInitial = await api('/api/staff/v1/auth/login', undefined, { tenantCode: 'client-ci', account: staff.account, password: staff.temporaryPassword });
-          const staffChanged = await api('/api/staff/v1/auth/change-password', staffInitial.accessToken, { currentPassword: staff.temporaryPassword, newPassword: staffPassword });
-          assert.equal(staffChanged.user.isPlatformAdmin, false); assert.equal(staffChanged.user.isSaasAdmin, false);
-          await api('/api/staff/v1/auth/logout', undefined, { refreshToken: staffChanged.refreshToken });
           async function createCustomer(owner, tenantCode, phone, name) {
             const initialPassword = 'Member9-' + randomUUID(), password = 'Customer9-' + randomUUID();
             const member = await api('/api/membership/personal', owner.accessToken, { name, phone, channel: 'admin',
@@ -550,6 +562,13 @@ jobs:
               ['customer-web', 5194, '13800000001', customerPassword, cancelOrder],
               ['staff-web', 5195, staff.account, staffPassword, serviceOrder],
             ]) {
+              // 两端按实际完成分别留证；员工原首次改密失败不能抹去已完成的客户链。
+              if (surface === 'staff-web') {
+                const initial = await api('/api/staff/v1/auth/login', undefined, { tenantCode: 'client-ci', account: staff.account, password: staff.temporaryPassword });
+                const changed = await api('/api/staff/v1/auth/change-password', initial.accessToken, { currentPassword: staff.temporaryPassword, newPassword: staffPassword });
+                assert.equal(changed.user.isPlatformAdmin, false); assert.equal(changed.user.isSaasAdmin, false);
+                await api('/api/staff/v1/auth/logout', undefined, { refreshToken: changed.refreshToken });
+              }
               await driver(prefix + '/url', { url: `https://127.0.0.1:${port}/` });
               // Runtime 将无原凭据的 refresh 归为 anonymous，首次访问直接显示原登录表单。
               await text('使用你的' + (surface === 'customer-web' ? '客户' : '员工') + '账号登录。');
@@ -614,6 +633,12 @@ jobs:
               }
               await click('退出登录'); await text('使用你的' + (audience === 'client' ? '客户' : '员工') + '账号登录。');
               assert(await dom('return Object.keys(sessionStorage).every(key => !key.endsWith(":credentials"))'));
+              writeFileSync(resolve(task, surface + '-host.json'), JSON.stringify({ platform: process.env.ZELO_COMMIT,
+                rental: process.env.RENTAL_COMMIT, client: process.env.GITHUB_SHA, surface, databaseChecked: true, browserExecuted: true,
+                evidence: ['original-login', 'core-order-navigation', 'narrow-layout', 'core-disable-direct-route', 'logout',
+                  ...(audience === 'client' ? ['customer-cancel-original-receipt', 'single-dispatch-unknown-original-key', 'disabled-core-receipt',
+                    'account-change-inflight-isolation', 'cross-tenant-order-denial'] : ['staff-service-start', 'browser-tablet-touch-input', 'staff-revocation'])],
+                a03Accepted: false, releaseApproved: false }, null, 2));
               await driver(prefix + '/window/rect', { width: 1440, height: 1000 });
             }
             writeFileSync(resolve(task, 'web-host.json'), JSON.stringify({ platform: process.env.ZELO_COMMIT, rental: process.env.RENTAL_COMMIT,
@@ -630,15 +655,18 @@ jobs:
           }
           NODE
       - name: 保存最小页面证据
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: zelo-client-web-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ env.CI_DIR }}/web-host.json
+            ${{ env.CI_DIR }}/customer-web-host.json
+            ${{ env.CI_DIR }}/staff-web-host.json
             ${{ env.CI_DIR }}/customer-web.png
             ${{ env.CI_DIR }}/staff-web.png
             ${{ env.CI_DIR }}/staff-tablet-touch.png
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
       - name: 清理本 job 全部临时材料
         if: always()
