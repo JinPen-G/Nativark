@@ -337,7 +337,8 @@ const schemaTokens = ${prismaSchemaTokens.toString()};
 for (const item of receipt.files) if (digest(fs.readFileSync(path.join(root, item.file))) !== item.sha256)
   throw Error('镜像输入摘要变化：' + item.file);
 for (const item of receipt.clients) {
-  const schemaFile = item.directory === 'apps/platform-api/generated/client' ? 'apps/platform-api/prisma/schema.prisma'
+  const schemaFile = item.directory === 'apps/platform-api/generated/client'
+    ? (item.mode === 'platform-capabilities' ? 'apps/platform-api/prisma-deployment/schema.prisma' : 'apps/platform-api/prisma/schema.prisma')
     : item.directory === 'apps/rental-api/generated/client' ? 'apps/rental-api/prisma-deployment/schema.prisma' : undefined;
   if (!schemaFile) throw Error('镜像 Client 目录未登记');
   const source = fs.readFileSync(path.join(root, schemaFile), 'utf8');
