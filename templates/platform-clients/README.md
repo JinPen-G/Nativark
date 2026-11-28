@@ -67,7 +67,9 @@ export const connection: RentalClientHostConfiguration = {
 
 固定 `34baba2` 已提供普通页面只读准入、原取消收据、员工服务开始与原收据及生命周期感知会话。本端已移除临时页面准入参数，直接复用原 `access`，不再请求另一套业务工厂。
 
-剩余**可验证的门店范围观察与切换**：`src/client-contribution-context.ts` 目前只返回 workspace；`src/http-staff-auth.controller.ts` 将原 locationScope 编入权限指纹，但没有已选 `locationId/locationName`。`clients/contribution/session.ts` 的选择列表/切换只提供 workspace。需明确本期门店是否直接等于 workspace；若不是，须由原服务补可选地点、当前已选地点和验证切换的正式投影/方法，再由该原工厂映射公共 `locationId`。通用端不能根据 URL/手填值推定门店授权。
+剩余**可验证的门店范围观察与切换**：`src/contracts.ts` 区分经营空间 `BusinessWorkspace` 和履约地点 `RentalFulfillmentLocation`，不能把切空间作为切门店证据。`src/client-contribution-context.ts` 目前只返回 workspace；`src/http-staff-auth.controller.ts` 将原 locationScope 编入权限指纹，但没有已选 `locationId/locationName`。`clients/contribution/session.ts` 的选择列表/切换也只提供 workspace。
+
+Rental 已有 `clients/staff/context.ts` 的 `createRentalStaffContext`：`loadContext` 根据原 session-context、地点列表及启用状态筛选可用地点，`setCurrentLocation` 只改变本机筛选，不改变服务端权限。最小接续是在原贡献中沿这份能力或同一原服务权威投影当前选择/名称、提供已核候选，并让订单服务列表消费该筛选；切换时发布新观察，使旧页面、请求和原引用分区失效。不要在 Zelo 重写地点业务或增加第二套 Auth，也不能把本机选择升级为服务端授权。当前通用端尚未消费此地点选择，门店切换验收仍未完成。
 
 合入前还须核已定版组合，当前 `0.2.1` 只用于这次开发接线，不代表最终发行组合。缺真实权威仍失败关闭；离线替身不成为生产依赖。
 
