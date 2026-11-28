@@ -21,6 +21,8 @@
 
 `receipt(principal, operationId)`提供只读核对。只开放本人原操作且当前仍可见的对象，返回recorded及原收据，或unavailable；unavailable不表示未执行。结果未知后的页面只调用该读取，不自动重发写入。
 
+`receiptFor(principal, action, input)`供事务参加者核对精确的原请求。输入仍经同一业务schema解析，再核原actor、动作与输入指纹；同键异参明确拒绝，不能把另一请求的收据作为批准执行证据。它保留原收据的当前读取权限，不授予新动作。
+
 执行请求的`purpose`由服务端方法固定为business或original_receipt，不能从HTTP body选择。宿主分别办理普通准入与原收据善后，Core停用/到期后的必要核对仍复用当前身份和原操作范围，不能借此开放普通工单查询或写入。
 
 ## 接入已有宿主
@@ -53,6 +55,8 @@ MySQL入口单独从 `@rental-os/example-tickets-core/mysql` 导入 `createMysql
 
 authority返回的`revalidate()`在提交前复核同一原会话/订阅等期限。锁定行不会阻止时间流逝，等待后失效必须回滚；不能重新借用平台身份或另一会话使原操作继续。
 
+需要加入原批准事务的宿主调用 `composeTicketsPlatformHost(...).withTransaction(native, consume, before?)`。`native`须为该宿主已开启的交互事务；回调取得同一`TicketsService`，内部不另开事务、不提交或回滚。`before`可固定可信主体和精确动作，在批准消费前先按原顺序取得人员/授权与工单锁，防止将并发出现的旧收据当作本次提交。异常由外层owner回滚；每次调用及参加者退出前复核当前授权，服务/仓储不能逃出回调复用，也不允许未等待的业务调用。底层同名入口由`/mysql`提供，仍须真实授权与审计。可选示例见[AI与业务接入](examples/ai-integration/README.md)。
+
 `migrations/001-tickets.sql`只创建这个Core的三张表。仅在目标组合选择本Core并完成部署授权后应用；无Core宿主不执行，停用也不删表或清收据。迁移SHA-256在清单生成器固定，本包局部gitattributes保证LF；已发布迁移不可改写。
 
 `readTicketsPhysicalData(reader)`由同一MySQL正式出口提供，读取三表的真实列类型/空值/排序规则、InnoDB、复合主键和查询索引、受执行的状态/修订CHECK及原操作外键。只有本版所需结构全部满足才返回数据版本、观察时间与结构摘要，缺项返回undefined；不读业务数据或执行DDL。MySQL的冗余括号、字符引入符及原CHECK包装按表达式结构核对，不能只删字符后误把不同约束当等价。额外非唯一索引可用于调优，额外唯一/业务约束须按数据版本处理。[检查源码](src/mysql.ts)
@@ -83,7 +87,7 @@ node packages/example-tickets-core/dist/metadata.js manifest <仓库HTTPS地址>
 node packages/example-tickets-core/dist/metadata.js openapi
 ```
 
-打包方分别保存为`core.manifest.json`、`openapi.json`，将当前README、LICENSE、所声明dist/迁移、`admin/index.tsx`及按[公共命令](../core-contracts/README.md#生成随包指南与归档)生成的CORE_GUIDE.md放到交付目录，再用同一pack/prepare链准备候选。成功stdout只有JSON且退出0，错误stderr说明并退出1。后台TSX由受控宿主组合构建，不在运行时从包路径热加载；AI工具仍未提供，不把本包领域/适配通过称为已独立安装完成。
+打包方分别保存为`core.manifest.json`、`openapi.json`，将当前README、LICENSE、所声明dist/迁移、`admin/index.tsx`及按[公共命令](../core-contracts/README.md#生成随包指南与归档)生成的CORE_GUIDE.md放到交付目录，再用同一pack/prepare链准备候选。成功stdout只有JSON且退出0，错误stderr说明并退出1。后台TSX由受控宿主组合构建，不在运行时从包路径热加载；可选AI目前为固定源码材料，普通标准包不会自动装配AI工具。
 
 本示范可直接用一个命令生成完整包。先提交本Core/接入合同源码，准备含 `repository` 和40位 `commit`的底座来源JSON；输出父目录预先存在，输出文件必须是新文件。
 
@@ -97,9 +101,11 @@ npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> 
 
 自 `0.1.2` 起，打包时核对 npm 包名及版本与生成清单的发行身份。遇到版本不一致，先同步 [package.json](package.json) 与 [Core 版本](src/contracts.ts)，再从同一固定来源重建并打包。沿用已登记的旧包作为升级起点，候选继续使用数据版本 `0.1.0` 和原迁移，原绑定与收据按当前权限回读。
 
-当前源码候选 `0.1.6` 将底座兼容范围扩展为 `>=0.1.10 <0.4.0`，包含沿用同一公共合同、授权与原迁移的 0.3 系列；公共 Core 合同仍为 `>=0.1.0 <0.2.0`，实际当前合同为 `0.1.1`。这是兼容声明补丁，不变更工单业务、HTTP、页面或数据版本 `0.1.0`；原迁移及历史绑定/收据继续保持。两个示范宿主精确引用此候选，含 Core 的部署仍使用自己的数据计划，不套用零 Core 安装/升级计划。候选尚未发布，固定来源构建及对应宿主核验后才生成新资产；0.4 及以后须另行核定。
+当前源码候选 `0.2.0` 增加原事务参加者与精确动作收据读取，供选装AI复用普通业务；普通HTTP和业务状态规则保持，数据版本仍为 `0.1.0`。包内默认入口不导入AI/MCP。可选接入目前以[同事务批准执行源码](examples/ai-integration/tickets-start.mts)提供，尚未形成完整选装宿主，不能以该候选版本认定AI已可用。
 
-此前源码候选 `0.1.5` 的范围仍是 `>=0.1.10 <0.3.0`。历史包、Tag 和清单保持原字节与原范围，不能直接改旧清单使其通过 0.3 宿主检查；选用新的 `0.1.6` 固定包与对应部署锁。
+底座兼容沿用 `0.1.6` 的 `>=0.1.10 <0.4.0`，包含同一公共合同、授权和原迁移的0.3系列；公共Core合同为 `>=0.1.0 <0.2.0`，当前协议为 `0.1.1`。两个示范宿主精确引用当前候选，含Core部署使用自己的数据计划。候选尚未发布；历史资产、Tag、清单、迁移与收据不修改，0.4及以后另行核定。
+
+此前源码候选 `0.1.5` 的范围仍是 `>=0.1.10 <0.3.0`。历史包、Tag和清单保持原字节与原范围，不能直接改旧清单使其通过0.3宿主检查；选用兼容的新固定包与对应部署锁。
 
 当前已发布正式版本为 `0.1.4`，包含工单分派筛选，标准包及同一双Core宿主的必要冒烟已通过。公开发行使用 Tag `example-tickets/v0.1.4` 和资产 `example-tickets-0.1.4.tgz`，固定源提交 `74a16a2c3fecfad654241de25cea5d3f27da1332`；下载后按 Release 摘要和同版清单核对。[0.1.4 发行](https://github.com/JinPen-G/Zelo/releases/tag/example-tickets/v0.1.4)。推荐从该固定版本准备更新候选，`dataVersion` 仍为 `0.1.0`，沿用原迁移。独立升级只更新所选 Tickets 包及宿主对应的部署锁，保留原绑定、工单和操作收据。程序回退候选同样须核对包身份、宿主合同、数据版本和完整迁移账，并按目标版本核验页面及 API 能力。[版本与数据合同](src/contracts.ts) · [独立宿主](../../apps/example-tickets-api/README.md)
 

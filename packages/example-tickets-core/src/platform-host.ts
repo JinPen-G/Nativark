@@ -5,7 +5,7 @@
  */
 import { isCoreVersionSupported, type CoreScopeRequest } from "@rental-os/core-contracts";
 import type { CoreDeploymentAvailability } from "@rental-os/core-host";
-import { TicketsService } from "./service";
+import { TicketsService, type TicketExecutionRequest } from "./service";
 import { TicketError, TICKETS_CORE_ID, TICKETS_DATA_READABLE } from "./contracts";
 import { createTicketsServer } from "./server";
 import { createMysqlTicketsExecution, readTicketsRemoval } from "./mysql";
@@ -79,6 +79,10 @@ export function composeTicketsPlatformHost<Tx extends PlatformCoreTransaction>(i
     await lease.revalidate();
     return binding;
   }, { isolationLevel: "ReadCommitted" });
-  return { service: new TicketsService(execution), principals, server: createTicketsServer({ resolveAuthorizedBinding,
+  return { service: new TicketsService(execution), principals,
+    /** 显式AI/其他原事务参加者复用同一业务规则和当前授权；service不能逃出消费回调。 */
+    withTransaction: <T>(transaction: Tx, consume: (service: TicketsService) => Promise<T>, before?: Omit<TicketExecutionRequest, "purpose">) =>
+      execution.withTransaction(transaction, scoped => consume(new TicketsService(scoped)), before && { ...before, purpose: "business" }),
+    server: createTicketsServer({ resolveAuthorizedBinding,
     assessRemoval: tenantId => readTicketsRemoval(input.database, tenantId) }) };
 }
