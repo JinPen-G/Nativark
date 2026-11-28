@@ -386,7 +386,8 @@ jobs:
               ['staff-web', 5195, staff.account, staffPassword, '暂无受权订单'],
             ]) {
               await driver(prefix + '/url', { url: `https://127.0.0.1:${port}/` });
-              await text('重新登录'); await click('重新登录');
+              // Runtime 将无原凭据的 refresh 归为 anonymous，首次访问直接显示原登录表单。
+              await text('使用你的' + (surface === 'customer-web' ? '客户' : '员工') + '账号登录。');
               await fill('#login-account', account); await fill('#login-password', password); await click('登录'); await text(empty);
               const audience = surface === 'customer-web' ? 'client' : 'staff';
               // 此 GET 消费页面实际保存的原客户端凭据，核身份；不注入准备管理员的 token。
