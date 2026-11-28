@@ -102,7 +102,11 @@ export function createWechatClientPage(getClient: () => WechatClientApp) {
     },
     onHide() { active = false; showAttempt++; unsubscribe?.(); unsubscribe = undefined; actionId = undefined; scanValue = ""; searchValue = "";
       page?.setData({ authenticated: false, identity: "", items: [], pending: [], action: null, loginFields: [], feedback: "" }); view?.suspend(); },
-    onUnload() { active = false; showAttempt++; unsubscribe?.(); unsubscribe = undefined; page = undefined; },
+    onUnload() {
+      active = false; showAttempt++; unsubscribe?.(); unsubscribe = undefined; page = undefined;
+      // 卸载可能没有先收到 onHide；原键保存/准备的迟到完成也不得继续派发。
+      view?.suspend();
+    },
     changeLanguage() { locale = locale === "zh-CN" ? "en-US" : "zh-CN"; render(); },
     changeTheme() {
       dark = !dark; const palette = getArcPalette(dark, getClient().primaryColor);
