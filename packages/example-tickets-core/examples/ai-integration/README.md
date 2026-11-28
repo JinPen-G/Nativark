@@ -87,6 +87,12 @@ export function composeTicketsReads(
 
 ## 完整宿主的接点
 
+普通 HTTP 已提供 `GET /api/cores/example-tickets/tickets/:ticketId/ai-status`，单源schema和OpenAPI沿[工单HTTP](../../src/http.ts)。`createTicketsAiStatus({ service, builtin?, mcp? })` 接受宿主的真实只读状态参加者，并复用普通工单详情权限与返回前版本检查；`TicketsHttpModule.registerFactory` 的 `aiStatus` 注入该服务，缺省两条路线均明确 `unconfigured/host_not_selected`。这个默认值只说明尚未装配，不能作为完整AI验收。
+
+状态为闭合的 `unconfigured / denied / unpublished / available / pending_approval / reconciliation_required / unavailable`，原因由所属权威归类，异常不返回数据库/凭据细节。原任务状态必须显式提供同一 `taskId`；不根据最近记录或页面缓存猜测。`executionGranted:false` 始终成立，执行时仍走完整原授权。当前内置示例为无模型业务任务，MCP为客户端模型自付的纯读取；两者不检查平台模型连接或云模型财务预算，原Task/工具适用限额仍须核验。将来选择服务端模型路线须另接唯一Gateway和原财务账，不能借用这两条状态。
+
+[工单后台宿主](../../../../apps/example-tickets-admin/src/tickets-ai.tsx)已选用状态区，复用公共查询/按钮/语言与会话隔离，刷新期间或失败时收起旧状态。页面只读状态，不会因进入详情而创建任务、批准或执行。真实内置与MCP装配仍按下面的依赖继续完成。
+
 以下均为已核正式出口，不是本目录已经完成的装配。宿主必须固定工单场景、输入 / 对象来源与版本，再接同一 Core 的原方法。
 
 | 阶段 | 正式接点与工单落点 |

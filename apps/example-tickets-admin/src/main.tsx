@@ -10,8 +10,9 @@ import { createPlatformAdminApplication } from "@rental-os/platform-admin/applic
 import { createBrowserAdminSession } from "@rental-os/platform-admin/runtime";
 import { applyMotionPreference, isMotionReduced } from "@rental-os/platform-admin/motion";
 import manifest from "virtual:core-manifest";
+import { TicketsAiDetailPage } from "./tickets-ai";
 
-const registered = registerCoreAdminPages([{ manifest, contribution: createTicketsAdmin() }]);
+const registered = registerCoreAdminPages([{ manifest, contribution: createTicketsAdmin(TicketsAiDetailPage) }]);
 if (!registered.ok) throw new Error(registered.issues.map(issue => `${issue.field} ${issue.message}`).join("\n"));
 const session = createBrowserAdminSession({ baseURL: import.meta.env.VITE_API_BASE_URL ?? "/api", storageKey: "nativark:tickets-admin" });
 const App = createPlatformAdminApplication({ brandName: ADMIN_BRAND_NAME, brand: <AdminBrandMark />, session, pages: registered.pages });

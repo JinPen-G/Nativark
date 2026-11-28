@@ -142,14 +142,16 @@ export function CreateTicketPage() {
 }
 
 /** 路由适配显式传入已解析ticketId；不读取并执行任意URL、页面表达式或模型目标。 */
-export function TicketDetailPage({ ticketId }: { ticketId: string }) {
-  return <TicketDetailContent key={ticketId} ticketId={ticketId} />;
+export function TicketDetailPage({ ticketId, extension }: { ticketId: string;
+  extension?: ComponentType<{ ticketId: string; ticketRevision: number }> }) {
+  return <TicketDetailContent key={ticketId} ticketId={ticketId} extension={extension} />;
 }
 
 type TicketAction = "assign" | "start" | "close";
 type TicketOperation = { action: TicketAction; data: Record<string, unknown> };
 
-function TicketDetailContent({ ticketId }: { ticketId: string }) {
+function TicketDetailContent({ ticketId, extension: Extension }: { ticketId: string;
+  extension?: ComponentType<{ ticketId: string; ticketRevision: number }> }) {
   const { request, queryKey } = useCoreRequest(), client = useQueryClient(), host = useCorePageHost(), { t, locale } = useLocale();
   const [form] = Form.useForm<{ assigneeId: string }>();
   const [failed, setFailed] = useState<TicketOperation>();
@@ -251,7 +253,9 @@ function TicketDetailContent({ ticketId }: { ticketId: string }) {
       {canAssign && current.state === "open" && !failed && <Form form={form} layout="vertical" {...editor.formProps}>
         <Form.Item name="assigneeId" label={t("受派成员ID")} rules={[{ required: true }]}><Input disabled={busy} /></Form.Item>
         <SaveButton variant="secondary" label={t("分派工单")} disabled={query.isFetching || busy || Boolean(refreshFailure)} form={form} onSave={editor.submit} />
-      </Form>}</>}
+      </Form>}
+      {Extension && !failed && !query.isFetching && !query.error && !refreshFailure
+        && <Extension ticketId={ticketId} ticketRevision={current.revision} />}</>}
     </QueryState>
   </CorePage>;
 }

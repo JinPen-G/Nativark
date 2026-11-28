@@ -35,6 +35,8 @@
 
 后台直接调用 `createTicketsAdmin()`取得四页贡献并按平台标准注册。默认详情从 `useCorePageHost().params.ticketId`读取框架匹配的登记参数；已有宿主仍可提供自己的受控详情组件。Core不需要自己写React Router适配或修改平台导航，[工单Web宿主](../../apps/example-tickets-admin/README.md)已将注册表交给正式公共应用工厂；原Rental主应用仍沿自己的组合。[页面源码](admin/index.tsx)
 
+详情的可选 `extension` 接收已读工单的 `ticketId/ticketRevision`，随当前页面及会话代次挂载。独立示范宿主用它展示内置任务与外部MCP的当前状态；详情读取失败、刷新或普通写入结果不明时不展示旧扩展状态。普通四页不必选择此扩展。
+
 新建页通过 `useCoreForm`共用原Form、顶部SaveButton和回车提交，框架维护等待、防重、失败及未保存提醒，Core只保留业务输入转换和原操作核对。同步成功后禁止重复创建，unknown未重新渲染也不重发；原收据暂缺继续保留同键，取得可信结果后解除这次草稿。没有另写按钮/表单样式或第二套请求。[简明表单写法](../platform-admin/src/core/README.md#保存保留原-form)
 
 详情页的分派表单也使用 `useCoreForm`，保存与回车共用一次请求。处理/关闭和分派共享等待边界，但不同动作或输入不会复用另一操作的成功结果；unknown只核对原键。处理/关闭的成功或原结果核对保留未保存的分派草稿，只有当前输入仍对应已确认的原分派才清稿。操作收据与详情刷新分别处理，已记录的操作不会因刷新失败变成unknown；读取失败显示重新读取入口，最新工单尚未读到时不继续提交。对象切换释放原表单和操作状态。[详情源码](admin/index.tsx)
@@ -118,6 +120,7 @@ npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> 
 | 方法与路径 | 业务权限 | 输入与返回 |
 | --- | --- | --- |
 | `GET /api/cores/example-tickets/tickets` | `example-tickets:ticket:read` | 可选state/offset/limit；当前可见工单数组 |
+| `GET /api/cores/example-tickets/tickets/:ticketId/ai-status` | 同上 | 两条已登记AI路线的当前状态；可选原taskId，不猜最近任务、不授予执行权 |
 | `GET /api/cores/example-tickets/ticket-pages` | 同上 | 可选subject/state/assignment/offset/limit；subject为标题字面包含搜索，assignment为assigned或unassigned，同一次读取的rows/total只计当前可见且匹配的范围 |
 | `GET /api/cores/example-tickets/ticket-status-counts` | 同上 | 无查询输入；当前可见全部工单的total/open/in_progress/closed计数 |
 | `GET /api/cores/example-tickets/tickets/{ticketId}` | 同上 | 已登记工单ID；当前可见详情 |

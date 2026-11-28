@@ -2,6 +2,8 @@
 
 本应用将公共后台与一个标准工单 Core 组合。登录、设置、侧栏、面包屑、铃铛、休息、面板和页面主按钮都来自公共包；Core 只提供自己的四个页面。默认零 Core 的同源应用见[公共后台](../platform-admin/README.md)。
 
+本宿主在原详情扩展位置选择[可选 AI 状态区](src/tickets-ai.tsx)，分别读取内置工单任务和外部MCP读取状态。未装配的API明确显示未配置；失败或刷新期间不继续显示旧“可用”。页面不自动创建任务、批准或执行，不把状态当权限。当前内置业务示例不调用模型，外部MCP的客户端模型由使用者自付；[完整接入与未验边界](../../packages/example-tickets-core/examples/ai-integration/README.md)分别说明。
+
 ## 接入只看这三处
 
 1. [main](src/main.tsx)取得工单页面贡献，调用 `registerCoreAdminPages`，将注册表和唯一会话交给 `createPlatformAdminApplication`。菜单、直接路由与面包屑共用该注册表，无须修改公共应用内部。
