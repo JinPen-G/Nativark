@@ -4,6 +4,7 @@
 const { createHash } = require("node:crypto");
 const { posix } = require("node:path");
 const { isDeepStrictEqual } = require("node:util");
+const { publicDataSdkFor } = require("../rental-host-lock.cjs");
 
 const CONTEXT_FILE = "rental-host.context.json";
 const SOURCE_FILE = "development.workspace.json";
@@ -334,7 +335,7 @@ function verifyPublicSdk(files, source, context, field, dataSdk) {
   requireEvidence(sdk && original, "公共保留缺少实际 SDK 收据");
   const { installedFiles, ...receipt } = sdk;
   const name = dataSdk ? "@rental-os/ai-native-data" : "@rental-os/ai-native-server";
-  const version = dataSdk ? "0.2.3" : "0.2.1";
+  const version = dataSdk ? publicDataSdkFor(sdk).version : "0.2.1";
   const owner = dataSdk ? "apps/rental-api" : "packages/rental-ai-adapters";
   const alias = dataSdk ? "@rental-os/public-ai-data" : name;
   const archive = `vendor/${dataSdk ? "ai-native-data" : "ai-native-server"}-public-${version}.tgz`;

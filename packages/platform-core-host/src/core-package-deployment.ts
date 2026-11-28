@@ -7,6 +7,7 @@ import { isDeepStrictEqual } from "node:util";
 import { CORE_CONTRACT_VERSION, CoreDeploymentLockSchema, CorePackagePathSchema,
   type CoreDeploymentLock } from "@rental-os/core-contracts";
 import { CORE_ARCHIVE_LIMITS, readCoreArchive } from "@rental-os/core-contracts/archive";
+import { CorePhasedMigrationLockSchema } from "@rental-os/core-contracts/deployment";
 import { readPackageArtifacts } from "@rental-os/core-contracts/package";
 import { PLATFORM_SOURCE_WORKSPACES } from "@rental-os/core-contracts/platform-source";
 import { createMysqlCoreDeploymentObservation, type CoreMysqlDataPlan } from "@rental-os/core-host/mysql-deployment";
@@ -42,7 +43,7 @@ const artifactsList = (value: unknown): { file: string; sha256: string }[] => {
 /** 原打包器实际从固定源码及所选 Client 重编六包，此处核原收据、完整锁和实际加载入口。
  * 所有路径只由静态宿主提供，不能来自请求。收据与运行文件同属受控部署材料，不是外部签名。
  * 仅收据不存在返回 false，供原源码目录兼容；已存在但损坏的证据必须报错，不能降级。 */
-export function readPlatformRuntimeEvidence(input: {
+export interface PlatformRuntimeEvidenceInput {
   directory: string;
   runtimeDirectories: ReadonlyMap<string, string>;
   runtimeEntries: ReadonlyMap<string, string>;
@@ -50,8 +51,29 @@ export function readPlatformRuntimeEvidence(input: {
   lock: CoreDeploymentLock;
   receiptFile: string;
   deploymentLockFile: string;
-}): boolean {
+}
+
+export function readPlatformRuntimeEvidence(input: PlatformRuntimeEvidenceInput): boolean {
+  return readRuntimeEvidence(input, false);
+}
+
+export type PhasedPlatformRuntimeEvidenceInput = Omit<PlatformRuntimeEvidenceInput, "lock"> & {
+  lock: ReturnType<typeof CorePhasedMigrationLockSchema.parse>;
+};
+
+/** 只读核 v2 的完整原上下文及公共六包，绝不将 base 交给 v1 读取器。
+ * 公共 Client 的编译依据沿原 platformBuild；实际组合 Client/扩展仍须宿主原选择器复核。
+ * 缺收据返回 false，损坏/换锁报错；结果不代表数据库、初始化或 v1 升级可用。 */
+export function readPhasedPlatformRuntimeEvidence(input: PhasedPlatformRuntimeEvidenceInput): boolean {
+  const lock = CorePhasedMigrationLockSchema.parse(input.lock);
+  if (lock.base.platform.versions.contract !== CORE_CONTRACT_VERSION || lock.base.platform.versions.node !== process.versions.node)
+    throw new Error("分阶段锁的合同或 Node 与当前实际运行版本不一致");
+  return readRuntimeEvidence({ ...input, lock }, true);
+}
+
+function readRuntimeEvidence(input: PlatformRuntimeEvidenceInput | PhasedPlatformRuntimeEvidenceInput, phased: boolean): boolean {
   const { platformFiles: files, lock, runtimeDirectories, runtimeEntries, receiptFile, deploymentLockFile } = input;
+  const platform = lock.lockVersion === 2 ? lock.base.platform : lock.platform;
   if (!isAbsolute(input.directory)) throw new Error("宿主运行证据须使用实际绝对部署目录");
   CorePackagePathSchema.parse(receiptFile); CorePackagePathSchema.parse(deploymentLockFile);
   const format = receiptFile === "platform-host.context.json" ? "platform-host-context-1"
@@ -75,13 +97,15 @@ export function readPlatformRuntimeEvidence(input: {
   }
   if (contextBytes.length > 8 * 1024 * 1024) throw new Error("宿主上下文读取越限");
   const context = record(JSON.parse(contextBytes.toString("utf8")));
+  if (phased && (receiptFile !== "rental-host.context.json" || context.ledgerVersion !== 2 || context.installation !== "fresh-ai"))
+    throw new Error("完整 v2 证据须来自原分阶段新装上下文");
   const build = record(context.platformBuild), compiler = record(build.compiler), client = record(build.client);
   const sourceLockBytes = files.get("package-lock.json"), schema = files.get("apps/platform-api/prisma/schema.prisma");
   if (!sourceLockBytes || !schema) throw new Error("固定底座缺少原锁或公共 schema");
   const sourceLock = record(JSON.parse(Buffer.from(sourceLockBytes).toString("utf8")));
   const compilerLock = record(record(sourceLock.packages)["node_modules/typescript"]);
-  if (context.format !== format || !isDeepStrictEqual(build.release, lock.platform)
-    || build.sourceArchiveSha256 !== lock.platform.sha256 || build.sourceLockSha256 !== digest(sourceLockBytes)
+  if (context.format !== format || !isDeepStrictEqual(build.release, platform)
+    || build.sourceArchiveSha256 !== platform.sha256 || build.sourceLockSha256 !== digest(sourceLockBytes)
     || compiler.name !== "typescript" || compiler.version !== compilerLock.version
     || typeof compiler.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(compiler.sha256)
     || client.mode !== "platform" || client.schemaSha256 !== digest(schema)
@@ -141,10 +165,21 @@ export function readPlatformRuntimeEvidence(input: {
   }
   const deploymentSha = contextFiles.get(deploymentLockFile);
   if (!deploymentSha || deploymentSha !== context.deploymentLockSha256) throw new Error("原上下文缺少部署锁摘要");
+  // v2 是整份新装上下文，后置 SQL/来源/所选 schema 不能只随 base 的摘要被裁掉。
+  // 仍消费原打包器的文件表，禁止把私有配置或依赖目录带入证据读取。
+  if (phased) for (const file of contextFiles.keys()) {
+    // 根 docs 是维护者私有资料；标准 Core 清单可含包内公开 docs，仍须核原上下文摘要。
+    if (file.split("/")[0].toLowerCase() === "docs"
+      || file.split("/").some(part => [".git", "node_modules", "output"].includes(part.toLowerCase())
+      || /^\.env(?:\.|$)/i.test(part) && part !== ".env.example"))
+      throw new Error("分阶段运行证据含非发行文件");
+  }
   const verified = readPackageArtifacts(root, [
-    { file: receiptFile, sha256: digest(contextBytes) }, { file: deploymentLockFile, sha256: deploymentSha }
+    ...(phased ? [...contextFiles].map(([file, sha256]) => ({ file, sha256 })) : [{ file: deploymentLockFile, sha256: deploymentSha }]),
+    { file: receiptFile, sha256: digest(contextBytes) }
   ], CORE_ARCHIVE_LIMITS.fileBytes, CORE_ARCHIVE_LIMITS.totalBytes);
-  if (!isDeepStrictEqual(CoreDeploymentLockSchema.parse(JSON.parse(Buffer.from(verified.files.get(deploymentLockFile)!).toString("utf8"))), lock))
+  const actualLock = JSON.parse(Buffer.from(verified.files.get(deploymentLockFile)!).toString("utf8"));
+  if (!isDeepStrictEqual(phased ? CorePhasedMigrationLockSchema.parse(actualLock) : CoreDeploymentLockSchema.parse(actualLock), lock))
     throw new Error("实际上下文部署锁与当前宿主不一致");
   return true;
 }

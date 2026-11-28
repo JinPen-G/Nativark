@@ -96,6 +96,17 @@ function installationSteps(report, { rootCommands, host }) {
       : '按所属 Core＋AI 宿主核数据、已发布能力、当前权限及政策；普通业务不因未配置模型而失效。',
     '保留原授权与操作结果；纯读取 MCP 不要求平台模型配置或云预算，委托服务端模型才走原 Gateway 与模型账。'));
   const member = report.runtime.member;
+  const phased = report.runtime.phasedInstallation;
+  if (phased?.selectionMatches) {
+    const migration = steps.find(item => item.id === 'migration');
+    migration.state = phased.database.state;
+    migration.observation = phased.postCapability;
+    const account = steps.find(item => item.id === 'platform-account');
+    account.observation = phased.initialization;
+    const ai = steps.find(item => item.id === 'ai-readiness');
+    if (ai) { ai.state = phased.database.state === 'ready' ? 'data-observed' : 'needs-observation-or-action';
+      ai.authorization = 'not_checked'; }
+  }
   if (member?.state === 'observed') {
     for (const [id, field, ready] of [['core-admission', 'deploymentAdmission', 'accepting'],
       ['tenant-grant', 'tenantGrant', 'enabled'], ['member-assignment', 'memberAssignment', 'assigned'],
