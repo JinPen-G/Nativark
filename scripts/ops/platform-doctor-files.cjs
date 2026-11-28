@@ -46,8 +46,10 @@ const exists = file => {
 };
 function relativeFile(root, name) {
   if (typeof name !== 'string' || !name || name.length > 240 || /[\\<>:"|?*#%\x00-\x1f\x7f]/u.test(name)
+      // 根 docs 不属于公开发行；包内原清单的公开说明仍按原文件摘要读取。
+      || name.split('/')[0].toLowerCase() === 'docs'
       || name.split('/').some(part => !part || part === '.' || part === '..'
-        || part.trim() !== part || part.endsWith('.') || ['.git', 'node_modules', 'docs'].includes(part.toLowerCase())
+        || part.trim() !== part || part.endsWith('.') || ['.git', 'node_modules'].includes(part.toLowerCase())
         || /^\.env(?:\.|$)/iu.test(part) && part !== '.env.example')) throw Error('unsafe_relative_path');
   const target = path.resolve(root, name);
   if (!inside(root, target)) throw Error('outside_root');

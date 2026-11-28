@@ -168,7 +168,9 @@ function readRuntimeEvidence(input: PlatformRuntimeEvidenceInput | PhasedPlatfor
   // v2 是整份新装上下文，后置 SQL/来源/所选 schema 不能只随 base 的摘要被裁掉。
   // 仍消费原打包器的文件表，禁止把私有配置或依赖目录带入证据读取。
   if (phased) for (const file of contextFiles.keys()) {
-    if (file.split("/").some(part => [".git", "node_modules", "docs", "output"].includes(part.toLowerCase())
+    // 根 docs 是维护者私有资料；标准 Core 清单可含包内公开 docs，仍须核原上下文摘要。
+    if (file.split("/")[0].toLowerCase() === "docs"
+      || file.split("/").some(part => [".git", "node_modules", "output"].includes(part.toLowerCase())
       || /^\.env(?:\.|$)/i.test(part) && part !== ".env.example"))
       throw new Error("分阶段运行证据含非发行文件");
   }

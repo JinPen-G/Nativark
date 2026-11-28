@@ -94,7 +94,7 @@ Rental 与双 Core 从同一已核部署目录取得全量所选清单，只为 
 
 `@rental-os/platform-core-host/core-package-deployment` 的 `readPhasedPlatformRuntimeEvidence(input: PhasedPlatformRuntimeEvidenceInput): boolean` 专供完整 v2 新装观察。参数沿原 `readPlatformRuntimeEvidence` 的部署目录、公共六包实际 `runtimeDirectories/runtimeEntries`、已核底座归档 `platformFiles`、原 `receiptFile/deploymentLockFile`，唯独 `lock` 必须是完整 `CorePhasedMigrationLockSchema`。没有收据返回 `false`；收据、文件摘要或完整锁冲突会抛错，不能降级成成功。
 
-该函数复用原 `platformBuild` 检查编译来源、公共 Client 依据和实际公共六包/入口，逐项读取原 v2 上下文文件表，再把实际锁连同 `postCapability` 与调用方的完整固定锁核同。原 v1 函数仍严格解析 v1，包管理及升级范围不变。受控文件摘要不是外部签名，不读取配置凭据，也不产生新运行收据。[实现](src/core-package-deployment.ts)
+该函数复用原 `platformBuild` 检查编译来源、公共 Client 依据和实际公共六包/入口，逐项读取原 v2 上下文文件表，再把实际锁连同 `postCapability` 与调用方的完整固定锁核同。根 `docs/` 私有资料、环境凭据、依赖和临时目录继续拒绝；标准 Core 包内公开说明沿原上下文摘要核验，不因目录也叫 `docs` 被误拒。原 v1 函数仍严格解析 v1，包管理及升级范围不变。受控文件摘要不是外部签名，不读取配置凭据，也不产生新运行收据。[实现](src/core-package-deployment.ts)
 
 这一步只提供公共运行材料证据。完整安装观察还必须组合所属宿主原选择器对真实 Core、公共 AI 包、实际生成 Client 的 schema/模型及后置扩展的核验，以及同次原账/物理读取和初始化状态。Rental 使用其 `readFreshRentalAiSelection`；任一缺项均不能设置 `runtimeIdentityVerified`。HTTP 封套统一消费 `@rental-os/core-contracts/phased-installation`，接入及字段责任见[公开安装诊断](../../apps/platform-api/README.md#core公共-ai-的完整-v2-观察)。
 

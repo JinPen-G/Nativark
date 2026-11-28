@@ -135,6 +135,8 @@ import {
 
 完整 v2 运行材料使用 `@rental-os/platform-core-host/core-package-deployment` 的 `readPhasedPlatformRuntimeEvidence` 核原上下文及公共六包，再与所属宿主原选择器的实际 Client/Core/AI 扩展核验合并。它接收完整 v2 锁；原 `readPlatformRuntimeEvidence` 仍只接受 v1。缺公共运行证据或原选择器任一部分时，`installed/runtimeClient` 不能补为已核。[边界及签名](../../packages/platform-core-host/README.md#分阶段新装的只读运行证据)
 
+Rental 宿主沿原 `CORE_PACKAGE_STORAGE_ROOT` 和 `CORE_PLATFORM_PACKAGE_REFERENCE` 选择底座材料：在受管目录的 `archives/index.json` 登记与完整锁中 `base.platform` 一致的标准底座归档，实际 `.tgz` 放同一 `archives/` 目录。诊断的 `--platform-package` 也选择这份已核字节。缺原登记或归档时保持材料未检查，不能用运行上下文、源码目录或 `v2.base` 代替标准归档证据；登记不办理下载、部署或 v1 升级。索引格式复用[原包来源入口](../../packages/platform-core-host/src/core-package-preflight/README.md)。
+
 原因码白名单为 `materials_unavailable`、`runtime_identity_unverified`、`deployment_changed`、`ledger_unavailable`、`ledger_incomplete`、`ledger_mismatch`、`physical_unavailable`、`physical_mismatch`、`initialization_unchecked`、`initialization_required`、`initialization_conflict`、`observation_unavailable`。其他安全代码投影为 `host_prerequisite`，均阻止整体 ready；原异常文字不进入诊断。未知/缺观察退出 2，已知冲突或待初始化退出 1，完整安装观察通过退出 0；整条 doctor 还会综合本地材料与成员检查。
 
 ### 独立 Rental 的公共数据 SDK 映射
