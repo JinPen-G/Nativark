@@ -11,6 +11,7 @@
 在获得本地依赖和独立数据库环境的操作许可后，按同版锁流程运行 `npm install --package-lock-only --ignore-scripts`、`npm ci --ignore-scripts`。公共 Client 使用唯一 `apps/platform-api/prisma/schema.prisma`；本 Core 的三张表沿参数化 SQL 读写，不需要另造或扩展公共 Prisma 模型。以下命令在源码工作区根执行，实际数据库配置由部署者提供：
 
 ```sh
+node node_modules/@prisma/engines/scripts/postinstall.js
 npm run prisma:generate -w @rental-os/platform-api
 npm run build -w @rental-os/platform-api
 npm run build -w {{PACKAGE_NAME}}
@@ -18,6 +19,8 @@ npm run lint -w {{PACKAGE_NAME}}
 npm run lint:admin -w {{PACKAGE_NAME}}
 node packages/core-contracts/dist/capabilities.js --repo {{TARGET}} --query ItemService --json
 ```
+
+上面的引擎准备是 `npm ci --ignore-scripts` 后显式运行同一锁版本的 Prisma 安装步骤，可能从官方来源下载当前平台二进制；它不连接数据库。目标为离线环境时，先按部署方受管工具链准备同版引擎，不能复制另一工作树正在使用的 Client 或 dist。
 
 本包的 `lint` 会读取本包 `dist` 供 API 宿主解析；首次使用先执行 `build`，后续修改沿 build → lint → lint:admin。无需连接业务库的源码检查也可复用底座的 `scripts/check-selected-prisma-types.cjs --mode platform --config <本包或host的tsconfig路径>`。类型检查通过不代表实际数据库或页面通过。
 
