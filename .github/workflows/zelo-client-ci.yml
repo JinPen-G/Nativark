@@ -17,7 +17,7 @@ concurrency:
 # 仅按已核固定成果更新；不能用活动分支、修改清单或放宽门禁凑兼容。
 env:
   ZELO_COMMIT: 5a6bbbf7593414a122a060018cb1abd87f1c20bf
-  RENTAL_COMMIT: 799150c8707023a36919bf6e0473539be2c03c2a
+  RENTAL_COMMIT: eec62c0b8a924519cad45f9307213def965b21ef
   CI_DIR: output/.tmp/zelo-client-ci
 
 jobs:

@@ -6,7 +6,7 @@
 
 ## 固定来源与选装
 
-客户端从 Zelo 基线 `d6ccb0dcad63ee2e06043b71c2651f326c7e8e3a` 开发，已普通合入宿主所需固定底座 `5a6bbbf7593414a122a060018cb1abd87f1c20bf`，候选在 [PR #14](https://github.com/JinPen-G/Zelo/pull/14)。运行组合必须再锁定所选 PR 提交的完整 SHA。业务依赖固定为 [Rental 799150c8707023a36919bf6e0473539be2c03c2a](https://github.com/JinPen-G/Zelo-rental-core/commit/799150c8707023a36919bf6e0473539be2c03c2a)，基于 Rental main `1ca7374a64db65bada538254cc95aba7950ea588`；对应 [Rental PR #4](https://github.com/JinPen-G/Zelo-rental-core/pull/4)。
+客户端从 Zelo 基线 `d6ccb0dcad63ee2e06043b71c2651f326c7e8e3a` 开发，已普通合入宿主所需固定底座 `5a6bbbf7593414a122a060018cb1abd87f1c20bf`，候选在 [PR #14](https://github.com/JinPen-G/Zelo/pull/14)。运行组合必须再锁定所选 PR 提交的完整 SHA。业务依赖固定为 [Rental eec62c0b8a924519cad45f9307213def965b21ef](https://github.com/JinPen-G/Zelo-rental-core/commit/eec62c0b8a924519cad45f9307213def965b21ef)，基于 Rental main `1ca7374a64db65bada538254cc95aba7950ea588`；对应 [Rental PR #4](https://github.com/JinPen-G/Zelo-rental-core/pull/4)。
 
 | 选择 | 独立入口 | 在已准备锁定依赖的组合中构建 |
 | --- | --- | --- |
@@ -26,7 +26,7 @@
 在包含本客户端提交的公开 Zelo Git 检出中使用 [prepare.cjs](prepare.cjs)。准备不需要预先安装依赖，只读取指定完整 SHA 的 Git 对象；不采用工作区未提交文件，也不读取 `.env` 或私有 `docs`。先查看选中的源码与依赖：
 
 ```powershell
-npm run prepare:client -- --surface customer-web --client-commit <客户端完整SHA> --rental-repo D:/sources/Zelo-rental-core --rental-commit 799150c8707023a36919bf6e0473539be2c03c2a --plan
+npm run prepare:client -- --surface customer-web --client-commit <客户端完整SHA> --rental-repo D:/sources/Zelo-rental-core --rental-commit eec62c0b8a924519cad45f9307213def965b21ef --plan
 ```
 
 将 `--plan` 改为 `--out D:/clients/customer-web` 才写出源码。父目录须已存在，目标目录须不存在；既有目录或链接明确拒绝覆盖。`--surface` 只接受表中四个入口中的一个，其他三个端不会加入输出 workspace 或锁。原公共主题包声明的依赖仍按其正式锁保留；这不启用管理员登录、其他客户端或服务端。
@@ -87,11 +87,13 @@ export const connection: RentalClientHostConfiguration = {
 
 ## 固定 Rental 接点与剩余依赖
 
-固定 `799150c8` 组合支持底座 `0.3.0` 的 `0.2.2` 候选、完整 v2 安装观察、原门店贡献及多 Core 依赖修复。普通页面只读准入、原取消收据、员工服务开始与原收据、地点投影及生命周期感知会话均由原贡献提供。本端直接复用原 `access` 和 `selectScope`，不再请求另一套业务工厂。固定源码说明见 [Rental 贡献接点](https://github.com/JinPen-G/Zelo-rental-core/blob/799150c8707023a36919bf6e0473539be2c03c2a/clients/contribution/README.md)。门店接线完成不等于已取得实页验收。
+固定 `eec62c0b` 组合支持底座 `0.3.0` 的 `0.2.2` 候选、完整 v2 安装观察、原门店贡献、多 Core 依赖及员工首次改密修复。普通页面只读准入、原取消收据、员工服务开始与原收据、地点投影及生命周期感知会话均由原贡献提供。本端直接复用原 `access` 和 `selectScope`，不再请求另一套业务工厂。固定源码说明见 [Rental 贡献接点](https://github.com/JinPen-G/Zelo-rental-core/blob/eec62c0b8a924519cad45f9307213def965b21ef/clients/contribution/README.md)。门店接线完成不等于已取得实页验收。
 
 合入前还须核已定版组合，当前 `0.2.2` 只用于这次开发接线，不代表最终发行组合。缺真实权威仍失败关闭；离线替身不成为生产依赖。
 
-[CI 46124397790](https://github.com/JinPen-G/Zelo/actions/runs/46124397790) 在此前固定 `268b9bfb` 已完成普通员工建号和 `POST /api/staff/v1/auth/login`，随后 `POST /api/staff/v1/auth/change-password` 返回 **403**。原 `src/http-auth.ts` 的 `mustChangePassword` 分支遗漏已经在员工政策及 Controller 登记的 staff 改密入口；固定 `799150c8` 仍保留同一分支。须由 Rental 修复该精确恢复路径，仍保持 staff audience、原会话/密码及后续业务拒绝；不能用管理员 token、直接改库或放宽全体 staff 路由解决。CI 保留员工原改密断言，安排在独立客户链后执行；两端成功证据分别保存，某端失败不等于另一端或 A03 通过。
+[CI 46124397790](https://github.com/JinPen-G/Zelo/actions/runs/46124397790) 在此前固定 `268b9bfb` 已完成普通员工建号和 `POST /api/staff/v1/auth/login`，随后 `POST /api/staff/v1/auth/change-password` 返回 **403**。当前固定版本包含 Rental `9638b38d` 对原强制改密阶段的精确修复：仅补员工本人 `me/session-context/change-password/logout` 四个自助入口，业务和切空间仍拒绝；原 staff audience、密码校验与 Controller 保持。CI 保留员工原改密断言，安排在独立客户链后执行；两端成功证据分别保存，修复提交本身不代替真实链通过。
+
+[CI 46128611819](https://github.com/JinPen-G/Zelo/actions/runs/46128611819) 的四端独立构建和组合前检成功，真实宿主在原打包入口因门店目录 OpenAPI 与实际挂载路径不一致退出 1。当前 `eec62c0b` 将文档对齐原 `/api/rental/v1/contribution-locations`；客户端请求仍走原 staff facade，Controller、Guard 和页面准入没有改成另一套入口。须沿后继真实 CI 验证，不关闭唯一挂载核对。
 
 ## 独立 Web 宿主 CI
 
@@ -117,7 +119,7 @@ API 新装输入是 Zelo `5a6bbbf7593414a122a060018cb1abd87f1c20bf` 与上述 Re
 | --- | --- | --- |
 | 租户与空间 | SaaS `POST /api/platform/tenant-bootstrap`；原 Core 部署准入、租户授权、成员分配、租户及 `rental-workspace` 绑定 | 当前组合兼容及 SDK 声明；不能从初始化返回的模板计数推断已生成订单 |
 | 普通客户 | `POST /api/membership/personal` 由受权管理员建号；客户 `/api/client/v1/auth/login`、`change-password` 后重新登录 | 已编写必要建号链；不请求管理员 token 作为客户身份 |
-| 普通员工 | `POST /api/platform/roles` 精确订单读/操作权，`POST /api/platform/users/access` 原空间及 `selected` locationScope；员工 `/api/staff/v1/auth/login`、`change-password` | 地点投影/选择沿固定原贡献；首次改密缺口仍须原 Guard 修复，选店和服务动作需要真实页面证据 |
+| 普通员工 | `POST /api/platform/roles` 精确订单读/操作权，`POST /api/platform/users/access` 原空间及 `selected` locationScope；员工 `/api/staff/v1/auth/login`、`change-password` | 地点投影/选择及首次改密沿固定原贡献；选店和服务动作需要真实页面证据 |
 | 本人可取消订单 | 原经营主体、地点、型号、库存、定价和报价入口 → `POST /api/rental/v1/orders` | 已编写 `camping` 数量型商品、`calendar_day` 原价、`store_pickup_return` 地点及个人 bookingIdentity；必须实际取得原 `draft` 订单并由客户预览、取消及读 `cancel-receipt` |
 | 可开始的服务发生项 | 原服务配置纳入报价/订单 → `POST /api/rental/v1/orders/:id/confirm` → `/allocate` → 员工 `/services/:occurrenceId/execution` | 已编写原支持服务及已发布的 `pickup` 付款时机规则；报价保留正常租金与押金，尚未收款或领取。必须由确认/配货产生 `ReadyForPickup` 与 `not_started`，再由员工开始服务；不改订单状态、不伪造支付或收据 |
 
