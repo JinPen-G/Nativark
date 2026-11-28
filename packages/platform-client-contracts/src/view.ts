@@ -122,7 +122,12 @@ export function createClientView(runtime: ClientRuntime, store?: ClientOperation
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     navigate, reload,
     search(value: string) { clear(state.destination, { params: state.request.params, search: value }); void reload(); void choices(generation); },
-    suspend() { suspended = true; clear(state.destination && { routeId: state.destination.routeId }); },
+    suspend() {
+      suspended = true;
+      // 隐藏/卸载须取消整页寿命，包括登录、切范围及原收据；仅清业务读槽会让迟到登录继续采用身份。
+      runtime.invalidate();
+      clear(state.destination && { routeId: state.destination.routeId });
+    },
     resume() { suspended = false; return sessionChange(() => runtime.refresh()); },
     async scan(value: string): Promise<ClientDestination | undefined> {
       if (!state.destination || state.busy) return;
