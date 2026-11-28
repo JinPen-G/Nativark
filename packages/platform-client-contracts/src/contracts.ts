@@ -64,6 +64,9 @@ export interface ClientAccessRequest {
   readonly actionId?: string;
   readonly purpose: ClientPurpose;
   readonly scope: ClientScope;
+  /** 定位仍是不可信输入；原权威据此核对象、版本和字段范围。 */
+  readonly request?: ClientPageRequest;
+  readonly reference?: ClientOperationReference;
 }
 export interface ClientAccessPort {
   /** 每次从所属权威取得当前观察；不能按前端菜单、声明权限或旧缓存恒真放行。 */

@@ -67,14 +67,15 @@ export function createClientOperations(runtime: ClientRuntime, store: ClientOper
           if (retained.some(value => value.coreId === contribution.coreId && value.routeId === routeId && value.actionId === actionId))
             throw new ClientError("operation_pending");
           return action.prepare(page, input, current, life);
-        }, actionId);
+        }, actionId, { request: page });
         if (!valid(prepared.reference) || prepared.reference.coreId !== contribution.coreId
           || prepared.reference.routeId !== routeId || prepared.reference.actionId !== actionId) throw new ClientError("unavailable");
         const candidate = capture(prepared.reference);
         await store.save(owner, candidate); // 无持久定位时不派发，刷新页面仍只核对原键。
         reference = candidate;
         if (!current()) throw new ClientError("stale");
-        const result = await runtime.withAccess(routeId, "action", "execute-operation", (_current, life) => prepared.execute(life), actionId);
+        const result = await runtime.withAccess(routeId, "action", "execute-operation", (_current, life) => prepared.execute(life), actionId,
+          { request: page, reference });
         const accepted = await accept(owner, reference, result);
         if (!current()) throw new ClientError("stale");
         return accepted;
@@ -90,7 +91,7 @@ export function createClientOperations(runtime: ClientRuntime, store: ClientOper
       const owner = runtime.scope();
       const epoch = runtime.getRevision();
       const result = await runtime.withAccess(fixed.routeId, "original_receipt", `receipt:${fixed.operationKey}`,
-        (current, life) => action.readReceipt(fixed, current, life), fixed.actionId);
+        (current, life) => action.readReceipt(fixed, current, life), fixed.actionId, { reference: fixed });
       const accepted = await accept(owner, fixed, result), state = runtime.getSnapshot();
       if (state.status !== "authenticated" || runtime.getRevision() !== epoch || clientScopeKey(state.scope) !== clientScopeKey(owner))
         throw new ClientError("stale");

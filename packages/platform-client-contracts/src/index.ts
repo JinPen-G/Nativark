@@ -2,3 +2,6 @@
 export * from "./contracts";
 export * from "./runtime";
 export * from "./operations";
+export * from "./storage";
+export * from "./view";
+export * from "./messages";

@@ -2,7 +2,7 @@
 
 `@rental-os/platform-client-contracts` 定义客户网站、员工门店 Web、微信客户和微信员工的贡献与页面寿命。业务代码仍由独立 Core 提供，客户和员工分别装配，不接受 `operator` audience。普通底座和未选择这些端的 Core 不依赖本包。
 
-[合同](src/contracts.ts) → [页面寿命](src/runtime.ts) → [一次派发及原收据](src/operations.ts)。Web 与微信消费者沿同一正式出口接入。`CorePrincipal` 沿 `@rental-os/core-contracts` 正式出口复用。
+[合同](src/contracts.ts) → [页面寿命](src/runtime.ts) → [一次派发及原收据](src/operations.ts) → [展示状态](src/view.ts)。Web 与微信消费者沿同一正式出口接入。`CorePrincipal` 沿 `@rental-os/core-contracts` 正式出口复用。
 
 ## 由宿主提供的原权威
 
@@ -23,6 +23,8 @@
 
 ## 接入与验证边界
 
-本包为可选源码候选。根 workspace/lock 的登记由集成窗口完成；单独准备同版依赖后使用 `npm run build` 或 `npm run lint`，不隐式安装依赖、启动服务或迁移。本包构建配置包含 DOM 类型以核对上游公共合同源码，运行代码不读取 window、AbortController、Storage 或 wx。
+`createClientView` 为各端提供同一订阅快照；切身份/范围同步清页面、输入、搜索和动作反馈，未知结果只保留隔离存储中的原定位。`suspend/resume` 供后台/前台生命周期使用。`createClientOperationStore` 只持久化投影后的原引用，损坏定位不会静默删除以绕过待核门槛；宿主应独立保存客户与员工命名空间，不能将本地存储作为当前权威。跨标签并发最终仍由 Core 原幂等与版本规则保证。
+
+本包为可选源码候选，根 workspace/lock 已显式登记；单独准备同版依赖后使用 `npm run build` 或 `npm run lint`，不隐式安装依赖、启动服务或迁移。本包构建配置包含 DOM 类型以核对上游公共合同源码，运行代码不读取 window、AbortController、Storage 或 wx。
 
 Zelo 接入基线为 `d6ccb0dcad63ee2e06043b71c2651f326c7e8e3a`，首个业务对接依据为独立 Rental `1ca7374a64db65bada538254cc95aba7950ea588`。Rental 的客户/员工会话与业务工厂必须由其宿主适配为本合同，业务页面/API 不复制到本包。类型和进程内宿主替身不能代替真实 Auth、撤权、数据库、微信开发者工具或真机验收。

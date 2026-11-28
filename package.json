@@ -17,12 +17,14 @@
     "packages/mcp-server",
     "packages/platform-admin",
     "packages/platform-client-contracts",
+    "packages/platform-client-web",
     "packages/platform-contracts",
     "packages/platform-core-host",
     "packages/platform-server"
   ],
   "scripts": {
     "build:client-contracts": "npm run build -w @rental-os/platform-client-contracts",
+    "build:client-web": "npm run build -w @rental-os/platform-client-web",
     "prepare:rental-workspace": "node scripts/prepare-rental-workspace.cjs",
     "docs:check": "node scripts/validate-docs.cjs",
     "test:docs": "node --test tests/docs-check.test.cjs",

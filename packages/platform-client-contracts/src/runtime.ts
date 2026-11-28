@@ -87,9 +87,10 @@ export function createClientRuntime(options: ClientRuntimeOptions) {
     return value;
   }
   async function withAccess<T>(routeId: string, purpose: ClientAccessRequest["purpose"], key: string,
-    work: (scope: ClientScope, life: ClientLifetime) => Promise<T>, actionId?: string): Promise<T> {
+    work: (scope: ClientScope, life: ClientLifetime) => Promise<T>, actionId?: string,
+    context: Pick<ClientAccessRequest, "request" | "reference"> = {}): Promise<T> {
     const { contribution } = find(routeId), owner = scope(), life = lifetime(key);
-    const request = { coreId: contribution.coreId, routeId, purpose, scope: owner, ...(actionId ? { actionId } : {}) };
+    const request = { coreId: contribution.coreId, routeId, purpose, scope: owner, ...context, ...(actionId ? { actionId } : {}) };
     try {
       const decision = await options.access.authorize(request, life);
       life.assertCurrent();
@@ -152,7 +153,7 @@ export function createClientRuntime(options: ClientRuntimeOptions) {
     read(routeId: string, request: ClientPageRequest) {
       const { route } = find(routeId);
       const fixed = { search: request.search, params: Object.freeze({ ...request.params }) };
-      return withAccess(routeId, "page", "page", (owner, life) => route.load(fixed, owner, life));
+      return withAccess(routeId, "page", "page", (owner, life) => route.load(fixed, owner, life), undefined, { request: fixed });
     },
     scan(routeId: string, value: string): Promise<ClientDestination | undefined> {
       const { contribution } = find(routeId);

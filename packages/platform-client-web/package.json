@@ -1,0 +1,18 @@
+{
+  "name": "@rental-os/platform-client-web",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "分别选装的客户网站与门店 Web 安全外壳",
+  "exports": {
+    ".": "./src/index.ts",
+    "./customer": "./src/customer.tsx",
+    "./staff": "./src/staff.tsx",
+    "./styles.css": "./src/styles.css"
+  },
+  "files": ["src", "README.md", "LICENSE"],
+  "scripts": { "build": "tsc -p tsconfig.json", "lint": "tsc -p tsconfig.json" },
+  "dependencies": { "@rental-os/platform-client-contracts": "0.1.0", "@rental-os/platform-admin": "0.1.0" },
+  "peerDependencies": { "react": "19.2.8", "react-dom": "19.2.8" },
+  "devDependencies": { "@types/react": "19.2.18", "@types/react-dom": "19.2.4", "typescript": "5.9.3" }
+}
