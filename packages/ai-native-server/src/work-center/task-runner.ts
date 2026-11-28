@@ -14,9 +14,7 @@ import { createPublicAiTaskRunnerStepPorts, createPublicAiTaskSteps, type AiStep
   type AiStepTransitionCommand, type AiTaskRunnerRepositoryCommandFactory } from '../task-steps';
 import { aiTaskRunPlanSchema, type TaskRunPlanAuthority } from '../task-runner-resources';
 import { TaskStepEvidenceAuthority } from '../runtime/runner/task-step-evidence.authority';
-import { createAiTaskRunnerOutcomePort } from '../runtime/runner/ai-task-runner-outcome-adapter';
-import { lockTaskTransition, recordTaskTransition, taskTransitionCommandSchema, taskTransitionSelect } from '../runtime/task-transition-commit';
-import { aiTaskAccessFromContext } from '../runtime/task-owner-access';
+import { createPublicAiTaskTransitions, createPublicAiTaskRunnerOutcomePort } from '../task-transitions';
 import { readPublicTenantModelInput } from '../runtime/model-input/public-tenant-model-invocation';
 import { readModelNonDispatchEvidence } from '../runtime/model-input/prisma-model-nondispatch.evidence';
 import { textProbeIntent } from '../runtime/text-capability-probe';
@@ -153,33 +151,8 @@ export function createWorkCenterRunner(input: { db: PrismaClient; authority: Bou
     }
   };
 
-  const outcome = createAiTaskRunnerOutcomePort({ commands: { transition: value => value }, tasks,
-    transitions: { async transition(value) {
-      const command = taskTransitionCommandSchema.parse(value);
-      if (!command.lease || !['running', 'succeeded', 'failed', 'waiting_external'].includes(command.to)) throw denied();
-      const start = command.reason === 'start', operation = start ? 'transition_task' : 'read_step_terminal';
-      const before = aiTaskAccessFromContext(await authority.actions.resolve(command.taskId, operation), command.taskId, clock());
-      let completed = false;
-      try {
-        const result = await db.$transaction(async tx => {
-          const result = await transactions.withAiTaskTransaction(tx, { kind: start ? 'task' : 'task_control', taskId: command.taskId }, async () => {
-            const current = async () => aiTaskAccessFromContext(await authority.actionOn(tx, command.taskId, operation), command.taskId, clock());
-            const task = await tx.aiTask.findFirst({ where: before.where, select: taskTransitionSelect });
-            if (!task || task.id !== command.taskId) throw unavailable();
-            const rows = await lockTaskTransition(tx, before, task, command, () => {});
-            return recordTaskTransition(tx, before, task, rows, command, false, current);
-          });
-          completed = true;
-          return result;
-        }, transactionOptions);
-        const after = aiTaskAccessFromContext(await authority.actions.resolve(command.taskId, 'read_step_terminal'), command.taskId, clock());
-        if (after.bindingKey !== before.bindingKey) throw denied();
-        return result;
-      } catch (error) {
-        if (completed) throw new WorkCenterUnknownError();
-        throw error;
-      }
-    } } });
+  const transitions = createPublicAiTaskTransitions({ db, transactions, authority, clock });
+  const outcome = createPublicAiTaskRunnerOutcomePort(transitions, tasks);
 
   function gateway(task: TaskObjects) {
     const budgetGrant = taskAuthority.budgetGrant(conversations, authority);

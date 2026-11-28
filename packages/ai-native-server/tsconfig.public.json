@@ -18,6 +18,7 @@
     "src/request-binding.ts",
     "src/task-transactions.ts",
     "src/task-persistence.ts",
+    "src/task-transitions.ts",
     "src/task-resource-ledger.ts",
     "src/task-runner-resources.ts",
     "src/task-steps.ts",
