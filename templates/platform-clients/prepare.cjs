@@ -110,8 +110,7 @@ function prepareClientWorkspace(options) {
   };
   add(snapshot(platformRepo, platformCommit, ['LICENSE', 'tsconfig.base.json', ...[...selected.keys()]
     .filter(directory => directory !== coreDirectory && !clientDirectories.includes(directory))]));
-  add(snapshot(clientRepo, options.clientCommit, ['templates/platform-clients/README.md', ...[...selected.keys()]
-    .filter(directory => clientDirectories.includes(directory))]));
+  add(snapshot(clientRepo, options.clientCommit, [...selected.keys()].filter(directory => clientDirectories.includes(directory))));
   // 原包元数据和领域类型原样保留；不调用 Core 的服务端构建、其他端入口或安装脚本。
   add(snapshot(options.rentalRepo, options.rentalCommit, ['package.json', 'LICENSE', 'src', 'clients/contribution']), coreDirectory + '/');
   files.set('package.json', json(projected.root)); files.set('package-lock.json', json(projected.lock));
@@ -129,7 +128,7 @@ function prepareClientWorkspace(options) {
     + '不要对全部 workspace 执行构建；本入口只构建公共合同及所选客户端，不生成 Prisma 或启动 API。\n\n'
     + `将已获授权的 HTTPS 宿主设置填入 [connection.ts](${entry}/connection.ts) 后重新构建。`
     + `产物位于 ${entry}/dist。微信另需本端已授权 AppID、合法域名、开发者工具与真机证据。\n\n`
-    + '接入、当前固定组合缺项及会话/原收据边界见 [公开说明](templates/platform-clients/README.md)。'
+    + `接入、当前固定组合缺项及会话/原收据边界见 [同版公开说明](https://github.com/JinPen-G/Zelo/blob/${options.clientCommit}/templates/platform-clients/README.md)。`
     + '单端工作区中的 Rental 源码来自独立仓固定提交，只消费其正式贡献出口；不编辑此副本替代独立仓交付。\n'));
   return { files, provenance };
 }
