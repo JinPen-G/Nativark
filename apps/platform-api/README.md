@@ -2,6 +2,197 @@
 
 这个宿主只装配公共 SaaS 服务和公共 schema，不依赖 `apps/api`、`@rental-os/shared`、Rental 或工单源码。默认不安装任何 Core。当前提供公共初始化、登录 / 本人 / 会话 / 改密、租户与人员角色 / 组织管理、安全配置、账户与租户外观、完整订阅办理、字典与编号、邀请 / 寄件 / 客服邮件、健康和 OpenAPI，基础集成、官方日历来源及标准 Core 管理也已接公共模块。独立运行包和标准 Core 组合已有正式入口，真实运行验收分别记录。[Core 接入手册](../../packages/core-contracts/README.md#五步快速接入)
 
+## 安装组合只读诊断
+
+源码检出可以先运行 [platform-doctor](../../scripts/ops/platform-doctor.cjs)。入口仅使用 Node 内置模块收集本地前置；已有同树 `@rental-os/core-contracts` 构建产物时，包、部署锁和兼容检查复用其正式出口。缺依赖时给出缺项，不安装依赖或借用父目录的 `node_modules`。
+
+```sh
+node scripts/ops/platform-doctor.cjs
+node scripts/ops/platform-doctor.cjs --profile public-ai --root <公共AI解包目录> --json
+node scripts/ops/platform-doctor.cjs --profile selected-core --root <组合目录> --host apps/example-tickets-api --lock <绝对锁路径> --core example-tickets=<绝对标准包目录> --platform-package <绝对底座tgz路径> --json
+```
+
+| 选择 | 检查对象与前置 |
+| --- | --- |
+| `platform`（默认） | 零 Core、无选装数据能力；检查根清单/npm v3 锁、宿主依赖、公共 Client 与启动产物。完整仓库根启动检查 `ZELO_PLATFORM_DATABASE_URL`，源码发行按其实际根命令检查 `DATABASE_URL` |
+| `public-ai` | 零 Core＋单个 `ai-native` 数据包；检查组合来源回执、所选 schema/Client、`start:ai` 产物及配置。沿用 `CORE_DEPLOYMENT_LOCK_FILE`、`PLATFORM_AI_DATA_PACKAGE_DIR`、`PLATFORM_AI_PROFILE_ID`；不要求付费模型调用 |
+| `selected-core` | `--lock` 固定所选 Core 和可选公共能力，`--host` 指定目标目录内宿主；每个 Core 传 `--core ID=<绝对包目录>`，每个能力传 `--capability ID=<绝对包目录>`。Core＋AI 的包组合可以诊断，但实际接线及 Client 必须沿所属宿主核验；公共 `start:ai` 不能直接用作有 Core 的宿主 |
+
+`--root` 默认是工具所在源码根。`--lock` 显式参数优先；所选 Core 模式必须显式提供它，不猜测业务宿主的环境变量。传入锁后，使用 `--platform-package` 提供同一底座原归档。只报告锁声明的版本、固定来源与摘要，未经检查的来源地址隐藏；不将候选包或源码版本标成已运行版本。v2 分阶段新装锁通过正式合同识别，仍保留专属宿主/旧库兼容待核状态。
+
+报告逐项包含状态、依据和具体处理入口。`pass` 只说明本项检查通过；启动产物存在只标为 `file-present-only`。退出 `1` 表示缺项或冲突，`2` 表示用法错误或检查不完整，`0` 表示所检查的前置无缺项。依赖检查覆盖所选宿主的 dependencies/devDependencies，选装和 peer 依赖继续由原构建与启动核验。源码回执的文件摘要一致只证明本地字节与回执一致，发行真实性须另核固定来源及实际归档。正式源码归档携带这些工具，并投影 `npm run doctor`、`npm run platform:install --`、`npm run platform:upgrade --`；完整仓库可直接运行同一 Node 文件。
+
+**默认数据库为 `unknown / 未检查`。** 默认命令不读取原迁移账、账号或真实服务。获准读取所选库后，可在工具同树显式使用 `--profile platform|public-ai --database`，把[真实安装观察](#显式安装与真实就绪)合入报告。工具不读取 `.env`、不输出连接串、密钥、初始化口令或底层异常；诊断不执行下载、生成、初始化、Seed、迁移、授权或启动。部署准入、租户授权、成员分配、绑定和业务就绪仍由所属权威提供，数据库就绪不会代替这些状态。
+
+另可显式添加 `--service`，使用下方升级入口的进程 API 地址和当前 SaaS 会话，从原包管理 `catalogue` 取得底座/Core/能力的实际版本与数据可用状态。运行集合、版本、来源和摘要须与本地 `--lock` 选择一致；不匹配或缺观察不会放行。此读口适用于提供正式部署观察的 Core＋AI 宿主，缺失的装配和业务权威仍保持未检查；它不直接连接该 Core 的库，也不代替租户/成员/绑定就绪。
+
+已准备候选时可加 `--service --prepared <原sha256>`，在同一报告读取原 `preparation-receipt`，比较候选与本地所选组合；`candidatePreparation: recorded` 只表示原候选及其文件核定。候选尚未运行时，当前版本仍按实际宿主显示，不会因为有准备回执改成已部署。
+
+所选 Core 还可加 `--member`，通过同一 API 地址和单独的 `PLATFORM_DOCTOR_MEMBER_ACCESS_TOKEN` 读取原本人 `session-context` 及 `scope/read`。使用要验收的当前租户成员会话；`--service` 的 SaaS 会话不代替它。报告逐 Core 显示所选版本是否相符、原准入、租户授权、成员分配、权限数量、绑定及业务就绪，不输出租户/用户/容器标识、自由文本或业务内容。没有出现在本人目录中的 Core 标为 `not_available_to_member`，其具体授权原因仍未核定，不推断授权行不存在。
+
+租户级范围直接读本人原范围；容器型 Core 需 `--scope <Core-ID=绝对范围JSON>`。JSON 沿原 `CoreScopeBindingQuerySchema`，例如 `{"coreId":"example-tickets","container":{"type":"workspace","id":"实际已获权空间"}}`；字段只定位范围，实际访问权由原服务端核定。每个 Core 可传一份，未选择的 Core 或多余字段拒绝。会话事实在范围读取前后变化时返回未知。`runtime.member` 的状态与包版本、数据库分别记录：业务就绪不表示任意动作已获权，仍须完成实际页面/读写验收。
+
+修复命令仅供使用者按自己的环境许可显式办理。后续初始化见下方五步；实际 Core 准入和授权见[公共宿主](../../packages/platform-core-host/README.md#部署准入与存量切换)，升级与中断恢复沿[原固定来源及升级预检](../../packages/core-contracts/README.md#分别更新底座或一个-core)。缺失应答按原操作和收据核对，不重跑初始化、迁移或业务动作。
+
+## 从诊断到初始化与就绪
+
+在原诊断命令后加 `--steps`，查看当前组合的办理顺序；`--steps --json` 将相同内容放入 `nextSteps`。每步列执行角色、前置、原入口、需核收的结果和中断处理。命令来自已有宿主说明，仅展示供显式执行；工具不代办操作、不记录完成度，也不接受人工填报的“数据库已就绪”。
+
+```sh
+node scripts/ops/platform-doctor.cjs --steps
+node scripts/ops/platform-doctor.cjs --profile public-ai --root <公共AI解包目录> --steps --json
+```
+
+| 阶段 | 执行角色与核收 |
+| --- | --- |
+| 本地材料 | 部署者核固定源码、原锁、依赖、唯一 Client 和构建产物；检查通过只表示本地前置成立 |
+| 数据观察与迁移 | 部署者在已指定环境核原迁移账及物理结构，再显式应用获批迁移。完整仓库的零 Core 根入口提供 `npm run db:migrate:status`；公共 AI 与业务 Core 使用各自数据观察，不能用零 Core 读取器判断其组合库 |
+| 公共账号 | 迁移已核定后显式执行原初始化。`initialized: true` 表示创建公共 SaaS 主体，`false` 表示原主体核验通过；均不创建业务租户或 Core 授权 |
+| 登录与租户开通 | SaaS 管理员完成实际登录和首次改密，再经原租户入口创建业务租户及首个管理员；租户管理员使用独立账号改密与登录 |
+| Core 就绪 | 逐项核实际装配/数据、部署准入、租户授权、成员分配、业务角色、绑定和业务条件；每项只读回自己的原状态及操作收据 |
+| 选装 AI | 核固定数据包、对应 Client、真实数据及适用权限。公共 AI 的角色授权显式办理；模型配置、业务工具可用和普通 Core 业务分别核验 |
+
+数据库观察必须区分：没有任何对象的空库、迁移和结构已兼容但账号尚未核定的库、原账号可用的已初始化库，以及原账未知/不兼容/执行未完的库。后者停止初始化和迁移，沿原所有者升级或恢复入口处理。`db:migrate:status` 只读迁移与结构，不能判定账号、租户、权限或业务已经可用；读失败也不是空库。
+
+首次初始化的 `SEED_PLATFORM_PASSWORD` 至少 8 位且含字母和数字，只通过受控进程配置提供。[原初始化服务](../../packages/platform-server/src/modules/platform/platform-initialization.ts)在同一 Serializable 事务创建主体，重复显式执行保留既有口令、角色及授权，只补录公共权限定义。执行初始化仍要求提供符合规则的初始口令，但它不用于登录或核对旧账号；无需索取旧租户密码。既有平台管理员不可用时返回冲突，不重置或恢复该账号。失应答先执行下方不需要口令的 `status`，读取原主体和初始化审计。
+
+Core 步骤复用[唯一管理合同](../../packages/core-contracts/README.md#core-管理-http-合同)：先读取当前准入/授权/分配/绑定及修订，写入使用原 `operationId` 与版本条件，失应答继续查对应原操作。已有 `stopped`、撤回分配和业务配置保持原事实；重启或重开不重放 Seed。安装者、SaaS 管理员和租户管理员即使是同一人，也须在各入口使用适用的当前身份与权限。
+
+真正收口还需要在指定环境完成零 Core 新装登录、所选 Core＋公共 AI 状态回读、重复初始化保留账号，以及必要的拒绝和恢复冒烟。`--steps` 的指导、静态检查、既有 CI 和本地依赖状态都不代替这些运行证据。
+
+## 显式安装与真实就绪
+
+[安装命令](../../scripts/ops/platform-doctor-install.cjs)要求显式选择 `platform` 或 `public-ai`，只使用工具同树的宿主、依赖、生成 Client 和原迁移。先按下方五步完成依赖、Client 和构建；公共 AI 先取得正式选装源码，并配置下文的锁和数据包。完整仓库的零 Core 使用 `ZELO_PLATFORM_DATABASE_URL`，继续限制为回环独立 `zelo_platform_*` 库；解包发行使用进程 `DATABASE_URL`。存在会被 Prisma 发现的 `.env` 时拒绝办理，不读取内容。
+
+```sh
+node scripts/ops/platform-doctor-install.cjs status --profile platform
+node scripts/ops/platform-doctor-install.cjs migrate --profile platform --approve <本次status的migrationApproval>
+node scripts/ops/platform-doctor-install.cjs initialize --profile platform
+node scripts/ops/platform-doctor.cjs --profile platform --database --steps
+```
+
+公共 AI 将 `--profile platform` 替换为 `--profile public-ai`，并提供 `CORE_DEPLOYMENT_LOCK_FILE` 和 `PLATFORM_AI_DATA_PACKAGE_DIR`，或显式 `--lock` / `--capability ai-native=<绝对包目录>`。执行前后须使用同一选择。`selected-core` 暂不执行通用迁移或账号编排，继续由所属固定宿主提供数据和生命周期；材料诊断仍支持 Core＋AI。
+
+v2 分阶段新装锁的 `postCapability` 在诊断中保留原迁移、来源和前置声明。`--service` 消费下方的完整分阶段只读接口；缺接口仍未检查。v1 `catalogue`/准备回执不包含后置阶段，不能拿 `v2.base` 匹配当作完整运行或准备成功；v2 的 `--prepared` 继续拒绝套用 v1 回执。当前成员的准入/绑定就绪可单独读取，也不代替整库数据观察。
+
+| 原库观察 | 含义与可继续入口 |
+| --- | --- |
+| `unknown` | 未取得完整元数据可见性、连接/结构读取失败，或 AI 部分迁移需所属数据所有者恢复；停止写入 |
+| `empty` | 已实际读取并确认没有数据库对象；可审核本次原迁移链后显式 migrate |
+| `migration_pending` | 原账与已应用公共迁移前缀的物理结构一致；待迁移数量单列，可在核定执行范围后 migrate |
+| `migration_incomplete` | 原账有未结束或失败收据；返回原迁移 ID/摘要，不重放、不执行 migrate resolve |
+| `incompatible` | 原账缺失、历史摘要/顺序改变、出现未选对象或物理结构不符；沿旧库/所属数据恢复流程处理 |
+| `ready` | 完整原迁移账与所属物理读取器核同；初始化状态另列，服务、登录及业务仍未检查 |
+
+空库判定前核数据库账号的库级元数据可见性。当前支持显式库级/全局权限声明，须能读全部表、视图、事件、触发器及过程元数据；仅表级权限、角色间接授权或部分撤权无法可靠核定时返回 `metadata_visibility_unverified`，不会推断空库。工具只查询，不自行授予权限。所有数据库读取由[安装观察模块](src/installation.ts)在有界事务内办理并断开连接，沿原 `_prisma_migrations` 和物理结构读取器，不另建迁移账。
+
+`migrationApproval` 绑定本次目标和所选 schema/锁/迁移摘要，是部署者核对执行范围的确认值，不是权限凭证。须先取得当前环境迁移许可、备份及停机条件，再传给 `migrate`；工具重新观察原库，仅对已核空库或公共前缀调用原 Prisma `migrate deploy`，完整链直接返回 `already_applied`。原 Prisma 排他锁与原迁移账保持；失败或失应答为 `unknown`，随后只读 `status` 核原阶段。工具不会从网络补引擎、覆盖 Client 或自动恢复 DDL。实际使用库的并发迁移/运行切换仍由部署窗口管理。
+
+`initialization.state` 分为 `not_checked`、`uninitialized`、`initialized`、`conflict`。账号就绪复用原仓储的启用主体、租户、SaaS 身份和必要管理权限；只输出状态、首次改密标记以及 `platform.initialized` 审计是否存在。没有审计不补造历史收据。`initialize` 先核完整数据状态，再调用原初始化服务；旧的 `db:initialize`/workspace 命令保留。未知响应不自动重发，先用 `status` 判断原事务结果。账号存在不证明实际密码登录成功。
+
+安装 `status` 退出 `0` 表示本次观察完成（可能仍为空库或待迁移），`1` 表示已知冲突，`2` 表示未知或用法错误。执行命令退出 `0` 表示本步骤完成，`1` 表示前置拒绝，`2` 表示结果未核定；不能只看退出码判定整套服务就绪。
+
+## Core＋公共 AI 的完整 v2 观察
+
+在诊断工具已按原锁构建的目录运行，`--root` 指向所选宿主，材料都来自同一固定组合。环境中的 `PLATFORM_DOCTOR_API_URL` 和 `PLATFORM_DOCTOR_ACCESS_TOKEN` 只供原 SaaS 只读接口使用；成员检查另用自己的 `PLATFORM_DOCTOR_MEMBER_ACCESS_TOKEN`。
+
+```sh
+node scripts/ops/platform-doctor.cjs --profile selected-core --root <组合根目录> --host apps/rental-api --lock <完整v2锁绝对JSON> --platform-package <原底座绝对tgz> --core rental=<标准包绝对目录> --capability ai-native=<公共数据包绝对目录> --service --steps --json
+```
+
+`runtime.phasedInstallation` 分别展示原准备结果、已运行包身份、Client、基础原账、每项后置迁移及物理状态、平台/Core 初始化。`ready` 仅表示这一份安装观察齐全；租户开通、成员分配、绑定、业务和模型权限仍沿原入口核定，不由安装观察授予。缺字段、版本/摘要冲突、v1 锁、未结束原迁移或无可靠物理依据都不能返回成功；不自动安装、初始化、迁移或换键重试。
+
+`--root` 可指向原 `rental-host.context.json` 运行归档：诊断核该上下文的实际文件表，保留其中的开发来源证明，不把源码文件表误用于已投影运行包。标准包字节核同后，若只剩旧 API 路径许可，v2 本地检查仍为 `not_checked`；只有同一包摘要的正式宿主完整运行观察才能补足其可信策略依据。其他清单、迁移、摘要或兼容错误继续拒绝，v1 规则不变。
+
+### 宿主只读输出合同
+
+固定路径是 **GET `/api/platform/core-installation/status`**，不接收查询或动作参数。宿主沿原 Auth/Guard/ALS 的 operator audience、当前 SaaS 身份和 `system:tenant:manage` 权限，在原事务身份复核边界内读取；401/403 保留拒绝，404 表示该固定版本尚未提供入口。响应禁止缓存，不输出连接配置、账号 ID、业务数据、日志原文或文件系统路径。本入口不加入 v1 包管理/候选执行器。
+
+生产者和消费者必须从 **`@rental-os/core-contracts/phased-installation`** 读取同一正式出口，不能私写同名 DTO。可执行响应合同、HTTP 路径与格式的唯一来源为 [phased-installation.ts](../../packages/core-contracts/src/phased-installation.ts)，诊断投影位于 [projectPhasedInstallation](../../scripts/ops/platform-doctor-upgrade.cjs)。
+
+```ts
+import {
+  PHASED_INSTALLATION_HTTP,
+  CorePhasedInstallationObservationSchema,
+  type CorePhasedInstallationObservation
+} from "@rental-os/core-contracts/phased-installation";
+// 宿主在自己的原只读观察实现返回前解析；doctor 也解析同一响应 schema。
+// PHASED_INSTALLATION_HTTP.path 相对 /api；format 也从该常量取得。
+```
+
+封套分 `status: unavailable`（至少一个缺项原因）与 `status: observed`（完整字段）。字段均必需，缺观察明确使用 `null`、空观察集合或 `not_checked`；只有初始化的 `mustChangePassword` 可省略。`CorePhasedMigrationLockSchema`、发行、迁移执行、数据/物理观察与登记摘要直接复用原 schema。消费者对完整锁、集合、迁移 ID/原摘要作一致性检查，基础阶段复用 `planCoreUpdate` 的 `unchanged` 核验，再独立要求全部后置阶段。该局部校验不会把 v2 锁交给 v1 升级执行器。
+
+| 字段 | 宿主必须提供的原依据 |
+| --- | --- |
+| `lock` / `preparation` | 当前完整固定锁；原新装准备工厂的材料结果。锁文件存在不能补造 `prepared`，准备仍是 `deployment: pending`，不冒充候选存储收据 |
+| `installed` / `registered` | 核实际使用的原归档摘要、运行来源回执、Core 标准包、公共数据包和后置 SQL 的原字节后返回对应完整身份；不能照抄传入锁。登记摘要取实际受控服务注册 |
+| `runtimeClient` | 原宿主核生成 Client 与选定完整 schema 的语义及模型集合后，给出原组合 schema 的 SHA-256；缺 Client、构建或来源时为 null |
+| `database.base` | 同一原事务内调用原全阶段观察器，保留实际顺序/摘要和 execution；不能从 migration 文件推导已应用。观察器失败时为 null，不裁掉额外或未知账 |
+| `database.postCapability` | 从同次原读取中保留后置迁移的原应用事实、execution 和所属物理读取器的原结果。映射原 `corePostCapabilityPrismaMigrationName`；不另建账，不将执行成功布尔值或静态 SQL 摘要伪造成物理观察 |
+| `initialization` | 只读原启用主体/权限与原初始化审计，以及每个 Core 自己的原初始化状态。Rental 品类由其原初始化所有者核定；未执行业务绑定不是平台账号未初始化 |
+
+宿主应在同一次有界读取中返回这些字段，包/锁在读取前后变化时拒绝。只完成基础阶段、只有后置物理结构或缺原账都保持不完整；原后置观察没有独立数据版本声明时，其 `physical.version` 由所属固定计划核定，doctor 不猜测它。当前材料、数据库、初始化分别核验，缺原审计可以是 `not_found`，不得补造历史记录。
+
+完整 v2 运行材料使用 `@rental-os/platform-core-host/core-package-deployment` 的 `readPhasedPlatformRuntimeEvidence` 核原上下文及公共六包，再与所属宿主原选择器的实际 Client/Core/AI 扩展核验合并。它接收完整 v2 锁；原 `readPlatformRuntimeEvidence` 仍只接受 v1。缺公共运行证据或原选择器任一部分时，`installed/runtimeClient` 不能补为已核。[边界及签名](../../packages/platform-core-host/README.md#分阶段新装的只读运行证据)
+
+Rental 宿主沿原 `CORE_PACKAGE_STORAGE_ROOT` 和 `CORE_PLATFORM_PACKAGE_REFERENCE` 选择底座材料：在受管目录的 `archives/index.json` 登记与完整锁中 `base.platform` 一致的标准底座归档，实际 `.tgz` 放同一 `archives/` 目录。诊断的 `--platform-package` 也选择这份已核字节。缺原登记或归档时保持材料未检查，不能用运行上下文、源码目录或 `v2.base` 代替标准归档证据；登记不办理下载、部署或 v1 升级。索引格式复用[原包来源入口](../../packages/platform-core-host/src/core-package-preflight/README.md)。
+
+原因码白名单为 `materials_unavailable`、`runtime_identity_unverified`、`deployment_changed`、`ledger_unavailable`、`ledger_incomplete`、`ledger_mismatch`、`physical_unavailable`、`physical_mismatch`、`initialization_unchecked`、`initialization_required`、`initialization_conflict`、`observation_unavailable`。其他安全代码投影为 `host_prerequisite`，均阻止整体 ready；原异常文字不进入诊断。未知/缺观察退出 2，已知冲突或待初始化退出 1，完整安装观察通过退出 0；整条 doctor 还会综合本地材料与成员检查。
+
+### 独立 Rental 的公共数据 SDK 映射
+
+原 [双仓准备入口](../../scripts/prepare-rental-workspace.cjs)按固定 Zelo 源码的 `packages/ai-native-data/package.public.json` 编译并回读 npm 归档；[锁投影](../../scripts/rental-host-lock.cjs)仅接受已支持的准确版本，保留旧 `0.2.3` 来源/文件名。新宿主应在自己的 `peerDependencies` 显式声明 `"@rental-os/public-ai-data": "0.2.5"`，原可选 peer 标记保持。新候选输出如下，不能手改原锁或沿用旧文件名：
+
+| 字段 | SDK 0.2.5 的固定投影 |
+| --- | --- |
+| 归档 | `vendor/ai-native-data-public-0.2.5.tgz` |
+| 宿主依赖 | `file:../../vendor/ai-native-data-public-0.2.5.tgz` |
+| 安装位置 | `apps/rental-api/node_modules/@rental-os/public-ai-data` |
+| 锁内真实包名、版本 | `@rental-os/ai-native-data`、`0.2.5` |
+| 锁内 resolved | `file:vendor/ai-native-data-public-0.2.5.tgz` |
+| integrity | 同次实际归档字节的 `sha512-<base64>`，由原准备器生成 |
+
+SDK 版本与 AI 数据发行版本分别核验；Rental 自己的底座兼容和后置迁移前置仍须明确支持所选发行。只改宿主依赖声明不会自动取得完整组合或 v2 观察支持。
+
+## 单对象升级与中断接续
+
+[升级命令](../../scripts/ops/platform-doctor-upgrade.cjs)消费正在运行的原 `/api/platform/core-packages` 接口，使用当前 SaaS 会话和宿主版本观察。先通过原登录入口取得会话，通过受控进程配置提供 `PLATFORM_DOCTOR_API_URL`（HTTPS origin 或回环 HTTP origin）和 `PLATFORM_DOCTOR_ACCESS_TOKEN`。令牌不放命令参数，不进入输出；请求禁止跳转和自动重试。包引用必须已由原发行/本地归档入口登记，命令不凭任意 URL 下载包。
+
+```sh
+node scripts/ops/platform-doctor-upgrade.cjs status
+node scripts/ops/platform-doctor-upgrade.cjs plan --kind platform --reference <候选固定包引用>
+node scripts/ops/platform-doctor-upgrade.cjs prepare --kind platform --reference <同一引用> --sha256 <预览返回的摘要>
+node scripts/ops/platform-doctor-upgrade.cjs receipt --sha256 <同一摘要>
+```
+
+只更新 Core 时使用 `--kind core --id <Core-ID>`；只更新公共数据能力时使用 `--kind platform-capability --id <能力-ID>`。`status` 分别投影锁定与实际底座/Core/能力版本、固定来源和可用状态。宿主没有真实包/原账/物理观察时保持 `unavailable`，不把传入锁当运行版本。零 Core＋AI 和 Core＋AI 是否可用由各自宿主实际供给决定。
+
+`plan` 调用原 `plan-update` 和 `preview-preparation`，复用正式 `planCoreUpdate` 的来源、不可变历史、可读范围和单对象更新约束，显示当前/候选及迁移差异。`prepare` 是显式写入原候选存储的操作，服务端重新核当前身份、原运行组合、材料和预期摘要，保留原提交意图审计；结果仍为 `deployment: pending`。准备不应用 SQL、不切换应用、不更改配置、租户授权或成员分配。
+
+中断后保留原摘要并执行 `receipt`，核 `recorded` 原记录；没有原收据或读取失败保持 `unavailable/unknown`，不能以超时判定未执行或换摘要重发。迁移未批准时不继续执行；迁移中断看原账和真实物理状态，不重放 Seed。候选的 `baseAtPreparation` 只说明准备时基线，运行切换前须重新 `status`，再按[原固定部署、CI 与配对恢复入口](../../scripts/ops/deployment/README.md)办理。工具不自动调用服务器更新器或借用旧服务器授权。
+
+切换后重新观察版本，并通过原登录/设置/授权入口核配置和权限保持。应用回退要求旧应用仍可读取当前数据；数据回填/结构已前进时，按所属迁移与已批准备份恢复方案处理，不能只换旧镜像或改原账。升级退出 `0` 只表示本次查询/候选办理有确定结果，`1` 为拒绝/缺项，`2` 为未知或用法错误，均不代替实际切换验收。
+
+### 旧版归档白名单的维护桥接
+
+`0.2.1`、`0.2.2` 的旧包管理器只认识当时的源码发行脚本清单，因此会拒绝本次新增安装入口的归档。不能通过删掉新脚本、放宽未知文件检查、覆盖旧包或改写已发布版本来升级。新工具随一个严格前进的新版本交付；相同版本的不同 SHA/归档继续由原 `planCoreUpdate` 拒绝。
+
+本次源码版本准备为 `0.3.0`，须完成 PR 评审和原发行核收后才成为正式发行；分支、CI 归档和下列验证本身不代表已经发布或可以部署。
+
+针对**零 Core、未选公共 AI/其他数据能力、Node/合同/能力声明不变、公共数据合同及全部 SQL 原字节相同**的旧宿主，本版提供只读 `bridge` 预检。其他组合、改变迁移、未知或不兼容原库必须交所属维护者核定方案，本入口不尝试通用转换。使用者按原发行规则独立核收两版归档、完整 SHA 和摘要；工具的字节检查不代替可信发行来源。
+
+1. 保留旧运行目录、启动锁、归档、配置和可恢复备份。在新独立目录解包含本工具的正式新版本，沿原锁准备本目录依赖、Client 和构建，使用同一数据库与认证/存储配置。不得覆盖旧目录或借旧 `node_modules`/`dist`；这个阶段不启动新 API。
+2. 提供旧宿主的 `PLATFORM_DOCTOR_API_URL`、当前 SaaS 会话和目标库进程配置，在**新目录**运行下列命令。两份 v1 锁沿上方[固定发行与部署锁](#固定发行与部署锁)取各自原发行，不复制修改旧锁充当新版本。新目录全部公共源码须与候选归档逐字节一致。工具通过原 HTTP 复核正在运行的旧组合，同时读取原库迁移/物理结构/账号，再用原升级函数核前进关系。
+
+   ```sh
+   node scripts/ops/platform-doctor-install.cjs bridge --profile platform --lock <新锁绝对JSON> --platform-package <新归档绝对tgz> --previous-lock <旧锁绝对JSON> --previous-package <旧归档绝对tgz>
+   ```
+
+3. 仅 `maintenance_bridge_checked` 且 `migration: not_required` 可进入已批准维护窗口；结果仍为 `deployment: pending`。部署者核两个配置确指同一原库，停止旧 API 并等待原在途处理结束，在新目录再次 `status --profile platform --lock <新锁>`，随后按原 `npm start`/服务管理入口启动新目录。新旧不得同时处理业务，不执行迁移、重新初始化或业务 Seed。新包归档索引、`CORE_PLATFORM_PACKAGE_REFERENCE` 和 `CORE_DEPLOYMENT_LOCK_FILE` 指向新版本的固定材料。
+4. 用原登录入口验证既有口令，回读配置、角色授权和 `platform-doctor-upgrade status` 的实际新版本。旧候选仍按原 SHA `receipt` 回读；桥接不另造候选收据。首次切换失败时先停新进程，确认原账/数据未变化且旧程序仍可读，再用保留的旧目录、旧锁及原配置恢复。任何数据变化、未知在途操作或旧版不再可读，都转数据所有者的恢复流程，不能倒写迁移账或直接覆盖运行文件。
+
+`bridge` 不改包校验器、锁、文件、账号、权限或服务，不自动下载新版本。原 HTTP 不公开数据库连接身份，因此 `database.matchesRunningHost` 保持 `not_checked`，两端指向同一原库仍须部署者核配置。运行版本变化、当前会话失效、候选文件变更和库状态不明均拒绝继续；重新开始只读核对不等于重新执行任何业务动作。执行权限仍来自本次部署窗口。
+
 ## 默认零 Core 的五步
 
 在所选源码根目录执行以下步骤。workspace 命令同时适用于完整源码检出和零 Core 源码发行，实际依赖采用该发行的 npm v3 锁文件。开发环境使用 Node.js 22.12 或更新的受支持 LTS、Prisma 5.22.0 与独立 MySQL，独立 Linux 运行包的固定 Node 版本见下方打包说明。
@@ -39,7 +230,7 @@ npm run start -w @rental-os/platform-api
 
 ## 选装公共 AI 管理
 
-默认入口没有 AI。需要在零 Core 环境管理平台模型、费率、预算和额度时，使用同一固定组合的公共 AI 服务 SDK `0.2.1`、数据 SDK `0.2.3` 和独立数据包 `0.2.2`。从原公共 schema 与锁定的数据包生成此宿主的 115 模型 Client，再运行 `npm run build:ai -w @rental-os/platform-api`。选装工程不使用默认 Client 或旧混合 SDK。[服务包构建配置](../../packages/ai-native-server/tsconfig.public.json) · [数据包工厂](../../packages/ai-native-data/src/public-data-package.ts)
+默认入口没有 AI。本次底座 `0.3.0` 源码候选使用公共 AI 服务 SDK `0.2.1`、数据 SDK `0.2.5` 和独立数据包 `0.2.4`；它们是待评审的版本准备，尚未发行。历史底座组合继续使用其固定的数据 SDK `0.2.3` 与数据包 `0.2.2`，不改旧归档及兼容范围。从原公共 schema 与锁定的数据包生成此宿主的 115 模型 Client，再运行 `npm run build:ai -w @rental-os/platform-api`。选装工程不使用默认 Client 或旧混合 SDK。[服务包构建配置](../../packages/ai-native-server/tsconfig.public.json) · [数据包工厂](../../packages/ai-native-data/src/public-data-package.ts)
 
 `start:ai` 使用原 `CORE_DEPLOYMENT_LOCK_FILE`、新安装的 `PLATFORM_AI_DATA_PACKAGE_DIR` 两个绝对路径，以及服务端固定的 `PLATFORM_AI_PROFILE_ID`。锁只能包含公共底座和一个公共 AI 数据包，包目录、版本、摘要及所选 Client 均须匹配。此入口不会安装包、应用迁移、建立默认模型或发起模型调用。实际接口走原 Guard、同一数据库/事务和原账观察；使用者仍须具有 `system:ai-provider:view` 或 `system:ai-provider:manage`，选装入口不会给默认角色授权。[显式启动与装配](src/ai-main.ts)
 

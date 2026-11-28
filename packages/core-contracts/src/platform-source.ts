@@ -20,7 +20,13 @@ export const PLATFORM_SOURCE_SCRIPTS = [
   "scripts/package-rental-host.cjs",
   "scripts/check-selected-prisma-types.cjs",
   "scripts/prepare-rental-workspace.cjs",
-  "scripts/rental-build-snapshot.cjs"
+  "scripts/rental-build-snapshot.cjs",
+  "scripts/ops/platform-doctor.cjs",
+  "scripts/ops/platform-doctor-files.cjs",
+  "scripts/ops/platform-doctor-steps.cjs",
+  "scripts/ops/platform-doctor-runtime.cjs",
+  "scripts/ops/platform-doctor-install.cjs",
+  "scripts/ops/platform-doctor-upgrade.cjs"
 ] as const;
 const sourcePaths = [
   ...PLATFORM_SOURCE_WORKSPACES, "packages/ui-arc", "packages/ui-tablecn/LICENSE.md", "packages/ui-tablecn/README.md",
@@ -113,13 +119,14 @@ function projectLock(lock: Lock, root: Package, packages: ReadonlyMap<string, Pa
   return { ...lock, name: root.name, version: root.version, packages: entries };
 }
 
-function platformReadme(source: PlatformSourceIdentity): string {
+function platformReadme(source: PlatformSourceIdentity, installation = false): string {
   return `# Zelo 公共底座\n\n` +
     `这是不包含业务 Core 的底座源码，来源固定于 [${source.commit}](${source.repository}/tree/${source.commit})。\n\n` +
     `公共 API 和后台提供登录、租户/人员/角色、基础设置及 Core 授权入口。侧栏、面包屑、通知、休息和面板属于公共后台。\n\n` +
     `## 本地运行\n\n使用 Node 22.12 或更新的 LTS 补丁与 npm，准备自己的独立 MySQL。初始化和API启动直接读取当前进程的 DATABASE_URL、AUTH_TOKEN_SECRET 和 SEED_PLATFORM_PASSWORD，配置模板见 .env.example。PowerShell使用 $env:变量名 = '自己的值'，Bash使用 export 变量名='自己的值'；配置、Client与迁移顺序见[公共API五步](apps/platform-api/README.md#默认零-core-的五步)。\n\n` +
     "```sh\nnpm ci\nnpm run db:generate\nnpm run build\nnpm run db:migrate:deploy\nnpm run db:initialize\nnpm run dev\n```\n\n" +
     `命令会使用公共 Prisma schema 和迁移；首次初始化建立平台管理账号，重复执行不重置已有账号。后台默认 5176，API 默认 3000；自己的环境、迁移与服务启动由使用者办理。\n\n` +
+    (installation ? `安装前可运行 npm run doctor -- --steps；显式选择组合、数据库就绪读取、迁移确认及升级原收据见[安装入口](apps/platform-api/README.md#显式安装与真实就绪)。默认诊断不连接数据库，安装与升级命令分别执行。\n\n` : "") +
     `只读类型检查可在准备依赖后运行 npm run check:types，在内存生成所选公共声明并读取完整配置，不要求先生成磁盘Client或启动数据库。\n\n` +
     `## 开发 Core\n\n从 [五步接入与 Agent 模板](packages/core-contracts/README.md#五步快速接入)开始。` +
     `Core 自己提供业务、存储和页面，通过正式贡献注册，复用 [公共后台](packages/platform-admin/README.md)；` +
@@ -163,9 +170,17 @@ export function createPlatformSource(
     "prepare:rental-workspace": "node scripts/prepare-rental-workspace.cjs",
     capabilities: "npm run capabilities -w @rental-os/core-contracts --"
   };
+  // 旧固定归档缺少新工具时保持原投影字节，不能用新版入口使历史发行复核失效。
+  const installation = PLATFORM_SOURCE_SCRIPTS.filter(file => file.includes("/platform-doctor"))
+    .every(file => files.has(file));
+  if (installation) Object.assign(root.scripts, {
+    doctor: "node scripts/ops/platform-doctor.cjs",
+    "platform:install": "node scripts/ops/platform-doctor-install.cjs",
+    "platform:upgrade": "node scripts/ops/platform-doctor-upgrade.cjs"
+  });
   files.set("package.json", jsonBytes(root));
   files.set("package-lock.json", jsonBytes(projectLock(json<Lock>(files, "package-lock.json"), root, packages)));
-  files.set("README.md", Buffer.from(platformReadme(source)));
+  files.set("README.md", Buffer.from(platformReadme(source, installation)));
   // 组合工程的兼容链接仍可追溯到原提交；私有资料不生成不可访问的公开链接。
   for (const [path, bytes] of files) if (path.endsWith(".md")) {
     // Markdown 的尖括号目的地允许空格，私有资料链接也必须在这种写法下移除。
