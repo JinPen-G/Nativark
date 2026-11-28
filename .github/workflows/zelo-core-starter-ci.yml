@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    branches: [main, codex/productization-core-dev]
   workflow_dispatch:
 
 permissions:
@@ -17,7 +17,7 @@ concurrency:
 jobs:
   core-starter:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
     services:
       mysql:
         image: mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb
@@ -319,6 +319,244 @@ jobs:
             assert.equal(response.status, 200); assert(verify((await response.json()).data));
           }
           console.log('API持久重启后条目修订与原操作回执保持');
+          NODE
+      - name: 固定公共AI材料与工单AI标准包
+        working-directory: ${{ env.CI_DIR }}/source
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$GITHUB_WORKSPACE/$CI_DIR"
+          npm ci --include=dev --ignore-scripts --no-audit --no-fund --cache "$task/npm-cache"
+          mkdir "$task/offline-ai" "$task/public-ai" "$task/prepared-ai"
+          (
+            export DATABASE_URL=mysql://offline:offline@127.0.0.1:1/rental_os_offline
+            export AI_OFFLINE_WRITE_ROOT="$task" AI_OFFLINE_AUDIT="$task/offline-ai/audit.log"
+            export TEMP="$task/offline-ai" TMP="$task/offline-ai" TMPDIR="$task/offline-ai" XDG_CACHE_HOME="$task/offline-ai"
+            node --no-compilation-cache --max-old-space-size=6144 --require ./tests/fixtures/ai-native/prisma-offline-preload.cjs \
+              scripts/prepare-platform-public-ai.cjs --repo . --repository https://github.com/JinPen-G/Nativark \
+              --commit "$GITHUB_SHA" --out "$task/public-ai.tgz"
+            test ! -e "$AI_OFFLINE_AUDIT"
+          )
+          tar -xzf "$task/public-ai.tgz" -C "$task/public-ai"
+          # 消费正式准备器的同次SDK字节；没有跨工作树链接、私有资料或第二套依赖。
+          test ! -e packages/ai-native-server/dist
+          test ! -e packages/ai-native-data/dist
+          cp -R "$task/public-ai/packages/ai-native-server/dist" packages/ai-native-server/dist
+          cp -R "$task/public-ai/packages/ai-native-data/dist" packages/ai-native-data/dist
+          mkdir apps/platform-api/prisma-deployment-ai-client
+          cp "$task/public-ai/apps/platform-api/prisma-deployment/schema.prisma" apps/platform-api/prisma-deployment-ai-client/schema.prisma
+          node node_modules/@prisma/engines/scripts/postinstall.js
+          node node_modules/prisma/build/index.js generate --schema apps/platform-api/prisma-deployment-ai-client/schema.prisma
+          npm run build -w @rental-os/example-tickets-api
+          npm run build:ai -w @rental-os/example-tickets-core
+          npm run build:ai -w @rental-os/example-tickets-api
+          node packages/example-tickets-core/dist/metadata.js package:ai https://github.com/JinPen-G/Zelo "$GITHUB_SHA" \
+            "$task/platform-identity.json" "$task/tickets-ai.tgz" > "$task/tickets-ai-package.json"
+          node -e 'const fs=require("node:fs"),c=require("@rental-os/core-contracts"); const lock=JSON.parse(fs.readFileSync(process.argv[1])); fs.writeFileSync(process.argv[2],JSON.stringify(c.coreDeploymentHostVersions(lock)),{flag:"wx"});' \
+            "$task/public-ai/apps/platform-api/prisma-deployment/core.deployment.lock.json" "$task/ai-host.json"
+          core_hash=$(node -p "require(process.argv[1]).sha256" "$task/tickets-ai-package.json")
+          node packages/core-contracts/dist/prepare-install.js "$task/tickets-ai.tgz" "$core_hash" "$task/prepared-ai" "$task/ai-host.json" > "$task/tickets-ai-prepared.json"
+          selected=$(node -p "require(process.argv[1]).directory" "$task/tickets-ai-prepared.json")
+          node packages/core-contracts/dist/check.js "$selected" --host "$task/ai-host.json" --json
+          node apps/example-tickets-api/dist-ai/prepare-ai-deployment.mjs \
+            "$task/public-ai/apps/platform-api/prisma-deployment/core.deployment.lock.json" "$task/public-ai/public-ai-data" \
+            "$selected" "$PWD/apps/platform-api/prisma-deployment-tickets-ai"
+          # 本job唯一源码无WIP；沿公开装配步骤供给已核完整包，然后不再重建该包。
+          tar -xzf "$task/tickets-ai.tgz" -C packages/example-tickets-core
+          export CORE_DEPLOYMENT_LOCK="$PWD/apps/platform-api/prisma-deployment-tickets-ai/core.deployment.lock.json"
+          export API_PROXY_TARGET=http://127.0.0.1:3093 VITE_API_BASE_URL=/api
+          npm run build -w @rental-os/example-tickets-admin
+      - name: 工单AI同库批准、执行与原结果冒烟
+        working-directory: ${{ env.CI_DIR }}/source
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$GITHUB_WORKSPACE/$CI_DIR"
+          MYSQL_PWD=zelo_ci_root_only mysql -h 127.0.0.1 -u root -e "CREATE DATABASE zelo_tickets_ai_ci; GRANT ALL ON zelo_tickets_ai_ci.* TO 'zelo_ci'@'%';"
+          export DATABASE_URL='mysql://zelo_ci:zelo_ci_database_only@127.0.0.1:3306/zelo_tickets_ai_ci?connection_limit=1'
+          export CORE_DEPLOYMENT_LOCK="$PWD/apps/platform-api/prisma-deployment-tickets-ai/core.deployment.lock.json"
+          export PLATFORM_AI_DATA_PACKAGE_DIR="$task/public-ai/public-ai-data"
+          export AUTH_TOKEN_SECRET="$(openssl rand -hex 32)" INTEGRATION_ENCRYPTION_KEY="$(openssl rand -hex 32)"
+          export SEED_PLATFORM_PASSWORD="TicketsAi9-$(openssl rand -hex 12)" API_PORT=3093 API_PROXY_TARGET=http://127.0.0.1:3093 DATABASE_CONNECT_ON_START=true
+          node node_modules/prisma/build/index.js migrate deploy --schema apps/platform-api/prisma-deployment-tickets-ai/schema.prisma
+          npm run initialize -w @rental-os/platform-api
+          node apps/example-tickets-api/dist-ai/ai-main.mjs > "$task/tickets-ai-api.log" 2>&1 &
+          api_pid=$!
+          trap 'kill "$api_pid" ${web_pid:+"$web_pid"} ${driver_pid:+"$driver_pid"} 2>/dev/null || true; wait || true' EXIT
+          node node_modules/vite/bin/vite.js preview --configLoader runner --config apps/example-tickets-admin/vite.config.ts --host 127.0.0.1 --port 5193 --strictPort > "$task/tickets-ai-web.log" 2>&1 &
+          web_pid=$!
+          if ! curl -fsS --retry 30 --retry-delay 1 --retry-max-time 60 --retry-connrefused --max-time 5 http://127.0.0.1:5193/api/health -o "$task/tickets-ai-health.json"; then
+            node -e 'const fs=require("node:fs"); for(const name of process.argv.slice(1)){let value=fs.readFileSync(name,"utf8"); for(const key of ["DATABASE_URL","AUTH_TOKEN_SECRET","INTEGRATION_ENCRYPTION_KEY","SEED_PLATFORM_PASSWORD"])if(process.env[key])value=value.replaceAll(process.env[key],"[redacted]"); console.error(value.slice(-5000));}' "$task/tickets-ai-api.log" "$task/tickets-ai-web.log"
+            exit 1
+          fi
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { randomUUID } from 'node:crypto';
+          import { createServer } from 'node:http';
+          import { once } from 'node:events';
+          import { writeFileSync } from 'node:fs';
+          import { resolve } from 'node:path';
+          const origin = 'http://127.0.0.1:5193', api = '/api/cores/example-tickets', management = '/api/platform/core-host/';
+          let stage = 'login';
+          async function request(path, token, data, expected = 200, method = data === undefined ? 'GET' : 'POST') {
+            const response = await fetch(origin + path, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+              ...(data === undefined ? {} : { body: JSON.stringify(data) }), signal: AbortSignal.timeout(125000) });
+            const json = await response.json();
+            assert.equal(response.status, expected, `${stage} ${method} ${path}: HTTP ${response.status}, code=${json?.error?.code ?? json?.code ?? 'unavailable'}`);
+            return json.data ?? json;
+          }
+          const core = (action, token, data) => request(management + action, token, { coreId: 'example-tickets', ...data });
+          const ai = (action, token, data, expected = 200) => request(api + '/ai/' + action, token, data, expected);
+          async function login(code, account, password) {
+            const old = await request('/api/auth/login', undefined, { tenantCode: code, account, password }, 201), changed = 'Tickets9-' + randomUUID();
+            return { token: (await request('/api/auth/change-password', old.accessToken, { currentPassword: password, newPassword: changed }, 201)).accessToken, password: changed };
+          }
+          try {
+            const saas = await login('platform', 'admin', process.env.SEED_PLATFORM_PASSWORD);
+            stage = 'explicit-core-grants';
+            await core('deployment-admission', saas.token, { state: 'accepting', expectedRevision: 0, operationId: randomUUID() });
+            const tenant = await request('/api/platform/tenants', saas.token, { tenantCode: 'ai-tickets-one', tenantName: 'AI工单测试', adminAccount: 'admin', adminDisplayName: '测试管理员' }, 201);
+            const admin = await login('ai-tickets-one', 'admin', tenant.temporaryPassword), tenantId = tenant.tenant.tenantId;
+            await core('tenant-grants', saas.token, { tenantId, state: 'enabled', expectedRevision: 0, operationId: randomUUID() });
+            await core('member-assignments', admin.token, { userId: tenant.admin.id, state: 'assigned', expectedRevision: 0, operationId: randomUUID() });
+            await core('bindings', admin.token, { expectedRevision: 0, operationId: randomUUID() });
+            const permissions = ['read', 'create', 'assign', 'start', 'close'].map(action => 'example-tickets:ticket:' + action);
+            const role = await request('/api/platform/roles', admin.token, { code: 'AI_TICKETS', name: '工单任务成员', scope: 'operator',
+              enabledBusinessScopes: [], permissions, dataScope: 'own', isActive: true }, 201);
+            assert(!role.permissions.includes('*')); assert.equal(role.fixedAllPermissions, false);
+            const user = await request('/api/platform/users', admin.token, { account: 'worker', displayName: '测试工单成员', roleIds: [role.id], isPlatformAdmin: false, isActive: true }, 201);
+            const actor = await login('ai-tickets-one', 'worker', user.temporaryPassword);
+            await core('member-assignments', admin.token, { userId: user.id, state: 'assigned', expectedRevision: 0, operationId: randomUUID() });
+            async function ticket(subject) {
+              const created = await request(api + '/tickets', actor.token, { operationId: randomUUID(), subject, description: '来自原工单的批准事实' });
+              return (await request(api + `/tickets/${created.ticket.id}/assign`, actor.token, { operationId: randomUUID(), expectedRevision: created.ticket.revision, assigneeId: user.id })).ticket;
+            }
+            const first = await ticket('AI正式执行');
+            assert.equal((await ai('status', actor.token, { ticketId: first.id })).reason, 'entitlement_denied');
+            stage = 'explicit-entitlement-and-publication';
+            const overview = (await request('/api/platform/subscriptions/' + tenantId, saas.token)).overview;
+            await request('/api/platform/subscriptions/' + tenantId + '/provision', saas.token, { plan: 'standard', source: 'pilot',
+              startAt: new Date(Date.now() - 60000).toISOString(), endAt: new Date(Date.now() + 86400000).toISOString(), timeZone: 'UTC',
+              expectedRevision: overview.revision, reason: '本job显式功能验收，不产生收费' }, 201);
+            await request('/api/platform/subscriptions/feature-catalog/ai.native.use', saas.token, { code: 'ai.native.use', name: '工单AI任务', module: 'AI Native',
+              categories: [], defaultOwnership: 'pro', currentOwnership: 'pro', releaseStatus: 'released', reason: '本job测试目录' }, 200, 'PUT');
+            const current = (await request('/api/platform/subscriptions/' + tenantId, saas.token)).overview;
+            await request('/api/platform/subscriptions/' + tenantId + '/feature-grants', saas.token, { featureCode: 'ai.native.use', expectedRevision: current.revision, reason: '本job显式授权' }, 201);
+            assert.equal((await ai('status', actor.token, { ticketId: first.id })).state, 'unpublished');
+            const limits = { maxSteps: 1, maxCalls: 1, maxConcurrent: 1, maxTotalMs: 120000, maxStepMs: 15000, maxOutputBytes: 65536 };
+            const publication = await ai('publish', admin.token, { operationId: randomUUID(), expectedRevision: null, enabled: true,
+              expiresAt: new Date(Date.now() + 3600000).toISOString(), limits });
+            assert.equal(publication.policy.revision, 1);
+            await ai('publish', actor.token, { operationId: randomUUID(), expectedRevision: 1, enabled: true, expiresAt: publication.policy.expiresAt, limits }, 403);
+            assert.equal((await ai('status', actor.token, { ticketId: first.id })).state, 'available');
+            const start = async ticket => {
+              const binding = await ai('prepareInput', actor.token, { operationId: randomUUID(), ticketId: ticket.id, expectedRevision: ticket.revision });
+              const created = await ai('createTask', actor.token, { inputRef: binding.source.recordId });
+              assert.equal(created.state, 'observed');
+              const command = { taskId: created.task.taskId, runId: created.task.runId, expectedRevision: created.task.revision };
+              const proposal = await ai('prepareApproval', actor.token, command); assert.equal(proposal.status, 'PENDING_CONFIRMATION');
+              const decision = await ai('decide', actor.token, { taskId: command.taskId, proposalId: proposal.proposalId,
+                proposalRevision: proposal.proposalRevision, reviewedPayloadHash: proposal.payloadHash, decision: 'approved' });
+              assert.equal(decision.status, 'CONFIRMED');
+              assert.equal((await request(api + '/tickets/' + ticket.id, actor.token)).state, 'open');
+              const before = await ai('result', actor.token, { taskId: command.taskId });
+              return { binding, command: { ...command, expectedRevision: before.taskRevision } };
+            };
+            stage = 'approval-to-business-receipt';
+            const firstTask = await start(first);
+            assert.equal((await ai('execute', actor.token, firstTask.command)).status, 'succeeded');
+            const original = await ai('result', actor.token, { taskId: firstTask.command.taskId });
+            assert.equal(original.business, 'committed'); assert.equal(original.step.effect, 'committed'); assert.equal(original.taskReconciliationRequired, false);
+            assert.equal(original.originalReceipt.operationId, firstTask.binding.original.command.operationId);
+            assert.equal(original.originalReceipt.ticket.state, 'in_progress'); assert.equal(original.originalReceipt.ticket.revision, 3);
+            assert.deepEqual(await ai('result', actor.token, { taskId: firstTask.command.taskId }), original);
+            stage = 'basis-change-refusal';
+            const staleTicket = await ticket('批准依据变化'), staleTask = await start(staleTicket);
+            const changed = await request(api + `/tickets/${staleTicket.id}/assign`, actor.token, { operationId: randomUUID(), expectedRevision: staleTicket.revision, assigneeId: user.id });
+            await ai('execute', actor.token, staleTask.command, 403);
+            assert.equal((await request(api + '/tickets/' + staleTicket.id, actor.token)).revision, changed.ticket.revision);
+            assert.equal((await request(api + '/operations/' + staleTask.binding.original.command.operationId, actor.token)).status, 'unavailable');
+            stage = 'lost-response-original-receipt';
+            const uncertain = await start(await ticket('失应答原结果'));
+            const proxy = createServer(async (incoming, outgoing) => {
+              try {
+                const chunks = []; for await (const chunk of incoming) chunks.push(chunk);
+                const response = await fetch(origin + api + '/ai/execute', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: incoming.headers.authorization }, body: Buffer.concat(chunks) });
+                assert.equal(response.status, 200); assert.equal((await response.json()).data.status, 'succeeded'); outgoing.destroy();
+              } catch { outgoing.destroy(); }
+            });
+            proxy.listen(0, '127.0.0.1'); await once(proxy, 'listening');
+            try { await assert.rejects(fetch(`http://127.0.0.1:${proxy.address().port}/`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + actor.token },
+              body: JSON.stringify(uncertain.command), signal: AbortSignal.timeout(125000) })); }
+            finally { proxy.closeAllConnections(); await new Promise(resolve => proxy.close(resolve)); }
+            const recovered = await ai('result', actor.token, { taskId: uncertain.command.taskId });
+            assert.equal(recovered.business, 'committed'); assert.equal(recovered.originalReceipt.operationId, uncertain.binding.original.command.operationId);
+            assert.equal((await request(api + '/tickets/' + recovered.ticketId, actor.token)).revision, 3);
+            const browserTicket = await ticket('页面批准与执行');
+            writeFileSync(resolve(process.env.GITHUB_WORKSPACE, process.env.CI_DIR, 'tickets-ai-browser.json'), JSON.stringify({ account: 'worker', password: actor.password,
+              token: actor.token, ticketId: browserTicket.id }), { mode: 0o600, flag: 'wx' });
+            console.log('工单AI：真实显式授权/发布、批准不执行、原Runner业务执行、同键原收据、依据变化拒绝与失应答回读通过；没有调用模型');
+          } catch (error) { console.error('工单AI阶段：' + stage); throw error; }
+          NODE
+          "$CHROMEWEBDRIVER/chromedriver" --port=9515 --allowed-ips=127.0.0.1 > "$task/tickets-ai-browser.log" 2>&1 &
+          driver_pid=$!
+          curl -fsS --retry 10 --retry-delay 1 --retry-connrefused --max-time 5 http://127.0.0.1:9515/status -o "$task/tickets-ai-browser-status.json"
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          import { resolve } from 'node:path';
+          const root = resolve(process.env.GITHUB_WORKSPACE, process.env.CI_DIR), state = JSON.parse(readFileSync(resolve(root, 'tickets-ai-browser.json')));
+          const redact = value => { let text = String(value ?? ''); for (const secret of [state.token, state.password, process.env.AUTH_TOKEN_SECRET,
+            process.env.INTEGRATION_ENCRYPTION_KEY, process.env.SEED_PLATFORM_PASSWORD]) if (secret) text = text.replaceAll(secret, '[redacted]'); return text.slice(0, 1200); };
+          async function driver(path, data, method = data === undefined ? 'GET' : 'POST') {
+            const response = await fetch('http://127.0.0.1:9515' + path, { method, headers: { 'Content-Type': 'application/json' },
+              ...(data === undefined ? {} : { body: JSON.stringify(data) }), signal: AbortSignal.timeout(30000) });
+            const { value } = await response.json(); assert(response.ok && !value?.error, `浏览器 ${path}: ${redact(value?.message)}`); return value;
+          }
+          const browser = await driver('/session', { capabilities: { alwaysMatch: { browserName: 'chrome', 'goog:chromeOptions': { args: [
+            '--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1440,1000', '--lang=zh-CN', '--disable-background-networking',
+            '--disable-component-update', '--no-first-run', '--disable-sync', '--no-proxy-server',
+            '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1', `--user-data-dir=${resolve(root, 'tickets-ai-browser-profile')}`] } } } });
+          const session = '/session/' + browser.sessionId, dom = (script, ...args) => driver(session + '/execute/sync', { script, args });
+          async function waitFor(read, label) {
+            const deadline = Date.now() + 125000;
+            do { const value = await read(); if (value) return value; await new Promise(resolve => setTimeout(resolve, 200)); } while (Date.now() < deadline);
+            throw Error('页面等待超时：' + label);
+          }
+          async function fill(selector, text) {
+            const element = await waitFor(() => dom('return document.querySelector(arguments[0])', selector), selector), id = element['element-6066-11e4-a52e-4f735466cecf'];
+            await driver(`${session}/element/${id}/clear`, {}); await driver(`${session}/element/${id}/value`, { text });
+          }
+          async function click(label) {
+            const element = await waitFor(async () => {
+              const buttons = await dom('return [...document.querySelectorAll("button")].filter(e => e.checkVisibility({visibilityProperty:true,opacityProperty:true}) && !e.disabled && e.getAttribute("aria-disabled") !== "true")');
+              for (const button of buttons) if (await driver(`${session}/element/${button['element-6066-11e4-a52e-4f735466cecf']}/computedlabel`) === label) return button;
+            }, label);
+            await driver(`${session}/element/${element['element-6066-11e4-a52e-4f735466cecf']}/click`, {});
+          }
+          const text = label => waitFor(() => dom('return document.body.innerText.includes(arguments[0])', label), label);
+          try {
+            await driver(session + '/url', { url: 'http://127.0.0.1:5193/login' });
+            await fill('#tenantCode', 'ai-tickets-one'); await fill('#account', state.account); await fill('#password', state.password);
+            await click('进入工作台'); await waitFor(() => dom('return location.pathname !== "/login"'), '登录完成');
+            await driver(session + '/url', { url: 'http://127.0.0.1:5193/cores/example-tickets/tickets/' + state.ticketId });
+            await text('页面批准与执行'); await click('准备开始处理'); await text('原工单已读取'); await click('创建工单任务');
+            await click('准备批准提案'); await text('批准内容：开始处理'); await text('来自原工单的批准事实');
+            await click('批准原提案'); await click('确认'); await text('已批准，尚未执行');
+            const detail = async () => {
+              const response = await fetch('http://127.0.0.1:5193/api/cores/example-tickets/tickets/' + state.ticketId,
+                { headers: { Authorization: 'Bearer ' + state.token } }); assert.equal(response.status, 200); return (await response.json()).data;
+            };
+            assert.equal((await detail()).state, 'open');
+            await click('执行已批准动作'); await click('确认'); await text('工单已开始处理');
+            assert.equal((await detail()).state, 'in_progress'); assert.equal((await detail()).revision, 3);
+            await driver(session + '/refresh', {}); await text('工单已开始处理');
+            assert.equal((await detail()).revision, 3);
+            console.log('Chrome真实页面：登录、事实准备、任务、原提案、人类批准、明确执行、原收据与刷新回读通过；同库工单修订保持3');
+          } catch (error) {
+            try { console.error(redact(await dom('return document.body.innerText'))); } catch {}
+            throw error;
+          } finally { await driver(session, undefined, 'DELETE'); }
           NODE
       - name: 清理本 job 临时材料
         if: always()
