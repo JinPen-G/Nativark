@@ -38,7 +38,7 @@ export interface CorePackageDeploymentExecutor {
   observe(operation: CorePackageDeploymentOperation): Promise<CorePackageDeploymentObservation>;
 }
 export interface CorePackageDeploymentOperationStore {
-  /** 原候选摘要只允许一个不可变派发意图；崩溃后也不能因换 ID 而再次执行。 */
+  /** 原候选摘要与派发 ID 双向唯一绑定；崩溃后不能换 ID 或候选再次执行。 */
   claimDeployment(operation: CorePackageDeploymentOperation): { claimed: boolean; operation: CorePackageDeploymentOperation };
   readDeployment(sha256: string): CorePackageDeploymentOperation | undefined;
 }

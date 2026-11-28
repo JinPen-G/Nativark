@@ -395,6 +395,8 @@ jobs:
               const nextApproval = await db.operationLog.create({ data: { tenantId: identity.tenantId, userId: identity.userId,
                 action: 'ci.core.deployment.approved', detail: { sha256: next.sha256, executorId: executor.id } } });
               const successful = { sha256: next.sha256, dispatchId: randomUUID(), approvalReference: nextApproval.id };
+              assert.equal((await packages.deployment.dispatch({ ...successful, dispatchId: command.dispatchId })).status, 'unknown');
+              assert.equal(submissions, 1, '原派发 ID 不得绑定另一候选再次执行');
               rejectSubmission = false;
               assert.equal((await packages.deployment.dispatch(successful)).status, 'unknown'); assert.equal(submissions, 2);
               packages = compose(); // 重新打开原存储，同 ID 只读真实安装结果。

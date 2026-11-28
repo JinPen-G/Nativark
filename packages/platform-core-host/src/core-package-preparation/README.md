@@ -83,7 +83,7 @@ GitHub 传输复用正式 `@rental-os/core-contracts/github-http`。本模块通
 
 正式入口为 `POST /api/platform/core-packages/dispatch-deployment`，请求只有 `sha256`、UUID `dispatchId` 和原 `approvalReference`。宿主 API 使用原 SaaS 身份及 `system:tenant:manage`，目标许可仍由执行器再核。准备相同候选不会产生新的部署许可。`POST /api/platform/core-packages/deployment-receipt` 只接收同一 `sha256`、`dispatchId`；两条路径及类型由 `.../core-package-preparation/deployment-protocol` 同源导出。
 
-应用把真实 `submit` 放进上述围栏，在原候选目录旁以独占文件 `.deployment-<sha256>.json` 持久绑定候选、派发 ID、原主体、执行器及批准引用，写完并同步后才提交。文件不包含凭据。一个候选只能绑定一份意图；并发或重启后的同 ID 请求只核原结果，换 ID、主体、批准或执行器不能重派。原文件缺损、部分写入或提交失应答保留 `unknown`／冲突，不能删除意图再试。真正重新执行须交目标执行器的原恢复流程，不由此入口自动重做。
+应用把真实 `submit` 放进上述围栏，在原候选目录旁以独占文件 `.deployment-<sha256>.json` 及 `.deployment-id-<dispatchId>.json` 持久绑定候选、派发 ID、原主体、执行器及批准引用，两份绑定写完并同步后才提交。文件不包含凭据。候选与派发 ID 双向唯一；并发或重启后的同 ID 请求只核原结果，换候选、ID、主体、批准或执行器不能重派。原文件缺损、单边绑定、部分写入或提交失应答保留 `unknown`／冲突，不能删除意图再试。真正重新执行须交目标执行器的原恢复流程，不由此入口自动重做。
 
 `submit` 返回不代表部署成功。`observe` 的成功必须带同一 ID、摘要、原收据引用及实际候选锁；明确失败须证实当前仍为原组合，部分切换或观察不明保持 `unknown`。等待构建、迁移、进程切换、健康观察和恢复沿原执行器生命周期进行，不占用这段 30 秒主体事务。源失权发生在新派发前时不调用执行器，保留当前组合；已有意图的原结果读取独立于取包凭据。
 

@@ -118,15 +118,43 @@ export function createCorePackagePreparationFileStore(input: {
   const legacyApiRoutes = structuredClone(input.legacyApiRoutes ?? {});
   const target = (sha256: string) => join(root, CoreArtifactHashSchema.parse(sha256));
   const deploymentFile = (sha256: string) => join(root, `.deployment-${CoreArtifactHashSchema.parse(sha256)}.json`);
-  function readDeployment(sha256: string): CorePackageDeploymentOperation | undefined {
+  const dispatchFile = (operation: CorePackageDeploymentOperation) => join(root, `.deployment-id-${operation.dispatchId}.json`);
+  const intentConflict = () => new CoreAccessError("operation_conflict", "原部署意图不可核定，保留原 ID 和文件处理，不可再次派发");
+  function readIntent(file: string): CorePackageDeploymentOperation | undefined {
     ordinaryDirectory(root);
-    const file = deploymentFile(sha256);
     if (!entryExists(file)) return undefined;
     try {
-      const operation = CorePackageDeploymentOperationSchema.parse(JSON.parse(readOrdinaryFile(file, 16 * 1024).toString("utf8")));
-      if (operation.sha256 !== sha256) throw new Error("派发摘要不符");
-      return operation;
-    } catch { throw new CoreAccessError("operation_conflict", "原部署意图不可核定，保留原 ID 和文件处理，不可再次派发"); }
+      return CorePackageDeploymentOperationSchema.parse(JSON.parse(readOrdinaryFile(file, 16 * 1024).toString("utf8")));
+    } catch { throw intentConflict(); }
+  }
+  function readDeployment(sha256: string): CorePackageDeploymentOperation | undefined {
+    const operation = readIntent(deploymentFile(sha256));
+    if (!operation) return undefined;
+    const dispatch = readIntent(dispatchFile(operation));
+    if (operation.sha256 !== sha256 || !dispatch || requestFingerprint(dispatch) !== requestFingerprint(operation)) throw intentConflict();
+    return operation;
+  }
+  function writeIntent(file: string, operation: CorePackageDeploymentOperation): boolean {
+    const rootIdentity = lstatSync(ordinaryDirectory(root));
+    let descriptor: number;
+    try { descriptor = openSync(file, "wx", 0o600); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+      throw error;
+    }
+    try {
+      const opened = fstatSync(descriptor);
+      if (!sameIdentity(rootIdentity, lstatSync(ordinaryDirectory(root)))
+        || !sameIdentity(opened, lstatSync(file)) || lstatSync(file).isSymbolicLink() || opened.size !== 0)
+        throw intentConflict();
+      writeFileSync(descriptor, JSON.stringify(operation) + "\n");
+      fsyncSync(descriptor);
+      if (process.platform !== "win32") {
+        const parent = openSync(root, "r");
+        try { fsyncSync(parent); } finally { closeSync(parent); }
+      }
+    } finally { closeSync(descriptor); }
+    return true;
   }
   function lookup(directory: string, sha256: string) {
     try {
@@ -148,25 +176,11 @@ export function createCorePackagePreparationFileStore(input: {
       readRecord(target(operation.sha256), operation.sha256);
       const prior = readDeployment(operation.sha256);
       if (prior) return { claimed: false, operation: prior };
-      const rootIdentity = lstatSync(ordinaryDirectory(root));
-      let descriptor: number;
-      try { descriptor = openSync(file, "wx", 0o600); }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-        return { claimed: false, operation: readDeployment(operation.sha256)! };
-      }
-      try {
-        const opened = fstatSync(descriptor);
-        if (!sameIdentity(rootIdentity, lstatSync(ordinaryDirectory(root)))
-          || !sameIdentity(opened, lstatSync(file)) || lstatSync(file).isSymbolicLink() || opened.size !== 0)
-          throw new Error("部署意图路径在提交前变化");
-        writeFileSync(descriptor, JSON.stringify(operation) + "\n");
-        fsyncSync(descriptor);
-        if (process.platform !== "win32") {
-          const parent = openSync(root, "r");
-          try { fsyncSync(parent); } finally { closeSync(parent); }
-        }
-      } finally { closeSync(descriptor); }
+      // 双向独占绑定：同候选不能换 ID，同 ID 也不能指向另一候选。
+      // 任一保留文件或中断窗口都只允许核原结果，不能补写后重新执行。
+      if (readIntent(dispatchFile(operation))) throw intentConflict();
+      if (!writeIntent(file, operation)) return { claimed: false, operation: readDeployment(operation.sha256)! };
+      if (!writeIntent(dispatchFile(operation), operation)) throw intentConflict();
       const saved = readDeployment(operation.sha256);
       if (!saved || requestFingerprint(saved) !== requestFingerprint(operation)) throw new Error("部署意图落盘不可核定");
       return { claimed: true, operation: saved };
