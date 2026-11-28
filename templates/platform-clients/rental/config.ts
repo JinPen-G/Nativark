@@ -9,7 +9,7 @@ export interface RentalClientHostConfiguration {
   /** 微信客户必须填原应用 AppID，用于原渠道 clientId；不作为授权。 */
   readonly appId?: string;
 }
-export const RENTAL_CLIENT_SOURCE = "eec62c0b8a924519cad45f9307213def965b21ef";
+export const RENTAL_CLIENT_SOURCE = "2457a57b26fabe6c5d04bfb58250dabbc9a22195";
 export const RENTAL_CLIENT_VERSION = "0.2.2";
 
 /** 这些正式 JSON 路由经过公共 RequestIdInterceptor；运输仅解一层，不把信封当业务结果。 */

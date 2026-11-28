@@ -6,7 +6,7 @@
 
 ## 固定来源与选装
 
-客户端从 Zelo 基线 `d6ccb0dcad63ee2e06043b71c2651f326c7e8e3a` 开发，已普通合入宿主所需固定底座 `5a6bbbf7593414a122a060018cb1abd87f1c20bf`，候选在 [PR #14](https://github.com/JinPen-G/Zelo/pull/14)。运行组合必须再锁定所选 PR 提交的完整 SHA。业务依赖固定为 [Rental eec62c0b8a924519cad45f9307213def965b21ef](https://github.com/JinPen-G/Zelo-rental-core/commit/eec62c0b8a924519cad45f9307213def965b21ef)，基于 Rental main `1ca7374a64db65bada538254cc95aba7950ea588`；对应 [Rental PR #4](https://github.com/JinPen-G/Zelo-rental-core/pull/4)。
+客户端从 Zelo 基线 `d6ccb0dcad63ee2e06043b71c2651f326c7e8e3a` 开发，已普通合入宿主所需固定底座 `5a6bbbf7593414a122a060018cb1abd87f1c20bf`，候选在 [PR #14](https://github.com/JinPen-G/Zelo/pull/14)。运行组合必须再锁定所选 PR 提交的完整 SHA。业务依赖固定为 [Rental 2457a57b26fabe6c5d04bfb58250dabbc9a22195](https://github.com/JinPen-G/Zelo-rental-core/commit/2457a57b26fabe6c5d04bfb58250dabbc9a22195)，基于 Rental main `1ca7374a64db65bada538254cc95aba7950ea588`；对应 [Rental PR #4](https://github.com/JinPen-G/Zelo-rental-core/pull/4)。
 
 | 选择 | 独立入口 | 在已准备锁定依赖的组合中构建 |
 | --- | --- | --- |
@@ -26,7 +26,7 @@
 在包含本客户端提交的公开 Zelo Git 检出中使用 [prepare.cjs](prepare.cjs)。准备不需要预先安装依赖，只读取指定完整 SHA 的 Git 对象；不采用工作区未提交文件，也不读取 `.env` 或私有 `docs`。先查看选中的源码与依赖：
 
 ```powershell
-npm run prepare:client -- --surface customer-web --client-commit <客户端完整SHA> --rental-repo D:/sources/Zelo-rental-core --rental-commit eec62c0b8a924519cad45f9307213def965b21ef --plan
+npm run prepare:client -- --surface customer-web --client-commit <客户端完整SHA> --rental-repo D:/sources/Zelo-rental-core --rental-commit 2457a57b26fabe6c5d04bfb58250dabbc9a22195 --plan
 ```
 
 将 `--plan` 改为 `--out D:/clients/customer-web` 才写出源码。父目录须已存在，目标目录须不存在；既有目录或链接明确拒绝覆盖。`--surface` 只接受表中四个入口中的一个，其他三个端不会加入输出 workspace 或锁。原公共主题包声明的依赖仍按其正式锁保留；这不启用管理员登录、其他客户端或服务端。
@@ -58,7 +58,7 @@ export const connection: RentalClientHostConfiguration = {
 
 微信 build 输出独立 `dist/app.js`、`dist/pages/client/index.js`、共享代码及原生视图资产。用微信开发者工具分别导入 `wechat-customer` 和 `wechat-staff`，两份 `project.config.json` 均指向自己的 `dist/`。导入时分别填写已获授权的真实 AppID；开发者工具写入的应用设置保留在各自选装工作区，不复制已有业务应用配置冒充本模板授权。合法域名校验保持开启，并在原应用配置所用 API 的 request 合法域名。客户连接设置的 AppID 必须与导入的应用一致。客户、员工是两个独立应用/会话，不用管理员登录替代。
 
-微信深链只使用登记定位，例如 `pages/client/index?route=rental.my-order&orderId=<原订单ID>`；员工服务页使用 `route=rental.service-occurrence&orderId=<原订单ID>&occurrenceId=<原发生项ID>`。原服务仍校验每个参数。微信启动等待安全随机源和正式装配完成，隐藏/卸载页面不采用迟到启动结果；缺少 `wx.getRandomValues` 时保持不可用，开发者须选择支持该 API 的基础库并在真机核对。
+微信深链只使用登记定位，例如 `pages/client/index?route=rental.my-order&orderId=<原订单ID>`；员工服务页使用 `route=rental.service-occurrence&orderId=<原订单ID>&occurrenceId=<原发生项ID>`。原服务仍校验每个参数。微信启动等待安全随机源和正式装配完成，隐藏/卸载页面不采用迟到启动结果；缺少 `wx.getRandomValues` 时保持不可用。原锁定 `miniprogram-api-typings@5.2.3` 对该 API 标明最低基础库 `2.15.0`；这只是随机源的 API 下限，所选工具/基础库与真机的完整模板运行仍须分别核对，不能据此承诺所有高于该版本的环境均已通过。
 
 ### 微信宿主所需输入
 
@@ -102,9 +102,11 @@ export const connection: RentalClientHostConfiguration = {
 
 ## 固定 Rental 接点与剩余依赖
 
-固定 `eec62c0b` 组合支持底座 `0.3.0` 的 `0.2.2` 候选、完整 v2 安装观察、原门店贡献、多 Core 依赖及员工首次改密修复。普通页面只读准入、原取消收据、员工服务开始与原收据、地点投影及生命周期感知会话均由原贡献提供。本端直接复用原 `access` 和 `selectScope`，不再请求另一套业务工厂。固定源码说明见 [Rental 贡献接点](https://github.com/JinPen-G/Zelo-rental-core/blob/eec62c0b8a924519cad45f9307213def965b21ef/clients/contribution/README.md)。门店接线完成不等于已取得实页验收。
+固定 `2457a57b` 组合支持底座 `0.3.0` 的 `0.2.2` 候选、完整 v2 安装观察、原门店贡献、多 Core 依赖及员工首次改密修复。普通页面只读准入、原取消收据、员工服务开始与原收据、地点投影及生命周期感知会话均由原贡献提供。本端直接复用原 `access` 和 `selectScope`，不再请求另一套业务工厂。固定源码说明见 [Rental 贡献接点](https://github.com/JinPen-G/Zelo-rental-core/blob/2457a57b26fabe6c5d04bfb58250dabbc9a22195/clients/contribution/README.md)。门店接线完成不等于已取得实页验收。
 
 合入前还须核已定版组合，当前 `0.2.2` 只用于这次开发接线，不代表最终发行组合。缺真实权威仍失败关闭；离线替身不成为生产依赖。
+
+`2457a57b` 在原 `session.ts` 修复当前 401 仍保留已登录身份的问题：捕获的代次、寿命、范围和两枚原令牌仍匹配时才清凭据并发布匿名；迟到的旧 401、已取消页面及另一令牌不清新会话，403/404 仍是权限拒绝。原操作引用保持，重新登录后只读同键原收据，不自动刷新或重发。该片已通过原入口类型与离线冒烟；真实 CI 另沿普通员工自己的原退出接口撤销当前会话，核下一次真实 401 清除身份，再原登录和退出，不伪造应答或采用管理员身份。通用外壳不从页面错误自行判断另一身份的令牌已失效。
 
 [CI 46124397790](https://github.com/JinPen-G/Zelo/actions/runs/46124397790) 在此前固定 `268b9bfb` 已完成普通员工建号和 `POST /api/staff/v1/auth/login`，随后 `POST /api/staff/v1/auth/change-password` 返回 **403**。当前固定版本包含 Rental `9638b38d` 对原强制改密阶段的精确修复：仅补员工本人 `me/session-context/change-password/logout` 四个自助入口，业务和切空间仍拒绝；原 staff audience、密码校验与 Controller 保持。CI 保留员工原改密断言，安排在独立客户链后执行；两端成功证据分别保存，修复提交本身不代替真实链通过。
 
@@ -157,5 +159,7 @@ API 新装输入是 Zelo `5a6bbbf7593414a122a060018cb1abd87f1c20bf` 与上述 Re
 [CI 46136350842](https://github.com/JinPen-G/Zelo/actions/runs/46136350842) 的四端构建和组合前检通过，宿主在客户切账号后读取原 `contribution-context/me` 时得到 HTTP 429，尚未进入本次员工链。原 Rental 的 `public_auth` 地址桶为每 60 秒 30 次；本次据此删除公共展示中“没有原定位仍复权原收据”的空请求，保留有定位时的前后复权、页面/动作权限、原限流和全部业务断言。该次没有生成客户完整报告，先前两次客户成功不能冒充本次通过；后继真实结果单独回读，不盲目重跑。
 
 [CI 46138070889](https://github.com/JinPen-G/Zelo/actions/runs/46138070889) 已在上述空请求修复后完成客户完整链，并生成实际测试合并提交 `26bf51d9cacbf65e6ab7f1b272778e4d6122bc7e` 的客户报告；四端独立构建、组合前检及同提交零 Core/生成器检查均通过。员工首次选店和订单列表已通过，进入详情时原订单返回 200、交付前地点复权仍在途，15 秒观察先结束，故尚无完整员工报告。当前将页面与反馈观察统一为 45 秒，原运输期限和全部业务断言保持；该调整本身不构成员工通过证据。该 job 临时环境已清理。
+
+[CI 46142242103](https://github.com/JinPen-G/Zelo/actions/runs/46142242103) 已全部通过：四端分别原锁安装/类型/构建、固定组合前检、真实客户和员工完整 Web 链。实际测试合并提交为 `d9ba5724132a9025f2d17777878bad0f7fae5eba`，对应客户端 `2319b18c5318a10279e06efae97006ae8c86e8ea`，底座 `5a6bbbf` 与 Rental `eec62c0b`。报告确认客户取消和单次派发 unknown 同键原收据、Core 停用善后读取、切账号隔离、跨租户拒绝；员工两门店切换/在途隔离、服务端门店拒绝、服务开始一次派发、撤权及退出均通过。两端 390px 窄屏和员工 820×1180 浏览器 touch 输入已验，中文截图已回读；不是实体平板或微信证据。三项 job 清理均成功。本次成功尚不包含后继 `2457a57b` 的真实 401 验证，微信开发者工具及真机仍待独占验收环境。
 
 此前 `file:` 离线预览被浏览器策略拒绝，没有换入口绕过。微信还需客户/员工各自已授权 AppID、开发者工具权限、合法域名与测试宿主，分别记录开发者工具及真机证据。`wx` 替身、Web 浏览器和 Vite 构建不能互相代替这些验收。真实 MySQL、原迁移及 HTTP 只在获授权的独占 CI 中执行，没有操作本机共享业务环境、部署、原生 App、收银硬件或离线业务写入。

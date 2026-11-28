@@ -17,7 +17,7 @@ concurrency:
 # 仅按已核固定成果更新；不能用活动分支、修改清单或放宽门禁凑兼容。
 env:
   ZELO_COMMIT: 5a6bbbf7593414a122a060018cb1abd87f1c20bf
-  RENTAL_COMMIT: eec62c0b8a924519cad45f9307213def965b21ef
+  RENTAL_COMMIT: 2457a57b26fabe6c5d04bfb58250dabbc9a22195
   CI_DIR: output/.tmp/zelo-client-ci
 
 jobs:
@@ -690,6 +690,18 @@ jobs:
               grant = await manage('tenant-grants', saas.accessToken, { tenantId, state: 'enabled', expectedRevision: grant.revision, operationId: randomUUID() });
               await click('刷新页面'); await text(order.orderNo);
               if (audience === 'staff') {
+                // 沿原退出接口撤销页面当前普通员工会话，保留本地槽以观察下一次真实 401。
+                // 不模拟响应、不注入管理员身份；原贡献必须清身份，不能只显示普通页面拒绝。
+                const revoked = await driver(prefix + '/execute/async', { script: `const done = arguments[arguments.length - 1];
+                  const credentials = JSON.parse(sessionStorage.getItem(Object.keys(sessionStorage).find(key => key.endsWith(':credentials'))));
+                  fetch('/api/staff/v1/auth/logout', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({refreshToken:credentials.refreshToken})})
+                    .then(response => done(response.status)).catch(() => done(0));`, args: [] });
+                assert.equal(revoked, 201);
+                await click('刷新页面'); await text('使用你的员工账号登录。');
+                assert(requestHistory.some(row => row.path === '/api/staff/v1/auth/contribution-context' && row.status === 401));
+                assert(await dom('return !document.querySelector(".zc-identity,.zc-items,.zc-receipts") && Object.keys(sessionStorage).every(key => !key.endsWith(":credentials"))'));
+                await fill('#login-account', account); await fill('#login-password', password); await click('登录');
+                await text(order.orderNo);
                 await manage('member-assignments', admin.accessToken, { userId: staff.id, state: 'revoked', expectedRevision: assignment.revision, operationId: randomUUID() });
                 await click('刷新页面'); await text('你没有此页面或操作的权限。');
               } else {
@@ -710,14 +722,14 @@ jobs:
                 evidence: ['original-login', 'core-order-navigation', 'narrow-layout', 'core-disable-direct-route', 'logout',
                   ...(audience === 'client' ? ['customer-cancel-original-receipt', 'single-dispatch-unknown-original-key', 'disabled-core-receipt',
                     'account-change-inflight-isolation', 'cross-tenant-order-denial'] : ['staff-service-start', 'browser-tablet-touch-input', 'staff-revocation',
-                    'authorized-location-selection', 'location-change-inflight-isolation', 'selected-location-server-denial'])],
+                    'authorized-location-selection', 'location-change-inflight-isolation', 'selected-location-server-denial', 'current-session-401-clears-identity'])],
                 a03Accepted: false, releaseApproved: false }, null, 2));
               await driver(prefix + '/window/rect', { width: 1440, height: 1000 });
             }
             writeFileSync(resolve(task, 'web-host.json'), JSON.stringify({ platform: process.env.ZELO_COMMIT, rental: process.env.RENTAL_COMMIT,
               client: process.env.GITHUB_SHA, databaseChecked: true, browserExecuted: true,
               evidence: ['original-client-and-staff-login', 'core-order-pages', 'customer-cancel-original-receipt', 'staff-service-start',
-                'single-dispatch-unknown-original-key', 'disabled-core-receipt', 'account-change-inflight-isolation', 'cross-tenant-order-denial',
+                'single-dispatch-unknown-original-key', 'disabled-core-receipt', 'account-change-inflight-isolation', 'cross-tenant-order-denial', 'current-session-401-clears-identity',
                 'browser-tablet-touch-input', 'narrow-layout', 'core-disable-direct-route', 'staff-revocation', 'logout',
                 'authorized-location-selection', 'location-change-inflight-isolation', 'selected-location-server-denial'],
               pending: ['wechat-devtools', 'wechat-device'],
