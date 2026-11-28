@@ -81,7 +81,7 @@ GitHub 传输复用正式 `@rental-os/core-contracts/github-http`。本模块通
 
 可信宿主在 `composePlatformCorePackageAssembly` 显式注入 `deploymentExecutor`，其正式类型为 `CorePackageDeploymentExecutor`，由 `@rental-os/platform-core-host/core-package-preparation` 导出。`id` 固定目标身份；`authorize(transaction, operation, record)` 必须沿同一身份事务核当前部署权、软件许可及原维护批准；`submit(operation, record)` 办理真正的有界提交；`observe(operation)` 按原 ID 读取该目标的实际结果。缺执行器或持久意图存储时返回 `deployment_executor_unavailable`，平台没有默认部署许可。目标不能来自请求路径、任意命令、包内代码或凭据字段。
 
-正式入口为 `POST /api/platform/core-packages/dispatch-deployment`，请求只有 `sha256`、UUID `dispatchId` 和原 `approvalReference`。宿主 API 使用原 SaaS 身份及 `system:tenant:manage`，目标许可仍由执行器再核。准备相同候选不会产生新的部署许可。`POST /api/platform/core-packages/deployment-receipt` 只接收同一 `sha256`、`dispatchId`；两条路径及类型由 `.../core-package-preparation/deployment-protocol` 同源导出。
+正式入口为 `POST /api/platform/core-packages/dispatch-deployment`，请求只有 `sha256`、UUID `dispatchId` 和原 `approvalReference`。UUID 在正式合同中统一为小写，大小写写法不能形成另一派发身份。宿主 API 使用原 SaaS 身份及 `system:tenant:manage`，目标许可仍由执行器再核。准备相同候选不会产生新的部署许可。`POST /api/platform/core-packages/deployment-receipt` 只接收同一 `sha256`、`dispatchId`；两条路径及类型由 `.../core-package-preparation/deployment-protocol` 同源导出。
 
 应用把真实 `submit` 放进上述围栏，在原候选目录旁以独占文件 `.deployment-<sha256>.json` 及 `.deployment-id-<dispatchId>.json` 持久绑定候选、派发 ID、原主体、执行器及批准引用，两份绑定写完并同步后才提交。文件不包含凭据。候选与派发 ID 双向唯一；并发或重启后的同 ID 请求只核原结果，换候选、ID、主体、批准或执行器不能重派。原文件缺损、单边绑定、部分写入或提交失应答保留 `unknown`／冲突，不能删除意图再试。真正重新执行须交目标执行器的原恢复流程，不由此入口自动重做。
 

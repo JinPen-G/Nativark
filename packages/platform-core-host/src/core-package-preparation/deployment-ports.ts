@@ -7,7 +7,8 @@ import type { CorePackagePreparationRecord, CorePackagePreparationUnavailable } 
 
 const reference = z.string().min(1).max(128).regex(/^[a-zA-Z0-9][a-zA-Z0-9._:-]*$(?![\s\S])/);
 export const CorePackageDeploymentRequestSchema = z.object({
-  sha256: CoreArtifactHashSchema, dispatchId: z.string().length(36).uuid(), approvalReference: reference
+  // UUID 大小写是同一身份，不能在区分大小写的存储中保留两份派发绑定。
+  sha256: CoreArtifactHashSchema, dispatchId: z.string().length(36).uuid().toLowerCase(), approvalReference: reference
 }).strict();
 export const CorePackageDeploymentQuerySchema = CorePackageDeploymentRequestSchema.pick({ sha256: true, dispatchId: true });
 export const CorePackageDeploymentOperationSchema = CorePackageDeploymentRequestSchema.extend({
