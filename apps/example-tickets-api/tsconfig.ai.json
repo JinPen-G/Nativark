@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": "dist-ai",
+    "noEmitOnError": true,
+    "paths": { "@prisma/client": ["../platform-api/generated/client/index.d.ts"] }
+  },
+  "files": ["src/ai-main.mts", "src/prepare-ai-deployment.mts"],
+  "include": [],
+  "exclude": ["dist", "dist-ai"]
+}

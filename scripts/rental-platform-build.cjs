@@ -44,8 +44,10 @@ function compileRentalPlatformSource(input) {
     throw Error('底座复算须使用原锁版本的同一实际 TypeScript 编译器');
   const workspace = slash(root), modules = workspace + '/node_modules';
   const clientDirectory = workspace + '/apps/platform-api/generated/client';
+  const selectedSchema = selection?.capabilitySchema || readSource('apps/platform-api/prisma/schema.prisma');
+  const clientMode = selection?.capabilitySchema ? 'platform-capabilities' : 'platform';
   if (!selection || slash(selection.client) !== clientDirectory + '/index.d.ts'
-    || !samePrismaSchema(selection.schema, readSource('apps/platform-api/prisma/schema.prisma')))
+    || !samePrismaSchema(selection.schema, selectedSchema))
     throw Error('底座所选 Client 与固定归档原公共 schema 不一致');
   const virtual = new Map([...platformFiles].map(([file, bytes]) => [workspace + '/' + file, Buffer.from(bytes).toString('utf8')]));
   virtual.set(clientDirectory + '/index.d.ts', selection.declarations);
@@ -174,7 +176,7 @@ function compileRentalPlatformSource(input) {
     if (!parsed || parsed.projectReferences?.length) throw Error('底座原配置缺失或含未核的 project references：' + project);
     let options = { ...parsed.options, noEmitOnError: true, typeRoots: [modules + '/@types'] };
     if (directory === 'apps/platform-api') options = selectedCompilerOptions(ts, projectPath, options,
-      { mode: 'platform', client: clientDirectory + '/index.d.ts' }, readFile).options;
+      { mode: clientMode, client: clientDirectory + '/index.d.ts', capabilitySchema: selection.capabilitySchema }, readFile).options;
     if (slash(options.rootDir) !== workspace + '/' + directory + '/src' || slash(options.outDir) !== workspace + '/' + directory + '/dist'
       || options.noEmit || options.incremental || options.composite)
       throw Error('底座编译必须保留原 src→dist 的完整普通 emit：' + project);
@@ -212,7 +214,7 @@ function compileRentalPlatformSource(input) {
     release: structuredClone(release), sourceArchiveSha256: release.sha256,
     sourceLockSha256: hash(platformFiles.get('package-lock.json')),
     compiler: { name: 'typescript', version: ts.version, sha256: hash(dependencies.get('node_modules/typescript/lib/typescript.js')) },
-    client: { mode: 'platform', schemaSha256: hash(platformFiles.get('apps/platform-api/prisma/schema.prisma')),
+    client: { mode: clientMode, schemaSha256: hash(Buffer.from(selectedSchema)),
       generatedSchemaSha256: hash(Buffer.from(selection.schema)), declarationsSha256: hash(Buffer.from(selection.declarations)),
       files: sortedHashes(clientFiles) },
     projects, dependencies: sortedHashes(dependencies), generated: sortedHashes(generated)

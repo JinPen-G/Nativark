@@ -1,6 +1,7 @@
 /** 工单HTTP方法/路径与schema的单源映射，Nest入口和OpenAPI都从这里取合同。 */
 import { z } from "zod";
 import { CoreHttpContributionSchema, type CoreHttpContribution } from "@rental-os/core-contracts";
+import { TicketAiStatusQuerySchema, TicketAiStatusSchema } from "./ai-status";
 import { AssignTicketSchema, ChangeTicketStateSchema, CreateTicketSchema, ListTicketsSchema, TicketPageQuerySchema, TicketStatusCountsQuerySchema, TicketStatusCountsSchema, TicketIdSchema, TicketSchema, TicketPageSchema,
   TICKETS_CORE_ID, TICKETS_CORE_VERSION } from "./contracts";
 
@@ -17,6 +18,7 @@ export const TICKETS_HTTP = {
   page: { method: "GET", path: "ticket-pages", permission: "read", purpose: "business", startsNewBusiness: false, summary: "读取当前可见工单页与同范围总数", query: TicketPageQuerySchema, response: TicketPageSchema },
   counts: { method: "GET", path: "ticket-status-counts", permission: "read", purpose: "business", startsNewBusiness: false, summary: "读取当前可见全部工单的总数及状态计数", query: TicketStatusCountsQuerySchema, response: TicketStatusCountsSchema },
   get: { method: "GET", path: "tickets/:ticketId", permission: "read", purpose: "business", startsNewBusiness: false, summary: "读取当前可见工单详情", params: TicketParamsSchema, response: TicketSchema },
+  aiStatus: { method: "GET", path: "tickets/:ticketId/ai-status", permission: "read", purpose: "business", startsNewBusiness: false, summary: "读取当前工单两条可选AI路线的真实状态，不授予执行权", params: TicketParamsSchema, query: TicketAiStatusQuerySchema, response: TicketAiStatusSchema },
   receipt: { method: "GET", path: "operations/:operationId", permission: "read", purpose: "original_receipt", startsNewBusiness: false, summary: "只读核对本人的原工单操作收据", params: z.object({ operationId: TicketIdSchema }).strict(), response: TicketReceiptLookupSchema },
   create: { method: "POST", path: "tickets", permission: "create", purpose: "business", startsNewBusiness: true, summary: "创建工单", body: CreateTicketSchema, response: TicketReceiptSchema },
   assign: { method: "POST", path: "tickets/:ticketId/assign", permission: "assign", purpose: "business", startsNewBusiness: false, summary: "分派待处理工单", params: TicketParamsSchema, body: AssignTicketSchema.omit({ ticketId: true }), response: TicketReceiptSchema },
@@ -27,7 +29,7 @@ export const TICKETS_HTTP = {
 /** 宿主Guard政策与Nest/OpenAPI来自同一HTTP声明，Core业务服务继续核当前范围/原结果。 */
 export function createTicketsHttpContribution(): CoreHttpContribution {
   return CoreHttpContributionSchema.parse({ coreId: TICKETS_CORE_ID, implementationVersion: TICKETS_CORE_VERSION,
-    routes: Object.entries(TICKETS_HTTP).map(([id, route]) => ({ id, method: route.method, path: `/${route.path}`,
+    routes: Object.entries(TICKETS_HTTP).map(([id, route]) => ({ id: id.replace(/[A-Z]/gu, letter => `-${letter.toLowerCase()}`), method: route.method, path: `/${route.path}`,
       audiences: ["operator"], permissions: [{ resource: "ticket", action: route.permission }],
       purpose: route.purpose, startsNewBusiness: route.startsNewBusiness })) });
 }

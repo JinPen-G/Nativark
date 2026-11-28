@@ -12,7 +12,7 @@ try {
   if (command === "openapi" && !args.length) process.stdout.write(`${JSON.stringify(createTicketsOpenApi(), null, 2)}\n`);
   else if (command === "manifest" && args.length === 2)
     process.stdout.write(`${JSON.stringify(createTicketsManifest({ repository: args[0], commit: args[1] }), null, 2)}\n`);
-  else if (command === "package" && args.length === 4) {
+  else if (["package", "package:ai", "package:mcp"].includes(command) && args.length === 4) {
     const directory = resolve(__dirname, ".."), source = CoreSourceSchema.parse({ repository: args[0], commit: args[1] });
     const repository = execFileSync("git", ["rev-parse", "--show-toplevel"],
       { cwd: directory, encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -26,7 +26,8 @@ try {
     const platformSource = CoreSourceSchema.parse(JSON.parse(readFileSync(args[2], "utf8")));
     const platformTask = execFileSync("git", ["show", `${platformSource.commit}:${CORE_GUIDE_SOURCE_FILE}`],
       { cwd: repository, encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1024 * 1024 });
-    const pack = packTicketsPackage({ directory, source, sourceDirectory: "packages/example-tickets-core", platformSource, platformTask });
+    const pack = packTicketsPackage({ directory, source, sourceDirectory: "packages/example-tickets-core", platformSource, platformTask,
+      ai: command === "package:ai", mcp: command === "package:mcp" });
     const output = resolve(args[3]);
     if (!output.endsWith(".tgz")) throw new Error("工单标准包使用.tgz扩展名");
     for (let parent = dirname(output); ; parent = dirname(parent)) {
@@ -41,7 +42,7 @@ try {
     } catch (error) { if (created) unlinkSync(output); throw error; }
     process.stdout.write(JSON.stringify({ status: "packed", coreId: pack.manifest.id, version: pack.manifest.version,
       file: output, sha256: pack.sha256, files: pack.fileCount }) + "\n");
-  } else throw new Error("用法：metadata.js openapi；manifest <仓库HTTPS地址> <固定提交>；package <仓库HTTPS地址> <固定提交> <底座来源JSON> <新包.tgz>");
+  } else throw new Error("用法：metadata.js openapi；manifest <仓库HTTPS地址> <固定提交>；package、package:ai 或 package:mcp <仓库HTTPS地址> <固定提交> <底座来源JSON> <新包.tgz>");
 } catch (error) {
   console.error(error instanceof Error ? error.message : "工单元数据生成失败");
   process.exitCode = 1;

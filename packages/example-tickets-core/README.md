@@ -21,6 +21,12 @@
 
 `receipt(principal, operationId)`提供只读核对。只开放本人原操作且当前仍可见的对象，返回recorded及原收据，或unavailable；unavailable不表示未执行。结果未知后的页面只调用该读取，不自动重发写入。
 
+`receiptFor(principal, action, input)`供事务参加者核对精确的原请求。输入仍经同一业务schema解析，再核原actor、动作与输入指纹；同键异参明确拒绝，不能把另一请求的收据作为批准执行证据。它保留原收据的当前读取权限，不授予新动作。
+
+可选`@rental-os/example-tickets-core/ai`提供同源准备、原Task/Run、C05批准、正式开始处理及原结果请求端口。它按当前签名身份与真实权益/发布/额度工作，成功证据核同事务批准消费、原计量artifact和工单精确收据；普通Core无需导入。编译及AI选装标准包用独立`build:ai`、`pack:core:ai`命令，仍待可选宿主全链运行验收。[固定来源、装配与未验边界](examples/ai-integration/README.md)
+
+浏览器只消费`@rental-os/example-tickets-core/ai-http`的闭合任务合同。它与服务端HTTP/OpenAPI同源，包含普通包也可解析的状态/提案/原结果形状，不包含AI Runtime、Node模块或默认授权。原输入摘要和业务执行证据仍由服务端在原事务中核验。[页面动作](../../apps/example-tickets-admin/src/tickets-ai-task.tsx)
+
 执行请求的`purpose`由服务端方法固定为business或original_receipt，不能从HTTP body选择。宿主分别办理普通准入与原收据善后，Core停用/到期后的必要核对仍复用当前身份和原操作范围，不能借此开放普通工单查询或写入。
 
 ## 接入已有宿主
@@ -32,6 +38,8 @@
 需要移除检查时，向 `authority.assessRemoval`传入MySQL正式出口 `readTicketsRemoval`的只读绑定。它先核真实结构，再查询未关闭工单、历史工单和原操作收据是否存在；部署移除检查全Core，可选tenantId仅缩小观察范围。未关闭返回in_flight，保留历史/收据返回history，缺结构返回unknown。全部不存在也只表示Core数据没有阻碍，平台仍须确认已停止新准入、没有在途任务/回调和完整历史依赖。停用不要求清空历史，检查不关闭工单、不删数据，也不批准删除代码。[实际检查](src/mysql.ts) · [平台汇合](../core-host/README.md#移除代码前读取依赖)
 
 后台直接调用 `createTicketsAdmin()`取得四页贡献并按平台标准注册。默认详情从 `useCorePageHost().params.ticketId`读取框架匹配的登记参数；已有宿主仍可提供自己的受控详情组件。Core不需要自己写React Router适配或修改平台导航，[工单Web宿主](../../apps/example-tickets-admin/README.md)已将注册表交给正式公共应用工厂；原Rental主应用仍沿自己的组合。[页面源码](admin/index.tsx)
+
+详情的可选 `extension` 接收已读工单的 `ticketId/ticketRevision`，随当前页面及会话代次挂载。独立示范宿主用它展示内置任务与外部MCP的当前状态；详情读取失败、刷新或普通写入结果不明时不展示旧扩展状态。普通四页不必选择此扩展。
 
 新建页通过 `useCoreForm`共用原Form、顶部SaveButton和回车提交，框架维护等待、防重、失败及未保存提醒，Core只保留业务输入转换和原操作核对。同步成功后禁止重复创建，unknown未重新渲染也不重发；原收据暂缺继续保留同键，取得可信结果后解除这次草稿。没有另写按钮/表单样式或第二套请求。[简明表单写法](../platform-admin/src/core/README.md#保存保留原-form)
 
@@ -52,6 +60,8 @@ MySQL入口单独从 `@rental-os/example-tickets-core/mysql` 导入 `createMysql
 锁顺序为人员/当前Core授权与受派成员 → 本租户工单锁行 → 原操作回执/工单变更 → 平台审计。受派成员必须在工单锁之前核定，不能由Core在领域回调中倒序申请人员锁。小样例使用每租户一条工单写锁，保证原操作幂等与收据一起提交；审计、回执或业务失败均抛错回滚。ReadCommitted加原修订条件避免覆盖别人的更新，领域服务不取得整个Prisma client。
 
 authority返回的`revalidate()`在提交前复核同一原会话/订阅等期限。锁定行不会阻止时间流逝，等待后失效必须回滚；不能重新借用平台身份或另一会话使原操作继续。
+
+需要加入原批准事务的宿主调用 `composeTicketsPlatformHost(...).withTransaction(native, consume, before?)`。`native`须为该宿主已开启的交互事务；回调取得同一`TicketsService`，内部不另开事务、不提交或回滚。`before`可固定可信主体和精确动作，在批准消费前先按原顺序取得人员/授权与工单锁，防止将并发出现的旧收据当作本次提交。异常由外层owner回滚；每次调用及参加者退出前复核当前授权，服务/仓储不能逃出回调复用，也不允许未等待的业务调用。底层同名入口由`/mysql`提供，仍须真实授权与审计。可选示例见[AI与业务接入](examples/ai-integration/README.md)。
 
 `migrations/001-tickets.sql`只创建这个Core的三张表。仅在目标组合选择本Core并完成部署授权后应用；无Core宿主不执行，停用也不删表或清收据。迁移SHA-256在清单生成器固定，本包局部gitattributes保证LF；已发布迁移不可改写。
 
@@ -83,7 +93,7 @@ node packages/example-tickets-core/dist/metadata.js manifest <仓库HTTPS地址>
 node packages/example-tickets-core/dist/metadata.js openapi
 ```
 
-打包方分别保存为`core.manifest.json`、`openapi.json`，将当前README、LICENSE、所声明dist/迁移、`admin/index.tsx`及按[公共命令](../core-contracts/README.md#生成随包指南与归档)生成的CORE_GUIDE.md放到交付目录，再用同一pack/prepare链准备候选。成功stdout只有JSON且退出0，错误stderr说明并退出1。后台TSX由受控宿主组合构建，不在运行时从包路径热加载；AI工具仍未提供，不把本包领域/适配通过称为已独立安装完成。
+打包方分别保存为`core.manifest.json`、`openapi.json`，将当前README、LICENSE、所声明dist/迁移、`admin/index.tsx`及按[公共命令](../core-contracts/README.md#生成随包指南与归档)生成的CORE_GUIDE.md放到交付目录，再用同一pack/prepare链准备候选。成功stdout只有JSON且退出0，错误stderr说明并退出1。后台TSX由受控宿主组合构建，不在运行时从包路径热加载；可选AI目前为固定源码材料，普通标准包不会自动装配AI工具。
 
 本示范可直接用一个命令生成完整包。先提交本Core/接入合同源码，准备含 `repository` 和40位 `commit`的底座来源JSON；输出父目录预先存在，输出文件必须是新文件。
 
@@ -97,9 +107,11 @@ npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> 
 
 自 `0.1.2` 起，打包时核对 npm 包名及版本与生成清单的发行身份。遇到版本不一致，先同步 [package.json](package.json) 与 [Core 版本](src/contracts.ts)，再从同一固定来源重建并打包。沿用已登记的旧包作为升级起点，候选继续使用数据版本 `0.1.0` 和原迁移，原绑定与收据按当前权限回读。
 
-当前源码候选 `0.1.6` 将底座兼容范围扩展为 `>=0.1.10 <0.4.0`，包含沿用同一公共合同、授权与原迁移的 0.3 系列；公共 Core 合同仍为 `>=0.1.0 <0.2.0`，实际当前合同为 `0.1.1`。这是兼容声明补丁，不变更工单业务、HTTP、页面或数据版本 `0.1.0`；原迁移及历史绑定/收据继续保持。两个示范宿主精确引用此候选，含 Core 的部署仍使用自己的数据计划，不套用零 Core 安装/升级计划。候选尚未发布，固定来源构建及对应宿主核验后才生成新资产；0.4 及以后须另行核定。
+当前源码候选 `0.2.0` 增加原事务参加者与精确动作收据读取，供选装AI复用普通业务；普通HTTP和业务状态规则保持，数据版本仍为 `0.1.0`。包内默认入口不导入AI/MCP。可选接入目前以[同事务批准执行源码](examples/ai-integration/tickets-start.mts)提供，尚未形成完整选装宿主，不能以该候选版本认定AI已可用。
 
-此前源码候选 `0.1.5` 的范围仍是 `>=0.1.10 <0.3.0`。历史包、Tag 和清单保持原字节与原范围，不能直接改旧清单使其通过 0.3 宿主检查；选用新的 `0.1.6` 固定包与对应部署锁。
+底座兼容沿用 `0.1.6` 的 `>=0.1.10 <0.4.0`，包含同一公共合同、授权和原迁移的0.3系列；公共Core合同为 `>=0.1.0 <0.2.0`，当前协议为 `0.1.1`。两个示范宿主精确引用当前候选，含Core部署使用自己的数据计划。候选尚未发布；历史资产、Tag、清单、迁移与收据不修改，0.4及以后另行核定。
+
+此前源码候选 `0.1.5` 的范围仍是 `>=0.1.10 <0.3.0`。历史包、Tag和清单保持原字节与原范围，不能直接改旧清单使其通过0.3宿主检查；选用兼容的新固定包与对应部署锁。
 
 当前已发布正式版本为 `0.1.4`，包含工单分派筛选，标准包及同一双Core宿主的必要冒烟已通过。公开发行使用 Tag `example-tickets/v0.1.4` 和资产 `example-tickets-0.1.4.tgz`，固定源提交 `74a16a2c3fecfad654241de25cea5d3f27da1332`；下载后按 Release 摘要和同版清单核对。[0.1.4 发行](https://github.com/JinPen-G/Zelo/releases/tag/example-tickets/v0.1.4)。推荐从该固定版本准备更新候选，`dataVersion` 仍为 `0.1.0`，沿用原迁移。独立升级只更新所选 Tickets 包及宿主对应的部署锁，保留原绑定、工单和操作收据。程序回退候选同样须核对包身份、宿主合同、数据版本和完整迁移账，并按目标版本核验页面及 API 能力。[版本与数据合同](src/contracts.ts) · [独立宿主](../../apps/example-tickets-api/README.md)
 
@@ -112,6 +124,7 @@ npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> 
 | 方法与路径 | 业务权限 | 输入与返回 |
 | --- | --- | --- |
 | `GET /api/cores/example-tickets/tickets` | `example-tickets:ticket:read` | 可选state/offset/limit；当前可见工单数组 |
+| `GET /api/cores/example-tickets/tickets/:ticketId/ai-status` | 同上 | 两条已登记AI路线的当前状态；可选原taskId，不猜最近任务、不授予执行权 |
 | `GET /api/cores/example-tickets/ticket-pages` | 同上 | 可选subject/state/assignment/offset/limit；subject为标题字面包含搜索，assignment为assigned或unassigned，同一次读取的rows/total只计当前可见且匹配的范围 |
 | `GET /api/cores/example-tickets/ticket-status-counts` | 同上 | 无查询输入；当前可见全部工单的total/open/in_progress/closed计数 |
 | `GET /api/cores/example-tickets/tickets/{ticketId}` | 同上 | 已登记工单ID；当前可见详情 |

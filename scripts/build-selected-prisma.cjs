@@ -106,7 +106,7 @@ function readRequired(readFile, file, label) {
 /** 与离线验证共用同一选型检查。readFile 仅供测试替换运输；CLI 固定使用 ts.sys。
  * 元数据取自已生成目录，不调用 Prisma generator，也不把模式名当作模型声明。 */
 function selectedCompilerOptions(ts, project, options, selection, readFile = ts.sys.readFile) {
-  if (!modes.includes(selection?.mode) || !selection.client || !path.isAbsolute(selection.client)) throw Error('所选 Client 必须有明确模式与绝对声明路径');
+  if (![...modes, 'platform-capabilities'].includes(selection?.mode) || !selection.client || !path.isAbsolute(selection.client)) throw Error('所选 Client 必须有明确模式与绝对声明路径');
   const client = slash(selection.client);
   const defaultClient = /(?:^|\/)node_modules(?:\/|$)|(?:^|\/)\.prisma(?:\/|$)/u.test(client);
   const projectRoot = path.dirname(project);
@@ -116,6 +116,11 @@ function selectedCompilerOptions(ts, project, options, selection, readFile = ts.
     throw Error('legacy 仅供旧组合宿主及其依赖包显式消费原默认 Client，独立宿主禁止使用');
   const directory = path.dirname(client), text = readRequired(readFile, client, '宿主 Client 声明');
   const schema = readRequired(readFile, path.join(directory, 'schema.prisma'), '同一生成 Client 的 schema');
+  // 选装模式只供核完完整数据包的静态打包器调用；CLI 仍不接受此模式或任意 schema。
+  const capabilities = selection.mode === 'platform-capabilities';
+  if (capabilities && (selection.legacy || !selection.capabilitySchema
+    || !samePrismaSchema(schema, selection.capabilitySchema)))
+    throw Error('选装 Client 必须与宿主核定的完整能力 schema 一致');
   const tree = ts.createSourceFile(client, text, ts.ScriptTarget.Latest, true);
   if (tree.parseDiagnostics.length) throw Error('所选 Client 声明语法无效');
   const prisma = tree.statements.find(node => ts.isModuleDeclaration(node) && node.name.text === 'Prisma');
@@ -134,7 +139,7 @@ function selectedCompilerOptions(ts, project, options, selection, readFile = ts.
   const schemaModels = [...schema.matchAll(/^\s*model\s+([A-Za-z][A-Za-z0-9_]*)\s*\{/gm)].map(match => match[1]).sort();
   if (!schemaModels.length || new Set(schemaModels).size !== schemaModels.length || JSON.stringify(models) !== JSON.stringify(schemaModels))
     throw Error('Client 声明与同目录 schema 的模型集合不一致；请由宿主重新核定生成物');
-  const required = selection.mode === 'platform' ? ['Tenant', 'User', 'AuthSession']
+  const required = selection.mode === 'platform' || capabilities ? ['Tenant', 'User', 'AuthSession']
     : ['Tenant', 'User', 'AuthSession', 'BusinessWorkspace', 'WorkspaceMember', 'RentalOrder', 'RentalQuote'];
   if (selection.mode === 'rental-ai') required.push('AiTask', 'AiTaskOriginalRequest', 'AiGatewayInvocation');
   if (required.some(model => !models.includes(model)) || selection.mode === 'platform' && models.some(model => /^(?:Rental|Ai|BusinessWorkspace$|WorkspaceMember$)/u.test(model)))

@@ -18,17 +18,30 @@ const publicDataSdk = Object.freeze({
   install: 'apps/rental-api/node_modules/@rental-os/public-ai-data',
   archive: 'vendor/ai-native-data-public-0.2.3.tgz', spec: 'file:../../vendor/ai-native-data-public-0.2.3.tgz'
 });
+const publicDataSdkVersions = new Map([
+  [publicDataSdk.version, publicDataSdk],
+  ['0.2.5', Object.freeze({ ...publicDataSdk, version: '0.2.5', declaration: '0.2.5',
+    archive: 'vendor/ai-native-data-public-0.2.5.tgz', spec: 'file:../../vendor/ai-native-data-public-0.2.5.tgz' })]
+]);
+/** 由固定源码的 package.public.json 选择准确归档；未知版本不猜测路径或放宽范围。 */
+function publicDataSdkFor(metadata) {
+  const selected = publicDataSdkVersions.get(metadata?.version);
+  if (!selected || metadata.name !== selected.packageName) throw Error('公共数据 SDK 仅接受固定源码的 0.2.3 或 0.2.5');
+  return selected;
+}
 function publicDataSdkLock(metadata, bytes) {
-  if (metadata.name !== publicDataSdk.packageName || metadata.version !== publicDataSdk.version
-    || !(bytes instanceof Uint8Array) || !bytes.length) throw Error('新装读取器须为固定公共数据 SDK 0.2.3');
-  return { name: metadata.name, version: metadata.version, resolved: 'file:' + publicDataSdk.archive,
+  const selected = publicDataSdkFor(metadata);
+  if (!(bytes instanceof Uint8Array) || !bytes.length) throw Error('新装读取器缺少同次固定公共数据 SDK 字节');
+  return { name: metadata.name, version: metadata.version, resolved: 'file:' + selected.archive,
     integrity: 'sha512-' + createHash('sha512').update(bytes).digest('base64'), license: metadata.license,
     ...Object.fromEntries(dependencyFields.filter(field => metadata[field]).map(field => [field, metadata[field]])) };
 }
 function isPublicDataSdkDependency(lock, owner, name, specification, sdk) {
   if (!sdk || owner !== publicDataSdk.owner || name !== publicDataSdk.name) return false;
-  if (specification !== publicDataSdk.spec || lockedDependency(lock, owner, name) !== publicDataSdk.install
-    || !isDeepStrictEqual(lock.packages[publicDataSdk.install], sdk.lock)) throw Error('新装读取器归档锁已变化');
+  const selected = publicDataSdkFor(sdk.metadata);
+  if (specification !== selected.spec || lockedDependency(lock, owner, name) !== selected.install
+    || !isDeepStrictEqual(sdk.lock, publicDataSdkLock(sdk.metadata, sdk.bytes))
+    || !isDeepStrictEqual(lock.packages[selected.install], sdk.lock)) throw Error('新装读取器归档锁已变化');
   return true;
 }
 
@@ -218,7 +231,9 @@ function projectWorkspaceLock(lock, workspaces, root, options = {}) {
     if (file === retentionSdk.install && options.publicRetention) {
       if (!isDeepStrictEqual(entry, options.publicRetention.lock)) throw Error('公共保留 SDK 运行锁已变化');
     } else if (file === publicDataSdk.install && options.publicAiDataSdk) {
-      if (!isDeepStrictEqual(entry, options.publicAiDataSdk.lock)) throw Error('新装读取器运行锁已变化');
+      if (!isDeepStrictEqual(entry, options.publicAiDataSdk.lock)
+        || !isDeepStrictEqual(entry, publicDataSdkLock(options.publicAiDataSdk.metadata, options.publicAiDataSdk.bytes)))
+        throw Error('新装读取器运行锁已变化');
     } else {
       if (!entry.version || !/^https:\/\//u.test(entry.resolved || '') || !/^sha(?:256|384|512)-/u.test(entry.integrity || ''))
         throw Error('外部依赖缺少原锁定版本/HTTPS来源/摘要：' + file);
@@ -236,4 +251,4 @@ function projectWorkspaceLock(lock, workspaces, root, options = {}) {
 }
 
 module.exports = { selectWorkspaces, projectHostLock, projectWorkspaceLock, mergeSourceLocks, lockedDependency, hostDirectory,
-  retentionSdk, retentionSdkLock, isRetentionSdkDependency, publicDataSdk, publicDataSdkLock, isPublicDataSdkDependency };
+  retentionSdk, retentionSdkLock, isRetentionSdkDependency, publicDataSdk, publicDataSdkFor, publicDataSdkLock, isPublicDataSdkDependency };

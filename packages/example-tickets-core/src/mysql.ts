@@ -136,26 +136,72 @@ export interface MysqlTicketsAuthority<TTransaction extends TicketsSqlTransactio
   audit(tx: TTransaction, receipt: TicketStoredReceipt): Promise<void>;
 }
 
+/** 借用原宿主已开启的事务；本参加者不能提交、回滚或为批准另开业务事务。 */
+export interface MysqlTicketsExecution<TTransaction extends TicketsSqlTransaction> extends TicketExecution {
+  withTransaction<T>(transaction: TTransaction, consume: (execution: TicketExecution) => Promise<T>, before?: TicketExecutionRequest): Promise<T>;
+}
+
 /** 私有MySQL入口只将受限工单仓储交给领域服务；未提供真实授权/审计实现时不能装配。 */
-export function createMysqlTicketsExecution<TTransaction extends TicketsSqlTransaction>(client: TicketsSqlClient<TTransaction>, authority: MysqlTicketsAuthority<TTransaction>): TicketExecution {
-  return {
-    run(request, work) {
-      return client.$transaction(async tx => {
+export function createMysqlTicketsExecution<TTransaction extends TicketsSqlTransaction>(client: TicketsSqlClient<TTransaction>, authority: MysqlTicketsAuthority<TTransaction>): MysqlTicketsExecution<TTransaction> {
+  const unavailable = () => new TicketError("denied", "原工单事务参加者已退出或不是事务连接");
+  async function participate<T>(tx: TTransaction, consume: (execution: TicketExecution) => Promise<T>, before?: TicketExecutionRequest): Promise<T> {
+    if (!tx || "$transaction" in tx || typeof tx.$queryRaw !== "function" || typeof tx.$executeRaw !== "function") throw unavailable();
+    let active = true, pending = 0;
+    const leases: Array<() => Promise<void>> = [];
+    const current = () => { if (!active) throw unavailable(); };
+    const execution: TicketExecution = { async run(request, work) {
+      current();
+      // 同一Native连接内不并发抢人员/Core锁。调用方必须等待一次原操作结束。
+      if (pending !== 0) throw unavailable();
+      pending++;
+      let running = true, queries = 0;
+      try {
         const { principal, permission } = request;
         const access = await authority.authorize(tx, request);
+        current();
+        leases.push(access.revalidate.bind(access));
         if (access.tenantId !== principal.tenantId || access.userId !== principal.subjectId)
           throw new TicketError("denied", "工单授权与当前事务主体不一致");
         if (request.assigneeId && access.authorizedAssigneeId !== request.assigneeId)
           throw new TicketError("denied", "受派成员尚未通过当前事务授权");
         const store = new MysqlTicketRepository(tx, access.tenantId, receipt => authority.audit(tx, receipt));
         if (permission !== "read" && permission !== "read.all") await store.lock();
-        const result = await work(store, access);
+        current();
+        const scoped = <Args extends unknown[], Result>(method: (...args: Args) => Promise<Result>) => async (...args: Args) => {
+          current(); if (!running) throw unavailable();
+          queries++;
+          try { const result = await method(...args); current(); if (!running) throw unavailable(); return result; }
+          finally { queries--; }
+        };
+        const repository: TicketRepository = Object.freeze({
+          list: scoped(store.list.bind(store)), page: scoped(store.page.bind(store)), statusCounts: scoped(store.statusCounts.bind(store)),
+          find: scoped(store.find.bind(store)), create: scoped(store.create.bind(store)), update: scoped(store.update.bind(store)),
+          receipt: scoped(store.receipt.bind(store)), saveReceipt: scoped(store.saveReceipt.bind(store))
+        });
+        const result = await work(repository, access);
+        current();
+        if (queries !== 0) throw unavailable();
         // 人员/授权行锁保留当前修订，提交前另复核会自然流逝的会话/订阅期限。
         await access.revalidate();
+        current();
         return result;
-      }, { isolationLevel: "ReadCommitted" });
-    }
-  };
+      } finally { running = false; pending--; }
+    } };
+    try {
+      // 批准参加者先用同一授权与工单锁冻结原操作；随后才能核无旧收据、准备批准及执行业务。
+      if (before) await execution.run(before, async () => undefined);
+      const result = await consume(Object.freeze(execution));
+      if (pending !== 0) throw unavailable();
+      for (const revalidate of leases) { current(); await revalidate(); }
+      current();
+      return result;
+    } finally { active = false; }
+  }
+  return Object.freeze({
+    run: <T>(request: TicketExecutionRequest, work: (repository: TicketRepository, access: TicketAccess) => Promise<T>) =>
+      client.$transaction(tx => participate(tx, execution => execution.run(request, work)), { isolationLevel: "ReadCommitted" }),
+    withTransaction: participate
+  });
 }
 
 /** 只解析本版CHECK所需的IN/BETWEEN/比较/AND；括号保留表达式归属，不能把布尔子式当数值。 */

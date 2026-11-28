@@ -35,7 +35,78 @@ SaaS 的四组 Core 包管理 Controller 也从同一[应用工厂](src/assembly
 
 配置 `CORE_PACKAGE_STORAGE_ROOT` 为宿主独占的绝对目录，按[包管理存储约定](../../packages/platform-core-host/src/core-packages/README.md)准备原归档、发行和候选目录。`CORE_PLATFORM_PACKAGE_REFERENCE` 指向该目录 `archives/index.json` 中与启动锁完全相同的底座源码归档引用；实际 Nest 装配将两项配置传给当前版本及更新材料读取源。
 
-读取源从六个公共包的正式静态入口核 `platform-host.context.json` 同源编译证据，要求 `host=example-tickets` 及 `apps/example-tickets-api/prisma-deployment/core.deployment.lock.json` 等于当前锁。实际公共 schema、所选公共数据计划中的全部原 SQL 和完整工单包须与固定归档逐字节一致；只允许一个工单Core和空数据能力集合。版本读取复用本宿主的原Prisma账及物理观察，更新材料读取本身不查库。缺配置、固定引用或运行收据保持 unavailable，已有但不一致的材料拒绝读取。受控组合仍可通过 `composeTicketsApplication` 的第三个参数显式注入来源，生产默认不使用替代证据；候选准备沿原待部署状态保存。[公共数据计划](../platform-api/src/platform-data.ts)
+读取源从六个公共包的正式静态入口核 `platform-host.context.json` 同源编译证据。普通工单要求`host=example-tickets`及`apps/example-tickets-api/prisma-deployment/core.deployment.lock.json`等于当前锁；显式AI路线要求`host=example-tickets-ai`、固定`dist-ai/ai-main.mjs`入口和`apps/platform-api/prisma-deployment`中的完整锁/schema。AI静态宿主从已核数据包调用正式组合器，核所有上下文文件及`data-capabilities/ai-native`全部字节。实际公共schema、原SQL和完整工单包也须同源。MCP运行归档尚无正式选型，不能用源码启动冒充当前包材料。版本读取复用原Prisma账及物理观察，更新材料读取不查库；缺证据保持 unavailable，不一致则拒绝。候选准备仍是待部署状态。[公共数据计划](../platform-api/src/platform-data.ts)
+
+## 工单MCP安装材料
+
+纯读取MCP使用独立选装包与公共Client，不需要AI数据模型、平台模型或云模型预算。先构建同一固定源码的公共/工单包与MCP 0.1.2包，再执行`npm run build:mcp -w @rental-os/example-tickets-core`和`npm run build:mcp -w @rental-os/example-tickets-api`。MCP完整材料须按其`package.json.files`和全部`dist`收集，保留原LICENSE/README/元数据与五份SQL；`createMcpDataRelease`会拒绝不完整、不同版本或摘要不符的材料，依赖安装目录不能冒充该材料包。
+
+```sh
+npm run pack:core:mcp -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> <固定完整SHA> <底座来源JSON> <新工单MCP包.tgz>
+# 按正式prepare-install/check取得完整包目录后，五个参数均使用当前宿主内的绝对路径：
+node apps/example-tickets-api/dist-mcp/prepare-mcp-deployment.mjs <底座发行JSON> <MCP固定来源JSON> <完整MCP包目录> <完整工单MCP包目录> <apps/platform-api下的新部署目录>
+```
+
+[准备器](src/prepare-mcp-deployment.mts)复用正式包摘要、兼容及迁移生成入口，生成v1部署锁、同库公共14份/Core 2份/MCP 5份迁移和公共schema。工单MCP数据版为0.1.1，普通工单及内置AI候选保持原0.1.0；历史`001-tickets.sql`逐字不变。新增五表只互相引用，按Core迁移顺序执行，运行准入另核MCP能力的完整原账及物理观察。所有授权、发布、目标和绑定表初始为空，不seed角色或通配权限。
+
+该入口只准备新目录，返回`prepared/deployment:pending`，不连接数据库或执行迁移。API、权限登记与后台核包都从同一部署锁取得能力版本。下方提供显式服务和人工页面步骤；真实OAuth与数据库仍须沿独占CI验收，安装材料准备通过不代表MCP已经可用。普通业务仍可独立运行。
+
+### 启动与人工授权
+
+获准的新装环境应用准备器返回的schema迁移，并沿普通入口初始化、登记部署准入、租户授权、成员分配和绑定。将同一完整工单MCP包供给实际workspace后，使用公共schema生成唯一Client；普通工单及MCP共用原Auth和同一数据库。`DATABASE_URL`须明确`connection_limit>=2`，原OAuth/业务事务与持久计量短事务使用不同连接。
+
+```sh
+# 以下三个配置路径均为部署者已核定的绝对路径；不会自动迁移或创建默认发布。
+export CORE_DEPLOYMENT_LOCK=/absolute/source/apps/platform-api/prisma-deployment-mcp/core.deployment.lock.json
+export PLATFORM_MCP_DATA_PACKAGE_DIR=/absolute/complete-mcp-package
+export TICKETS_MCP_CONFIGURATION=/absolute/private/tickets-mcp.json
+npm run start:mcp -w @rental-os/example-tickets-api
+```
+
+`tickets-mcp.json`为闭合配置：`enabled`、精确HTTPS根`origin`、本次部署审核到期秒数`reviewedUntil`和实际表排序规则`tableCollation`（例如MySQL 8.4新库的`utf8mb4_0900_ai_ci`）。TLS入口按该origin转发`/mcp`、`/oauth/*`、`/.well-known/*`、普通`/api/*`及同源后台；保留核定Host，禁止不受控请求绕过代理。路由、Origin和注册回调不接受通配符。配置失效停止新访问，原结果回读/撤回仍核当前原身份。
+
+SaaS管理员沿同源OpenAPI的`/api/cores/example-tickets/mcp-clients/{read,save,operation}`显式登记public client、精确回调、两个工单scope与到期时间，使用原注册CAS和操作收据。租户管理员再调用`/api/cores/example-tickets/mcp/publish`，明确客户端修订、scope、字段策略、到期时间与发现限流；当前`system:params:manage`在同事务复核。注册和发布各自不能生成个人grant。所有写入沿原operationKey/operationId，失应答只读原结果。
+
+外部客户端从正式`/oauth/authorize`发起PKCE S256请求，服务检查原注册后跳转同源`/cores/example-tickets/mcp-authorization`。用户沿原登录进入，核对范围后明确同意或拒绝；同意只保存grant，不执行工单。用户读取原grant，在页面审核实际待外发字段并绑定原工单，然后选择“返回原客户端”，由原AS签发一次code。客户端沿`/oauth/token`换取受限凭据，再调用`/mcp`。字段审核、调用与返回都复核当前权限、发布及原计量，客户端模型自付，不需要平台AI权益或模型预算。
+
+未登录时，工单宿主用公共`RouterBridge`在当前标签内保留这个固定人工页的请求，原登录成功后返回同一入口，不自动准备或同意。该导航暂存不包含code/token，也不跨标签或账号保存；若在登录期间刷新或关闭了标签，请从原客户端重新打开授权入口。已提交的同意仍按原记录回读，不能据入口丢失推断未授权。
+
+[显式宿主](src/mcp-main.mts) · [人工页面](../example-tickets-admin/src/tickets-mcp.tsx) · [同源控制面合同](../../packages/example-tickets-core/src/mcp-http.ts) · [原目标/额度及未验边界](../../packages/example-tickets-core/examples/ai-integration/README.md#tenant-mcp-参加者)
+
+## 可选工单AI宿主
+
+默认 `start` 保持普通工单。显式 `npm run build:ai -w @rental-os/example-tickets-api` 编译选装入口，`npm run start:ai -w @rental-os/example-tickets-api` 使用同一启动、关闭、原Guard与数据库实例。前置是同一固定源码的公共AI Client、`ai-native-server@0.2.1`、`ai-native-data@0.2.5`及含`entries.ai`的完整工单`0.2.0`包；普通工单数据版本仍为`0.1.0`。构建顺序先完成公共AI服务端与工单`build:ai`，再构建本宿主普通入口和AI入口，不能用普通41模型Client启动AI入口。
+
+`CORE_DEPLOYMENT_LOCK`须只选择同一工单AI标准包与单个公共`ai-native`数据能力，`PLATFORM_AI_DATA_PACKAGE_DIR`为该数据包的绝对目录。启动核完整包和部署锁，业务请求在同一原事务内复核公共AI原迁移账及物理结构。沿同一公共初始化、部署准入、租户授权、成员分配和工单绑定步骤，不创建默认权益、工具发布、额度或角色。当前示例为无模型的内置业务任务，不要求平台模型连接或云模型预算；原Task累计资源仍适用。[装配入口](src/ai-main.mts) · [完整AI请求与原结果说明](../../packages/example-tickets-core/examples/ai-integration/README.md#完整宿主的接点)
+
+固定源码先用[公共AI准备器](../../scripts/prepare-platform-public-ai.cjs)取得同源SDK、公共数据包和零Core+AI锁。选用者在自己的独占构建目录供给该SDK，按它的组合schema生成本宿主唯一Client，再构建本包与工单AI包。原公共`apps/platform-api/prisma/schema.prisma`保留，不能用组合schema覆盖公共基线。工单`build:ai`明确使用`apps/platform-api/generated/client`；不生成另一Client或依赖其他工作树的产物。
+
+完整工单AI标准包经过原`prepare-install`与`check`后，使用新的正式准备入口。命令均在同一固定源码根执行，下列四个参数必须改为实际绝对路径。
+
+```sh
+npm run build:ai -w @rental-os/example-tickets-core
+npm run build -w @rental-os/example-tickets-api
+npm run build:ai -w @rental-os/example-tickets-api
+node apps/example-tickets-api/dist-ai/prepare-ai-deployment.mjs \
+  /absolute/public-ai/apps/platform-api/prisma-deployment/core.deployment.lock.json \
+  /absolute/public-ai/public-ai-data /absolute/prepared/example-tickets \
+  /absolute/source/apps/platform-api/prisma-deployment-tickets-ai
+```
+
+[准备命令](src/prepare-ai-deployment.mts)核同一完整数据包与工单AI入口、原公共数据基线和兼容范围，输出原公共/Core/AI迁移及同源组合schema，保持原SQL与账名。目标必须为当前`apps/platform-api`下的新目录，以沿原生成器使用同一个Client；已有目录拒绝覆盖。命令不安装、连库或执行DDL，输出只表示`prepared/deployment=pending`。获准部署时对返回的schema执行原`migrate deploy`，按上述同一部署锁、数据包目录、初始化与普通Core授权步骤启动`start:ai`，再显式发布工具和资源限额。历史混合库不能按本新装组合重建。
+
+本入口已提供同源HTTP、原数据观察与页面动作。完整检出使用下述正式运行包命令，打包器从锁中的固定Git来源重新准备公共AI SDK，不接受活动目录混装或自报摘要。`--platform-package`须为同一固定来源经`export-platform`取得、与公共AI锁中底座摘要相同的归档；输出保留唯一115模型Client的schema、完整选装材料和运行证据，不包含Rental。编译和打包不代表真实迁移、镜像或A04验收。
+
+```sh
+node scripts/package-platform-host.cjs --host example-tickets-ai \
+  --public-ai-repo /absolute/fixed-zelo-checkout \
+  --lock /absolute/source/apps/platform-api/prisma-deployment-tickets-ai/core.deployment.lock.json \
+  --platform-package /absolute/releases/platform-source.tgz \
+  --platform-client /absolute/source/apps/platform-api/generated/client/index.d.ts \
+  --tickets-package /absolute/prepared/example-tickets --output /absolute/new-tickets-ai-host.tgz
+```
+
+运行包入口为`apps/example-tickets-api/dist-ai/ai-main.mjs`，`CORE_DEPLOYMENT_LOCK`指向包内`apps/platform-api/prisma-deployment/core.deployment.lock.json`，`PLATFORM_AI_DATA_PACKAGE_DIR`指向包内`data-capabilities/ai-native`；Dockerfile已设置后两项。取得包管理当前材料还须沿上文登记同一底座归档与引用，不用运行收据代替标准包。MCP独立使用tenant参加者，内置AI证据不冒充MCP验收。
 
 ## 独立后端运行包
 

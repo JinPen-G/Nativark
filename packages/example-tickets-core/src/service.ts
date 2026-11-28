@@ -8,6 +8,10 @@ import { AssignTicketSchema, ChangeTicketStateSchema, CreateTicketSchema, ListTi
   type ListTickets, type Ticket, type TicketPage, type TicketPageQuery, type TicketStatusCounts, type TicketPermission, type TicketReceipt } from "./contracts";
 
 export interface TicketStoredReceipt extends TicketReceipt { actorId: string; fingerprint: string }
+export type TicketChangeAction = Exclude<TicketPermission, "read" | "read.all">;
+const changeSchemas = { create: CreateTicketSchema, assign: AssignTicketSchema, start: ChangeTicketStateSchema, close: ChangeTicketStateSchema };
+const changeFingerprint = (principal: CorePrincipal, action: TicketChangeAction, input: unknown) =>
+  createHash("sha256").update(JSON.stringify([principal.subjectId, action, input])).digest("hex");
 export interface TicketRepository {
   list(query: ListTickets, viewerId?: string): Promise<Ticket[]>;
   /** 正文与总数来自同一次数据库观察，不能统计当前成员无权读取的工单。 */
@@ -71,9 +75,22 @@ export class TicketsService {
 
   receipt(principal: CorePrincipal, operationId: string): Promise<{ status: "recorded"; receipt: TicketReceipt } | { status: "unavailable" }> {
     TicketIdSchema.parse(operationId);
+    return this.originalReceipt(principal, operationId);
+  }
+
+  /** 供原事务参加者核对精确动作的原结果；同键异参不能冒充已批准动作的提交证据。 */
+  receiptFor(principal: CorePrincipal, action: TicketChangeAction, input: unknown): Promise<{ status: "recorded"; receipt: TicketReceipt } | { status: "unavailable" }> {
+    if (!Object.hasOwn(changeSchemas, action)) return Promise.reject(new TicketError("operation_conflict", "未登记的工单动作"));
+    const parsed = changeSchemas[action].parse(input);
+    return this.originalReceipt(principal, parsed.operationId, changeFingerprint(principal, action, parsed));
+  }
+
+  private originalReceipt(principal: CorePrincipal, operationId: string, fingerprint?: string): Promise<{ status: "recorded"; receipt: TicketReceipt } | { status: "unavailable" }> {
     return this.withAccess(principal, "read", async (store, access) => {
       const receipt = await store.receipt(operationId);
       if (!receipt || receipt.actorId !== access.userId) return { status: "unavailable" };
+      if (fingerprint !== undefined && receipt.fingerprint !== fingerprint)
+        throw new TicketError("operation_conflict", "原操作键已用于不同请求，不能作为本次动作的提交证据");
       this.visible(await store.find(receipt.ticket.id), access);
       if (receipt.ticket.tenantId !== access.tenantId) throw new TicketError("denied", "原工单收据不属于当前租户");
       return { status: "recorded", receipt: { operationId, ticket: receipt.ticket } };
@@ -109,6 +126,16 @@ export class TicketsService {
     return this.transition(principal, "start", input, "open", "in_progress");
   }
 
+  /** 受权准备只读当前事实，与start共用权限/版本/状态规则；不占用操作键或执行动作。 */
+  prepareStart(principal: CorePrincipal, input: unknown): Promise<Ticket> {
+    const parsed = ChangeTicketStateSchema.parse(input);
+    return this.withAccess(principal, "start", async (store, access) => {
+      const ticket = this.visible(await store.find(parsed.ticketId), access);
+      this.transitionable(ticket, access, parsed.expectedRevision, "open");
+      return ticket;
+    });
+  }
+
   close(principal: CorePrincipal, input: unknown): Promise<TicketReceipt> {
     return this.transition(principal, "close", input, "in_progress", "closed");
   }
@@ -117,13 +144,17 @@ export class TicketsService {
     const parsed = ChangeTicketStateSchema.parse(input);
     return this.change(principal, action, parsed, async (store, access) => {
       const ticket = this.visible(await store.find(parsed.ticketId), access);
-      this.expected(ticket, parsed.expectedRevision);
-      if (ticket.assigneeId !== access.userId && !access.canAssign) throw new TicketError("denied", "只有受派成员或管理者可以处理工单");
-      if (!ticket.assigneeId || ticket.state !== from) throw new TicketError("state_conflict", "当前工单状态不支持此操作");
+      this.transitionable(ticket, access, parsed.expectedRevision, from);
       const updated = this.next(ticket, { state: to });
       await store.update(updated, parsed.expectedRevision);
       return updated;
     });
+  }
+
+  private transitionable(ticket: Ticket, access: TicketAccess, revision: number, from: Ticket["state"]) {
+    this.expected(ticket, revision);
+    if (ticket.assigneeId !== access.userId && !access.canAssign) throw new TicketError("denied", "只有受派成员或管理者可以处理工单");
+    if (!ticket.assigneeId || ticket.state !== from) throw new TicketError("state_conflict", "当前工单状态不支持此操作");
   }
 
   private withAccess<T>(principal: CorePrincipal, permission: TicketPermission,
@@ -137,10 +168,10 @@ export class TicketsService {
     });
   }
 
-  private change<T extends { operationId: string }>(principal: CorePrincipal, action: Exclude<TicketPermission, "read" | "read.all">,
+  private change<T extends { operationId: string }>(principal: CorePrincipal, action: TicketChangeAction,
     input: T, apply: (store: TicketRepository, access: TicketAccess) => Promise<Ticket>, assigneeId?: string): Promise<TicketReceipt> {
     // input来自对应唯一schema，字段顺序固定；Actor/动作/业务输入共同定义同一次请求。
-    const fingerprint = createHash("sha256").update(JSON.stringify([principal.subjectId, action, input])).digest("hex");
+    const fingerprint = changeFingerprint(principal, action, input);
     return this.withAccess(principal, action, async (store, access) => {
       const previous = await store.receipt(input.operationId);
       if (previous) {

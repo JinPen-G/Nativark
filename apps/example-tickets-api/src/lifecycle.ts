@@ -14,6 +14,7 @@ export class TicketsApplicationLifecycle implements OnModuleInit, OnModuleDestro
   private disconnection?: Promise<void>;
   private stopping = false;
   private readonly requests = new Set<Promise<unknown>>();
+  private readonly optionalClosers = new Set<() => Promise<void>>();
 
   constructor(private readonly database: PlatformDatabaseClient, private readonly permissions: CoreHostPermissionStartup) {
     database.manageLifecycle(this);
@@ -44,6 +45,12 @@ export class TicketsApplicationLifecycle implements OnModuleInit, OnModuleDestro
     return request.finally(() => { this.requests.delete(request); });
   }
 
+  /** 受控装配登记原协议排空，不接收请求提供的生命周期；失败仍等待其他工作再交回宿主。 */
+  attachProtocol(close: () => Promise<void>): void {
+    if (this.stopping) throw new Error("停止后不能装配协议入口");
+    this.optionalClosers.add(close);
+  }
+
   intercept(_context: ExecutionContext, next: CallHandler): Observable<unknown> {
     let dispatched = false;
     return new Observable(subscriber => {
@@ -71,9 +78,12 @@ export class TicketsApplicationLifecycle implements OnModuleInit, OnModuleDestro
   onModuleDestroy(): Promise<void> {
     this.stop();
     return this.draining ??= (async () => {
+      const closed = await Promise.allSettled([...this.optionalClosers].map(close => Promise.resolve().then(close)));
       await Promise.allSettled([this.initialization]);
       // 原拒绝仍交HTTP出口；排空只等真实完成，不把业务403/409解释为关停失败。
       await Promise.allSettled([...this.requests]);
+      const failures = closed.flatMap(result => result.status === "rejected" ? [result.reason] : []);
+      if (failures.length) throw new AggregateError(failures, "原可选协议排空失败");
     })();
   }
 

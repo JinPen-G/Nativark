@@ -1,6 +1,6 @@
 {
   "name": "@rental-os/example-tickets-core",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "private": true,
   "license": "MIT",
   "description": "租户范围的轻量工单 Core 接入示范",
@@ -14,6 +14,10 @@
       "http": [
         "dist/http.d.ts"
       ],
+      "ai-http": [
+        "dist/ai-http.d.ts"
+      ],
+      "mcp-http": ["dist/mcp-http.d.ts"],
       "package": [
         "dist/package.d.ts"
       ],
@@ -28,6 +32,12 @@
       ],
       "platform-host": [
         "dist/platform-host.d.ts"
+      ],
+      "ai": [
+        "dist-ai/index.d.mts"
+      ],
+      "mcp": [
+        "dist-mcp/index-mcp.d.mts"
       ]
     }
   },
@@ -44,6 +54,11 @@
       "types": "./dist/http.d.ts",
       "default": "./dist/http.js"
     },
+    "./ai-http": {
+      "types": "./dist/ai-http.d.ts",
+      "default": "./dist/ai-http.js"
+    },
+    "./mcp-http": { "types": "./dist/mcp-http.d.ts", "default": "./dist/mcp-http.js" },
     "./package": {
       "types": "./dist/package.d.ts",
       "default": "./dist/package.js"
@@ -60,15 +75,29 @@
     "./platform-host": {
       "types": "./dist/platform-host.d.ts",
       "default": "./dist/platform-host.js"
+    },
+    "./ai": {
+      "types": "./dist-ai/index.d.mts",
+      "default": "./dist-ai/index.mjs"
+    },
+    "./mcp": {
+      "types": "./dist-mcp/index-mcp.d.mts",
+      "default": "./dist-mcp/index-mcp.mjs"
     }
   },
   "scripts": {
     "prebuild": "npm run build -w @rental-os/platform-core-host",
     "build": "tsc -p tsconfig.json",
+    "build:ai": "tsc -p tsconfig.ai.json",
+    "build:mcp": "tsc -p tsconfig.mcp.json",
     "prelint": "npm run build -w @rental-os/platform-core-host",
     "lint": "tsc -p tsconfig.json --noEmit",
     "prepack:core": "npm run build",
     "pack:core": "node dist/metadata.js package",
+    "prepack:core:ai": "npm run build && npm run build:ai",
+    "pack:core:ai": "node dist/metadata.js package:ai",
+    "prepack:core:mcp": "npm run build && npm run build:mcp",
+    "pack:core:mcp": "node dist/metadata.js package:mcp",
     "prelint:admin": "npm run build",
     "lint:admin": "tsc -p admin/tsconfig.json"
   },
@@ -89,7 +118,9 @@
     "@rental-os/platform-server": "0.1.0",
     "@rental-os/platform-contracts": "0.1.0",
     "@rental-os/core-host": "0.1.0",
-    "@rental-os/platform-admin": "0.1.0"
+    "@rental-os/platform-admin": "0.1.0",
+    "@rental-os/ai-native-server": "0.2.1",
+    "@rental-os/mcp-server": "0.1.2"
   },
   "peerDependenciesMeta": {
     "@prisma/client": {
@@ -117,6 +148,12 @@
       "optional": true
     },
     "@rental-os/platform-admin": {
+      "optional": true
+    },
+    "@rental-os/ai-native-server": {
+      "optional": true
+    },
+    "@rental-os/mcp-server": {
       "optional": true
     }
   }

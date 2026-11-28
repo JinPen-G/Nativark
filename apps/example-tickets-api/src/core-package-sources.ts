@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
-  CORE_CONTRACT_VERSION, CoreDeploymentLockSchema, type CoreDataObservation, type CoreDeploymentLock
+  CORE_CONTRACT_VERSION, CoreDeploymentLockSchema, coreDeploymentHostVersions, type CoreDataObservation, type CoreDeploymentLock
 } from "@rental-os/core-contracts";
 import { CORE_ARCHIVE_LIMITS, createCoreArchive, readCoreArchive } from "@rental-os/core-contracts/archive";
 import { readCorePackageFiles, readPackageArtifacts } from "@rental-os/core-contracts/package";
@@ -17,11 +17,15 @@ import type { CorePackageDeploymentSource } from "@rental-os/platform-core-host/
 import type { CoreHostSqlTransaction } from "@rental-os/core-host/mysql";
 import type { CorePackagePreparationMaterialsSource } from "@rental-os/platform-core-host/core-package-preparation";
 import { requireTicketsDeploymentPackage } from "./deployment-package";
+import { requirePlatformDataCapabilityFiles } from "@rental-os/core-contracts/platform-data-package";
 
 export interface TicketsCorePackageSourcesInput {
   lock: CoreDeploymentLock;
   storageDirectory?: string;
   platformReference?: string;
+  dataCapabilities?: ReadonlyMap<string, ReadonlyMap<string, Uint8Array>>;
+  /** 静态选装宿主使用已核完整数据包的正式组合器；输入只取固定底座归档的原schema。 */
+  composeRuntimeSchema?(platformSchema: string): string;
   observe(): Promise<CoreDataObservation>;
   /** 候选准备在原身份事务内重读，观察器须绑定本次传入的 SQL 读取器。 */
   observeInTransaction?(transaction: Pick<CoreHostSqlTransaction, "$queryRaw">): Promise<CoreDataObservation>;
@@ -30,7 +34,8 @@ export interface TicketsCorePackageSourcesInput {
 const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
 /** 入口只能从本宿主的静态依赖解析，六公共包与工单包必须属于同一部署上下文。 */
-async function readPlatformRuntime(files: ReadonlyMap<string, Uint8Array>, lock: CoreDeploymentLock) {
+async function readPlatformRuntime(files: ReadonlyMap<string, Uint8Array>, lock: CoreDeploymentLock,
+  capabilities?: { schema: string; files: ReadonlyMap<string, ReadonlyMap<string, Uint8Array>> }) {
   const directories = ["packages/platform-contracts", "packages/core-contracts", "packages/core-host",
     "packages/platform-server", "packages/platform-core-host", "apps/platform-api"] as const;
   const entries = [require.resolve("@rental-os/platform-contracts"), require.resolve("@rental-os/core-contracts"),
@@ -38,13 +43,19 @@ async function readPlatformRuntime(files: ReadonlyMap<string, Uint8Array>, lock:
     require.resolve("@rental-os/platform-core-host"), require.resolve("@rental-os/platform-api/data-plan")];
   const directory = resolve(dirname(entries[5]), "../../..");
   const receiptFile = "platform-host.context.json";
+  const ai = lock.cores[0].manifest.entries.ai === "dist-ai/index.mjs";
+  // 仅消费已有正式打包路线；MCP无固定运行上下文时仍保持材料不可用。
+  if ((lock.dataCapabilities?.length ?? 0) > 0 && (!ai || !capabilities)) return;
   if (!readPlatformRuntimeEvidence({ directory,
     runtimeDirectories: new Map(directories.map((item, index) => [item, resolve(dirname(entries[index]), "..")])),
     runtimeEntries: new Map(directories.map((item, index) => [item, entries[index]])),
     platformFiles: files, lock, receiptFile,
-    deploymentLockFile: "apps/example-tickets-api/prisma-deployment/core.deployment.lock.json" })) return;
+    ...(capabilities ? { capabilities } : {}),
+    deploymentLockFile: ai ? "apps/platform-api/prisma-deployment/core.deployment.lock.json"
+      : "apps/example-tickets-api/prisma-deployment/core.deployment.lock.json" })) return;
   const context = JSON.parse((await readCorePackageOrdinaryFile(join(directory, receiptFile), 8 * 1024 * 1024)).toString("utf8"));
-  if (context.host !== "example-tickets"
+  if (context.host !== (ai ? "example-tickets-ai" : "example-tickets")
+    || context.entry !== (ai ? "apps/example-tickets-api/dist-ai/ai-main.mjs" : "apps/example-tickets-api/dist/main.js")
     || !isDeepStrictEqual(context.corePackages, [{ id: "example-tickets", sha256: lock.cores[0].sha256 }]))
     throw new Error("实际运行上下文不是当前固定工单组合");
   // 原公共观察读取公共目录；将它使用的 schema 和 SQL 也核到同一固定源码归档。
@@ -62,14 +73,22 @@ export function createTicketsCorePackageSources(input: TicketsCorePackageSources
   deployment: CorePackageDeploymentSource; materials: CorePackagePreparationMaterialsSource;
 } {
   const lock = CoreDeploymentLockSchema.parse(input.lock);
-  if (lock.cores.length !== 1 || lock.cores[0].manifest.id !== "example-tickets" || lock.dataCapabilities?.length)
-    throw new Error("工单包读取源须且仅包含 example-tickets，不选择数据能力");
+  if (lock.cores.length !== 1 || lock.cores[0].manifest.id !== "example-tickets"
+    || (lock.dataCapabilities?.length ?? 0) !== (input.dataCapabilities?.size ?? 0))
+    throw new Error("工单包读取源须包含同一工单与全部显式选装数据包");
+  const dataCapabilities = new Map((lock.dataCapabilities ?? []).map(release => {
+    const files = input.dataCapabilities?.get(release.id);
+    if (!files) throw new Error("工单组合缺少所选数据包");
+    requirePlatformDataCapabilityFiles(files, release);
+    return [release.id, new Map([...files].map(([file, bytes]) => [file, Buffer.from(bytes)]))] as const;
+  }));
   const pin = lock.cores[0], storage = input.storageDirectory, reference = input.platformReference;
   if (storage && !isAbsolute(storage)) throw new Error("Core 包存储根须为宿主配置的绝对目录");
   const artifacts = storage && reference
     ? createPlatformCorePackageArchiveIndexSource({ directory: join(storage, "archives") }) : undefined;
   const observe = input.observe.bind(input);
   const observeInTransaction = input.observeInTransaction?.bind(input);
+  const composeRuntimeSchema = input.composeRuntimeSchema?.bind(input);
 
   async function readCurrent() {
     if (!artifacts || !reference) return;
@@ -83,9 +102,13 @@ export function createTicketsCorePackageSources(input: TicketsCorePackageSources
     if (!inspectCorePackageArtifact(artifact, undefined, {}).ok)
       throw new Error("本地底座标准包未通过原发行检查");
     const platformFiles = readCoreArchive(artifact.bytes, artifact.release.sha256).files;
-    const directory = await readPlatformRuntime(platformFiles, lock);
+    const schema = platformFiles.get("apps/platform-api/prisma/schema.prisma");
+    if (!schema) throw new Error("固定底座缺少公共schema");
+    const directory = await readPlatformRuntime(platformFiles, lock, composeRuntimeSchema ? {
+      schema: composeRuntimeSchema(new TextDecoder("utf-8", { fatal: true }).decode(schema)), files: dataCapabilities
+    } : undefined);
     if (!directory) return;
-    const tickets = requireTicketsDeploymentPackage(pin, lock.platform.versions);
+    const tickets = requireTicketsDeploymentPackage(pin, coreDeploymentHostVersions(lock));
     if (!isDeepStrictEqual(tickets.manifest, pin.manifest)
       || relative(resolve(directory, "packages/example-tickets-core"), tickets.root) !== "")
       throw new Error("实际工单包与当前固定部署上下文不一致");
@@ -107,7 +130,7 @@ export function createTicketsCorePackageSources(input: TicketsCorePackageSources
     if (!await readCurrent()) return;
     return { lock: structuredClone(lock), installed: {
       platform: structuredClone(lock.platform), cores: structuredClone(lock.cores),
-      ...(lock.dataCapabilities === undefined ? {} : { dataCapabilities: [] })
+      ...(lock.dataCapabilities === undefined ? {} : { dataCapabilities: structuredClone(lock.dataCapabilities) })
     }, data: await readObservation() };
   }
 
@@ -122,7 +145,7 @@ export function createTicketsCorePackageSources(input: TicketsCorePackageSources
         const current = await readCurrent();
         if (!current) return;
         return { base: structuredClone(lock), platform: current.platform, cores: current.cores,
-          ...(lock.dataCapabilities === undefined ? {} : { dataCapabilities: new Map() }) };
+          ...(lock.dataCapabilities === undefined ? {} : { dataCapabilities }) };
       }
     }
   };

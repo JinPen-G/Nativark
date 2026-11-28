@@ -1,7 +1,7 @@
 /** 部署者显式同步已核定工单包权限；不启动HTTP、迁移或授予任何租户/成员使用权。 */
 import "reflect-metadata";
 import { readFileSync } from "node:fs";
-import { CoreDeploymentLockSchema } from "@rental-os/core-contracts";
+import { CoreDeploymentLockSchema, coreDeploymentHostVersions } from "@rental-os/core-contracts";
 import { registerPlatformCorePermissions } from "@rental-os/platform-core-host";
 import { PlatformDatabaseClient } from "@rental-os/platform-api/database";
 import { requireTicketsDeploymentPackage } from "./deployment-package";
@@ -11,7 +11,7 @@ async function register() {
     throw new Error("工单权限登记须配置独立DATABASE_URL与固定CORE_DEPLOYMENT_LOCK路径");
   const lock = CoreDeploymentLockSchema.parse(JSON.parse(readFileSync(process.env.CORE_DEPLOYMENT_LOCK, "utf8")));
   if (lock.cores.length !== 1 || lock.cores[0].manifest.id !== "example-tickets") throw new Error("本宿主只登记所选工单Core");
-  const { manifest } = requireTicketsDeploymentPackage(lock.cores[0], lock.platform.versions);
+  const { manifest } = requireTicketsDeploymentPackage(lock.cores[0], coreDeploymentHostVersions(lock));
   const database = new PlatformDatabaseClient();
   try {
     const result = await database.$transaction(tx => registerPlatformCorePermissions(tx, [manifest]), { isolationLevel: "Serializable" });

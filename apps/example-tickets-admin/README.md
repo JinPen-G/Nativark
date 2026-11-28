@@ -2,7 +2,15 @@
 
 本应用将公共后台与一个标准工单 Core 组合。登录、设置、侧栏、面包屑、铃铛、休息、面板和页面主按钮都来自公共包；Core 只提供自己的四个页面。默认零 Core 的同源应用见[公共后台](../platform-admin/README.md)。
 
+本宿主在原详情扩展位置选择[可选 AI 状态区](src/tickets-ai.tsx)，分别读取内置工单任务和外部MCP读取状态。未装配的API明确显示未配置；失败或刷新期间不继续显示旧“可用”。页面不自动创建任务、批准或执行，不把状态当权限。当前内置业务示例不调用模型，外部MCP的客户端模型由使用者自付；[完整接入与未验边界](../../packages/example-tickets-core/examples/ai-integration/README.md)分别说明。
+
+选装AI宿主时，同一详情的[原任务操作](src/tickets-ai-task.tsx)依次提供准备工单事实、创建原任务、准备提案、人类批准/拒绝、明确执行及原结果核对。批准展示原标题、说明、受派成员与修订；批准完成不会自动执行。页面从`@rental-os/example-tickets-core/ai-http`读取与HTTP/OpenAPI同源的闭合合同，不加载服务端AI Runtime。
+
+本标签的`sessionStorage`只保留按当前租户、用户和工单隔离的原操作/输入/Task/Run引用及待核对阶段；不保存工单正文、批准或凭据。刷新或重新进入只读取原结果，写请求关闭认证重发。存储不可用则停止新写入；当前身份/范围失效中止等待并拒绝迟到响应。原响应不明时继续保留引用，不由缺记录推导重试许可。业务收据确认与任务计量是否完整分别显示，普通工单动作仍沿原入口。
+
 ## 接入只看这三处
+
+选装MCP标准包时，清单明确选择`dist-mcp/index-mcp.mjs`才注册“外部读取授权”页面。原登录用户在`/cores/example-tickets/mcp-authorization`核对注册客户端、回调及scope，明确同意后读取原grant，审核实际工单字段并绑定原目标，再返回原客户端。页面不注册客户端、不替租户发布、不自动批准/签发/重发，原用量与撤回沿同一授权记录读取。详情的MCP状态不猜测最近grant；持有明确grant的人工页才显示该对象的当前读取条件。[宿主配置](../example-tickets-api/README.md#启动与人工授权)
 
 1. [main](src/main.tsx)取得工单页面贡献，调用 `registerCoreAdminPages`，将注册表和唯一会话交给 `createPlatformAdminApplication`。菜单、直接路由与面包屑共用该注册表，无须修改公共应用内部。
 2. [工单页面](../../packages/example-tickets-core/admin/index.tsx)从 `@rental-os/platform-admin/core` 使用 `CorePage`、`useCoreForm`、`CoreList` 和 `useCoreRequest`。页面声明名称、权限、父级和操作，框架复用原设计与请求围栏。
