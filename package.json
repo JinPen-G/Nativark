@@ -16,11 +16,13 @@
     "packages/example-tickets-core",
     "packages/mcp-server",
     "packages/platform-admin",
+    "packages/platform-client-contracts",
     "packages/platform-contracts",
     "packages/platform-core-host",
     "packages/platform-server"
   ],
   "scripts": {
+    "build:client-contracts": "npm run build -w @rental-os/platform-client-contracts",
     "prepare:rental-workspace": "node scripts/prepare-rental-workspace.cjs",
     "docs:check": "node scripts/validate-docs.cjs",
     "test:docs": "node --test tests/docs-check.test.cjs",
