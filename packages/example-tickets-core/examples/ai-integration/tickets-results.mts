@@ -82,6 +82,7 @@ export function createTicketsAiResultReaders(input: { database: PrismaClient; sc
     return { ...after, result: result ? { resultId: result.resultId, status: result.status, errorCode: result.errorCode,
       completeMeasurement: result.completeMeasurement, observedAt: result.observedAt } : null,
       taskReconciliationRequired: after.taskStatus === "waiting_external" || ["running", "unknown"].includes(after.step?.status ?? "")
+        || after.approvalConsumption === "unknown" || after.approvalConsumption === "reserved"
         || after.resources?.some(resource => resource.reserved !== "0") === true };
   } });
 }

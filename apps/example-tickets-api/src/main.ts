@@ -7,7 +7,7 @@ import { CORE_CONTRACT_VERSION, CoreDeploymentLockSchema } from "@rental-os/core
 import { requestIdentityMiddleware } from "@rental-os/platform-server";
 import { ticketsApplicationModule } from "./app.module";
 
-async function bootstrap() {
+export async function bootstrapTickets(select: (lock: ReturnType<typeof CoreDeploymentLockSchema.parse>) => unknown | Promise<unknown> = ticketsApplicationModule) {
   if (!process.env.DATABASE_URL || !process.env.AUTH_TOKEN_SECRET || !process.env.CORE_DEPLOYMENT_LOCK)
     throw new Error("示范宿主须配置DATABASE_URL、AUTH_TOKEN_SECRET与固定CORE_DEPLOYMENT_LOCK路径");
   const lock = CoreDeploymentLockSchema.parse(JSON.parse(readFileSync(process.env.CORE_DEPLOYMENT_LOCK, "utf8")));
@@ -18,7 +18,7 @@ async function bootstrap() {
   const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
   if (!Number.isSafeInteger(trustProxyHops) || trustProxyHops < 0) throw new Error("TRUST_PROXY_HOPS 须为非负整数");
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("API_PORT必须为1-65535整数");
-  const app = await NestFactory.create(ticketsApplicationModule(lock));
+  const app = await NestFactory.create(await select(lock) as Parameters<typeof NestFactory.create>[0]);
   try {
     // 只按部署方声明的代理跳数解析客户端地址；缺省不采信转发头。
     if (trustProxyHops > 0) app.getHttpAdapter().getInstance().set("trust proxy", trustProxyHops);
@@ -34,4 +34,4 @@ async function bootstrap() {
   }
 }
 
-void bootstrap();
+if (require.main === module) void bootstrapTickets();

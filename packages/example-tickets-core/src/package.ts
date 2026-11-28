@@ -3,7 +3,7 @@ import { lstatSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { createCoreArchive, CORE_ARCHIVE_LIMITS } from "@rental-os/core-contracts/archive";
 import { corePackageFiles, inspectCorePackageFiles } from "@rental-os/core-contracts/package";
-import { CorePackagePathSchema, pinCoreDocumentationLinks, renderCoreGuide, type CoreHostVersions, type CoreManifest } from "@rental-os/core-contracts";
+import { CorePackagePathSchema, pinCoreDocumentationLinks, renderCoreGuide, type CoreHostVersions, type CoreManifest, type CoreOpenApiContribution } from "@rental-os/core-contracts";
 import { createTicketsManifest } from "./manifest";
 import { createTicketsOpenApi } from "./openapi";
 
@@ -24,9 +24,12 @@ export function packTicketsPackage(input: {
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("工单打包根须为不经过链接的普通目录");
     if (dirname(directory) === directory) break;
   }
+  // 仅AI选装包加载同次编译的可选出口；Node版本沿清单，普通打包没有AI运行依赖。
+  const openapi = input.ai ? (require("../dist-ai/index.mjs") as { createTicketsAiOpenApi(): CoreOpenApiContribution }).createTicketsAiOpenApi()
+    : createTicketsOpenApi();
   const generated = new Map<string, Uint8Array>([
     ["core.manifest.json", Buffer.from(JSON.stringify(manifest, null, 2) + "\n")],
-    ["openapi.json", Buffer.from(JSON.stringify(createTicketsOpenApi(), null, 2) + "\n")],
+    ["openapi.json", Buffer.from(JSON.stringify(openapi, null, 2) + "\n")],
     ["CORE_GUIDE.md", Buffer.from(renderCoreGuide(manifest, input.platformTask, input.platformSource))]
   ]);
   let total = 0;

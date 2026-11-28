@@ -37,6 +37,14 @@ SaaS 的四组 Core 包管理 Controller 也从同一[应用工厂](src/assembly
 
 读取源从六个公共包的正式静态入口核 `platform-host.context.json` 同源编译证据，要求 `host=example-tickets` 及 `apps/example-tickets-api/prisma-deployment/core.deployment.lock.json` 等于当前锁。实际公共 schema、所选公共数据计划中的全部原 SQL 和完整工单包须与固定归档逐字节一致；只允许一个工单Core和空数据能力集合。版本读取复用本宿主的原Prisma账及物理观察，更新材料读取本身不查库。缺配置、固定引用或运行收据保持 unavailable，已有但不一致的材料拒绝读取。受控组合仍可通过 `composeTicketsApplication` 的第三个参数显式注入来源，生产默认不使用替代证据；候选准备沿原待部署状态保存。[公共数据计划](../platform-api/src/platform-data.ts)
 
+## 可选工单AI宿主
+
+默认 `start` 保持普通工单。显式 `npm run build:ai -w @rental-os/example-tickets-api` 编译选装入口，`npm run start:ai -w @rental-os/example-tickets-api` 使用同一启动、关闭、原Guard与数据库实例。前置是同一固定源码的公共AI Client、`ai-native-server@0.2.1`、`ai-native-data@0.2.5`及含`entries.ai`的完整工单`0.2.0`包；普通工单数据版本仍为`0.1.0`。构建顺序先完成公共AI服务端与工单`build:ai`，再构建本宿主普通入口和AI入口，不能用普通41模型Client启动AI入口。
+
+`CORE_DEPLOYMENT_LOCK`须只选择同一工单AI标准包与单个公共`ai-native`数据能力，`PLATFORM_AI_DATA_PACKAGE_DIR`为该数据包的绝对目录。启动核完整包和部署锁，业务请求在同一原事务内复核公共AI原迁移账及物理结构。沿同一公共初始化、部署准入、租户授权、成员分配和工单绑定步骤，不创建默认权益、工具发布、额度或角色。当前示例为无模型的内置业务任务，不要求平台模型连接或云模型预算；原Task累计资源仍适用。[装配入口](src/ai-main.mts) · [完整AI请求与原结果说明](../../packages/example-tickets-core/examples/ai-integration/README.md#完整宿主的接点)
+
+本入口已提供同源HTTP与原数据观察接点。公开AI部署准备、完整页面动作及CI实际运行仍在接续；不能把编译成功当成已经部署。原`package-platform-host.cjs`和`platform-host.context.json`当前只支持普通工单运行证据，因此选装AI组合的包管理“当前材料”不会补造可用收据；其正式运行包证据接点需另行固定。MCP tenant OAuth适配尚未提供时保持未配置，内置AI状态不冒充MCP可用。
+
 ## 独立后端运行包
 
 独立运行包由 [公共宿主打包器](../../scripts/package-platform-host.cjs) 选择此组合。完成下述构建及部署锁准备后，在本仓库根目录执行；把示例绝对路径替换成同一固定组合的实际材料路径。

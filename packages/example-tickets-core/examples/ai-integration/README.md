@@ -103,7 +103,8 @@ export function composeTicketsReads(
 | [tickets-runner.mts](tickets-runner.mts) | 原Task/Run提交、准备计量、Step登记及C05待批完成后释放租约；明确批准后由正式`continuePending`接续同一Run。中途不明只观察原任务，不新建任务或重放工具。 |
 | [tickets-results.mts](tickets-results.mts) | 同一Task、原artifact、C05消费与精确工单收据一起核对；业务已提交与任务计量是否完整分别显示，不用工单收据补造丢失的计量事实。 |
 | [tickets-evidence.mts](tickets-evidence.mts) | 只读原计划/ActionInput、原计量artifact及三种业务资源、C05和精确业务收据；成功产生`core:example-tickets:ticket`及原修订快照。缺消费或完整计量不得声明提交，unknown只保留原证据。 |
-| [tickets-application.mts](tickets-application.mts) | 当前签名请求组合正式正文保护、tenant身份、工单Step证据与上述参加者，结束时关闭绑定。它是宿主内部请求端口，尚未直接开放HTTP。 |
+| [tickets-application.mts](tickets-application.mts) | 当前签名请求组合正式正文保护、tenant身份、工单Step证据与上述参加者，结束时关闭绑定。 |
+| [tickets-http.mts](tickets-http.mts) | 同源闭合输入/输出、OpenAPI和精确Core路由；HTTP只传原引用、操作键与业务输入，不接受身份、租约或批准证明。 |
 
 `createTicketsStartSource`从原受保护数据库view读取Task、Step、原输入、提案版本和批准；当前主体、场景、发布/权益/政策来自已绑定的`createPublicTenantTaskAuthority`。宿主须在该权威的`assertTaskAction/assertReference`中接入上述场景参加者，数据库使用正式`createAiBodyStorageDatabase`保护view，发布使用固定管理权限的`createTenantConfigurationTransactions`。不能从HTTP body传执行上下文、租约或批准证明，也不能用固定管理员/恒真回调补缺件。
 
@@ -112,6 +113,12 @@ export function composeTicketsReads(
 原工单/版本或原输入、目标、提案、工具版本变化时拒绝；同键已有其他动作也拒绝。已提交的原批准只能回读同一操作收据；结果不明保持`retryable:false`和原operationId，原Runner通过原结果读口核对，不重新执行。服务端模型不是该业务执行器的职责，需要模型时另接唯一Gateway与财务账，不直连供应商。
 
 ## 完整宿主的接点
+
+选装入口为 `@rental-os/example-tickets-core/ai`；普通包不会加载它。`createTicketsAiHttpContribution()` 和 `createTicketsAiOpenApi()`必须与同一标准AI包及原Guard组合。`TicketsAiHttpModule`提供 `POST /api/cores/example-tickets/ai/<action>`，动作集合由 `TICKETS_AI_HTTP`声明，未知动作拒绝。发布另核当前`system:params:manage`，新工作核`example-tickets:ticket:start`，批准和执行各自重新核原依据；原结果读口不恢复新工作权。
+
+请求顺序是`prepareInput`保存受权事实 → `createTask`创建原任务 → `prepareApproval`计量准备并释放租约 → `approval`展示原提案 → `decide`记录人类决定 → `execute`明确执行 → `result`读取原收据。写请求失败、断线或超时后只用`originalInput`、`originalTask`、`approval`、`result`核对原引用，不换操作键或自动重发。`observeInterrupted`仅接原Runner的恢复观察，不能证明未消耗或重新派发工具。发布也有独立的`publicationOperation`原结果读口。
+
+显式宿主见[可选AI装配](../../../../apps/example-tickets-api/src/ai-main.mts)及[运行说明](../../../../apps/example-tickets-api/README.md#可选工单ai宿主)。它与普通HTTP共用原Auth、Guard、数据库和生命周期；公共AI数据包须由同一部署锁固定，并在原事务中核迁移及物理状态。包构建/HTTP合同和宿主接线不等于真库、浏览器或完整A04通过。
 
 普通 HTTP 已提供 `GET /api/cores/example-tickets/tickets/:ticketId/ai-status`，单源schema和OpenAPI沿[工单HTTP](../../src/http.ts)。`createTicketsAiStatus({ service, builtin?, mcp? })` 接受宿主的真实只读状态参加者，并复用普通工单详情权限与返回前版本检查；`TicketsHttpModule.registerFactory` 的 `aiStatus` 注入该服务，缺省两条路线均明确 `unconfigured/host_not_selected`。这个默认值只说明尚未装配，不能作为完整AI验收。
 
@@ -129,7 +136,7 @@ export function composeTicketsReads(
 | 原结果与 unknown | 原 `TicketsService.receipt(principal, operationId)` 与 `/task-persistence`、`/runtime/original-result-reads`、`/runtime/original-task-recovery-read`；保持原 actionId、操作键和结果引用，缺原证据不补成功、不重新派发 |
 | 任务资源与模型 | `/task-resource-ledger`、`/task-runner-resources`、`/task-measured-effects` 保持累计资源；需要服务端模型时接 `/public-tenant-gateway` 和 `/runtime/budget/public-budget-ledger`，恢复不重置账 |
 
-Task/Run聚合提交已使用上述固定正式出口，工单发布、原输入、计划、批准、执行、Step事实与结果参加者已提供。完整宿主还须组合可选数据准入、HTTP/页面动作，以及真实MCP身份/发布/计量/字段权威。工单成功用自身已提交对象及精确原收据证明`committed`，不能伪装成订单/报告事实或`effect:none`；公共仓储继续拥有状态机、CAS、事件与复权。[原批准消费](../../../ai-native-server/src/runtime/approval-consumption-persistence.repository.ts) · [工单事务](../../src/mysql.ts)
+Task/Run聚合提交已使用上述固定正式出口，工单发布、原输入、计划、批准、执行、Step事实、结果与HTTP参加者已提供。可选宿主数据准入已经接到原观察器，页面动作和真实MCP身份/发布/计量/字段权威仍须完成装配与实际验证。工单成功用自身已提交对象及精确原收据证明`committed`，不能伪装成订单/报告事实或`effect:none`；公共仓储继续拥有状态机、CAS、事件与复权。[原批准消费](../../../ai-native-server/src/runtime/approval-consumption-persistence.repository.ts) · [工单事务](../../src/mysql.ts)
 
 现有持久MCP OAuth的`OriginalOAuthPrincipalBinding`包含真实workspaceId及空间准入，而工单Core为tenant范围。工单宿主须选择已受支持的原身份参加者；缺匹配参加者时保持未配置，不能捏造空间ID或默认准入。接口通用的资源verifier也不自动提供业务身份映射、持久目标或字段许可。
 

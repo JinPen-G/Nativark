@@ -17,10 +17,12 @@ import { TICKETS_AI_TOOLS, TICKETS_AI_TRANSACTION, TICKETS_AI_RETENTION_MS, Tick
 
 type Tx = Prisma.TransactionClient;
 const revision = z.number().int().min(1).max(4294967294);
-const policySchema = z.object({ revision, enabled: z.boolean(), expiresAt: z.string().datetime({ offset: true }), limits: aiTaskRunnerLimitsSchema }).strict();
+export const TicketsAiPolicySchema = z.object({ revision, enabled: z.boolean(), expiresAt: z.string().datetime({ offset: true }), limits: aiTaskRunnerLimitsSchema }).strict();
+const policySchema = TicketsAiPolicySchema;
 export const TicketsAiPublicationCommandSchema = policySchema.omit({ revision: true }).extend({ operationId: z.string().uuid(), expectedRevision: revision.nullable() }).strict();
-const receiptSchema = z.object({ version: z.literal("example-tickets-ai-publication-1"), operationId: z.string().uuid(),
+export const TicketsAiPublicationReceiptSchema = z.object({ version: z.literal("example-tickets-ai-publication-1"), operationId: z.string().uuid(),
   scopeId: z.string().uuid(), commandHash: z.string().regex(/^[a-f0-9]{64}$/u), policy: policySchema, policyHash: z.string().regex(/^[a-f0-9]{64}$/u) }).strict();
+const receiptSchema = TicketsAiPublicationReceiptSchema;
 const conflict = () => new TicketsAiSceneError("basis_changed", "TICKETS_AI_BASIS_CHANGED");
 const unavailable = () => new TicketsAiSceneError("authority_unavailable");
 const logId = (principal: CorePrincipal, operationId: string) => {

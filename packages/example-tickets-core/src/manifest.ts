@@ -38,7 +38,7 @@ export function createTicketsManifest(source: CoreManifest["source"], options: {
     assets: ["package.json", ...["contracts", "service", "server", "manifest", "mysql", "http", "nest", "openapi", "metadata", "package", "platform-host", "ai-status"].map(name => `dist/${name}.js`),
       ...["index", "contracts", "service", "server", "manifest", "mysql", "http", "nest", "openapi", "metadata", "package", "platform-host", "ai-status"].map(name => `dist/${name}.d.ts`),
       ...(options.ai ? ["index", "tickets-application", "tickets-authority", "tickets-approval", "tickets-publication", "tickets-plan",
-        "tickets-runner", "tickets-results", "tickets-evidence", "tickets-start"].flatMap(name =>
+        "tickets-runner", "tickets-results", "tickets-evidence", "tickets-start", "tickets-http"].flatMap(name =>
         [...(name === "index" ? [] : [`dist-ai/${name}.mjs`]), `dist-ai/${name}.d.mts`]) : [])]
   });
 }
