@@ -137,6 +137,10 @@ import {
 
 Rental 宿主沿原 `CORE_PACKAGE_STORAGE_ROOT` 和 `CORE_PLATFORM_PACKAGE_REFERENCE` 选择底座材料：在受管目录的 `archives/index.json` 登记与完整锁中 `base.platform` 一致的标准底座归档，实际 `.tgz` 放同一 `archives/` 目录。诊断的 `--platform-package` 也选择这份已核字节。缺原登记或归档时保持材料未检查，不能用运行上下文、源码目录或 `v2.base` 代替标准归档证据；登记不办理下载、部署或 v1 升级。索引格式复用[原包来源入口](../../packages/platform-core-host/src/core-package-preflight/README.md)。
 
+可复现的新装观察组合固定为 Zelo `6d46f4943f7a0538f04e7ee2d908827d8345a666` 与 Rental `daa798c4394858c70db7b6e13c7b0742aa02cb74`，准备方式见该版 [Rental 公开入口](https://github.com/JinPen-G/Zelo-rental-core/blob/daa798c4394858c70db7b6e13c7b0742aa02cb74/workspace/apps/rental-api/README.md#新装-rental-与公共-ai)。这些是待评审的固定开发源码，尚非正式发行。按同一组 SHA 准备 `--fresh-ai` 运行包、标准底座归档和原索引；先做本地材料诊断，缺选装包时按报告补齐明确材料，数据库保持未知。原打包结果 `prepared / deployment: pending` 也不代表迁移已执行。
+
+该宿主启动门禁要求完整 18 条原迁移（公共 14、Rental 2、公共 AI 1、Rental 扩展 1）通过原账与物理检查，不能为了提前提供 HTTP 状态绕过门禁。按原说明显式迁移和初始化 SaaS，再使用当前 SaaS 会话读取上面的诊断。品类尚未初始化时，报告可同时显示数据 `ready` 和安装 `incomplete / initialization_required`；在核定环境显式执行 `node apps/rental-api/dist-ai/ai-fresh-initialize.js` 后，用同一身份重读平台及 Core 的原初始化状态/收据、每阶段原账和完整安装 `ready`。重复执行该原入口保留已有品类及初始化收据；观察命令本身不会触发它。租户授权和具体业务可用性继续分别办理。
+
 原因码白名单为 `materials_unavailable`、`runtime_identity_unverified`、`deployment_changed`、`ledger_unavailable`、`ledger_incomplete`、`ledger_mismatch`、`physical_unavailable`、`physical_mismatch`、`initialization_unchecked`、`initialization_required`、`initialization_conflict`、`observation_unavailable`。其他安全代码投影为 `host_prerequisite`，均阻止整体 ready；原异常文字不进入诊断。未知/缺观察退出 2，已知冲突或待初始化退出 1，完整安装观察通过退出 0；整条 doctor 还会综合本地材料与成员检查。
 
 ### 独立 Rental 的公共数据 SDK 映射
