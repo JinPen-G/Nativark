@@ -138,7 +138,7 @@ jobs:
           NODE
           npm install --package-lock-only --ignore-scripts --no-audit --no-fund --cache "$task/npm-cache"
           npm ci --ignore-scripts --no-audit --no-fund --cache "$task/npm-cache"
-      - name: 同包宿主迁移、授权和持久化冒烟
+      - name: 同包宿主迁移、授权、页面和持久化冒烟
         working-directory: ${{ env.CI_DIR }}/platform
         shell: bash
         run: |
@@ -154,16 +154,22 @@ jobs:
           selected=$(node -p "require(process.argv[1]).directory" "$task/prepared.json")
           node "$selected/host/api/dist/main.js" > "$task/api.log" 2>&1 &
           api_pid=$!
-          trap 'kill "$api_pid" ${web_pid:+"$web_pid"} 2>/dev/null || true; wait || true' EXIT
+          trap 'kill "$api_pid" ${web_pid:+"$web_pid"} ${driver_pid:+"$driver_pid"} 2>/dev/null || true; wait || true' EXIT
           node node_modules/vite/bin/vite.js preview --configLoader runner --config "$selected/host/admin/vite.config.mts" --host 127.0.0.1 --port 5192 --strictPort > "$task/web.log" 2>&1 &
           web_pid=$!
           curl -fsS --retry 30 --retry-delay 1 --retry-max-time 60 --retry-connrefused --max-time 5 http://127.0.0.1:5192/api/health -o "$task/health.json"
+          # 复用runner预装且相互匹配的浏览器/驱动，仅开本job临时profile；不引入测试包或runner。
+          google-chrome --version
+          "$CHROMEWEBDRIVER/chromedriver" --version
+          "$CHROMEWEBDRIVER/chromedriver" --port=9515 --allowed-ips=127.0.0.1 > "$task/browser.log" 2>&1 &
+          driver_pid=$!
+          curl -fsS --retry 10 --retry-delay 1 --retry-connrefused --max-time 5 http://127.0.0.1:9515/status -o "$task/browser-status.json"
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import { randomUUID } from 'node:crypto';
           import { writeFileSync } from 'node:fs';
           import { resolve } from 'node:path';
-          const origin = 'http://127.0.0.1:5192', coreId = 'ci-notes', api = '/api/cores/ci-notes', management = '/api/platform/core-host/';
+          const origin = 'http://127.0.0.1:5192', coreId = 'ci-notes', api = '/api/cores/ci-notes', management = '/api/platform/core-host/', passwords = new Map();
           async function request(path, token, data, expected = 200, method = data === undefined ? 'GET' : 'POST') {
             const response = await fetch(origin + path, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
               ...(data === undefined ? {} : { body: JSON.stringify(data) }), signal: AbortSignal.timeout(15000) });
@@ -173,7 +179,9 @@ jobs:
           const post = (route, token, data) => request(management + route, token, { coreId, ...data });
           async function login(code, account, password) {
             const session = await request('/api/auth/login', undefined, { tenantCode: code, account, password }, 201);
-            const changed = await request('/api/auth/change-password', session.accessToken, { currentPassword: password, newPassword: `Core9-${randomUUID()}` }, 201);
+            const newPassword = `Core9-${randomUUID()}`;
+            const changed = await request('/api/auth/change-password', session.accessToken, { currentPassword: password, newPassword }, 201);
+            passwords.set(`${code}/${account}`, newPassword);
             return changed.accessToken;
           }
           const html = await (await fetch(origin + '/login')).text(), entry = /<script\b[^>]*\bsrc="(\/assets\/[^"/]+\.js)"/.exec(html)?.[1];
@@ -224,9 +232,58 @@ jobs:
           assert.equal((await post('member-assignments/read', first.token, { userId: user.id })).assignment.state, 'revoked');
           await post('member-assignments', first.token, { userId: user.id, state: 'assigned', expectedRevision: revoked.revision, operationId: randomUUID() });
           assert.equal((await request(api + `/items/${created.item.id}`, editor)).revision, 3);
+
+          // W3C WebDriver直接驱动同一正式页面；只轮询DOM读取，不重发页面写动作。
+          async function driver(path, data, method = data === undefined ? 'GET' : 'POST') {
+            const response = await fetch('http://127.0.0.1:9515' + path, { method, headers: { 'Content-Type': 'application/json' },
+              ...(data === undefined ? {} : { body: JSON.stringify(data) }), signal: AbortSignal.timeout(30000) });
+            const { value } = await response.json();
+            assert(response.ok && !value?.error, `浏览器 ${path}: ${value?.error ?? response.status}`); return value;
+          }
+          const browser = await driver('/session', { capabilities: { alwaysMatch: { browserName: 'chrome',
+            'goog:chromeOptions': { args: ['--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1440,1000', '--lang=zh-CN',
+              '--disable-background-networking', '--disable-component-update', '--no-first-run', '--disable-sync', '--no-proxy-server',
+              '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost', `--user-data-dir=${resolve(process.env.GITHUB_WORKSPACE, process.env.CI_DIR, 'browser-profile')}`] },
+            'goog:loggingPrefs': { browser: 'ALL' } } } });
+          const sessionPath = '/session/' + browser.sessionId;
+          const dom = (script, ...args) => driver(sessionPath + '/execute/sync', { script, args });
+          async function waitFor(read, label) {
+            const until = Date.now() + 15000;
+            do { const value = await read(); if (value) return value; await new Promise(resolve => setTimeout(resolve, 150)); } while (Date.now() < until);
+            throw new Error('页面等待超时：' + label);
+          }
+          const element = selector => waitFor(() => dom('return [...document.querySelectorAll(arguments[0])].find(e => e.checkVisibility({visibilityProperty:true,opacityProperty:true}) && !e.disabled) ?? null', selector), selector);
+          async function fill(selector, text) {
+            const field = (await element(selector))['element-6066-11e4-a52e-4f735466cecf'];
+            await driver(`${sessionPath}/element/${field}/clear`, {});
+            await driver(`${sessionPath}/element/${field}/value`, { text });
+          }
+          async function click(label) {
+            const button = await waitFor(() => dom('return [...document.querySelectorAll("button")].find(e => e.textContent.trim() === arguments[0] && e.checkVisibility({visibilityProperty:true,opacityProperty:true}) && !e.disabled) ?? null', label), label);
+            await driver(`${sessionPath}/element/${button['element-6066-11e4-a52e-4f735466cecf']}/click`, {});
+          }
+          const text = label => waitFor(() => dom('return document.body.innerText.includes(arguments[0])', label), label);
+          try {
+            await driver(sessionPath + '/url', { url: origin + '/login' });
+            await fill('#tenantCode', first.code); await fill('#account', 'editor'); await fill('#password', passwords.get(`${first.code}/editor`));
+            await click('进入工作台'); await waitFor(() => dom('return location.pathname !== "/login"'), '登录完成');
+            await driver(sessionPath + '/url', { url: origin + '/cores/ci-notes/items' });
+            await text('已编辑'); await click('新建条目');
+            await fill('#title', '页面创建'); await fill('#description', '页面说明'); await click('创建条目');
+            await text('条目已创建'); await click('查看条目'); await text('页面说明'); await click('编辑条目');
+            await fill('#title', '页面编辑'); await fill('#description', '页面扩展命中'); await click('保存条目');
+            await text('页面编辑'); await click('归档条目'); await click('确认'); await text('已归档');
+            await click('返回条目'); await fill('[aria-label="说明包含"]', '页面扩展命中');
+            await waitFor(() => dom('return document.body.innerText.includes("页面编辑") && !document.body.innerText.includes("已编辑")'), '公开说明筛选');
+            const persisted = await request(api + '/items?description=页面扩展命中', editor);
+            assert.equal(persisted.total, 1); assert.equal(persisted.rows[0].state, 'archived'); assert.equal(persisted.rows[0].revision, 3);
+            const errors = (await driver(sessionPath + '/log', { type: 'browser' })).filter(entry => entry.level === 'SEVERE' && /(?:Uncaught|TypeError|ReferenceError)/.test(entry.message));
+            assert.equal(errors.length, 0, '正式页面存在未处理脚本错误');
+            console.log('预装Chrome真实页面：登录、列表、新建、详情、编辑、确认归档及公开说明筛选通过，同库HTTP回读一致');
+          } finally { await driver(sessionPath, undefined, 'DELETE'); }
           // 仅保存本job的短期会话，供重启回读；不打印、不上传，always清理。
           writeFileSync(resolve(process.env.GITHUB_WORKSPACE, process.env.CI_DIR, 'restart.json'), JSON.stringify({ editor, itemId: created.item.id, operationId: archived.operationId }), { mode: 0o600, flag: 'wx' });
-          console.log('生成Core：同包启动、显式准入/授权/分配/绑定、持久读写、公开扩展、权限拒绝及停用重开通过；未将HTML产物检查当作浏览器操作');
+          console.log('生成Core：同包启动、显式准入/授权/分配/绑定、持久读写、公开扩展、权限拒绝及停用重开通过');
           NODE
           kill "$api_pid"
           stopped=0
