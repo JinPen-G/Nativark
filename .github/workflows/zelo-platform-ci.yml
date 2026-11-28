@@ -234,7 +234,7 @@ jobs:
               test ! -e "$CI_UPGRADE_ROOT"
             }
             trap cleanup_upgrade EXIT
-            mkdir -p "$CI_UPGRADE_ROOT/storage/archives"
+            mkdir -p "$CI_UPGRADE_ROOT/storage/archives" "$CI_UPGRADE_ROOT/storage/candidates"
             for pair in previous:016086943419e3462fc7763a856f97de6d32b279 candidate:f3bfce5800ea971af6148e843f1e63437d5fa94a; do
               label="${pair%%:*}" commit="${pair#*:}"
               git -C "$task/source" fetch --no-tags --depth=1 origin "$commit"
@@ -361,6 +361,8 @@ jobs:
             const interrupted = await cli(['prepare', '--kind', 'platform', '--reference', 'candidate', '--sha256', sha256],
               'http://127.0.0.1:' + proxy.address().port);
             assert.equal(interrupted.code, 2); assert.equal(interrupted.value.status, 'unknown'); assert.equal(interrupted.value.sha256, sha256);
+            if (published?.status !== 'prepared') console.error({ preparation: published?.status ?? 'no_response',
+              reason: /^[a-z_]+$/.test(published?.error?.code ?? '') ? published.error.code : 'unavailable' });
             assert.equal(published?.status, 'prepared');
             proxy.closeAllConnections(); await new Promise(resolve => proxy.close(resolve)); proxy = undefined;
             const preparedAt = published.record.preparedAt, before = await snapshot();
