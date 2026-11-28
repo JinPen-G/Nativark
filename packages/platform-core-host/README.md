@@ -78,7 +78,7 @@ Rental 与双 Core 从同一已核部署目录取得全量所选清单，只为 
 
 ## Core 包管理接入
 
-`composePlatformCorePackageAssembly` 共用当前 Core 应用的 `database`、`users` 和 `catalogue`，由 `CorePackageAssemblyModule.register` 在同一 Nest 容器供给读取、预检、发行选择、候选准备及私有来源五组 Controller。通过 `createPlatformCorePackageAssemblyHttpAccess(packages, coreHttp)` 合并原 Core 准入，再交给唯一 `coreHttpProvider`。当前主体经过原签名 Guard 和应用事务复验，重复或未登记路径拒绝。[完整读取路线](src/core-packages/README.md)
+`composePlatformCorePackageAssembly` 共用当前 Core 应用的 `database`、`users` 和 `catalogue`，由 `CorePackageAssemblyModule.register` 在同一 Nest 容器供给读取、预检、发行选择、候选准备、私有来源及有界部署六组 Controller。通过 `createPlatformCorePackageAssemblyHttpAccess(packages, coreHttp)` 合并原 Core 准入，再交给唯一 `coreHttpProvider`。当前主体经过原签名 Guard 和应用事务复验，重复或未登记路径拒绝。[完整读取路线](src/core-packages/README.md)
 
 宿主使用 `createPlatformCorePackageAudit<HostTransaction>()` 写入原 `operationLog` 事务。发行与候选发布前记录 `requested` 提交意图并复验当前主体，文件发布后的提交失应答或撤权沿原引用 / SHA 返回 `unknown`。发行引用与候选分别保存到 `storageDirectory/releases` 和 `storageDirectory/candidates`。根目录使用宿主配置的绝对路径，部署方须预先准备普通目录与服务账户访问权。[发行存储](src/core-package-selection/README.md) · [候选准备](src/core-package-preparation/README.md)
 
@@ -94,7 +94,7 @@ SaaS 管理员沿原 operator 会话及 `system:tenant:manage` 权限，在“Co
 
 固定发行的选择、下载、缓存命中与候选准备均核当前来源配置、原身份和 GitHub 远端完整 pin。缓存和在途下载按当前主体/会话及配置修订隔离；新主体不能复用他人的私有获取资格。远端不可达、撤权、移动 Tag 或资产变化即拒绝新的材料操作。凭据只发送到已核仓库的 GitHub API 首次请求，后续重定向均不带凭据。[固定发行规则与许可](../core-contracts/README.md#私有固定发行的服务端合同)
 
-私有候选摘要包含原 `privateRelease` 身份，凭据及配置修订不进候选或归档。实际部署器须在原受权派发点调用 `packages.deploymentSourceGuard.withAccess(sha256, dispatch)`，重新核原候选全部文件、当前组合、私有来源与当前主体；回调仍由原部署器办理部署/软件许可批准、唯一派发、结果收据和失败恢复。该服务端接点不注册浏览器执行路由，不提供新部署器、持久放行票据或商业收费规则。当前公开双仓自动切换器尚未消费私有 Core 候选，不能仅凭此接点或准备回执启用私有自动部署；具体接线及真实切换须单独核验。[派发接点及限制](src/core-package-preparation/README.md#私有候选与实际部署接点)
+私有候选摘要包含原 `privateRelease` 身份，凭据及配置修订不进候选或归档。可信宿主可静态注入 `deploymentExecutor`，由原管理事务和 `deploymentSourceGuard.withAccess` 复核候选、当前组合、来源及主体，再持久绑定唯一派发 ID 并有界提交。执行器独立核部署/软件许可批准，沿同 ID 提供真实结果与失败恢复；失应答不自动重派。固定 HTTP 只接受候选摘要、UUID 和原批准引用，不接受路径、命令或凭据。默认公共 API 未注入执行器，官方双仓更新器仍只消费原 Rental 配对镜像，私有候选保持待部署。[正式端口、原结果与目标限制](src/core-package-preparation/README.md#私有候选与实际部署接点)
 
 撤销取包权只阻止新的受限获取、准备和派发。已安装组合继续核本地原包及原数据观察，原回执仍由当前管理权限读取；不自动停用 Core、改租户授权、撤回成员、删除候选或业务数据。停用、运行权益及模型消费账分别沿原管理权威。商业授权只预留在原部署准入/租户授权/成员分配接点，收费、期限和离线宽限未实现，缺许可依据不得用下载成功补成允许。
 
@@ -102,7 +102,7 @@ SaaS 管理员沿原 operator 会话及 `system:tenant:manage` 权限，在“Co
 
 `createPublicCorePackageDeploymentSources` 为零 Core 标准底座读取启动锁及本地底座引用。宿主从当前运行入口固定底座根和六个服务端模块目录，读取器核当前 Node / 已加载合同版本，复用原发行检查及 `readPackageArtifacts` 核完整标准包，再核数据计划与锁定合同。版本读取委托原 `createMysqlCoreDeploymentObservation`，候选材料供给同一原迁移字节。缺证据、目录/源码差异及原账失败保留不可用，启动锁固定到本次进程。[源码](src/core-package-deployment.ts) · [默认宿主配置](../../apps/platform-api/README.md)
 
-装配四组模块后，调用 `createPlatformCorePackageOpenApi(createPlatformCoreOpenApi(createPlatformOpenApi()))` 组合实际接口资料，路径或 schema 冲突立即拒绝。浏览器从正式协议子出口读取路径常量，五个 Web 宿主在 dev、build 和 lint 前构建本包，准备同版本运行时出口。[公共 API 装配](../../apps/platform-api/src/app.module.ts) · [页面接入](../platform-admin/src/features/core-packages/README.md)
+装配同版完整模块后，调用 `createPlatformCorePackageOpenApi(createPlatformCoreOpenApi(createPlatformOpenApi()))` 组合实际接口资料，路径或 schema 冲突立即拒绝。浏览器从正式协议子出口读取路径常量，Web 宿主在 dev、build 和 lint 前构建本包，准备同版本运行时出口。[公共 API 装配](../../apps/platform-api/src/app.module.ts) · [页面接入](../platform-admin/src/features/core-packages/README.md)
 
 ### 分阶段新装的只读运行证据
 

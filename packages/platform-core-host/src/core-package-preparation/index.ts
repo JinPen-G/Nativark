@@ -5,3 +5,7 @@ export * from "./bundle";
 export * from "./file-store";
 export * from "./application";
 export * from "./http";
+export * from "./deployment-ports";
+export * from "./deployment";
+export * from "./deployment-http";
+export { CORE_PACKAGE_DEPLOYMENT_HTTP } from "./deployment-protocol";

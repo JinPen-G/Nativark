@@ -15,6 +15,8 @@ import { CorePackageReleaseReceiptRequestSchema, CorePackageReleaseReferenceSche
 import { CORE_PACKAGE_PREPARATION_HTTP } from "../core-package-preparation/protocol";
 import { CorePackagePreparationRequestSchema, CorePackagePrepareRequestSchema, CorePackagePreparationQuerySchema } from "../core-package-preparation/ports";
 import { CORE_PACKAGE_SOURCE_HTTP } from "../core-package-source-protocol";
+import { CORE_PACKAGE_DEPLOYMENT_HTTP } from "../core-package-preparation/deployment-protocol";
+import { CorePackageDeploymentRequestSchema, CorePackageDeploymentQuerySchema } from "../core-package-preparation/deployment-ports";
 
 type Schema = Record<string, unknown>;
 const namespace = "PlatformCorePackage";
@@ -224,6 +226,12 @@ function schemas(): CoreOpenApiContribution["schemas"] {
     [`${namespace}.PreparationRequest`]: coreOpenApiSchema(CorePackagePreparationRequestSchema),
     [`${namespace}.PrepareRequest`]: coreOpenApiSchema(CorePackagePrepareRequestSchema),
     [`${namespace}.PreparationQuery`]: coreOpenApiSchema(CorePackagePreparationQuerySchema),
+    [`${namespace}.DeploymentRequest`]: coreOpenApiSchema(CorePackageDeploymentRequestSchema),
+    [`${namespace}.DeploymentQuery`]: coreOpenApiSchema(CorePackageDeploymentQuerySchema),
+    [`${namespace}.DeploymentResult`]: variants(ref("Unavailable"),
+      extend(coreOpenApiSchema(CorePackageDeploymentQuerySchema), { status: values("pending", "unknown") }),
+      extend(coreOpenApiSchema(CorePackageDeploymentQuerySchema), { status: values("succeeded", "failed"),
+        receipt: text, current: ref("DeploymentLock") })),
     [`${namespace}.PrivateSource`]: object({ provider: values("github"), enabled: flag,
       repositories: { ...list(ref("RepositoryURL")), maxItems: 100, uniqueItems: true }, credentialConfigured: flag,
       revision: { ...timestamp, nullable: true } }),
@@ -234,7 +242,7 @@ function schemas(): CoreOpenApiContribution["schemas"] {
   };
 }
 
-/** 四组模块全部登记后由宿主组合此片段，记录与实体结果沿原 requestId 包装。 */
+/** 所有包管理 Controller 同版登记后组合此片段，记录与实体结果沿原 requestId 包装。 */
 export function createCorePackageOpenApi(): CoreOpenApiContribution {
   const operations: Array<{ id: string; route: { method: string; path: string }; summary: string;
     request?: string; response: string; effect: "read" | "write" }> = [
@@ -250,6 +258,8 @@ export function createCorePackageOpenApi(): CoreOpenApiContribution {
     { id: "previewPreparation", route: CORE_PACKAGE_PREPARATION_HTTP.preview, summary: "预览完整待部署候选", request: "PreparationRequest", response: "PreparationPreview", effect: "read" },
     { id: "prepare", route: CORE_PACKAGE_PREPARATION_HTTP.prepare, summary: "按原预览摘要准备待部署文件", request: "PrepareRequest", response: "PreparationResult", effect: "write" },
     { id: "preparationReceipt", route: CORE_PACKAGE_PREPARATION_HTTP.receipt, summary: "读取同一原候选摘要与全部文件证据", request: "PreparationQuery", response: "PreparationRead", effect: "read" },
+    { id: "dispatchDeployment", route: CORE_PACKAGE_DEPLOYMENT_HTTP.dispatch, summary: "向已批准的可信宿主单次提交固定候选", request: "DeploymentRequest", response: "DeploymentResult", effect: "write" },
+    { id: "deploymentReceipt", route: CORE_PACKAGE_DEPLOYMENT_HTTP.receipt, summary: "按同一派发 ID 读取宿主真实部署结果", request: "DeploymentQuery", response: "DeploymentResult", effect: "read" },
     { id: "privateSource", route: CORE_PACKAGE_SOURCE_HTTP.read, summary: "读取 SaaS 私有来源脱敏配置", response: "PrivateSource", effect: "read" },
     { id: "savePrivateSource", route: CORE_PACKAGE_SOURCE_HTTP.save, summary: "配置轮换或撤销私有来源凭据", request: "SavePrivateSource", response: "PrivateSource", effect: "write" }
   ];

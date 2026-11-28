@@ -8,6 +8,8 @@ import {
   type CorePackageArtifact
 } from "../core-package-preflight/ports";
 import type { CorePackageReadFailure } from "../core-package-ports";
+import type { PlatformCoreTransaction } from "../ports";
+import type { CorePackageDeploymentOperationStore } from "./deployment-ports";
 
 export const CorePackagePreparationRequestSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("install"), package: CorePackageInspectRequestSchema }).strict(),
@@ -70,7 +72,7 @@ export interface CorePackagePreparationBundle {
   artifact: CorePackageArtifact;
   files: ReadonlyMap<string, Uint8Array>;
 }
-export interface CorePackagePreparationStore {
+export interface CorePackagePreparationStore extends Partial<CorePackageDeploymentOperationStore> {
   prepare(bundle: CorePackagePreparationBundle): CorePackagePreparationResult;
   read(sha256: string): CorePackagePreparationRead;
 }
@@ -81,6 +83,7 @@ export interface CorePackagePreparationApplication {
 }
 /** 仅供服务端原部署器在真正派发前调用；不是浏览器命令、持久授权或新的部署执行器。 */
 export interface CorePackageDeploymentSourceGuard {
-  withAccess<T>(sha256: string, dispatch: (record: CorePackagePreparationRecord) => Promise<T>): Promise<T>;
+  withAccess<T>(sha256: string, dispatch: (record: CorePackagePreparationRecord, transaction: PlatformCoreTransaction,
+    revalidate: () => Promise<void>) => Promise<T>): Promise<T>;
 }
 export { CORE_PACKAGE_PREPARATION_HTTP } from "./protocol";

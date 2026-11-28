@@ -2,7 +2,7 @@
  * 同摘要已有目录逐字节核验，原回读核文件清单。暂存保留创建进程与原 SHA，
  * 退出只清理本次且身份/字节未变的文件和空目录，强制退出残留须另核归属。 */
 import {
-  closeSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, realpathSync,
+  closeSync, fsyncSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, realpathSync,
   renameSync, rmdirSync, unlinkSync, writeFileSync, type Stats
 } from "node:fs";
 import { createHash } from "node:crypto";
@@ -14,6 +14,7 @@ import { prepareCoreInstall } from "@rental-os/core-contracts/install";
 import { requestFingerprint } from "@rental-os/platform-contracts/request-fingerprint";
 import { CoreAccessError } from "@rental-os/core-host";
 import type { CorePackageLegacyApiRoutes } from "../core-package-ports";
+import { CorePackageDeploymentOperationSchema, type CorePackageDeploymentOperation, type CorePackageDeploymentOperationStore } from "./deployment-ports";
 import {
   CorePackagePreparationRecordSchema, type CorePackagePreparationBundle,
   type CorePackagePreparationRecord, type CorePackagePreparationStore
@@ -112,10 +113,21 @@ export function createCorePackagePreparationFileStore(input: {
   directory: string;
   legacyApiRoutes?: CorePackageLegacyApiRoutes;
   now?: () => number;
-}): CorePackagePreparationStore {
+}): CorePackagePreparationStore & CorePackageDeploymentOperationStore {
   const root = resolve(input.directory), now = input.now ?? Date.now;
   const legacyApiRoutes = structuredClone(input.legacyApiRoutes ?? {});
   const target = (sha256: string) => join(root, CoreArtifactHashSchema.parse(sha256));
+  const deploymentFile = (sha256: string) => join(root, `.deployment-${CoreArtifactHashSchema.parse(sha256)}.json`);
+  function readDeployment(sha256: string): CorePackageDeploymentOperation | undefined {
+    ordinaryDirectory(root);
+    const file = deploymentFile(sha256);
+    if (!entryExists(file)) return undefined;
+    try {
+      const operation = CorePackageDeploymentOperationSchema.parse(JSON.parse(readOrdinaryFile(file, 16 * 1024).toString("utf8")));
+      if (operation.sha256 !== sha256) throw new Error("派发摘要不符");
+      return operation;
+    } catch { throw new CoreAccessError("operation_conflict", "原部署意图不可核定，保留原 ID 和文件处理，不可再次派发"); }
+  }
   function lookup(directory: string, sha256: string) {
     try {
       ordinaryDirectory(root);
@@ -130,6 +142,35 @@ export function createCorePackagePreparationFileStore(input: {
   }
 
   return {
+    readDeployment,
+    claimDeployment(value) {
+      const operation = CorePackageDeploymentOperationSchema.parse(value), file = deploymentFile(operation.sha256);
+      readRecord(target(operation.sha256), operation.sha256);
+      const prior = readDeployment(operation.sha256);
+      if (prior) return { claimed: false, operation: prior };
+      const rootIdentity = lstatSync(ordinaryDirectory(root));
+      let descriptor: number;
+      try { descriptor = openSync(file, "wx", 0o600); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        return { claimed: false, operation: readDeployment(operation.sha256)! };
+      }
+      try {
+        const opened = fstatSync(descriptor);
+        if (!sameIdentity(rootIdentity, lstatSync(ordinaryDirectory(root)))
+          || !sameIdentity(opened, lstatSync(file)) || lstatSync(file).isSymbolicLink() || opened.size !== 0)
+          throw new Error("部署意图路径在提交前变化");
+        writeFileSync(descriptor, JSON.stringify(operation) + "\n");
+        fsyncSync(descriptor);
+        if (process.platform !== "win32") {
+          const parent = openSync(root, "r");
+          try { fsyncSync(parent); } finally { closeSync(parent); }
+        }
+      } finally { closeSync(descriptor); }
+      const saved = readDeployment(operation.sha256);
+      if (!saved || requestFingerprint(saved) !== requestFingerprint(operation)) throw new Error("部署意图落盘不可核定");
+      return { claimed: true, operation: saved };
+    },
     read(sha256) {
       const current = lookup(target(sha256), sha256);
       if (current.status !== "absent") return current;

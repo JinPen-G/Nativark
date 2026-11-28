@@ -145,16 +145,20 @@ export function composePlatformCorePackagePreparation<Tx extends PlatformCoreTra
         if (built.status !== "ready") throw new CoreAccessError("core_unavailable", "当前候选或来源不满足部署前置，请保留原运行组合");
         if (built.bundle.sha256 !== query.sha256 || !isDeepStrictEqual(built.bundle.plan, original.plan))
           throw new CoreAccessError("revision_conflict", "原候选或私有来源已变化，不能使用旧准备结果部署");
-        return locked(async transaction => {
-          if (!isDeepStrictEqual(built.principal, identityReference())) throw new CoreAccessError("denied", "部署原主体或会话已变化");
-          await sameSnapshot(transaction, built.snapshot);
-          const current = input.store!.read(query.sha256);
-          if (current.status !== "recorded" || !isDeepStrictEqual(current.record, original))
-            throw new CoreAccessError("operation_conflict", "派发前原候选记录或文件已变化");
-          await built.sourceLease?.revalidate(transaction);
+        return locked(async (transaction, revalidate) => {
+          const check = async () => {
+            if (!isDeepStrictEqual(built.principal, identityReference())) throw new CoreAccessError("denied", "部署原主体或会话已变化");
+            await revalidate();
+            await sameSnapshot(transaction, built.snapshot);
+            const current = input.store!.read(query.sha256);
+            if (current.status !== "recorded" || !isDeepStrictEqual(current.record, original))
+              throw new CoreAccessError("operation_conflict", "派发前原候选记录或文件已变化");
+            await built.sourceLease?.revalidate(transaction);
+          };
+          await check();
           // 回调由原受权执行器供给，须自行核部署/许可、记录原派发并处理 unknown/恢复。
           // 此处不运行包代码、不切换实例、不自动重试；保持本地权限锁直到原派发返回。
-          return dispatch(structuredClone(original));
+          return dispatch(structuredClone(original), transaction, check);
         });
       }
     },

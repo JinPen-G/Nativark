@@ -35,6 +35,8 @@ IMAP 使用 `EXAMINE` 和 `BODY.PEEK`。超过 1 MB 的邮件只读取最多 64 
 
 目录位于 `GET /api/platform/integrations`，保存位于 `PUT /api/platform/integrations/:capability/:provider`，测试位于同一路径的 `/test` POST。当前租户来自 Guard 与 ALS。公开响应只包含非秘密设置、秘密字段配置标记和原测试结果。
 
+目录查询只读取 `TENANT_INTEGRATION_PROVIDERS` 正式登记的能力／提供方组合，再沿原币种与历史配置规则投影。共表保存的 SaaS 私有包来源 `core-package/github` 不属于租户集成目录，须经独立的当前 SaaS 包管理入口读取脱敏状态。
+
 保存先校验目录字段、原凭据及供应商地址，在原事务锁配置、核修订和依赖，然后更新唯一配置与默认选择。空白凭据的保留由原客户端转换与服务端合并共同完成。保存会清除原测试结果。
 
 测试区分 `configuration` 和 `live`。占用、探针和结果均关联原配置内容与修订，迟到结果继续拒绝。短信探针查询模板，存储探针 HEAD 随机对象，支付探针由原宿主读取供应商接口。新业务默认要求当前配置通过 live 测试，原事实恢复可沿原调用使用 `requireLiveTest: false`，并保留业务权限和配置关联。

@@ -32,6 +32,9 @@ import {
   createCorePackagePreparationFileStore, createPlatformCorePackagePreparationHttpAccess,
   type CorePackagePreparationApplication, type CorePackagePreparationMaterialsSource, type CorePackageDeploymentSourceGuard
 } from "./core-package-preparation";
+import { composeCorePackageDeployment, CorePackageDeploymentController, createCorePackageDeploymentHttpAccess,
+  CORE_PACKAGE_DEPLOYMENT_APPLICATION, type CorePackageDeploymentApplication, type CorePackageDeploymentExecutor
+} from "./core-package-preparation";
 
 export interface CorePackageAssembly {
   packages: CorePackageHttpApplication;
@@ -40,6 +43,7 @@ export interface CorePackageAssembly {
   preparation: CorePackagePreparationApplication;
   sources: CorePackageSourceSettingsApplication;
   deploymentSourceGuard: CorePackageDeploymentSourceGuard;
+  deployment: CorePackageDeploymentApplication;
   http: RegisteredCoreHttpAccess;
 }
 
@@ -68,6 +72,8 @@ export function composePlatformCorePackageAssembly<Tx extends PlatformCoreTransa
   legacyApiRoutes?: CorePackageLegacyApiRoutes;
   fetcher?: typeof fetch;
   sourceVault?: Pick<SecretBox, "encrypt" | "decrypt">;
+  /** 目标由可信宿主静态选择；默认未装配，不从请求、环境字符串或包代码创建执行器。 */
+  deploymentExecutor?: CorePackageDeploymentExecutor;
   now?: () => number;
 }): CorePackageAssembly {
   if (typeof input.audit?.recordPublicationAttempt !== "function")
@@ -104,13 +110,16 @@ export function composePlatformCorePackageAssembly<Tx extends PlatformCoreTransa
       releases: createPlatformCorePackageReleaseSource(input.fetcher, source?.access), store: references }),
     preparation,
     deploymentSourceGuard: preparation.deploymentSourceGuard,
+    deployment: composeCorePackageDeployment({ ...shared, store: candidates, guard: preparation.deploymentSourceGuard,
+      executor: input.deploymentExecutor }),
     sources: source?.settings ?? {
       async read() { throw new CoreAccessError("core_unavailable", "宿主尚未装配原服务端凭据保管"); },
       async save() { throw new CoreAccessError("core_unavailable", "宿主尚未装配原服务端凭据保管"); }
     },
     http: combineHttpAccess([
       createPlatformCorePackageHttpAccess(), createPlatformCorePackagePreflightHttpAccess(),
-      createPlatformCorePackageSelectionHttpAccess(), createPlatformCorePackagePreparationHttpAccess(), createCorePackageSourceHttpAccess()
+      createPlatformCorePackageSelectionHttpAccess(), createPlatformCorePackagePreparationHttpAccess(), createCorePackageSourceHttpAccess(),
+      createCorePackageDeploymentHttpAccess()
     ])
   };
 }
@@ -131,7 +140,7 @@ export class CorePackageAssemblyModule {
       module: CorePackageAssemblyModule,
       imports: options.imports ?? [],
       controllers: [CorePackageController, CorePackagePreflightController,
-        CorePackageSelectionController, CorePackagePreparationController, CorePackageSourceController],
+        CorePackageSelectionController, CorePackagePreparationController, CorePackageSourceController, CorePackageDeploymentController],
       providers: [
         { provide: CORE_PACKAGE_ASSEMBLY, inject: options.inject ?? [], useFactory: options.useFactory },
         { provide: CORE_PACKAGE_APPLICATION, inject: [CORE_PACKAGE_ASSEMBLY],
@@ -143,7 +152,9 @@ export class CorePackageAssemblyModule {
         { provide: CORE_PACKAGE_PREPARATION_APPLICATION, inject: [CORE_PACKAGE_ASSEMBLY],
           useFactory: (application: CorePackageAssembly) => application.preparation },
         { provide: CORE_PACKAGE_SOURCE_SETTINGS, inject: [CORE_PACKAGE_ASSEMBLY],
-          useFactory: (application: CorePackageAssembly) => application.sources }
+          useFactory: (application: CorePackageAssembly) => application.sources },
+        { provide: CORE_PACKAGE_DEPLOYMENT_APPLICATION, inject: [CORE_PACKAGE_ASSEMBLY],
+          useFactory: (application: CorePackageAssembly) => application.deployment }
       ],
       exports: [CORE_PACKAGE_ASSEMBLY]
     };

@@ -103,6 +103,10 @@
       "types": "./dist/core-package-preparation/protocol.d.ts",
       "default": "./dist/core-package-preparation/protocol.js"
     },
+    "./core-package-preparation/deployment-protocol": {
+      "types": "./dist/core-package-preparation/deployment-protocol.d.ts",
+      "default": "./dist/core-package-preparation/deployment-protocol.js"
+    },
     "./core-package-http": {
       "types": "./dist/core-package-http.d.ts",
       "default": "./dist/core-package-http.js"
@@ -210,6 +214,9 @@
       ],
       "core-package-preparation/protocol": [
         "dist/core-package-preparation/protocol.d.ts"
+      ],
+      "core-package-preparation/deployment-protocol": [
+        "dist/core-package-preparation/deployment-protocol.d.ts"
       ],
       "core-package-http": [
         "dist/core-package-http.d.ts"
