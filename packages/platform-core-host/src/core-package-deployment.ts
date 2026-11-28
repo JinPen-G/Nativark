@@ -8,6 +8,7 @@ import { CORE_CONTRACT_VERSION, CoreDeploymentLockSchema, CorePackagePathSchema,
   type CoreDeploymentLock } from "@rental-os/core-contracts";
 import { CORE_ARCHIVE_LIMITS, readCoreArchive } from "@rental-os/core-contracts/archive";
 import { CorePhasedMigrationLockSchema } from "@rental-os/core-contracts/deployment";
+import { requirePlatformDataCapabilityFiles } from "@rental-os/core-contracts/platform-data-package";
 import { readPackageArtifacts } from "@rental-os/core-contracts/package";
 import { PLATFORM_SOURCE_WORKSPACES } from "@rental-os/core-contracts/platform-source";
 import { createMysqlCoreDeploymentObservation, type CoreMysqlDataPlan } from "@rental-os/core-host/mysql-deployment";
@@ -51,6 +52,11 @@ export interface PlatformRuntimeEvidenceInput {
   lock: CoreDeploymentLock;
   receiptFile: string;
   deploymentLockFile: string;
+  /** 静态宿主按所选完整数据包的正式组合器生成；不能来自请求或上下文自报。 */
+  capabilities?: {
+    schema: string;
+    files: ReadonlyMap<string, ReadonlyMap<string, Uint8Array>>;
+  };
 }
 
 export function readPlatformRuntimeEvidence(input: PlatformRuntimeEvidenceInput): boolean {
@@ -104,11 +110,25 @@ function readRuntimeEvidence(input: PlatformRuntimeEvidenceInput | PhasedPlatfor
   if (!sourceLockBytes || !schema) throw new Error("固定底座缺少原锁或公共 schema");
   const sourceLock = record(JSON.parse(Buffer.from(sourceLockBytes).toString("utf8")));
   const compilerLock = record(record(sourceLock.packages)["node_modules/typescript"]);
+  const capabilities = input.capabilities;
+  if (capabilities) {
+    if (phased || lock.lockVersion !== 1 || receiptFile !== "platform-host.context.json" || !lock.dataCapabilities?.length
+      || capabilities.files.size !== lock.dataCapabilities.length || !capabilities.schema.trim())
+      throw new Error("选装运行证据须提供完整的原 v1 数据组合");
+    for (const release of lock.dataCapabilities) {
+      const material = capabilities.files.get(release.id);
+      if (!material) throw new Error("选装运行证据缺少固定数据包");
+      requirePlatformDataCapabilityFiles(material, release);
+    }
+    if (!isDeepStrictEqual(context.dataCapabilities, lock.dataCapabilities.map(({ id, sha256 }) => ({ id, sha256 }))))
+      throw new Error("运行上下文的选装能力与当前锁不一致");
+  }
   if (context.format !== format || !isDeepStrictEqual(build.release, platform)
     || build.sourceArchiveSha256 !== platform.sha256 || build.sourceLockSha256 !== digest(sourceLockBytes)
     || compiler.name !== "typescript" || compiler.version !== compilerLock.version
     || typeof compiler.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(compiler.sha256)
-    || client.mode !== "platform" || client.schemaSha256 !== digest(schema)
+    || client.mode !== (capabilities ? "platform-capabilities" : "platform")
+    || client.schemaSha256 !== digest(capabilities ? Buffer.from(capabilities.schema) : schema)
     || typeof client.declarationsSha256 !== "string" || !/^[a-f0-9]{64}$/.test(client.declarationsSha256))
     throw new Error("实际宿主编译来源、版本或公共 Client 与当前发行不一致");
   const projects = build.projects;
@@ -167,7 +187,7 @@ function readRuntimeEvidence(input: PlatformRuntimeEvidenceInput | PhasedPlatfor
   if (!deploymentSha || deploymentSha !== context.deploymentLockSha256) throw new Error("原上下文缺少部署锁摘要");
   // v2 是整份新装上下文，后置 SQL/来源/所选 schema 不能只随 base 的摘要被裁掉。
   // 仍消费原打包器的文件表，禁止把私有配置或依赖目录带入证据读取。
-  if (phased) for (const file of contextFiles.keys()) {
+  if (phased || capabilities) for (const file of contextFiles.keys()) {
     // 根 docs 是维护者私有资料；标准 Core 清单可含包内公开 docs，仍须核原上下文摘要。
     if (file.split("/")[0].toLowerCase() === "docs"
       || file.split("/").some(part => [".git", "node_modules", "output"].includes(part.toLowerCase())
@@ -175,12 +195,21 @@ function readRuntimeEvidence(input: PlatformRuntimeEvidenceInput | PhasedPlatfor
       throw new Error("分阶段运行证据含非发行文件");
   }
   const verified = readPackageArtifacts(root, [
-    ...(phased ? [...contextFiles].map(([file, sha256]) => ({ file, sha256 })) : [{ file: deploymentLockFile, sha256: deploymentSha }]),
+    ...(phased || capabilities ? [...contextFiles].map(([file, sha256]) => ({ file, sha256 })) : [{ file: deploymentLockFile, sha256: deploymentSha }]),
     { file: receiptFile, sha256: digest(contextBytes) }
   ], CORE_ARCHIVE_LIMITS.fileBytes, CORE_ARCHIVE_LIMITS.totalBytes);
   const actualLock = JSON.parse(Buffer.from(verified.files.get(deploymentLockFile)!).toString("utf8"));
   if (!isDeepStrictEqual(phased ? CorePhasedMigrationLockSchema.parse(actualLock) : CoreDeploymentLockSchema.parse(actualLock), lock))
     throw new Error("实际上下文部署锁与当前宿主不一致");
+  if (capabilities && lock.lockVersion === 1) {
+    const selectedSchema = verified.files.get(`${dirname(deploymentLockFile).split("\\").join("/")}/schema.prisma`);
+    if (!selectedSchema || digest(selectedSchema) !== digest(Buffer.from(capabilities.schema)))
+      throw new Error("运行目录的选装 schema 与静态宿主组合不一致");
+    for (const release of lock.dataCapabilities!) for (const [file, bytes] of capabilities.files.get(release.id)!) {
+      const actual = verified.files.get(`data-capabilities/${release.id}/${file}`);
+      if (!actual || digest(actual) !== digest(bytes)) throw new Error("实际选装数据材料与固定包不一致");
+    }
+  }
   return true;
 }
 

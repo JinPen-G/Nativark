@@ -234,6 +234,14 @@ npm run start -w @rental-os/platform-api
 
 ## 选装公共 AI 管理
 
+### 工单 AI 运行材料
+
+显式工单 AI 宿主使用 `scripts/package-platform-host.cjs --host example-tickets-ai`，并提供原有的 `--lock`、`--platform-package`、`--platform-client`、`--tickets-package`、`--output`、`--deps` 绝对路径，以及 `--public-ai-repo <完整固定Zelo检出绝对路径>`。该选装打包必须从完整检出执行；零 Core 源码归档不携带公共 AI SDK 构建工具。普通 `platform`、`example-tickets` 模式保持原入口。
+
+打包器按部署锁的完整提交重新构建公共 SDK，核同底座和数据包，采用同一个组合 Prisma Client；工单必须使用同次 AI 标准包。输出固定入口为 `apps/example-tickets-api/dist-ai/ai-main.mjs`，部署锁和组合 schema 位于 `apps/platform-api/prisma-deployment`，数据材料位于 `data-capabilities/ai-native`。Docker 环境只固定这些已核材料路径，数据库、身份密钥、初始化、授权及模型配置仍由部署方显式提供。
+
+静态宿主调用 `readPlatformRuntimeEvidence` 时，通过 `capabilities` 传入所选完整数据包与正式组合器生成的 schema，使用对应的组合部署锁路径。读取会核完整文件表、原发行、编译来源和实际材料；这些运行证据不代替迁移账、初始化、部署许可或业务授权。
+
 默认入口没有 AI。本次底座 `0.3.0` 源码候选使用公共 AI 服务 SDK `0.2.1`、数据 SDK `0.2.5` 和独立数据包 `0.2.4`；它们是待评审的版本准备，尚未发行。历史底座组合继续使用其固定的数据 SDK `0.2.3` 与数据包 `0.2.2`，不改旧归档及兼容范围。从原公共 schema 与锁定的数据包生成此宿主的 115 模型 Client，再运行 `npm run build:ai -w @rental-os/platform-api`。选装工程不使用默认 Client 或旧混合 SDK。[服务包构建配置](../../packages/ai-native-server/tsconfig.public.json) · [数据包工厂](../../packages/ai-native-data/src/public-data-package.ts)
 
 `start:ai` 使用原 `CORE_DEPLOYMENT_LOCK_FILE`、新安装的 `PLATFORM_AI_DATA_PACKAGE_DIR` 两个绝对路径，以及服务端固定的 `PLATFORM_AI_PROFILE_ID`。锁只能包含公共底座和一个公共 AI 数据包，包目录、版本、摘要及所选 Client 均须匹配。此入口不会安装包、应用迁移、建立默认模型或发起模型调用。实际接口走原 Guard、同一数据库/事务和原账观察；使用者仍须具有 `system:ai-provider:view` 或 `system:ai-provider:manage`，选装入口不会给默认角色授权。[显式启动与装配](src/ai-main.ts)
