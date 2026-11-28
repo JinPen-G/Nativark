@@ -7,6 +7,7 @@ const path = require('node:path');
 const { createRequire } = require('node:module');
 const { isDeepStrictEqual } = require('node:util');
 const files = require('./platform-doctor-files.cjs');
+const { installationSteps } = require('./platform-doctor-steps.cjs');
 const { samePrismaSchema } = require('../build-selected-prisma.cjs');
 const toolRoot = path.resolve(__dirname, '../..');
 const API_GUIDE = 'apps/platform-api/README.md#安装组合只读诊断';
@@ -16,7 +17,7 @@ const HELP = `Zelo 安装组合只读诊断
 node scripts/ops/platform-doctor.cjs [--root <源码或解包目录>] [--profile platform|public-ai|selected-core]
   [--host <目标根下的宿主目录>] [--lock <绝对JSON路径>]
   [--core <Core-ID=绝对包目录>] [--capability <能力-ID=绝对包目录>]
-  [--platform-package <绝对tgz路径>] [--json]
+  [--platform-package <绝对tgz路径>] [--steps] [--json]
 
 默认 platform：零 Core。public-ai：零 Core + 公共 AI。selected-core：由锁选择 Core 及可选能力，须提供 --host。
 仅检查本地材料和当前进程配置的存在/格式；不读 .env，不联网、安装、迁移、初始化、授权或启服务。
@@ -28,7 +29,7 @@ function parseArguments(args) {
   const seen = new Set();
   for (let index = 0; index < args.length; index++) {
     const flag = args[index];
-    if (['--json', '--help'].includes(flag)) {
+    if (['--json', '--help', '--steps'].includes(flag)) {
       if (seen.has(flag)) throw Error('usage');
       options[flag.slice(2)] = true; seen.add(flag); continue;
     }
@@ -152,6 +153,8 @@ function diagnose(options, environment = process.env) {
   add('database', 'not_checked', report.database.reason,
     '先取得目标环境只读许可，沿原宿主迁移账与物理结构读取器核定；未知旧库停止初始化和迁移。', undefined, false);
   add('runtime', 'not_checked', '未观察服务、账号、当前执行权、Core 准入、租户/成员授权或业务状态。', HOST_GUIDE, undefined, false);
+  if (options.steps) report.nextSteps = installationSteps(report, { host,
+    rootCommands: options.profile === 'platform' && /local-dev-preflight\.cjs/u.test(manifest?.scripts?.dev ?? '') });
   return finish(report);
 }
 
@@ -410,6 +413,14 @@ function formatReport(report) {
   lines.push('来源：' + JSON.stringify(report.sources));
   if (report.selection) lines.push('锁声明（非运行版本）：' + JSON.stringify(report.selection));
   lines.push('数据库：unknown / 未检查；初始化、运行版本、授权与业务就绪：未检查。');
+  if (report.nextSteps) {
+    lines.push('后续步骤（仅说明，不执行；未读取数据库，不产生放行结论）：');
+    for (const step of report.nextSteps.steps) {
+      lines.push(`[${step.state}] ${step.title} / ${step.actor}`, '  前置：' + step.condition, '  入口：' + step.entry);
+      if (step.commands?.length) lines.push('  授权后显式办理：' + step.commands.join(' → '));
+      lines.push('  核收：' + step.result, '  中断：' + step.recovery);
+    }
+  }
   return lines.join('\n');
 }
 function main(args = process.argv.slice(2)) {
