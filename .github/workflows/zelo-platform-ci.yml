@@ -206,6 +206,8 @@ jobs:
           fi
           node --input-type=module <<'NODE'
           import { strict as assert } from 'node:assert';
+          import { createRequire } from 'node:module';
+          import { randomBytes } from 'node:crypto';
           const web = 'http://127.0.0.1:5191';
           async function request(path, init) {
             const response = await fetch(web + path, { ...init, signal: AbortSignal.timeout(8000) });
@@ -232,6 +234,27 @@ jobs:
               body: JSON.stringify({ currentPassword: process.env.SEED_PLATFORM_PASSWORD,
                 newPassword: `${process.env.SEED_PLATFORM_PASSWORD}-New8!` }) });
             const headers = { ...json, Authorization: `Bearer ${changed.accessToken}` };
+            // 仅在既有独占库核来源配置，不访问 GitHub；合成 token 不具有外部获取权限。
+            const sourcePath = '/api/platform/core-packages/private-source', repositories = ['https://github.com/zelo-ci/private-source-smoke'];
+            const sourceToken = 'github_pat_ci_' + randomBytes(24).toString('hex');
+            const saveSource = value => body(sourcePath, { method: 'POST', headers, body: JSON.stringify(value) });
+            const beforeSource = await body(sourcePath, { headers });
+            const configured = await saveSource({ expectedRevision: beforeSource.revision, enabled: true, repositories, token: sourceToken });
+            assert.equal(configured.credentialConfigured, true);
+            assert.deepEqual(Object.keys(configured).sort(), ['credentialConfigured', 'enabled', 'provider', 'repositories', 'revision']);
+            const { PrismaClient } = createRequire(process.cwd() + '/package.json')('./apps/platform-api/generated/client');
+            const sourceDatabase = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
+            try {
+              const stored = await sourceDatabase.tenantIntegrationConfig.findUnique({ where: {
+                tenantId_capability_provider: { tenantId: 'tenant_platform', capability: 'core-package', provider: 'github' } } });
+              assert(stored?.credentialsEncrypted?.startsWith('v2:') && !stored.credentialsEncrypted.includes(sourceToken), '来源凭据须以原加密信封保存');
+            } finally { await sourceDatabase.$disconnect(); }
+            const rotated = await saveSource({ expectedRevision: configured.revision, enabled: true, repositories, token: 'github_pat_ci_' + randomBytes(24).toString('hex') });
+            assert.notEqual(rotated.revision, configured.revision);
+            const revoked = await saveSource({ expectedRevision: rotated.revision, enabled: false, repositories, revokeToken: true });
+            assert.equal(revoked.enabled, false); assert.equal(revoked.credentialConfigured, false);
+            assert.deepEqual(await body(sourcePath, { headers }), revoked);
+            console.log('私有来源：原 SaaS HTTP、独占 MySQL 加密配置、轮换/撤销与脱敏回读通过；未访问真实私有源');
             const operationKey = 'ci-public-model-save', id = process.env.PLATFORM_AI_PROFILE_ID;
             const provider = '/api/platform/ai/providers/' + id;
             const result = await body(provider, { method: 'PUT', headers, body: JSON.stringify({

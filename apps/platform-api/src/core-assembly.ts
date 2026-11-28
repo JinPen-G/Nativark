@@ -3,6 +3,7 @@ import { Module, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigModule, ConfigService } from "@nestjs/config";
 import { dirname, join, resolve } from "node:path";
 import type { TenantIntegrationBusinessParticipant } from "@rental-os/platform-server/integration-store";
+import { SecretBox } from "@rental-os/platform-server/secret-box";
 import { assertFileProviderCanDisable, assertFileProviderIdentityChange } from "@rental-os/platform-server/file-integration-dependencies";
 import type { Prisma } from "../generated/client";
 import { CoreHostModule, CORE_HOST_APPLICATION, CorePackageAssemblyModule, CORE_PACKAGE_ASSEMBLY,
@@ -80,7 +81,8 @@ export const publicCorePackagesModule = CorePackageAssemblyModule.register({
     return composePlatformCorePackageAssembly({
       database: dependencies.database, users: dependencies.users, catalogue: publicCoreCatalogue,
       audit: createPlatformCorePackageAudit<Prisma.TransactionClient>(),
-      storageDirectory, localArtifacts, ...sources
+      // 活动底座观察沿上方只读归档器；管理链由装配提供带私有来源复权的同索引适配。
+      storageDirectory, sourceVault: new SecretBox(config), ...sources
     });
   }
 });

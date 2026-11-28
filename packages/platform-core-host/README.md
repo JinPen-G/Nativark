@@ -84,6 +84,20 @@ Rental 与双 Core 从同一已核部署目录取得全量所选清单，只为 
 
 `localArtifacts` 供给已下载的固定包，`deployment` 供给实际活动组合、使用包和原迁移账，`materials` 供给该组合的完整原包与迁移。未供给的来源保留 `unavailable`。旧 API 兼容许可通过 `legacyApiRoutes` 从宿主可信策略按 Core ID 供给精确的 `METHOD /api/path` 集合，同一集合用于下载检查、预检、迁移组合和候选写入。请求与包清单的额外许可字段沿原严格 schema 拒绝。[预检端口](src/core-package-preflight/README.md)
 
+### GitHub.com 私有固定发行
+
+统一装配接受 `sourceVault: new SecretBox(config)`，复用 [原 SecretBox](../platform-server/src/common/secret-box.ts) 的 AES-GCM 信封、密钥版本及历史密钥环。来源配置复用原 `tenant_integration_configs`，固定为平台租户 `tenant_platform`、能力 `core-package`、提供方 `github`；不新增表或向普通租户开放集成能力。缺 Vault、密钥不可用、身份不符或来源未启用均拒绝获取。[来源实现](src/core-package-source-settings.ts) · [公共 API 装配](../../apps/platform-api/src/core-assembly.ts)
+
+SaaS 管理员沿原 operator 会话及 `system:tenant:manage` 权限，在“Core 包管理 → 私有来源”配置允许仓库和凭据。只接受规范 `https://github.com/owner/repository`，不支持 GitHub Enterprise、任意地址或自动发现私有仓库。GitHub 凭据应仅获选定仓库的 Metadata/Contents 读取权，并完成所属组织要求的批准。页面每次保存使用当前 `expectedRevision`；新 token 轮换旧值，留空保留，撤销同时停用获取并清空密文。未知保存结果先刷新修订，不自动重发。生产环境仍由原服务端配置提供 `INTEGRATION_ENCRYPTION_KEY`，加密密钥轮换沿原 SecretBox 密钥环办理，不把 GitHub token 当加密密钥。
+
+`GET/POST /api/platform/core-packages/private-source` 复用原 Guard、主体/会话/角色锁和配置行 CAS。响应只含允许仓库、启用状态、配置修订与 `credentialConfigured`，不返回 token、密文或临时 URL；响应禁缓存，审计只记状态、修订和保留/轮换/撤销动作。首次输入的 token 只用于本次安全提交，不进入查询缓存、本机存储或表单快照。允许仓库列表也是受限管理信息，不对公网发现或普通租户投影。[HTTP](src/core-package-source-http.ts) · [浏览器协议](src/core-package-source-protocol.ts)
+
+固定发行的选择、下载、缓存命中与候选准备均核当前来源配置、原身份和 GitHub 远端完整 pin。缓存和在途下载按当前主体/会话及配置修订隔离；新主体不能复用他人的私有获取资格。远端不可达、撤权、移动 Tag 或资产变化即拒绝新的材料操作。凭据只发送到已核仓库的 GitHub API 首次请求，后续重定向均不带凭据。[固定发行规则与许可](../core-contracts/README.md#私有固定发行的服务端合同)
+
+私有候选摘要包含原 `privateRelease` 身份，凭据及配置修订不进候选或归档。实际部署器须在原受权派发点调用 `packages.deploymentSourceGuard.withAccess(sha256, dispatch)`，重新核原候选全部文件、当前组合、私有来源与当前主体；回调仍由原部署器办理部署/软件许可批准、唯一派发、结果收据和失败恢复。该服务端接点不注册浏览器执行路由，不提供新部署器、持久放行票据或商业收费规则。当前公开双仓自动切换器尚未消费私有 Core 候选，不能仅凭此接点或准备回执启用私有自动部署；具体接线及真实切换须单独核验。[派发接点及限制](src/core-package-preparation/README.md#私有候选与实际部署接点)
+
+撤销取包权只阻止新的受限获取、准备和派发。已安装组合继续核本地原包及原数据观察，原回执仍由当前管理权限读取；不自动停用 Core、改租户授权、撤回成员、删除候选或业务数据。停用、运行权益及模型消费账分别沿原管理权威。商业授权只预留在原部署准入/租户授权/成员分配接点，收费、期限和离线宽限未实现，缺许可依据不得用下载成功补成允许。
+
 配置 `storageDirectory` 时，本地包默认从 `archives/index.json` 的正式登记读取，归档位于同一普通目录。部署人员准备 `.tgz`、原完整发行投影和唯一引用，后台通过“使用已下载包”进入原校验链。首次成功读取固定本进程登记，原文件路径和字节每次复核；宿主显式提供 `localArtifacts` 时消费该来源。[登记与读取](src/core-package-preflight/README.md)
 
 `createPublicCorePackageDeploymentSources` 为零 Core 标准底座读取启动锁及本地底座引用。宿主从当前运行入口固定底座根和六个服务端模块目录，读取器核当前 Node / 已加载合同版本，复用原发行检查及 `readPackageArtifacts` 核完整标准包，再核数据计划与锁定合同。版本读取委托原 `createMysqlCoreDeploymentObservation`，候选材料供给同一原迁移字节。缺证据、目录/源码差异及原账失败保留不可用，启动锁固定到本次进程。[源码](src/core-package-deployment.ts) · [默认宿主配置](../../apps/platform-api/README.md)

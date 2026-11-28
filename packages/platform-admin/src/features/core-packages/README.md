@@ -1,6 +1,10 @@
 # Core 包管理页面
 
-[CorePackagesPage](CorePackagesPage.tsx)提供当前注册目录、GitHub Topic 发现和底座/Core独立版本三个视图。[客户端](client.ts)复用唯一 AdminRuntime，查询键带原会话代次，离开视图释放查询，权限变化后拒绝旧响应。普通租户在挂载查询前拒绝。
+[CorePackagesPage](CorePackagesPage.tsx)提供当前注册目录、GitHub Topic 发现、底座/Core独立版本与私有来源四个视图。[客户端](client.ts)复用唯一 AdminRuntime，查询键带原会话代次，离开视图释放查询，权限变化后拒绝旧响应。普通租户在挂载查询前拒绝。
+
+“私有来源”只管理 GitHub.com 的允许仓库和服务端凭据，显示凭据是否可用及当前配置。新 token 只用于一次保存，留空保留旧值，提交时清空输入；不进入表单快照、查询缓存、sessionStorage 或响应。撤销需确认，成功后新获取停止，已安装运行权保持独立。保存失败或失应答先刷新当前修订，不能自动重发。配置、轮换与撤销共用原集成表和 SecretBox，服务器再次核平台租户、SaaS身份与权限。[表单](CorePackagePrivateSource.tsx) · [服务端规则](../../../../platform-core-host/README.md#githubcom-私有固定发行)
+
+私有固定发行单独填写允许仓库、Core ID、版本与可选 Tag，重新核对后进入原选择/候选侧栏。Tag 留空采用 `v<版本>`，多 Core 仓库可显式填 `<Core ID>/v<版本>`。仓库身份、完整 Tag 提交、资产和摘要以服务端实读结果为准；当前不可读取时显示不可用，不泄露服务端错误正文。私有资料不混入公开发现。下载、准备与实际部署分别复权，页面没有私有部署按钮，候选回执始终为待部署。
 
 ## 公开 Rental Core 的五步
 

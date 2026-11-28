@@ -5,6 +5,7 @@ import {
   type GitHubCoreReleasePin, type GitHubCoreReleaseSelection
 } from "@rental-os/core-contracts/github";
 import { requestFingerprint } from "@rental-os/platform-contracts/request-fingerprint";
+import type { CorePackageArtifactAccess } from "../core-package-preflight/ports";
 import type {
   CorePackageReleasePreview, CorePackageReleaseReferenceRead, CorePackageReleaseSelectResult
 } from "./protocol";
@@ -29,6 +30,7 @@ export const CorePackageReleaseReferenceRecordSchema = z.object({
 
 export interface CorePackageReleaseSource {
   inspect(selection: GitHubCoreReleaseSelection): Promise<GitHubCoreReleasePin>;
+  authorize?(release: GitHubCoreReleasePin): Promise<CorePackageArtifactAccess | undefined>;
 }
 export interface CorePackageReleaseReferenceStore {
   /** absent 只表示原目录内可核定地缺少记录，读取失败须返回 unavailable 或抛出。 */

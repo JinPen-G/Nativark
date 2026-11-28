@@ -22,6 +22,8 @@ const access = createPlatformCorePackageHttpAccess();
 | `GET /platform/core-packages/catalogue` | 当前注册、查询时间及底座和每个 Core 的锁定发行、实际包、注册与可用状态 |
 | `POST /platform/core-packages/discover` | `{ query: { text, page }, refresh }`，复用原 Topic 分页、缓存和带原时间的过期快照 |
 | `POST /platform/core-packages/repository` | `{ repository, includeReleases }`，公开 GitHub 规范地址，按固定提交读取根索引或清单，按需读取固定 Release |
+| `GET /platform/core-packages/private-source` | 当前平台 SaaS 管理员读取允许仓库、修订与凭据配置状态，禁止缓存 |
+| `POST /platform/core-packages/private-source` | 按原 `expectedRevision` 保存启用状态/允许仓库，或一次轮换/撤销凭据，只返回脱敏配置 |
 
 仓库候选始终未审核，包状态为 unchecked。发布元数据、包校验、下载、受控部署注册、租户授权和业务生效分别判定。声明兼容来自实际底座包版本和原 `checkCoreCombination`，安装状态由实际包及受控部署证据判断。GitHub 离线或限流时，当前目录继续独立查询。
 
@@ -29,4 +31,4 @@ const access = createPlatformCorePackageHttpAccess();
 
 固定包预检和候选准备继续复用原 install、update 和 deployment，由宿主供给实际包来源、完整材料及独占存储。零 Core 公共宿主可通过启动锁、本地底座引用与实际运行模块目录供给标准底座证据，原数据状态沿同一 MySQL 观察读取；缺证据时保留 `unavailable`，注册目录返回实际空集合。可信旧路径许可来自宿主精确策略，按 Core ID 传给下载、检查、原部署生成器和文件准备。[当前发行读取](../core-package-deployment.ts) · [固定包预检](../core-package-preflight/README.md) · [候选准备与原结果读取](../core-package-preparation/README.md)
 
-`createCorePackageOpenApi()` 覆盖读取、包预检、发行选择和候选准备四组实际协议。全部接口返回 HTTP 200 的原 `data` / `requestId` 包装，错误状态及 unavailable、unknown、absent、pending 分别说明。请求复用原 schema，来源、版本、清单、迁移和候选指纹的跨字段约束随对应结构说明。宿主登记四组 Controller 后，使用正式 `createPlatformCorePackageOpenApi(document)` 合并原文档，输入复制及路径 / schema 冲突拒绝沿同一函数维护。[同版本接口片段](openapi.ts)
+`createCorePackageOpenApi()` 覆盖读取、包预检、发行选择、候选准备和私有配置实际协议。全部接口返回 HTTP 200 的原 `data` / `requestId` 包装，错误状态及 unavailable、unknown、absent、pending 分别说明。私有配置请求的 token 为只写字段，不进入任何响应；配置轮换、撤销与复权边界见[来源说明](../../README.md#githubcom-私有固定发行)。请求复用原 schema，来源、版本、清单、迁移和候选指纹的跨字段约束随对应结构说明。宿主登记同版 Controller 后，使用正式 `createPlatformCorePackageOpenApi(document)` 合并原文档，输入复制及路径 / schema 冲突拒绝沿同一函数维护。[同版本接口片段](openapi.ts)
