@@ -129,6 +129,8 @@ export function createClientRuntime(options: ClientRuntimeOptions) {
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     routes: [...routes.values()].map(({ route }) => route),
     scope, find, withAccess,
+    /** 为本地读取捕获同一页面寿命；它不提供业务或原收据准入。 */
+    captureLifetime: lifetime,
     /** 页面卸载/切路由只取消展示；不证明任何已派发业务回滚。 */
     cancel(key: string) { pending.get(key)?.cancel(); pending.delete(key); },
     invalidate() { changed(); },

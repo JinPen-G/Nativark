@@ -42,10 +42,20 @@ export function createClientOperations(runtime: ClientRuntime, store: ClientOper
   }
   return {
     async pending(routeId: string) {
-      return runtime.withAccess(routeId, "original_receipt", "pending-operations", async (owner, life) => {
-        const references = await store.read(owner); life.assertCurrent();
-        return references.filter(reference => valid(reference) && reference.routeId === routeId
-          && reference.coreId === runtime.find(routeId).contribution.coreId).map(capture);
+      const { contribution } = runtime.find(routeId), owner = runtime.scope(), life = runtime.captureLifetime("pending-operations");
+      const select = (references: readonly ClientOperationReference[]) => references.filter(reference => valid(reference)
+        && reference.routeId === routeId && reference.coreId === contribution.coreId).map(capture);
+      try {
+        // 没有本页原定位就没有可展示的历史内容，不为每次翻页空读原收据权限。
+        // 有定位仍须前后复权并重新读取；本地缓存不能证明原操作结果或授予读取权。
+        const references = select(await store.read(owner));
+        life.assertCurrent();
+        if (!references.length) return [];
+      } catch (error) { life.assertCurrent(); throw error; }
+      // 结束本地探测后，同一请求槽接续原门禁；没有异步间隙可采用已取消的定位。
+      return runtime.withAccess(routeId, "original_receipt", "pending-operations", async (currentOwner, authorizedLife) => {
+        const retained = await store.read(currentOwner); authorizedLife.assertCurrent();
+        return select(retained);
       });
     },
     async execute(routeId: string, actionId: string, request: ClientPageRequest,
