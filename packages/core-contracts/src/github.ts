@@ -43,11 +43,12 @@ export const GitHubCoreReleasePinSchema = z.object({
 export type GitHubCoreReleasePin = z.infer<typeof GitHubCoreReleasePinSchema>;
 
 /** Check a reader's result at the application boundary. The reader itself must
- * have verified the public numeric repository ID before issuing an alias pin. */
+ * have verified the public numeric repository ID before issuing an alias pin.
+ * Private selections always retain the exact verified repository identity. */
 export function gitHubCoreReleaseMatchesSelection(selection: GitHubCoreReleaseSelection, pin: GitHubCoreReleasePin): boolean {
   return pin.coreId === selection.coreId && pin.version === selection.version && pin.tag === selection.tag
     && pin.visibility === selection.visibility
-    && (pin.repository === selection.repository || selection.coreId === "rental"
+    && (pin.repository === selection.repository || selection.visibility !== "private" && selection.coreId === "rental"
       && officialRentalReleaseSource(selection.repository) === pin.repository);
 }
 
