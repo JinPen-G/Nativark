@@ -8,7 +8,7 @@ import { readPlatformDataCapabilityPackage, requirePlatformDataCapabilityFiles }
 import { createPublicAiDataContribution, PUBLIC_AI_DATA_FILES, PUBLIC_AI_DATA_OWNER,
   PUBLIC_AI_DATA_PREREQUISITES, type PublicAiDataContribution } from "./public-data";
 
-export const PUBLIC_AI_DATA_PACKAGE_VERSION = "0.2.2";
+export const PUBLIC_AI_DATA_PACKAGE_VERSION = "0.2.4";
 const entries = ["public-data", "public-data-package", "public-mysql-data"] as const;
 const entry = (name: typeof entries[number]) => ({ types: `./dist/${name}.d.ts`, default: `./dist/${name}.js` });
 const manifest = {
@@ -23,10 +23,12 @@ const packageFiles = ["package.json", "README.md", "LICENSE", ...PUBLIC_AI_DATA_
   ...entries.flatMap(name => [`dist/${name}.js`, `dist/${name}.d.ts`])];
 
 function releaseMetadata(contribution: PublicAiDataContribution, version = PUBLIC_AI_DATA_PACKAGE_VERSION) {
-  if (version !== "0.2.0" && version !== PUBLIC_AI_DATA_PACKAGE_VERSION)
+  // 已发行的范围属于原包身份；新增兼容范围仅用于新发行，不能扩大旧包的运行许可。
+  const platformMaximum = { "0.2.0": "0.2.0", "0.2.2": "0.3.0", "0.2.4": "0.4.0" } as const;
+  if (!Object.hasOwn(platformMaximum, version))
     throw new Error("公共 AI 数据发行版本不受本读取器支持");
   return { id: PUBLIC_AI_DATA_OWNER.id, version,
-    compatibility: { platform: { minInclusive: "0.1.0", maxExclusive: version === "0.2.0" ? "0.2.0" : "0.3.0" },
+    compatibility: { platform: { minInclusive: "0.1.0", maxExclusive: platformMaximum[version as keyof typeof platformMaximum] },
       contract: { minInclusive: "0.1.1", maxExclusive: "0.2.0" } },
     runtime: { node: { minInclusive: "22.0.0", maxExclusive: "25.0.0" } },
     schema: PUBLIC_AI_DATA_FILES[0], data: contribution.data, prerequisites: PUBLIC_AI_DATA_PREREQUISITES };

@@ -12,7 +12,7 @@ const { isDeepStrictEqual } = require('node:util');
 const { selectedCompilerOptions, samePrismaSchema, prismaSchemaTokens } = require('./build-selected-prisma.cjs');
 const { compileRentalPlatformSource, requireMatchingPublicRuntime, publicDirectories } = require('./rental-platform-build.cjs');
 const { selectWorkspaces, projectHostLock, lockedDependency, hostDirectory,
-  retentionSdk, retentionSdkLock, isRetentionSdkDependency, publicDataSdk, isPublicDataSdkDependency } = require('./rental-host-lock.cjs');
+  retentionSdk, retentionSdkLock, isRetentionSdkDependency, publicDataSdk, publicDataSdkFor, isPublicDataSdkDependency } = require('./rental-host-lock.cjs');
 const root = path.resolve(__dirname, '..');
 const targetNodeVersion = '24.13.0';
 const sourceProvenanceFile = 'development.workspace.json';
@@ -799,7 +799,10 @@ function createRentalHostContext(input) {
     for (const [file, bytes] of aiFiles) files.set('public-ai-data/' + file, bytes);
   }
   if (publicRetention) files.set(retentionSdk.archive, sourceFiles.get(retentionSdk.archive));
-  if (publicAiDataSdk) files.set(publicDataSdk.archive, sourceFiles.get(publicDataSdk.archive));
+  if (publicAiDataSdk) {
+    const archive = publicDataSdkFor(publicAiDataSdk.metadata).archive;
+    files.set(archive, sourceFiles.get(archive));
+  }
   files.set('rental-host.deployment-provenance.json', json(describeRentalDeployment(api, lock, deploymentFiles, platform, phased?.postCapability)));
   if (sourceProvenanceBytes) files.set(sourceProvenanceFile, sourceProvenanceBytes);
   let buildProvenance;
