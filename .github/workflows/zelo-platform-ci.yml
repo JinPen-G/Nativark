@@ -224,7 +224,7 @@ jobs:
           node --input-type=module <<'NODE'
           import { strict as assert } from 'node:assert';
           import { createRequire } from 'node:module';
-          import { randomBytes, randomUUID, createHash } from 'node:crypto';
+          import { randomBytes, randomUUID } from 'node:crypto';
           import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
           import { join, resolve } from 'node:path';
           const web = 'http://127.0.0.1:5191';
@@ -278,7 +278,8 @@ jobs:
             const require = createRequire(process.cwd() + '/package.json'), sourceRequire = createRequire(join(task, 'source/package.json'));
             const contracts = require('@rental-os/core-contracts');
             const { packTicketsPackage } = sourceRequire('@rental-os/example-tickets-core/package');
-            const platformSource = JSON.parse(readFileSync('platform.source.json', 'utf8'));
+            const platformSource = JSON.parse(readFileSync('public-ai.workspace.json', 'utf8')).platform;
+            assert.equal(platformSource.source.commit, process.env.GITHUB_SHA);
             const pack = packTicketsPackage({ directory: join(task, 'source/packages/example-tickets-core'),
               source: { repository: repositories[0], commit: process.env.GITHUB_SHA }, sourceDirectory: 'packages/example-tickets-core',
               platformSource: platformSource.source, platformTask: readFileSync(join(task, 'source/packages/core-contracts/README.md'), 'utf8') });
@@ -302,9 +303,9 @@ jobs:
             const access = await auth.resolveAccessContext(headers.Authorization); assert(access?.tenantUser.isSaasAdmin);
             const identity = { tenantId: access.tenantUser.tenantId, userId: access.tenantUser.id, audience: 'operator', accessSession: access.accessSession };
             const platformData = createPublicPlatformDataPlan();
-            const base = contracts.CoreDeploymentLockSchema.parse({ lockVersion: 1, cores: [], platform: { source: platformSource.source,
-              sha256: createHash('sha256').update(readFileSync(join(task, 'platform.tgz'))).digest('hex'), data: platformData.data,
-              versions: { platform: platformSource.version, contract: contracts.CORE_CONTRACT_VERSION, node: process.versions.node, capabilities: {} } } });
+            // 选装归档与标准底座包不同；受控安装目标沿同源工作区回执的原底座 pin。
+            const base = contracts.CoreDeploymentLockSchema.parse({ lockVersion: 1, cores: [], platform: platformSource });
+            assert.deepEqual(base.platform.data, platformData.data);
             for (const part of ['releases', 'candidates', 'archives', 'installed', 'results']) mkdirSync(join(installation, part), { recursive: true });
             const activeFile = join(installation, 'active.json'), read = path => JSON.parse(readFileSync(path, 'utf8'));
             writeFileSync(activeFile, JSON.stringify(base), { flag: 'wx' });
