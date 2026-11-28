@@ -518,6 +518,10 @@ jobs:
             const root = resolve(task, 'web', surface, 'templates/platform-clients', surface, 'dist');
             const server = createServer({ key: readFileSync(resolve(task, 'localhost.key')), cert: readFileSync(resolve(task, 'localhost.crt')) }, (request, response) => {
               if (request.url?.startsWith('/api/')) {
+                const started = performance.now(), observation = { method: request.method, path: request.url, status: 'pending' };
+                requestHistory.push(observation);
+                if (requestHistory.length > 12) requestHistory.shift();
+                response.on('close', () => { observation.clientClosedMs = Math.round(performance.now() - started); });
                 const lose = request.method === 'POST' && request.url === cancelPath && loseCancelResponse;
                 const hold = request.method === 'GET' && request.url === `/api/client/v1/orders/${cancelOrder.id}` && holdCustomerRead;
                 const holdStaff = request.method === 'GET' && request.url === `/api/staff/v1/rental/v1/orders/${serviceOrder.id}`
@@ -528,8 +532,8 @@ jobs:
                 if (request.method === 'POST' && request.url === executionPath) serviceDispatches++;
                 if (lose) loseCancelResponse = false;
                 const upstream = forward(origin + request.url, { method: request.method, headers: request.headers }, result => {
-                  requestHistory.push({ method: request.method, path: request.url, status: result.statusCode });
-                  if (requestHistory.length > 12) requestHistory.shift();
+                  observation.status = result.statusCode; observation.headersMs = Math.round(performance.now() - started);
+                  result.on('end', () => { observation.completedMs = Math.round(performance.now() - started); });
                   // 原状态头已到客户端后扣住正文，让原运输自身超时；空应答直接断连会触发 Chrome 连接重试。
                   // 原成功必须来自服务端，不伪造正文/收据；客户端超时关闭连接后由 finally 统一收尾。
                   if (lose) {
@@ -582,9 +586,12 @@ jobs:
               throw new Error('页面等待超时：' + label);
             }
             const text = (value, timeout) => waitFor(() => dom('return document.body.innerText.includes(arguments[0])', value), value, timeout);
-            async function selectScope(value) {
+            async function selectScope(value, expectedOrder) {
               const option = await waitFor(() => dom('return [...document.querySelectorAll(".zc-sidebar select option")].find(e => e.value === arguments[0]) ?? null', value), '当前受权范围选项');
               await driver(`${prefix}/element/${option['element-6066-11e4-a52e-4f735466cecf']}/click`, {});
+              // 原选店先读上下文/地点，再经页面前后复权；15 秒短于运输自身的 30 秒上限。
+              // 只等本次选店后的原订单，不重新选择、不重发业务或放宽地点隔离断言。
+              await text(expectedOrder, 45000);
             }
             async function click(label) {
               const element = await waitFor(() => dom('return [...document.querySelectorAll("button")].find(e => e.checkVisibility() && !e.disabled && e.innerText.trim() === arguments[0]) ?? null', label), label);
@@ -627,14 +634,14 @@ jobs:
               assert.equal(observed.context.subjectId, audience === 'client' ? member.customerId : staff.id);
               assert.equal(observed.context.tenantId, tenantId);
               if (audience === 'staff') {
-                await selectScope('location:' + location.id); await text(order.orderNo);
+                await selectScope('location:' + location.id, order.orderNo);
                 assert(await dom('return document.querySelector(".zc-identity").innerText.includes(arguments[0])', location.name));
                 assert(await dom('return !document.body.innerText.includes(arguments[0])', nextLocationOrder.orderNo));
                 const link = await dom('return [...document.querySelectorAll(".zc-items a")].find(e => e.innerText === arguments[0])', order.orderNo);
                 assert(link); await driver(`${prefix}/element/${link['element-6066-11e4-a52e-4f735466cecf']}/click`, {});
                 await text(service.name); holdStaffRead = true; await click('刷新页面');
                 await waitFor(() => heldStaffRead, '原门店详情已到原服务'); await text('正在加载…');
-                await selectScope('location:' + nextLocation.id); await text(nextLocationOrder.orderNo);
+                await selectScope('location:' + nextLocation.id, nextLocationOrder.orderNo);
                 heldStaffRead(); assert(oldStaffReadFinished);
                 await click('刷新页面'); await text(nextLocationOrder.orderNo);
                 assert(await dom('return !document.body.innerText.includes(arguments[0]) && !document.querySelector(".zc-receipts")', order.orderNo));
@@ -644,7 +651,7 @@ jobs:
                   fetch(arguments[0], {headers:{Authorization:'Bearer '+credentials.accessToken,'x-rental-location-id':arguments[1]}})
                     .then(response => done(response.status)).catch(() => done(0));`, args: [`/api/staff/v1/rental/v1/orders/${order.id}`, nextLocation.id] });
                 assert([403, 404].includes(wrongLocation));
-                await selectScope('location:' + location.id); await text(order.orderNo);
+                await selectScope('location:' + location.id, order.orderNo);
               }
               const orderLink = await dom('return [...document.querySelectorAll(".zc-items a")].find(e => e.innerText === arguments[0])', order.orderNo);
               assert(orderLink);
