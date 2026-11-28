@@ -50,7 +50,8 @@ export function createTicketsAiRunner(input: { database: PrismaClient; scene: Ti
       if (kind === "pause" || !ticketsAiAdmitsTool(step.plan.toolCode, step.plan.toolVersion) || kind !== "start" && !resultRef) throw unavailable();
       return { taskId: lease.taskId, stepId: step.registered.stepId, expectedTaskRevision: step.registered.taskRevision,
         expectedStepRevision: step.registered.stepRevision, evidenceId: kind === "start" ? `start-${step.registered.stepId}` : resultRef!,
-        reason: kind === "start" ? "start" : kind === "unknown" ? "result_unknown" : "result_observed", lease: leaseInput(lease) };
+        reason: kind === "start" ? "start" : kind === "unknown" ? "result_unknown"
+          : step.registered.existingStatus === "unknown" ? "reconciled_committed" : "result_observed", lease: leaseInput(lease) };
     }
   };
   const ports = createPublicAiTaskRunnerStepPorts(steps, { tasks: measured.tasks, commands });

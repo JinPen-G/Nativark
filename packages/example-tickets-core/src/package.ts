@@ -15,8 +15,9 @@ export function packTicketsPackage(input: {
   /** 固定版本的公开接入README原文；参数名保留原程序调用兼容。 */
   platformTask: string;
   host?: CoreHostVersions;
+  ai?: boolean;
 }) {
-  const manifest = createTicketsManifest(input.source), root = resolve(input.directory);
+  const manifest = createTicketsManifest(input.source, { ai: input.ai }), root = resolve(input.directory);
   const sourceDirectory = CorePackagePathSchema.parse(input.sourceDirectory);
   for (let directory = root; ; directory = dirname(directory)) {
     const stat = lstatSync(directory);

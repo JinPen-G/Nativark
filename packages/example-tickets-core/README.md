@@ -23,6 +23,8 @@
 
 `receiptFor(principal, action, input)`供事务参加者核对精确的原请求。输入仍经同一业务schema解析，再核原actor、动作与输入指纹；同键异参明确拒绝，不能把另一请求的收据作为批准执行证据。它保留原收据的当前读取权限，不授予新动作。
 
+可选`@rental-os/example-tickets-core/ai`提供同源准备、原Task/Run、C05批准、正式开始处理及原结果请求端口。它按当前签名身份与真实权益/发布/额度工作，成功证据核同事务批准消费、原计量artifact和工单精确收据；普通Core无需导入。编译及AI选装标准包用独立`build:ai`、`pack:core:ai`命令，仍待可选宿主全链运行验收。[固定来源、装配与未验边界](examples/ai-integration/README.md)
+
 执行请求的`purpose`由服务端方法固定为business或original_receipt，不能从HTTP body选择。宿主分别办理普通准入与原收据善后，Core停用/到期后的必要核对仍复用当前身份和原操作范围，不能借此开放普通工单查询或写入。
 
 ## 接入已有宿主

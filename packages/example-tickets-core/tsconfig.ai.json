@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "rootDir": "examples/ai-integration",
+    "outDir": "dist-ai",
+    "declaration": true,
+    "types": ["node"],
+    "noEmitOnError": true
+  },
+  "files": ["examples/ai-integration/index.mts"],
+  "include": []
+}

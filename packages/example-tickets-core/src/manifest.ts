@@ -2,7 +2,8 @@
 import { CoreManifestSchema, type CoreManifest } from "@rental-os/core-contracts";
 import { TICKETS_CORE_ID, TICKETS_CORE_VERSION, TICKETS_DATA_VERSION, TICKETS_DATA_READABLE } from "./contracts";
 
-export function createTicketsManifest(source: CoreManifest["source"]): CoreManifest {
+/** 两种准备材料通过完整清单和sha256区分；选装AI只声明入口，不授予运行权。 */
+export function createTicketsManifest(source: CoreManifest["source"], options: { ai?: boolean } = {}): CoreManifest {
   const compatible = { minInclusive: "0.1.0", maxExclusive: "0.2.0" };
   return CoreManifestSchema.parse({
     manifestVersion: 1,
@@ -19,7 +20,8 @@ export function createTicketsManifest(source: CoreManifest["source"]): CoreManif
       contract: compatible
     },
     runtime: { node: { minInclusive: "22.12.0", maxExclusive: "25.0.0" } },
-    entries: { server: "dist/index.js", openapi: "openapi.json", admin: "admin/index.tsx" },
+    entries: { server: "dist/index.js", openapi: "openapi.json", admin: "admin/index.tsx",
+      ...(options.ai ? { ai: "dist-ai/index.mjs" } : {}) },
     permissions: [
       { resource: "ticket", action: "read", name: "读取本人可见工单" },
       { resource: "ticket", action: "read.all", name: "读取本租户全部工单" },
@@ -34,6 +36,9 @@ export function createTicketsManifest(source: CoreManifest["source"]): CoreManif
     ] },
     requires: [],
     assets: ["package.json", ...["contracts", "service", "server", "manifest", "mysql", "http", "nest", "openapi", "metadata", "package", "platform-host", "ai-status"].map(name => `dist/${name}.js`),
-      ...["index", "contracts", "service", "server", "manifest", "mysql", "http", "nest", "openapi", "metadata", "package", "platform-host", "ai-status"].map(name => `dist/${name}.d.ts`)]
+      ...["index", "contracts", "service", "server", "manifest", "mysql", "http", "nest", "openapi", "metadata", "package", "platform-host", "ai-status"].map(name => `dist/${name}.d.ts`),
+      ...(options.ai ? ["index", "tickets-application", "tickets-authority", "tickets-approval", "tickets-publication", "tickets-plan",
+        "tickets-runner", "tickets-results", "tickets-evidence", "tickets-start"].flatMap(name =>
+        [...(name === "index" ? [] : [`dist-ai/${name}.mjs`]), `dist-ai/${name}.d.mts`]) : [])]
   });
 }

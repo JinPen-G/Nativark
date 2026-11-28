@@ -2,13 +2,24 @@
 
 本目录提供两个 **MCP 只读适配**（当前可见工单、本人原收据），以及供原计量Runner登记的 **开始处理工单** 批准执行参加者。它们调用普通Core的同一`TicketsService`，复用[HTTP / Zod合同](../../src/http.ts)，不重写工单权限、状态转换或存储。普通Core无需导入本目录，也不需要模型或MCP。[普通业务与安装](../../README.md)
 
-这是供宿主显式选用的源码材料，尚未接入完整工单AI宿主或发布独立npm子出口。内置AI与MCP分别接入、分别验收；参加者编译通过不代表原任务、真实OAuth或完整业务闭环已可用。
+内置任务已有显式`@rental-os/example-tickets-core/ai`请求端口和单独编译/标准包命令，尚未完成可选HTTP宿主的运行验收。内置AI与MCP分别接入、分别验收；参加者编译通过不代表真实数据库、OAuth或完整业务闭环已可用。
 
 ## 来源与使用条件
 
 原读取示例固定于 `c9d6505201fd09786563262e04932673ea94156c`；宿主基础为Zelo `a18d1d763dbe8e98d85e862a83d58ee2ad7cf150`。该基础的npm包版本是`example-tickets-core` 0.1.6、`mcp-server` 0.1.1、`core-contracts` **0.1.0**、`ai-native-server` 0.2.1；本片工单候选为 **0.2.0**，新增同事务接点。Core接入协议`CORE_CONTRACT_VERSION`为 **0.1.1**，与npm包版本分别核对，不能将协议号写进依赖映射。这些源码候选不等于已发布或已安装。
 
-Task/Run提交复用固定补片`831dbee0f699b68119fa11a53c34d7b1ff5769cd`的正式`@rental-os/ai-native-server/task-transitions`出口。合并依赖为安装PR #11、Core模板PR #13、公共Task合同PR #16，再到本适配PR #15；不能用较早0.2.1源码的同名包替代这些固定出口。
+Task/Run提交复用固定补片`831dbee0f699b68119fa11a53c34d7b1ff5769cd`的正式`@rental-os/ai-native-server/task-transitions`出口，Core事实类型消费其后继`1d6785212c032d2891f495c107978c1b0b9284df`。合并依赖为安装PR #11、Core模板PR #13、公共Task合同PR #16，再到本适配PR #15；不能用较早0.2.1源码的同名包替代这些固定出口。
+
+在所选固定源码与已准备的公共AI SDK/专属Client下，先编译普通Core，再运行`npm run build:ai -w @rental-os/example-tickets-core`。普通`build`和`pack:core`不加载AI；选装使用`npm run pack:core:ai -w @rental-os/example-tickets-core -- <仓库HTTPS地址> <本次固定提交> <底座来源JSON> <新包.tgz>`。它增加`entries.ai`及本次实际编译的`dist-ai`文件，不改变工单SQL、数据版本或原角色。两种包通过完整清单及sha256区分，必须选择匹配的部署锁；选装入口的存在不等于数据已部署、权益已开通或工具已发布。
+
+```ts
+import { createTicketsAiRequests } from "@rental-os/example-tickets-core/ai";
+
+// dependencies来自所选宿主的同一Client、原Auth/principal、SecretBox、订阅和工单事务参加者。
+const requests = createTicketsAiRequests(dependencies);
+// request由原Guard/ALS提供，signal绑定本次请求；输入中没有身份、权限、租约或工具代码。
+const result = await requests.consume("result", request, { taskId }, signal);
+```
 
 [tickets-reads.mts](tickets-reads.mts) 是 ESM 消费者，仅使用包的正式出口。宿主将该源码纳入自己的受控构建，并提供同版依赖及真实权威。禁止深层导入其他包的 `src`、从模型生成的路径调用 API，或用另一个工作树的活动构建产物运行。
 
@@ -91,7 +102,8 @@ export function composeTicketsReads(
 | [tickets-plan.mts](tickets-plan.mts) | 原计划只含一个已发布工具，输入正文、Step指纹与普通操作键同源；在原计划保存事务中登记ActionInput，原输入、发布或权限变化均拒绝。 |
 | [tickets-runner.mts](tickets-runner.mts) | 原Task/Run提交、准备计量、Step登记及C05待批完成后释放租约；明确批准后由正式`continuePending`接续同一Run。中途不明只观察原任务，不新建任务或重放工具。 |
 | [tickets-results.mts](tickets-results.mts) | 同一Task、原artifact、C05消费与精确工单收据一起核对；业务已提交与任务计量是否完整分别显示，不用工单收据补造丢失的计量事实。 |
-| [tickets-application.mts](tickets-application.mts) | 当前签名请求组合正式正文保护、tenant身份与上述参加者，结束时关闭绑定；未提供真实工单Step证据则拒绝装配。它是宿主内部请求端口，尚未直接开放HTTP。 |
+| [tickets-evidence.mts](tickets-evidence.mts) | 只读原计划/ActionInput、原计量artifact及三种业务资源、C05和精确业务收据；成功产生`core:example-tickets:ticket`及原修订快照。缺消费或完整计量不得声明提交，unknown只保留原证据。 |
+| [tickets-application.mts](tickets-application.mts) | 当前签名请求组合正式正文保护、tenant身份、工单Step证据与上述参加者，结束时关闭绑定。它是宿主内部请求端口，尚未直接开放HTTP。 |
 
 `createTicketsStartSource`从原受保护数据库view读取Task、Step、原输入、提案版本和批准；当前主体、场景、发布/权益/政策来自已绑定的`createPublicTenantTaskAuthority`。宿主须在该权威的`assertTaskAction/assertReference`中接入上述场景参加者，数据库使用正式`createAiBodyStorageDatabase`保护view，发布使用固定管理权限的`createTenantConfigurationTransactions`。不能从HTTP body传执行上下文、租约或批准证明，也不能用固定管理员/恒真回调补缺件。
 
@@ -117,11 +129,11 @@ export function composeTicketsReads(
 | 原结果与 unknown | 原 `TicketsService.receipt(principal, operationId)` 与 `/task-persistence`、`/runtime/original-result-reads`、`/runtime/original-task-recovery-read`；保持原 actionId、操作键和结果引用，缺原证据不补成功、不重新派发 |
 | 任务资源与模型 | `/task-resource-ledger`、`/task-runner-resources`、`/task-measured-effects` 保持累计资源；需要服务端模型时接 `/public-tenant-gateway` 和 `/runtime/budget/public-budget-ledger`，恢复不重置账 |
 
-Task/Run聚合提交已使用上述固定正式出口，工单发布、原输入、计划、批准、执行与结果参加者也已提供。完整宿主还须组合工单成功事实的Step证据、可选数据准入、HTTP/页面动作，以及真实MCP身份/发布/计量/字段权威。工单成功必须用自身已提交对象及精确原收据证明`committed`，不能伪装成订单/报告事实或`effect:none`；公共仓储继续拥有状态机、CAS、事件与复权。[原批准消费](../../../ai-native-server/src/runtime/approval-consumption-persistence.repository.ts) · [工单事务](../../src/mysql.ts)
+Task/Run聚合提交已使用上述固定正式出口，工单发布、原输入、计划、批准、执行、Step事实与结果参加者已提供。完整宿主还须组合可选数据准入、HTTP/页面动作，以及真实MCP身份/发布/计量/字段权威。工单成功用自身已提交对象及精确原收据证明`committed`，不能伪装成订单/报告事实或`effect:none`；公共仓储继续拥有状态机、CAS、事件与复权。[原批准消费](../../../ai-native-server/src/runtime/approval-consumption-persistence.repository.ts) · [工单事务](../../src/mysql.ts)
 
 现有持久MCP OAuth的`OriginalOAuthPrincipalBinding`包含真实workspaceId及空间准入，而工单Core为tenant范围。工单宿主须选择已受支持的原身份参加者；缺匹配参加者时保持未配置，不能捏造空间ID或默认准入。接口通用的资源verifier也不自动提供业务身份映射、持久目标或字段许可。
 
-统一生成器接入等待固定模板接口；可用性 UI、宿主装配、包出口和发行依赖另按明确窗口推进。缺件期间两个 reader 只可在真实权威已齐备的宿主选用，缺失时保持 `unavailable`。
+可用性UI和宿主装配继续沿本端口接线。两个MCP reader只可在真实权威已齐备的宿主选用，缺失时保持`unavailable`，不能把默认未配置当成完整MCP验收。
 
 ## 必要验证与边界
 

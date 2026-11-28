@@ -13,7 +13,6 @@ import { createPublicAiTaskPersistence } from "@rental-os/ai-native-server/task-
 import { createAiTaskTransactionBoundary } from "@rental-os/ai-native-server/task-transactions";
 import { createTenantConfigurationTransactions } from "@rental-os/ai-native-server/tenant-configuration-transactions";
 import { aiTaskAccessFromContext } from "@rental-os/ai-native-server/task-observation";
-import type { AiStepTransitionAuthority } from "@rental-os/ai-native-server/task-steps";
 import { TICKETS_START_TOOL, type TicketsTransactionHost } from "./tickets-start.mjs";
 import { TicketsAiAuthority, TicketsAiSceneError, TicketsAiUnknownError, TICKETS_AI_TRANSACTION,
   ticketsAiCreationKey, ticketsAiEntryPermission, ticketsAiPrincipal, type TicketsBoundAuthority } from "./tickets-authority.mjs";
@@ -21,6 +20,7 @@ import { createTicketsAiPublication, TicketsAiPublicationCommandSchema } from ".
 import { createTicketsAiApprovals, TicketsAiDecisionSchema } from "./tickets-approval.mjs";
 import { createTicketsAiResultReaders } from "./tickets-results.mjs";
 import { createTicketsAiRunner, TicketsAiRunCommandSchema } from "./tickets-runner.mjs";
+import { createTicketsAiStepEvidence } from "./tickets-evidence.mjs";
 
 type Tx = Prisma.TransactionClient;
 const taskRef = z.object({ taskId: z.string().uuid() }).strict(), sourceRef = z.object({ inputRef: z.string().uuid() }).strict();
@@ -35,19 +35,14 @@ export const TICKETS_AI_INPUTS = {
 } as const;
 export type TicketsAiAction = keyof typeof TICKETS_AI_INPUTS;
 export type TicketsAiRequest = { headers: { authorization?: unknown } };
-type EvidenceInput = { database: PrismaClient; scene: TicketsAiAuthority; bound: TicketsBoundAuthority;
-  transactions: ReturnType<typeof createAiTaskTransactionBoundary<Tx>> };
 
 export function createTicketsAiRequests(input: {
   database: PrismaClient; tickets: TicketsTransactionHost; secrets: Pick<SecretBox, "encrypt" | "decrypt">;
   auth: Pick<PlatformAuthService, "resolveAccessContext">; principals: Pick<PlatformPrincipalAuthority<Tx>, "lock">;
   subscriptions: Pick<SubscriptionService, "readCategoryCommercialContext" | "lockCategoryCommercialContext">;
   assertDataAvailable(database: Pick<Tx, "$queryRaw">): Promise<void>;
-  /** 宿主固定工单证据实现，和本次请求共用scene/Native；不能接受请求指定的实现。 */
-  stepEvidence(current: EvidenceInput): AiStepTransitionAuthority;
   clock?: () => Date;
 }) {
-  if (typeof input.stepEvidence !== "function") throw new TicketsAiSceneError("task_adapter_missing");
   const db = createAiBodyStorageDatabase(input.database, input.secrets), transactions = createAiTaskTransactionBoundary<Tx>();
   const clock = input.clock ?? (() => new Date());
   return Object.freeze({ async consume<Action extends TicketsAiAction>(action: Action, request: TicketsAiRequest,
@@ -76,8 +71,7 @@ export function createTicketsAiRequests(input: {
           requiredPermission: "system:params:manage", assertDataAvailable: input.assertDataAvailable }) });
       const approvals = createTicketsAiApprovals({ database: db, scene, bound, transactions });
       const results = createTicketsAiResultReaders({ database: db, scene, bound, tasks });
-      const transition = input.stepEvidence({ database: db, scene, bound, transactions });
-      if (typeof transition?.resolve !== "function") throw new TicketsAiSceneError("task_adapter_missing");
+      const transition = createTicketsAiStepEvidence({ database: db, scene, bound, transactions });
       const run = () => createTicketsAiRunner({ database: db, scene, bound, tasks, transactions, approvals, transition });
       const create = async (inputRef: string, write: boolean) => {
         const locator = { inputRef, sceneCode: TICKETS_START_TOOL.scene, creationKey: ticketsAiCreationKey(inputRef) };
