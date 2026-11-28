@@ -27,6 +27,7 @@ export interface TicketsOptionalCapabilities {
   http: CoreHttpContribution;
   data: readonly (CoreMysqlDataPlan & { capabilityId: string })[];
   files: ReadonlyMap<string, ReadonlyMap<string, Uint8Array>>;
+  composeRuntimeSchema?(platformSchema: string): string;
   /** 本Core选装数据的完整观察，不能替换清单或略过原迁移。 */
   coreData?: CoreMysqlDataPlan;
 }
@@ -65,7 +66,7 @@ export function composeTicketsApplication(database: PlatformDatabaseClient, inpu
     http: [http], observations });
   const { platformReference, ...options } = packageOptions;
   const sources = createTicketsCorePackageSources({ lock, storageDirectory: options.storageDirectory,
-    platformReference, dataCapabilities: selected?.files, observe: () => observations.read(),
+    platformReference, dataCapabilities: selected?.files, composeRuntimeSchema: selected?.composeRuntimeSchema, observe: () => observations.read(),
     observeInTransaction: transaction => observation(transaction).read() });
   return {
     tickets,

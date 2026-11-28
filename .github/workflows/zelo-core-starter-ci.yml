@@ -362,6 +362,25 @@ jobs:
           node apps/example-tickets-api/dist-ai/prepare-ai-deployment.mjs \
             "$task/public-ai/apps/platform-api/prisma-deployment/core.deployment.lock.json" "$task/public-ai/public-ai-data" \
             "$selected" "$PWD/apps/platform-api/prisma-deployment-tickets-ai"
+          # 正式运行包从同一固定源码复算公共SDK和运行证据，不由CI自造context。
+          node --max-old-space-size=6144 scripts/package-platform-host.cjs --host example-tickets-ai --public-ai-repo "$PWD" \
+            --lock "$PWD/apps/platform-api/prisma-deployment-tickets-ai/core.deployment.lock.json" --platform-package "$task/platform.tgz" \
+            --platform-client "$PWD/apps/platform-api/generated/client/index.d.ts" --tickets-package "$selected" --output "$task/tickets-ai-host.tgz"
+          mkdir "$task/tickets-ai-runtime" "$task/tickets-ai-storage" "$task/tickets-ai-storage/archives" "$task/tickets-ai-storage/releases" "$task/tickets-ai-storage/candidates"
+          tar -xzf "$task/tickets-ai-host.tgz" -C "$task/tickets-ai-runtime"
+          cp "$task/platform.tgz" "$task/tickets-ai-storage/archives/platform.tgz"
+          node - "$task" <<'NODE'
+          const fs = require('node:fs'), path = require('node:path'), task = process.argv[2];
+          const lock = JSON.parse(fs.readFileSync(path.join(task, 'tickets-ai-runtime/apps/platform-api/prisma-deployment/core.deployment.lock.json')));
+          fs.writeFileSync(path.join(task, 'tickets-ai-storage/archives/index.json'), JSON.stringify({ format: 'core-package-archives-1', artifacts: [
+            { reference: 'ci-platform', file: 'platform.tgz', artifact: { kind: 'platform', release: lock.platform } }
+          ] }), { flag: 'wx' });
+          NODE
+          # 独立运行包只安装自身投影锁；复用下载缓存，不链接或复制另一树依赖。
+          npm --prefix "$task/tickets-ai-runtime" ci --include=dev --ignore-scripts --no-audit --no-fund --cache "$task/npm-cache"
+          node "$task/tickets-ai-runtime/node_modules/@prisma/engines/scripts/postinstall.js"
+          node "$task/tickets-ai-runtime/node_modules/prisma/build/index.js" generate --schema "$task/tickets-ai-runtime/apps/platform-api/prisma-deployment/schema.prisma"
+          (cd "$task/tickets-ai-runtime" && node verify-runtime.cjs)
           # 本job唯一源码无WIP；沿公开装配步骤供给已核完整包，然后不再重建该包。
           tar -xzf "$task/tickets-ai.tgz" -C packages/example-tickets-core
           export CORE_DEPLOYMENT_LOCK="$PWD/apps/platform-api/prisma-deployment-tickets-ai/core.deployment.lock.json"
@@ -375,13 +394,15 @@ jobs:
           task="$GITHUB_WORKSPACE/$CI_DIR"
           MYSQL_PWD=zelo_ci_root_only mysql -h 127.0.0.1 -u root -e "CREATE DATABASE zelo_tickets_ai_ci; GRANT ALL ON zelo_tickets_ai_ci.* TO 'zelo_ci'@'%';"
           export DATABASE_URL='mysql://zelo_ci:zelo_ci_database_only@127.0.0.1:3306/zelo_tickets_ai_ci?connection_limit=1'
-          export CORE_DEPLOYMENT_LOCK="$PWD/apps/platform-api/prisma-deployment-tickets-ai/core.deployment.lock.json"
-          export PLATFORM_AI_DATA_PACKAGE_DIR="$task/public-ai/public-ai-data"
+          runtime="$task/tickets-ai-runtime"
+          export CORE_DEPLOYMENT_LOCK="$runtime/apps/platform-api/prisma-deployment/core.deployment.lock.json"
+          export PLATFORM_AI_DATA_PACKAGE_DIR="$runtime/data-capabilities/ai-native"
+          export CORE_PACKAGE_STORAGE_ROOT="$task/tickets-ai-storage" CORE_PLATFORM_PACKAGE_REFERENCE=ci-platform
           export AUTH_TOKEN_SECRET="$(openssl rand -hex 32)" INTEGRATION_ENCRYPTION_KEY="$(openssl rand -hex 32)"
           export SEED_PLATFORM_PASSWORD="TicketsAi9-$(openssl rand -hex 12)" API_PORT=3093 API_PROXY_TARGET=http://127.0.0.1:3093 DATABASE_CONNECT_ON_START=true
-          node node_modules/prisma/build/index.js migrate deploy --schema apps/platform-api/prisma-deployment-tickets-ai/schema.prisma
-          npm run initialize -w @rental-os/platform-api
-          node apps/example-tickets-api/dist-ai/ai-main.mjs > "$task/tickets-ai-api.log" 2>&1 &
+          node "$runtime/node_modules/prisma/build/index.js" migrate deploy --schema "$runtime/apps/platform-api/prisma-deployment/schema.prisma"
+          node "$runtime/apps/platform-api/dist/initialize.js"
+          node "$runtime/apps/example-tickets-api/dist-ai/ai-main.mjs" > "$task/tickets-ai-api.log" 2>&1 &
           api_pid=$!
           trap 'kill "$api_pid" ${web_pid:+"$web_pid"} ${driver_pid:+"$driver_pid"} 2>/dev/null || true; wait || true' EXIT
           node node_modules/vite/bin/vite.js preview apps/example-tickets-admin --config apps/example-tickets-admin/vite.config.ts --host 127.0.0.1 --port 5193 --strictPort > "$task/tickets-ai-web.log" 2>&1 &
@@ -414,6 +435,12 @@ jobs:
           }
           try {
             const saas = await login('platform', 'admin', process.env.SEED_PLATFORM_PASSWORD);
+            stage = 'packaged-runtime-current-materials';
+            const catalogue = await request('/api/platform/core-packages/catalogue', saas.token);
+            assert.equal(catalogue.versions.status, 'observed');
+            assert.equal(catalogue.versions.platform.availability.status, 'available');
+            assert.equal(catalogue.versions.cores[0].availability.status, 'available');
+            assert.equal(catalogue.versions.dataCapabilities[0].availability.status, 'available');
             stage = 'explicit-core-grants';
             await core('deployment-admission', saas.token, { state: 'accepting', expectedRevision: 0, operationId: randomUUID() });
             const tenant = await request('/api/platform/tenants', saas.token, { tenantCode: 'ai-tickets-one', tenantName: 'AI工单测试', adminAccount: 'admin', adminDisplayName: '测试管理员' }, 201);
@@ -427,7 +454,7 @@ jobs:
             assert(!role.permissions.includes('*')); assert.equal(role.fixedAllPermissions, false);
             const user = await request('/api/platform/users', admin.token, { account: 'worker', displayName: '测试工单成员', roleIds: [role.id], isPlatformAdmin: false, isActive: true }, 201);
             const actor = await login('ai-tickets-one', 'worker', user.temporaryPassword);
-            await core('member-assignments', admin.token, { userId: user.id, state: 'assigned', expectedRevision: 0, operationId: randomUUID() });
+            let actorAssignment = await core('member-assignments', admin.token, { userId: user.id, state: 'assigned', expectedRevision: 0, operationId: randomUUID() });
             async function ticket(subject) {
               const created = await request(api + '/tickets', actor.token, { operationId: randomUUID(), subject, description: '来自原工单的批准事实' });
               return (await request(api + `/tickets/${created.ticket.id}/assign`, actor.token, { operationId: randomUUID(), expectedRevision: created.ticket.revision, assigneeId: user.id })).ticket;
@@ -493,10 +520,29 @@ jobs:
             const recovered = await ai('result', actor.token, { taskId: uncertain.command.taskId });
             assert.equal(recovered.business, 'committed'); assert.equal(recovered.originalReceipt.operationId, uncertain.binding.original.command.operationId);
             assert.equal((await request(api + '/tickets/' + recovered.ticketId, actor.token)).revision, 3);
+            stage = 'revoked-approved-action';
+            const revokedTicket = await ticket('执行前撤回成员'), revokedTask = await start(revokedTicket);
+            actorAssignment = await core('member-assignments', admin.token, { userId: user.id, state: 'revoked', expectedRevision: actorAssignment.revision, operationId: randomUUID() });
+            await ai('execute', actor.token, revokedTask.command, 403);
+            assert.equal((await request(api + '/operations/' + revokedTask.binding.original.command.operationId, actor.token)).status, 'unavailable');
+            actorAssignment = await core('member-assignments', admin.token, { userId: user.id, state: 'assigned', expectedRevision: actorAssignment.revision, operationId: randomUUID() });
+            assert.equal((await request(api + '/tickets/' + revokedTicket.id, actor.token)).revision, revokedTicket.revision);
+            stage = 'original-task-limit';
+            const limitedPolicy = await ai('publish', admin.token, { operationId: randomUUID(), expectedRevision: publication.policy.revision, enabled: true,
+              expiresAt: publication.policy.expiresAt, limits: { ...limits, maxTotalMs: 15000 } });
+            const limitedTicket = await ticket('原累计资源拒绝'), limitedTask = await start(limitedTicket);
+            assert.equal((await ai('status', actor.token, { ticketId: limitedTicket.id, taskId: limitedTask.command.taskId })).reason, 'limit_reached');
+            const limited = await ai('execute', actor.token, limitedTask.command);
+            assert(['failed', 'unavailable'].includes(limited.status)); assert.equal(limited.completedSteps, 0);
+            if (limited.status === 'failed') assert.equal(limited.errorCode, 'AI_RUN_LIMIT');
+            assert.equal((await request(api + '/operations/' + limitedTask.binding.original.command.operationId, actor.token)).status, 'unavailable');
+            assert.equal((await request(api + '/tickets/' + limitedTicket.id, actor.token)).revision, limitedTicket.revision);
+            await ai('publish', admin.token, { operationId: randomUUID(), expectedRevision: limitedPolicy.policy.revision, enabled: true,
+              expiresAt: publication.policy.expiresAt, limits });
             const browserTicket = await ticket('页面批准与执行');
             writeFileSync(resolve(process.env.GITHUB_WORKSPACE, process.env.CI_DIR, 'tickets-ai-browser.json'), JSON.stringify({ account: 'worker', password: actor.password,
               token: actor.token, ticketId: browserTicket.id }), { mode: 0o600, flag: 'wx' });
-            console.log('工单AI：真实显式授权/发布、批准不执行、原Runner业务执行、同键原收据、依据变化拒绝与失应答回读通过；没有调用模型');
+            console.log('工单AI：正式运行包材料、真实授权/发布、批准不执行、原Runner执行/收据、依据变化/撤权/累计限额拒绝与失应答回读通过；没有调用模型');
           } catch (error) { console.error('工单AI阶段：' + stage); throw error; }
           NODE
           "$CHROMEWEBDRIVER/chromedriver" --port=9515 --allowed-ips=127.0.0.1 > "$task/tickets-ai-browser.log" 2>&1 &

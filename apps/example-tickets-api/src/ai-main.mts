@@ -9,6 +9,7 @@ import type { Prisma } from "@prisma/client";
 import { CoreDeploymentLockSchema, checkPlatformDataCapabilities, type CoreDeploymentLock } from "@rental-os/core-contracts";
 import { readPlatformDataCapabilityPackage } from "@rental-os/core-contracts/platform-data-package";
 import { readPublicAiDataPackage } from "@rental-os/ai-native-data/public-data-package";
+import { composePublicAiPrismaSchema } from "@rental-os/ai-native-data/public-data";
 import { createPublicAiMysqlDataPlan } from "@rental-os/ai-native-data/public-mysql-data";
 import { PlatformDatabaseClient, PlatformDatabaseModule } from "@rental-os/platform-api/database";
 import { PlatformAuthService, SecretBox, SubscriptionService, PLATFORM_AUTH_DATA_STORE } from "@rental-os/platform-server";
@@ -33,7 +34,8 @@ export function selectTicketsAiApplication(value: CoreDeploymentLock, directory:
     .map(match => match[1][0].toLowerCase() + match[1].slice(1));
   if (!delegates.length) throw new Error("公共AI固定schema缺少模型声明");
   return ticketsApplicationModule(lock, {
-    capabilities: { http: createTicketsAiHttpContribution(), data: [plan], files: new Map([[selected.id, files]]) },
+    capabilities: { http: createTicketsAiHttpContribution(), data: [plan], files: new Map([[selected.id, files]]),
+      composeRuntimeSchema: platformSchema => composePublicAiPrismaSchema(platformSchema, contribution) },
     openapi: createTicketsAiOpenApi(),
     business({ platformServer, dependencies, assembledToken }) {
       const requestsToken = Symbol("tickets.ai.selected-requests");
