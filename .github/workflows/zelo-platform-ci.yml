@@ -432,8 +432,11 @@ jobs:
               const element = async selector => (await driver(prefix + '/element', { using: 'css selector', value: selector }))[elementId];
               const fill = async (selector, text) => { const id = await element(selector);
                 await driver(prefix + '/element/' + id + '/clear', {}); await driver(prefix + '/element/' + id + '/value', { text }); };
+              // 原 UIArc 同时保留可见字形和读屏标签；不把两份 DOM 文字当一个按钮名称。
+              const buttonReady = text => dom('return [...document.querySelectorAll("button")].some(e=>!e.disabled && e.getAttribute("aria-disabled")!=="true" && (!e.hasAttribute("data-rental-arc-action") || e.getAttribute("data-state")==="idle") && (e.textContent.trim()===arguments[0] || [...e.querySelectorAll("span")].some(s=>s.textContent.trim()===arguments[0])))', text);
               const clickText = async text => {
-                const result = await driver(prefix + '/element', { using: 'xpath', value: `//button[normalize-space(.)='${text}']` });
+                await waitFor(() => buttonReady(text), text);
+                const result = await driver(prefix + '/element', { using: 'xpath', value: `//button[not(@disabled) and not(@aria-disabled='true') and (not(@data-rental-arc-action) or @data-state='idle') and (normalize-space(.)='${text}' or .//span[normalize-space(.)='${text}'])]` });
                 await driver(prefix + '/element/' + result[elementId] + '/click', {});
               };
               await driver(prefix + '/url', { url: web + '/login' });
@@ -441,7 +444,7 @@ jobs:
               await fill('#tenantCode', 'platform'); await fill('#account', 'admin'); await fill('#password', `${process.env.SEED_PLATFORM_PASSWORD}-New8!`);
               await clickText('进入工作台'); await waitFor(() => dom('return !location.pathname.includes("login")'), '正式登录');
               await driver(prefix + '/url', { url: web + '/platform/core-packages' });
-              await waitFor(() => dom('return [...document.querySelectorAll("button")].some(e=>e.textContent.trim()==="私有来源")'), '包管理页');
+              await waitFor(() => buttonReady('私有来源'), '包管理页');
               await clickText('私有来源'); await waitFor(() => dom('return !!document.querySelector("#repositories")'), '私有来源表单');
               const uiToken = 'github_pat_ui_' + randomBytes(32).toString('hex');
               await fill('#repositories', repositories[0]); await fill('input[autocomplete="new-password"]', uiToken);
@@ -449,7 +452,7 @@ jobs:
               await clickText('保存来源');
               await waitFor(async () => (await body(sourcePath, { headers })).enabled, '首次保存');
               await waitFor(() => dom('return document.querySelector("input[autocomplete=new-password]")?.value === ""'), '凭据清空');
-              await waitFor(() => dom('return [...document.querySelectorAll("button")].some(e=>e.textContent.trim()==="保存来源" && !e.disabled)'), '表单重开');
+              await waitFor(() => buttonReady('保存来源'), '表单重开');
               const firstRevision = (await body(sourcePath, { headers })).revision;
               const rotatedUiToken = 'ghs_ui_' + randomBytes(384).toString('base64url') + '.ci.signature';
               await fill('input[autocomplete="new-password"]', rotatedUiToken);
@@ -457,11 +460,11 @@ jobs:
               await waitFor(async () => (await body(sourcePath, { headers })).revision !== firstRevision, '轮换');
               await waitFor(() => dom('return document.querySelector("input[autocomplete=new-password]")?.value === ""'), '轮换清空');
               for (const token of [uiToken, rotatedUiToken]) assert.equal(await dom('return document.body.innerText.includes(arguments[0]) || Object.values(localStorage).some(v=>v.includes(arguments[0])) || Object.values(sessionStorage).some(v=>v.includes(arguments[0]))', token), false);
-              await waitFor(() => dom('return [...document.querySelectorAll("button")].some(e=>e.textContent.trim()==="撤销凭据" && !e.disabled)'), '撤销入口');
-              await clickText('撤销凭据'); await waitFor(() => dom('return [...document.querySelectorAll("button")].some(e=>e.textContent.trim()==="确认")'), '二次确认');
+              await waitFor(() => buttonReady('撤销凭据'), '撤销入口');
+              await clickText('撤销凭据'); await waitFor(() => buttonReady('确认'), '二次确认');
               await clickText('确认'); await waitFor(async () => !(await body(sourcePath, { headers })).credentialConfigured, '撤销回读');
               await driver(prefix + '/window/rect', { width: 390, height: 844 });
-              assert(await dom('return !!document.querySelector("#repositories") && document.documentElement.scrollWidth <= innerWidth + 2'));
+              await waitFor(() => dom('return !!document.querySelector("#repositories") && document.documentElement.scrollWidth <= innerWidth + 2'), '窄屏布局');
               console.log('实际 Chrome：正式登录、私有来源保存/轮换/撤销、输入清空/浏览器存储脱敏、窄屏可见通过');
             } finally { if (browser) await driver('/session/' + browser.sessionId, undefined, 'DELETE'); }
             const operationKey = 'ci-public-model-save', id = process.env.PLATFORM_AI_PROFILE_ID;
