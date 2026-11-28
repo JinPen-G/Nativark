@@ -102,6 +102,8 @@ node scripts/ops/platform-doctor.cjs --profile selected-core --root <组合根�
 
 `runtime.phasedInstallation` 分别展示原准备结果、已运行包身份、Client、基础原账、每项后置迁移及物理状态、平台/Core 初始化。`ready` 仅表示这一份安装观察齐全；租户开通、成员分配、绑定、业务和模型权限仍沿原入口核定，不由安装观察授予。缺字段、版本/摘要冲突、v1 锁、未结束原迁移或无可靠物理依据都不能返回成功；不自动安装、初始化、迁移或换键重试。
 
+`--root` 可指向原 `rental-host.context.json` 运行归档：诊断核该上下文的实际文件表，保留其中的开发来源证明，不把源码文件表误用于已投影运行包。标准包字节核同后，若只剩旧 API 路径许可，v2 本地检查仍为 `not_checked`；只有同一包摘要的正式宿主完整运行观察才能补足其可信策略依据。其他清单、迁移、摘要或兼容错误继续拒绝，v1 规则不变。
+
 ### 宿主只读输出合同
 
 固定路径是 **GET `/api/platform/core-installation/status`**，不接收查询或动作参数。宿主沿原 Auth/Guard/ALS 的 operator audience、当前 SaaS 身份和 `system:tenant:manage` 权限，在原事务身份复核边界内读取；401/403 保留拒绝，404 表示该固定版本尚未提供入口。响应禁止缓存，不输出连接配置、账号 ID、业务数据、日志原文或文件系统路径。本入口不加入 v1 包管理/候选执行器。

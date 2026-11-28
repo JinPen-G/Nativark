@@ -459,3 +459,144 @@ jobs:
           }
           UPGRADE
           fi
+      - name: 固定 Core 与公共 AI 的原新装和观察接点
+        if: matrix.profile == 'public-ai'
+        working-directory: ${{ env.CI_DIR }}/source
+        shell: bash
+        env:
+          CORE_AI_PLATFORM_COMMIT: 016086943419e3462fc7763a856f97de6d32b279
+          CORE_AI_RENTAL_COMMIT: 1ca7374a64db65bada538254cc95aba7950ea588
+        run: |
+          set -euo pipefail
+          task="$GITHUB_WORKSPACE/$CI_DIR"
+          export CORE_AI_ROOT="$task/core-ai"
+          test ! -e "$CORE_AI_ROOT"
+          api_pid=''
+          cleanup_core_ai() {
+            result=$?
+            if [[ -n "$api_pid" ]]; then kill "$api_pid" 2>/dev/null || true; wait "$api_pid" || true; fi
+            if [[ -f "$CORE_AI_ROOT/database.created" ]]; then
+              if ! node - "$task/platform" <<'DROP'
+          const { PrismaClient } = require(process.argv[2] + '/apps/platform-api/generated/client');
+          const db = new PrismaClient({ datasourceUrl: 'mysql://root:zelo_ci_root_only@127.0.0.1:3306/mysql' });
+          (async () => { try { await db.$executeRawUnsafe('DROP DATABASE zelo_platform_core_ai_ci'); }
+            finally { await db.$disconnect(); } })().catch(() => { console.error('独占组合库清理失败'); process.exitCode = 1; });
+          DROP
+              then result=1; fi
+            fi
+            test "$CORE_AI_ROOT" = "$GITHUB_WORKSPACE/$CI_DIR/core-ai" && test ! -L "$CORE_AI_ROOT" || return 1
+            cd "$GITHUB_WORKSPACE"
+            rm -rf -- "$CORE_AI_ROOT"
+            test ! -e "$CORE_AI_ROOT" || result=1
+            return "$result"
+          }
+          trap cleanup_core_ai EXIT
+          mkdir -p "$CORE_AI_ROOT/rental" "$CORE_AI_ROOT/offline"
+          git fetch --no-tags --depth=1 origin "$CORE_AI_PLATFORM_COMMIT"
+          test "$(git rev-parse "$CORE_AI_PLATFORM_COMMIT^{commit}")" = "$CORE_AI_PLATFORM_COMMIT"
+          git -C "$CORE_AI_ROOT/rental" init --quiet
+          git -C "$CORE_AI_ROOT/rental" fetch --no-tags --depth=1 https://github.com/JinPen-G/Zelo-rental-core.git "$CORE_AI_RENTAL_COMMIT"
+          git -C "$CORE_AI_ROOT/rental" checkout --detach FETCH_HEAD
+          test "$(git -C "$CORE_AI_ROOT/rental" rev-parse HEAD)" = "$CORE_AI_RENTAL_COMMIT"
+          (
+            export DATABASE_URL=mysql://offline:offline@127.0.0.1:1/rental_os_offline
+            export AI_OFFLINE_WRITE_ROOT="$CORE_AI_ROOT" AI_OFFLINE_AUDIT="$CORE_AI_ROOT/offline/audit.log"
+            export TEMP="$CORE_AI_ROOT/offline" TMP="$CORE_AI_ROOT/offline" TMPDIR="$CORE_AI_ROOT/offline" XDG_CACHE_HOME="$CORE_AI_ROOT/offline"
+            node --no-compilation-cache --max-old-space-size=6144 --require ./tests/fixtures/ai-native/prisma-offline-preload.cjs \
+              scripts/prepare-rental-workspace.cjs --repo "$PWD" --repository https://github.com/JinPen-G/Nativark \
+              --commit "$CORE_AI_PLATFORM_COMMIT" --core-repo "$CORE_AI_ROOT/rental" --core-commit "$CORE_AI_RENTAL_COMMIT" \
+              --mode development --profile host --fresh-ai --out "$CORE_AI_ROOT/dependencies.tgz"
+            test ! -e "$AI_OFFLINE_AUDIT"
+          )
+          mkdir "$CORE_AI_ROOT/dependencies"
+          tar -xzf "$CORE_AI_ROOT/dependencies.tgz" -C "$CORE_AI_ROOT/dependencies"
+          (
+            cd "$CORE_AI_ROOT/dependencies"
+            npm ci --include=dev --ignore-scripts --no-audit --no-fund --cache "$task/npm-cache"
+          )
+          (
+            export DATABASE_URL=mysql://offline:offline@127.0.0.1:1/rental_os_offline
+            export AI_OFFLINE_WRITE_ROOT="$CORE_AI_ROOT" AI_OFFLINE_AUDIT="$CORE_AI_ROOT/offline/audit.log"
+            export TEMP="$CORE_AI_ROOT/offline" TMP="$CORE_AI_ROOT/offline" TMPDIR="$CORE_AI_ROOT/offline" XDG_CACHE_HOME="$CORE_AI_ROOT/offline"
+            node --no-compilation-cache --max-old-space-size=6144 --require ./tests/fixtures/ai-native/prisma-offline-preload.cjs \
+              scripts/package-rental-host.cjs --development --fresh-ai --repo "$PWD" --repository https://github.com/JinPen-G/Nativark \
+              --commit "$CORE_AI_PLATFORM_COMMIT" --core-repo "$CORE_AI_ROOT/rental" --core-commit "$CORE_AI_RENTAL_COMMIT" \
+              --deps "$CORE_AI_ROOT/dependencies/node_modules" --output "$CORE_AI_ROOT/host.tgz"
+            test ! -e "$AI_OFFLINE_AUDIT"
+          )
+          node "$task/platform/packages/core-contracts/dist/export-platform.js" --repo "$PWD" \
+            --repository https://github.com/JinPen-G/Nativark --commit "$CORE_AI_PLATFORM_COMMIT" --out "$CORE_AI_ROOT/platform.tgz"
+          mkdir "$CORE_AI_ROOT/host"
+          tar -xzf "$CORE_AI_ROOT/host.tgz" -C "$CORE_AI_ROOT/host"
+          cd "$CORE_AI_ROOT/host"
+          npm ci --include=dev --ignore-scripts --no-audit --no-fund --cache "$task/npm-cache"
+          node node_modules/@prisma/engines/scripts/postinstall.js
+          node node_modules/prisma/build/index.js generate --schema apps/platform-api/prisma/schema.prisma
+          node node_modules/prisma/build/index.js generate --schema apps/rental-api/prisma-deployment/schema.prisma
+          node verify-runtime.cjs
+          node - "$task/platform" <<'EVIDENCE'
+          const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path');
+          const load = require('node:module').createRequire(process.argv[2] + '/package.json');
+          const { readCoreArchive } = load('@rental-os/core-contracts/archive');
+          const { readPhasedPlatformRuntimeEvidence, readPlatformRuntimeEvidence } = load('@rental-os/platform-core-host/core-package-deployment');
+          const root = process.cwd(), lockFile = 'apps/rental-api/prisma-deployment/core.deployment.lock.json';
+          const lock = JSON.parse(fs.readFileSync(lockFile)), context = JSON.parse(fs.readFileSync('rental-host.context.json'));
+          assert.equal(lock.lockVersion, 2); assert.equal(lock.postCapability.length, 1);
+          assert.equal(lock.base.platform.source.commit, process.env.CORE_AI_PLATFORM_COMMIT);
+          assert.equal(lock.base.cores[0].manifest.source.commit, process.env.CORE_AI_RENTAL_COMMIT);
+          assert.equal(fs.readdirSync('apps/rental-api/prisma-deployment/migrations').filter(name => name !== 'migration_lock.toml').length, 18);
+          const modules = context.platformBuild.projects.map(item => item.project.replace('/tsconfig.json', ''));
+          const input = { directory: root, lock, receiptFile: 'rental-host.context.json', deploymentLockFile: lockFile,
+            runtimeDirectories: new Map(modules.map(item => [item, path.join(root, item)])),
+            runtimeEntries: new Map(modules.map(item => [item, path.join(root, item, item === 'apps/platform-api' ? 'dist/main.js' : 'dist/index.js')])),
+            platformFiles: readCoreArchive(fs.readFileSync(path.join(process.env.CORE_AI_ROOT, 'platform.tgz')), lock.base.platform.sha256).files };
+          assert.equal(readPhasedPlatformRuntimeEvidence(input), true);
+          assert.throws(() => readPlatformRuntimeEvidence(input));
+          const changed = structuredClone(lock); changed.postCapability[0].migration.sha256 = '0'.repeat(64);
+          assert.throws(() => readPhasedPlatformRuntimeEvidence({ ...input, lock: changed }));
+          console.log('完整 v2 原上下文及公共六包核同，原 v1 拒绝和后置锁变化拒绝保留；数据库另核');
+          EVIDENCE
+          node - "$task/platform" <<'CREATE'
+          const { PrismaClient } = require(process.argv[2] + '/apps/platform-api/generated/client');
+          const db = new PrismaClient({ datasourceUrl: 'mysql://root:zelo_ci_root_only@127.0.0.1:3306/mysql' });
+          (async () => { try { await db.$executeRawUnsafe('CREATE DATABASE zelo_platform_core_ai_ci');
+            require('node:fs').writeFileSync(process.env.CORE_AI_ROOT + '/database.created', 'created-by-this-step\n', { flag: 'wx' });
+            await db.$executeRawUnsafe("GRANT ALL PRIVILEGES ON zelo_platform_core_ai_ci.* TO 'zelo_ci'@'%'"); }
+            finally { await db.$disconnect(); } })().catch(() => { console.error('独占组合库准备失败'); process.exitCode = 1; });
+          CREATE
+          export DATABASE_URL='mysql://zelo_ci:zelo_ci_database_only@127.0.0.1:3306/zelo_platform_core_ai_ci?connection_limit=2'
+          export AUTH_TOKEN_SECRET="$(openssl rand -hex 32)" SEED_PLATFORM_PASSWORD="ZeloCoreCi9-$(openssl rand -hex 12)"
+          export API_PORT=3093 RENTAL_AI_MODE=enabled DATABASE_CONNECT_ON_START=true
+          export RENTAL_DEPLOYMENT_LOCK="$PWD/apps/rental-api/prisma-deployment/core.deployment.lock.json"
+          export RENTAL_PUBLIC_AI_DATA_PACKAGE_DIR="$PWD/public-ai-data"
+          node node_modules/prisma/build/index.js migrate deploy --schema apps/rental-api/prisma-deployment/schema.prisma
+          node apps/platform-api/dist/initialize.js
+          node apps/rental-api/dist-ai/ai-fresh-initialize.js
+          node apps/rental-api/dist-ai/ai-fresh-main.js > "$CORE_AI_ROOT/api.log" 2>&1 &
+          api_pid=$!
+          if ! curl -fsS --retry 24 --retry-delay 1 --retry-connrefused --max-time 3 http://127.0.0.1:3093/api/health > /dev/null; then
+            tail -n 30 "$CORE_AI_ROOT/api.log"
+            exit 1
+          fi
+          node - "$task/platform" <<'OBSERVATION'
+          const assert = require('node:assert/strict'), path = require('node:path'), { spawnSync } = require('node:child_process');
+          (async () => {
+            const origin = 'http://127.0.0.1:3093';
+            const response = await fetch(origin + '/api/auth/login', { method: 'POST', signal: AbortSignal.timeout(10000),
+              headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tenantCode: 'platform', account: 'admin', password: process.env.SEED_PLATFORM_PASSWORD }) });
+            assert.equal(response.status, 201); const body = await response.json(), token = (body.data ?? body).accessToken; assert(token);
+            const root = process.cwd(), args = [path.join(process.argv[2], 'scripts/ops/platform-doctor.cjs'), '--profile', 'selected-core',
+              '--root', root, '--host', 'apps/rental-api', '--lock', process.env.RENTAL_DEPLOYMENT_LOCK,
+              '--core', 'rental=' + path.join(root, 'packages/rental-core'), '--capability', 'ai-native=' + path.join(root, 'public-ai-data'),
+              '--platform-package', path.join(process.env.CORE_AI_ROOT, 'platform.tgz'), '--service', '--steps', '--json'];
+            const checked = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 60000,
+              env: { ...process.env, PLATFORM_DOCTOR_API_URL: origin, PLATFORM_DOCTOR_ACCESS_TOKEN: token } });
+            const report = JSON.parse(checked.stdout);
+            assert.equal(report.database.checked, false); assert.equal(report.database.state, 'unknown');
+            assert.equal(report.runtime.phasedInstallation.reason, 'phased_endpoint_unavailable');
+            const invalid = report.checks.filter(item => ['missing', 'invalid'].includes(item.state));
+            if (invalid.length) console.error(invalid.map(item => ({ id: item.id, state: item.state })));
+            assert.equal(invalid.length, 0); assert.equal(checked.status, 2);
+            console.log('固定 Core＋AI 原新装和登录通过；旧宿主缺完整 v2 HTTP 观察，doctor 保持未检查，A01 此项尚未关闭');
+          })().catch(error => { console.error(error.name + ': ' + error.message); process.exitCode = 1; });
+          OBSERVATION

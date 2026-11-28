@@ -23,10 +23,10 @@ node scripts/ops/platform-doctor.cjs [--root <源码或解包目录>] [--profile
 默认 platform：零 Core。public-ai：零 Core + 公共 AI。selected-core：由锁选择 Core 及可选能力，须提供 --host。
 默认仅检查本地材料和进程配置。--database 须显式 --profile，在工具同树读取所选数据库的原账/结构/账号。
 不读 .env，不下载、安装、迁移、初始化、授权或启服务。selected-core 的数据库观察须由所属宿主提供。
---service 显式读取进程指定的原包管理 catalogue，使用当前 SaaS 会话；运行组合须与本地所选锁一致。
+--service 使用当前 SaaS 会话读取原 catalogue 或完整 v2 安装观察；运行组合须与本地所选锁一致。
 --member 仅用于 selected-core，另用 PLATFORM_DOCTOR_MEMBER_ACCESS_TOKEN 读取本人目录/范围就绪；不输出主体或业务数据。
 退出 0：所检查的本地前置无缺项；1：缺项/冲突；2：用法错误或本地检查不完整。
-未选 --database 时库与账号保持未检查；数据库就绪不表示运行、登录、授权或业务可用。`;
+未选 --database 或 v2 --service 时库与账号保持未检查；数据就绪不表示登录、授权或业务可用。`;
 
 function parseArguments(args) {
   const options = { root: toolRoot, profile: 'platform', cores: new Map(), capabilities: new Map(), scopes: new Map() };
@@ -105,10 +105,27 @@ function diagnose(options, environment = process.env) {
   }, 'npm v3 根锁与根清单身份及 workspace 选择一致。', '取得同一组合的原 npm v3 锁，不手工补版本。', privateValue);
   if (manifest) report.sources.workspaceVersion = files.version(manifest.version);
 
-  let sourceReceipt;
+  let sourceReceipt, runtimeContext;
+  const packagedHost = options.profile === 'selected-core' && files.exists(at('rental-host.context.json'));
+  if (packagedHost) {
+    const receipt = check('source:rental-host.context.json', () => {
+      const value = files.json(at('rental-host.context.json'));
+      if (value.format !== 'rental-host-context-1' || value.host !== 'rental' || !value.platformBuild?.release) throw Error('host_receipt');
+      return { value, verification: files.verifyReceipt(options.root, { source: value.platformBuild.release.source,
+        version: value.platformBuild.release.versions.platform, files: value.files }) };
+    }, '原宿主上下文文件集摘要核同；源码证明保留为原材料，不用其开发文件表校验运行投影。',
+    '重新取得同一完整宿主归档；损坏上下文不能降级为源码目录。', privateValue);
+    if (receipt) {
+      runtimeContext = receipt.value;
+      sourceReceipt = { format: receipt.value.format, platform: receipt.value.platformBuild.release };
+      report.sources['rental-host.context.json'] = { ...files.source(sourceReceipt.platform.source),
+        ...receipt.verification, authenticityChecked: false };
+    }
+  }
   const receipts = [['platform.source.json', 'nativark-platform-source-1'], ['public-ai.workspace.json', 'zelo-platform-public-ai-1'],
     ['development.workspace.json', 'nativark-core-development-source-2']];
   for (const [name, format] of receipts) {
+    if (packagedHost) continue;
     if (!files.exists(at(name))) continue;
     const receipt = check('source:' + name, () => {
       const value = files.json(at(name));
@@ -153,7 +170,14 @@ function diagnose(options, environment = process.env) {
   }
   const start = hostManifest?.scripts?.[options.profile === 'public-ai' ? 'start:ai' : 'start'];
   const entry = typeof start === 'string' ? /^node (dist(?:-[a-z-]+)?\/[a-zA-Z0-9_/-]+\.js)$/u.exec(start)?.[1] : null;
-  if (entry) needFile('host:build', host + '/' + entry, '按所选宿主 README 构建，再复核原产物及运行包收据。');
+  if (runtimeContext) check('host:build', () => {
+    const selectedEntry = runtimeContext.entry;
+    if (typeof selectedEntry !== 'string' || !selectedEntry.startsWith(host + '/dist')
+      || !/^dist(?:-[a-z-]+)?\/[a-zA-Z0-9_/-]+\.js$/u.test(selectedEntry.slice(host.length + 1))) throw Error('host_entry');
+    files.read(files.relativeFile(options.root, selectedEntry));
+    return { file: selectedEntry, meaning: 'context-entry-present-only' };
+  }, '原上下文声明的实际启动产物存在，运行身份另核。', host + '/README.md');
+  else if (entry) needFile('host:build', host + '/' + entry, '按所选宿主 README 构建，再复核原产物及运行包收据。');
   else add('host:build', 'not_checked', '宿主没有可静态定位的单一 Node 启动产物。', host + '/README.md');
 
   inspectEnvironment(options, manifest, environment, add);
@@ -352,15 +376,20 @@ function inspectSelection(options, environment, receipt, report, add) {
   add('lock:contract', lock.platform.versions.contract === api.CORE_CONTRACT_VERSION ? 'pass' : 'invalid',
     '本工具加载的合同版本与锁版本比较。', '使用与所选发行一致的诊断工具及正式合同产物。',
     { declared: lock.platform.versions.contract, loaded: api.CORE_CONTRACT_VERSION });
-  try { inspectPackages(options, environment, lock, load, add); }
+  try { inspectPackages(options, environment, lock, load, add, input.lockVersion === 2); }
   catch { add('package-checker', 'not_checked', '正式包检查器不可加载，本地材料校验未完成。',
     '核对本工具同树 core-contracts 的构建产物及锁定依赖。'); }
 }
 
-function inspectPackages(options, environment, lock, load, add) {
+function inspectPackages(options, environment, lock, load, add, phased = false) {
   const api = load(''), archive = load('archive'), packages = load('package');
   const verify = (id, run, repair) => {
-    try { run(); add(id, 'pass', '原正式包检查与完整摘要核同；未加载包代码或执行迁移。'); }
+    try {
+      const pendingPolicy = run();
+      if (pendingPolicy) add(id, 'not_checked', '完整包字节核同；旧 API 路径须由原宿主可信策略核定，通用诊断不授予例外。',
+        '使用 --service 读取同一完整 v2 运行包观察；缺宿主依据保持未检查。', pendingPolicy);
+      else add(id, 'pass', '原正式包检查与完整摘要核同；未加载包代码或执行迁移。');
+    }
     catch { add(id, 'invalid', '原包、清单、入口、迁移或摘要校验失败；未采用该材料。', repair); }
   };
   for (const id of options.cores.keys()) if (!lock.cores.some(pin => pin.manifest.id === id))
@@ -378,7 +407,11 @@ function inspectPackages(options, environment, lock, load, add) {
       declared.forEach(name => files.ordinary(files.relativeFile(directory, name)));
       const content = packages.readCorePackageFiles(directory, archive.CORE_ARCHIVE_LIMITS.fileBytes, archive.CORE_ARCHIVE_LIMITS.totalBytes);
       const result = packages.inspectCorePackageFiles(content, api.coreDeploymentHostVersions(lock));
-      if (!result.ok || !isDeepStrictEqual(result.manifest, pin.manifest) || !archive.matchesInstalledCoreArchive(content, pin.sha256)) throw Error('core_package');
+      if (!isDeepStrictEqual(result.manifest, pin.manifest) || !archive.matchesInstalledCoreArchive(content, pin.sha256)) throw Error('core_package');
+      if (!result.ok) {
+        if (!phased || !result.issues.length || result.issues.some(issue => issue.code !== 'route_namespace')) throw Error('core_package');
+        return { hostPolicyRequired: true, packageSha256: pin.sha256 };
+      }
     }, '取得同一固定标准包并沿所属宿主核验；旧 API 许可只由可信宿主策略提供。');
   }
   for (const release of lock.dataCapabilities ?? []) {
@@ -486,6 +519,13 @@ async function main(args = process.argv.slice(2)) {
         report.database = observed.database;
         report.runtime.initialization = observed.database.initialization.state;
         report.runtime.freshPreparation = observed.preparation ?? 'not_checked';
+        // 只补原宿主拥有的路由策略判断；本地字节、清单或其他检查失败仍不改变。
+        if (observed.runtimeIdentityVerified) for (const core of observed.current.cores) {
+          const check = report.checks.find(item => item.id === 'core:' + core.id);
+          if (check?.state === 'not_checked' && check.evidence?.hostPolicyRequired
+            && check.evidence.packageSha256 === core.current?.sha256) Object.assign(check, { state: 'pass',
+            message: '本地标准包原字节与完整宿主已核包身份一致；旧路由例外由该宿主的原可信策略核定。' });
+        }
         const dbCheck = report.checks.find(item => item.id === 'database');
         Object.assign(dbCheck, { required: true, state: observed.database.state === 'ready' ? 'pass'
           : ['incompatible', 'migration_incomplete'].includes(observed.database.state) ? 'invalid' : 'not_checked',
