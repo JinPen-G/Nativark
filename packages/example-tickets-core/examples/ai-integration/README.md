@@ -130,7 +130,7 @@ OpenAPI从同一输入/输出schema投影，联合状态和仅null分支使用Op
 
 [工单后台宿主](../../../../apps/example-tickets-admin/src/tickets-ai.tsx)已选用状态区，复用公共查询/按钮/语言与会话隔离，刷新期间或失败时收起旧状态。已选内置AI宿主时，[原任务区域](../../../../apps/example-tickets-admin/src/tickets-ai-task.tsx)沿`@rental-os/example-tickets-core/ai-http`提供各次显式动作；进入详情不创建、批准或执行任务。原引用按租户/用户/工单保留，刷新只回读，未知请求禁止换键重做。真实内置与MCP运行仍分别验收。
 
-以下均为已核正式出口，不是本目录已经完成的装配。宿主必须固定工单场景、输入 / 对象来源与版本，再接同一 Core 的原方法。
+下表列出本目录装配消费的正式出口。移植到其他Core时，宿主须固定自己的场景、输入 / 对象来源与版本，再接该Core的原方法；不能复用工单身份或事实作为授权。
 
 | 阶段 | 正式接点与工单落点 |
 | --- | --- |
@@ -140,7 +140,7 @@ OpenAPI从同一输入/输出schema投影，联合状态和仅null分支使用Op
 | 原结果与 unknown | 原 `TicketsService.receipt(principal, operationId)` 与 `/task-persistence`、`/runtime/original-result-reads`、`/runtime/original-task-recovery-read`；保持原 actionId、操作键和结果引用，缺原证据不补成功、不重新派发 |
 | 任务资源与模型 | `/task-resource-ledger`、`/task-runner-resources`、`/task-measured-effects` 保持累计资源；需要服务端模型时接 `/public-tenant-gateway` 和 `/runtime/budget/public-budget-ledger`，恢复不重置账 |
 
-Task/Run聚合提交已使用上述固定正式出口，工单发布、原输入、计划、批准、执行、Step事实、结果与HTTP参加者已提供。可选宿主数据准入已经接到原观察器，页面动作沿同源合同接线；真实MCP身份/发布/计量/字段权威和两条路线的实际运行仍须完成。工单成功用自身已提交对象及精确原收据证明`committed`，不能伪装成订单/报告事实或`effect:none`；公共仓储继续拥有状态机、CAS、事件与复权。[原批准消费](../../../ai-native-server/src/runtime/approval-consumption-persistence.repository.ts) · [工单事务](../../src/mysql.ts)
+Task/Run聚合提交已使用上述固定正式出口，工单发布、原输入、计划、批准、执行、Step事实、结果与HTTP参加者已提供。可选宿主数据准入已经接到原观察器，页面动作沿同源合同接线；MCP的tenant身份、发布、持久计量和字段权威由下节参加者提供，两条路线的实际运行仍须分别验收。工单成功用自身已提交对象及精确原收据证明`committed`，不能伪装成订单/报告事实或`effect:none`；公共仓储继续拥有状态机、CAS、事件与复权。[原批准消费](../../../ai-native-server/src/runtime/approval-consumption-persistence.repository.ts) · [工单事务](../../src/mysql.ts)
 
 MCP的`/service`、`/persistent-oauth-authorization`、`/persistent-oauth-tokens`和`/prisma-oauth-store`提供不限定workspace的通用端口。历史名`createRentalMcpService`不代表必须使用Rental范围；`OriginalOAuthPrincipalBinding`的workspace约束属于现有Rental身份适配器。工单tenant参加者沿这些通用端口接入原平台Auth，不捏造空间ID。
 
