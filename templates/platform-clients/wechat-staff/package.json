@@ -1,0 +1,21 @@
+{
+  "name": "@rental-os/client-template-wechat-staff",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "build": "vite build",
+    "lint": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@rental-os/platform-client-contracts": "0.1.0",
+    "@rental-os/platform-client-wechat": "0.1.0",
+    "@rental-os/client-template-rental": "0.1.0"
+  },
+  "devDependencies": {
+    "miniprogram-api-typings": "5.2.3",
+    "typescript": "5.9.3",
+    "vite": "8.2.1"
+  },
+  "type": "module"
+}

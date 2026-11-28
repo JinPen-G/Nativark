@@ -36,6 +36,8 @@ import { TenantStatus, type PlatformSessionContextResponse } from "@rental-os/pl
 
 同一入口提供原 Step 事件、结果错误及 `createAiStepDraftSchemas`。公共宿主按自己的已发布工具和版本核验；原 Rental OpenAPI 沿原工具枚举生成同一组件，shared 的状态类型保留该枚举。来源引用仍受本端对象与字段授权。[原 Step schema](src/ai-step-draft-schemas.ts) · [持久化消费](../ai-native-server/src/task-steps.ts)
 
+业务 Core 的事实引用使用 `resourceType: "core:<coreId>:<resourceKind>"`，例如 `core:example-tickets:ticket`；两个标识各为 1–64 位小写字母、数字和单连字符，且以字母开头。`resourceId` 保留原业务对象 ID，`scope` 与 `basis` 保留真实范围及原结果依据。原六类引用兼容不变；公共 Step 和知识入口共同校验新增格式。格式通过不证明 Core 已安装、对象可读或业务已提交，宿主必须按静态登记的 Core 读取原收据并核当前权限，不把类型名转换成 URL 或任意工具调用。
+
 AI上下文与C03 Gateway从 `@rental-os/platform-contracts/ai-gateway` 导入。调用、结果、事件和Gateway端口以已注册工具请求为泛型，默认不接工具；`createAiGatewayDraftSchemas()`只允许空工具数组，传入Core明确的严格schema后才接受对应工具结构。上下文、配置引用、用量与unknown使用原版本，结构校验不替代当前权限、批准或业务裁定。原shared继续以原订单解释契约特化，并生成完全相同的旧schema。[正式接点](src/ai-gateway.ts) · [工具槽与版本](src/ai-gateway-draft.ts) · [上下文schema](src/ai-context-schemas.ts) · [有限schema读取](src/ai-leaf-schema-validation.ts)
 
 模型配置、原操作收据和用量从 `@rental-os/platform-contracts/ai-usage` 导入，模型目录发现从 `@rental-os/platform-contracts/ai-provider-discovery` 导入。原 C07 版本、严格 schema、金额精度、凭据变更和目录仅元数据语义保持，shared 原出口再导出同一声明及 schema 对象。实际保存由宿主当前授权、原配置/Profile 事务和原键收据裁定。[配置与用量](src/ai-usage.ts) · [目录发现](src/ai-provider-discovery.ts) · [公共配置工厂](../ai-native-server/src/model-configuration.ts)

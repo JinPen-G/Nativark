@@ -1,0 +1,7 @@
+{
+  "description": "独立客户微信入口；AppID 由开发者在本地私有设置填写",
+  "miniprogramRoot": "dist/",
+  "compileType": "miniprogram",
+  "projectname": "zelo-customer",
+  "setting": { "urlCheck": true, "es6": true, "minified": false }
+}

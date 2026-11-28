@@ -1,0 +1,34 @@
+/* 原生微信使用公共 UIArc 的中性层级；不引入浏览器 Auth、DOM 或管理员 UI 运行时。 */
+page { font-size: 16px; line-height: 1.6; }
+.client-shell { padding: 20px; padding-bottom: calc(24px + env(safe-area-inset-bottom)); box-sizing: border-box; min-height: 100vh; background: var(--client-background); color: var(--client-foreground); }
+.header, .context, .page-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
+.header { padding-bottom: 20px; border-bottom: 1px solid var(--client-border); }
+.brand { font-size: 22px; font-weight: 650; }
+.title { font-size: 25px; font-weight: 650; line-height: 1.35; }
+.context { padding: 20px 0; font-size: 14px; color: var(--client-secondary); }
+.navigation, .actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
+button { font-size: 16px; line-height: 1.5; min-height: 48px; padding: 12px 16px; margin: 0; border: 1px solid var(--client-secondary); border-radius: 10px; background: var(--client-surface); color: var(--client-foreground); }
+button::after { border: none; }
+button[size="mini"] { min-height: 48px; font-size: 14px; padding: 12px; }
+button[disabled] { color: var(--client-secondary); border-style: dashed; background: var(--client-muted); }
+button.primary { background: var(--client-foreground); color: var(--client-background); }
+button.selected { background: var(--client-muted); font-weight: 600; }
+.scope-control { padding: 12px 16px; min-height: 24px; border: 1px solid var(--client-secondary); border-radius: 10px; }
+.login { padding-top: 40px; max-width: 480px; margin: auto; }
+form label { display: block; margin: 24px 0; }
+input, textarea { margin-top: 8px; border: 1px solid var(--client-secondary); border-radius: 10px; padding: 12px; min-height: 24px; width: auto; }
+textarea { min-height: 100px; }
+.page { padding-top: 12px; }
+.tool { margin-top: 24px; }
+.tool > button { margin-top: 12px; }
+.input-action { display: flex; align-items: stretch; gap: 10px; margin-top: 8px; }
+.input-action input { flex: 1; min-width: 0; margin-top: 0; }
+.input-action button { flex-shrink: 0; }
+.status { padding: 28px 0; color: var(--client-secondary); }
+.status button { margin-top: 16px; }
+.item { padding: 22px 0; border-bottom: 1px solid var(--client-border); overflow-wrap: anywhere; }
+.item-title { font-size: 18px; font-weight: 600; }
+.item-link { text-align: left; border: 0; padding-left: 0; text-decoration: underline; font-size: 18px; }
+.secondary { color: var(--client-secondary); font-size: 14px; margin-top: 8px; overflow-wrap: anywhere; }
+.action-form, .receipts { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--client-border); }
+.action-form > button, .receipts button { margin-top: 16px; }

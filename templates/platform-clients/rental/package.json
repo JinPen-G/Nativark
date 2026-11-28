@@ -1,0 +1,15 @@
+{
+  "name": "@rental-os/client-template-rental",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "首个 Rental Core 的可选客户端宿主接线，不包含业务实现",
+  "exports": { "./browser": "./browser.ts", "./wechat": "./wechat.ts", "./config": "./config.ts" },
+  "files": ["*.ts", "LICENSE"],
+  "scripts": { "build": "tsc -p tsconfig.json", "lint": "tsc -p tsconfig.json" },
+  "dependencies": { "@rental-os/platform-client-contracts": "0.1.0" },
+  "peerDependencies": { "@rental-os/rental-core": "0.2.2" },
+  "peerDependenciesMeta": { "@rental-os/rental-core": { "optional": true } },
+  "devDependencies": { "typescript": "5.9.3", "miniprogram-api-typings": "5.2.3" }
+}
