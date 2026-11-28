@@ -11,4 +11,4 @@
 
 默认媒体由负责人于2026-11-11指定。MP3放入本端`public/media/rest-player/all-too-well-10-minute-version.mp3`，SHA-256为`2c06b9bd5f056434cd80ec76b995607923fcc9451c51b7997d95b07f732ccf5b`、24,560,943字节、实际时长613秒；该部署资源由同目录`.gitignore`排除，不随源码上传，缺失时保留真实失败与本地选择入口。源文件不修改。方形[封面](../../../../public/media/rest-player/red-taylors-version.jpg)取自[Apple Music官方专辑页](https://music.apple.com/cn/album/red-taylors-version-a-message-from-taylor/1590368448)公开的[600×600图片](https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/15/38/9b/15389bf4-8074-06c3-11ee-655b5453af68/21UM1IM25046.rgb.jpg/600x600bf-60.jpg)，原字节SHA-256为`04bd68a3faa8bc2857df2912ad7a2a28f35b9ca18d26324a53adf5135c258c80`；没有重绘、变色或替换为视频缩略图。录音与封面的权利归各自权利人，不属于UIArc组件许可。
 
-原组件供应方已完成类型、格式、CSS引用检查；这不是Rental OS宿主或官方媒体的运行验收。消费方的实页、失败状态和验证边界只维护于[管理后台开发记录](../../../../../../docs/管理后台/管理后台-开发记录.md)。
+原组件供应方已完成类型、格式、CSS引用检查；这不是Rental OS宿主或官方媒体的运行验收。消费方的实页、失败状态和验证边界只维护于[管理后台开发记录](<../../../../../../docs/Core包/Rental Core/管理后台/管理后台-开发记录.md>)。

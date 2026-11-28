@@ -7,15 +7,15 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const ROOT = path.resolve(__dirname, "..");
-const TASKS = "docs/AI Native/AI Native-开发任务.md";
+const TASKS = "docs/平台底座/AI Native/AI Native-开发任务.md";
 const FILES = Object.freeze([
   "AGENTS.md", "CLAUDE.md", "README.md", "docs/文档导航.md",
   "packages/platform-admin/AGENTS.md",
-  "docs/公共技术资料/开发指南/项目-开发指南.md",
-  "docs/公共技术资料/开发指南/数据库-启动指南.md",
-  "docs/公共技术资料/界面规范/管理后台-界面规范.md",
-  "docs/公共技术资料/接口说明/客户端-API说明.md",
-  "docs/AI Native/AI Native-协作接续.md", TASKS,
+  "docs/Core包/Rental Core/技术资料/开发指南/项目-开发指南.md",
+  "docs/Core包/Rental Core/技术资料/开发指南/数据库-启动指南.md",
+  "docs/平台底座/公共技术资料/界面规范/管理后台-界面规范.md",
+  "docs/Core包/Rental Core/技术资料/接口说明/客户端-API说明.md",
+  "docs/平台底座/AI Native/AI Native-协作接续.md", TASKS,
 ]);
 
 function inside(root, target) {
