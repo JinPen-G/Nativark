@@ -341,15 +341,16 @@ jobs:
           node node_modules/prisma/build/index.js migrate deploy --schema apps/rental-api/prisma-deployment/schema.prisma
           node apps/platform-api/dist/initialize.js
           node apps/rental-api/dist-ai/ai-fresh-initialize.js
-          node apps/rental-api/dist-ai/ai-fresh-main.js > "$task/api.log" 2>&1 &
+          setsid node apps/rental-api/dist-ai/ai-fresh-main.js > "$task/api.log" 2>&1 &
           api_pid=$!
-          trap 'kill "$api_pid" ${driver_pid:+"$driver_pid"} 2>/dev/null || true; wait || true' EXIT
+          # 独占进程组包含 Chrome 子进程；异常退出也先停止写 profile，再删除任务目录。
+          trap 'kill -- "-$api_pid" ${driver_pid:+"-$driver_pid"} 2>/dev/null || true; sleep 1; kill -KILL -- "-$api_pid" ${driver_pid:+"-$driver_pid"} 2>/dev/null || true; wait || true' EXIT
           curl -fsS --retry 30 --retry-delay 1 --retry-max-time 60 --retry-connrefused --max-time 5 http://127.0.0.1:3094/api/health -o "$task/health.json"
           openssl req -x509 -newkey rsa:2048 -nodes -keyout "$task/localhost.key" -out "$task/localhost.crt" \
             -days 1 -subj /CN=localhost -addext subjectAltName=DNS:localhost,IP:127.0.0.1 2> "$task/certificate.log"
           google-chrome --version
           "$CHROMEWEBDRIVER/chromedriver" --version
-          "$CHROMEWEBDRIVER/chromedriver" --port=9515 --allowed-ips=127.0.0.1 > "$task/browser.log" 2>&1 &
+          setsid "$CHROMEWEBDRIVER/chromedriver" --port=9515 --allowed-ips=127.0.0.1 > "$task/browser.log" 2>&1 &
           driver_pid=$!
           curl -fsS --retry 10 --retry-delay 1 --retry-connrefused --max-time 5 http://127.0.0.1:9515/status -o "$task/browser-status.json"
           node --input-type=module <<'NODE'
@@ -521,7 +522,8 @@ jobs:
                 const file = resolve(root, '.' + (pathname === '/' ? '/index.html' : pathname));
                 assert(file.startsWith(root + sep));
                 const type = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' }[extname(file)] ?? 'application/octet-stream';
-                response.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' }); response.end(readFileSync(file));
+                const bytes = readFileSync(file);
+                response.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' }); response.end(bytes);
               } catch { response.writeHead(404); response.end(); }
             });
             servers.push(server); await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
