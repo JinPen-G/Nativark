@@ -79,7 +79,15 @@ export function composeTicketsReads(
 
 [tickets-start.mts](tickets-start.mts)只登记`example-tickets.ticket.start`版本`1`。`prepareTicketsStart`从原服务读取事实；`TicketsStartBindingSchema`绑定持久输入记录ID、修订和摘要，`createTicketsStartProposal`用同一份原输入形成明确的输入/预览/对象版本。准备不自动批准，不派发动作。
 
-`createTicketsStartSource`从原受保护数据库view读取Task、Step、原输入、提案版本和批准；当前主体、场景、发布/权益/政策来自已绑定的`createPublicTenantTaskAuthority`。宿主须在该权威的`assertTaskAction/assertReference`中提供真实检查。不能从HTTP body传执行上下文、租约或批准证明，也不能用固定管理员/恒真回调补缺件。
+`prepareTicketsStart`调用普通服务的`prepareStart`，与`start`共用当前权限、受派者、状态及版本校验，只读事实，不占用操作键。以下参加者提供该场景的持久接点，仍须由显式宿主组合后使用：
+
+| 参加者 | 权威与原结果 |
+| --- | --- |
+| [tickets-authority.mts](tickets-authority.mts) | 从正式tenant任务身份读取原scope；当前`ai.native.use`权益、精确发布及原输入摘要绑定同一工单事实。原输入使用普通operationId作为requestKey，同键异参拒绝，不覆盖旧输入；历史回读不恢复新工作权。 |
+| [tickets-publication.mts](tickets-publication.mts) | 沿正式租户配置事务显式发布唯一工具与累计资源限额；不创建默认额度/权益。政策修订CAS与原操作日志收据同事务，提交失应答保留原operationId。 |
+| [tickets-approval.mts](tickets-approval.mts) | 从已登记Step和持久原输入形成提案，调用原C05创建及人类决定仓储；页面只提交提案引用和已查看摘要，批准正文从原表重读。批准与工单执行是不同动作。 |
+
+`createTicketsStartSource`从原受保护数据库view读取Task、Step、原输入、提案版本和批准；当前主体、场景、发布/权益/政策来自已绑定的`createPublicTenantTaskAuthority`。宿主须在该权威的`assertTaskAction/assertReference`中接入上述场景参加者，数据库使用正式`createAiBodyStorageDatabase`保护view，发布使用固定管理权限的`createTenantConfigurationTransactions`。不能从HTTP body传执行上下文、租约或批准证明，也不能用固定管理员/恒真回调补缺件。
 
 `createTicketsStartExecutor`返回原`TaskRegisteredExecutor`，供`createPublicAiTaskMeasuredRunnerPorts`显式登记。原Runner继续拥有阶段标记、Task累计额度、租约与unknown。它在同一strict Task Native事务中先取得工单当前授权和写锁，再核原事实、C05 `prepare`、普通`TicketsService.start`、精确`receiptFor`证据及C05 `commit`；业务行、原收据、平台审计和批准消费一起提交，任一失败回滚。不把此executor直接挂成HTTP、MCP reader或未经计量的模型回调。
 

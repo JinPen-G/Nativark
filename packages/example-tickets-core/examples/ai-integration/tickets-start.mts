@@ -37,10 +37,10 @@ const changed = () => new Error("TICKETS_AI_BASIS_CHANGED");
 const current = (signal: AbortSignal) => { if (signal.aborted) throw unavailable(); };
 
 /** 读取真实对象形成待存原输入。只准备事实，不能由该结果推导批准或执行许可。 */
-export async function prepareTicketsStart(service: Pick<TicketsService, "get">, principal: CorePrincipal, command: unknown): Promise<TicketsStartOriginal> {
+export async function prepareTicketsStart(service: Pick<TicketsService, "prepareStart">, principal: CorePrincipal, command: unknown): Promise<TicketsStartOriginal> {
   const input = ChangeTicketStateSchema.parse(command);
   return TicketsStartOriginalSchema.parse({ version: "example-tickets-start-1", principal,
-    command: input, fact: await service.get(principal, input.ticketId) });
+    command: input, fact: await service.prepareStart(principal, input) });
 }
 
 export function ticketsStartFingerprint(value: TicketsStartBinding): string {

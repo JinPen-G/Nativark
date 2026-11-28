@@ -126,6 +126,16 @@ export class TicketsService {
     return this.transition(principal, "start", input, "open", "in_progress");
   }
 
+  /** 受权准备只读当前事实，与start共用权限/版本/状态规则；不占用操作键或执行动作。 */
+  prepareStart(principal: CorePrincipal, input: unknown): Promise<Ticket> {
+    const parsed = ChangeTicketStateSchema.parse(input);
+    return this.withAccess(principal, "start", async (store, access) => {
+      const ticket = this.visible(await store.find(parsed.ticketId), access);
+      this.transitionable(ticket, access, parsed.expectedRevision, "open");
+      return ticket;
+    });
+  }
+
   close(principal: CorePrincipal, input: unknown): Promise<TicketReceipt> {
     return this.transition(principal, "close", input, "in_progress", "closed");
   }
@@ -134,13 +144,17 @@ export class TicketsService {
     const parsed = ChangeTicketStateSchema.parse(input);
     return this.change(principal, action, parsed, async (store, access) => {
       const ticket = this.visible(await store.find(parsed.ticketId), access);
-      this.expected(ticket, parsed.expectedRevision);
-      if (ticket.assigneeId !== access.userId && !access.canAssign) throw new TicketError("denied", "只有受派成员或管理者可以处理工单");
-      if (!ticket.assigneeId || ticket.state !== from) throw new TicketError("state_conflict", "当前工单状态不支持此操作");
+      this.transitionable(ticket, access, parsed.expectedRevision, from);
       const updated = this.next(ticket, { state: to });
       await store.update(updated, parsed.expectedRevision);
       return updated;
     });
+  }
+
+  private transitionable(ticket: Ticket, access: TicketAccess, revision: number, from: Ticket["state"]) {
+    this.expected(ticket, revision);
+    if (ticket.assigneeId !== access.userId && !access.canAssign) throw new TicketError("denied", "只有受派成员或管理者可以处理工单");
+    if (!ticket.assigneeId || ticket.state !== from) throw new TicketError("state_conflict", "当前工单状态不支持此操作");
   }
 
   private withAccess<T>(principal: CorePrincipal, permission: TicketPermission,
