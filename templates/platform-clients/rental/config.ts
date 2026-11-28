@@ -12,6 +12,13 @@ export interface RentalClientHostConfiguration {
 export const RENTAL_CLIENT_SOURCE = "34baba2cdd50d1a46241069448621e460265cdb5";
 export const RENTAL_CLIENT_VERSION = "0.2.1";
 
+/** 这些正式 JSON 路由经过公共 RequestIdInterceptor；运输仅解一层，不把信封当业务结果。 */
+export function responseBody<T>(value: unknown): T {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || !Object.prototype.hasOwnProperty.call(value, "data")) throw new ClientError("unavailable");
+  return (value as { data: T }).data;
+}
+
 export function connection(configuration: RentalClientHostConfiguration, surface: ClientSurface) {
   const origin = configuration.apiOrigin.replace(/\/$/u, "");
   if (!/^https:\/\/[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]{1,5})?$/iu.test(origin)

@@ -2,7 +2,7 @@
 import { ClientError } from "@rental-os/platform-client-contracts";
 import { createRentalCustomerClient, createRentalStaffClient, RentalClientHttpError,
   type RentalContributionTransport } from "@rental-os/rental-core/clients/contribution";
-import { connection, credentialProjection, credentialText, RENTAL_CLIENT_VERSION, type RentalClientHostConfiguration } from "./config";
+import { connection, credentialProjection, credentialText, responseBody, RENTAL_CLIENT_VERSION, type RentalClientHostConfiguration } from "./config";
 
 export function createRentalWebAssembly(surface: "customer-web" | "staff-web", configuration: RentalClientHostConfiguration | undefined,
   host: Pick<Window, "fetch" | "sessionStorage" | "crypto">) {
@@ -18,7 +18,7 @@ export function createRentalWebAssembly(surface: "customer-web" | "staff-web", c
         credentials: "omit", cache: "no-store", redirect: "error" });
       input.lifetime?.assertCurrent();
       if (!response.ok) throw new RentalClientHttpError(response.status);
-      const result = await response.json() as T;
+      const result = responseBody<T>(await response.json());
       input.lifetime?.assertCurrent();
       return result;
     } finally { unsubscribe?.(); }

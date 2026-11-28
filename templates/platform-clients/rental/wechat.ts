@@ -2,7 +2,7 @@
 import { ClientError } from "@rental-os/platform-client-contracts";
 import { createRentalCustomerClient, createRentalStaffClient, RentalClientHttpError,
   type RentalContributionTransport } from "@rental-os/rental-core/clients/contribution";
-import { connection, credentialProjection, credentialText, RENTAL_CLIENT_VERSION, type RentalClientHostConfiguration } from "./config";
+import { connection, credentialProjection, credentialText, responseBody, RENTAL_CLIENT_VERSION, type RentalClientHostConfiguration } from "./config";
 
 type WechatHost = Pick<WechatMiniprogram.Wx, "request" | "getStorageSync" | "setStorageSync" | "removeStorageSync" | "getRandomValues">;
 export async function createRentalWechatAssembly(surface: "wechat-customer" | "wechat-staff",
@@ -29,7 +29,7 @@ export async function createRentalWechatAssembly(surface: "wechat-customer" | "w
           try {
             input.lifetime?.assertCurrent();
             if (response.statusCode < 200 || response.statusCode >= 300) throw new RentalClientHttpError(response.statusCode);
-            resolve(response.data as T);
+            resolve(responseBody<T>(response.data));
           } catch (error) { reject(error); }
         }); },
         fail() { settle(() => reject(new ClientError(input.lifetime && !input.lifetime.current() ? "stale" : "unavailable"))); },

@@ -36,7 +36,7 @@ export const connection: RentalClientHostConfiguration = {
 };
 ```
 
-各端 `assembly.ts` 调用真实 `createRentalWebAssembly` / `createRentalWechatAssembly`，直接采用固定原工厂的 `session/access/contribution`，不自行实现业务或额外注入页面授权。普通页面请求原 `contribution-page-access`：客户核本人订单读范围，员工核 `order:view` 和原地点/dataScope；外层原 Core 门禁拒绝停用，不能用 `canAct` 或 `order:operate` 写权代替只读页。动作继续走原 `contribution-access`，原收据独立走历史许可。若改接其他 Core，只替换 `assembly.ts` 的正式贡献、会话和准入，外壳合同保持通用。
+各端 `assembly.ts` 调用真实 `createRentalWebAssembly` / `createRentalWechatAssembly`，直接采用固定原工厂的 `session/access/contribution`，不自行实现业务或额外注入页面授权。运输按正式宿主公共 `RequestIdInterceptor` 解开一层 `{ data, requestId }` JSON 信封，再交给工厂；缺少 `data` 的成功响应保持不可用，不递归解包业务对象。普通页面请求原 `contribution-page-access`：客户核本人订单读范围，员工核 `order:view` 和原地点/dataScope；外层原 Core 门禁拒绝停用，不能用 `canAct` 或 `order:operate` 写权代替只读页。动作继续走原 `contribution-access`，原收据独立走历史许可。若改接其他 Core，只替换 `assembly.ts` 的正式贡献、会话和准入，外壳合同保持通用。
 
 所有模板使用 `envDir: false`，构建不读 `.env`；没有默认服务器或 HTTP 代理。Web build 输出各模板 `dist/`，由实际宿主托管。跨来源时由原 API 明确允许该网站来源及 `Authorization` / `Idempotency-Key`，不能让模板代理绕过服务端策略。Web hash 只携带登记路由与对象定位，不携带身份。
 
