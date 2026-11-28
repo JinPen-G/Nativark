@@ -108,7 +108,9 @@ function issues(values) {
     owner: item?.owner === 'platform' ? 'platform' : 'selected-module' }));
 }
 function versions(value, api) {
-  if (value?.versions?.status !== 'observed') return { state: 'unavailable', repair: '核原宿主 deployment、固定锁、实际包与物理观察供给。' };
+  if (value?.versions?.status !== 'observed') return { state: 'unavailable',
+    reason: ['deployment_read_failed', 'deployment_unavailable', 'deployment_invalid'].includes(value?.versions?.error?.code)
+      ? value.versions.error.code : 'host_observation_unavailable', repair: '核原宿主 deployment、固定锁、实际包与物理观察供给。' };
   const raw = value.versions;
   const member = (entry, schema, kind) => ({
     locked: releaseSummary(schema.parse(entry.locked), kind),
@@ -153,7 +155,12 @@ async function run(options, api, environment = process.env, fetcher = fetch) {
       repair: '当前宿主缺完整运行/数据观察，停止候选办理。' };
     const value = await read('plan-update', options.request);
     if (value.status !== 'inspected' || value.plan?.status !== 'checked') return { exitCode: 1, status: 'unavailable', current,
-      repair: '核所选固定包引用、当前组合的实际部署/数据观察及当前 SaaS 权限。' };
+      inspectionIssues: (value.inspection?.issues ?? []).slice(0, 50).map(item => ({ code: [
+        'archive_invalid', 'release_mismatch', 'undeclared_file', 'platform_version', 'platform_source_mismatch',
+        'migration_mismatch', 'platform_source_invalid', 'capability_package_invalid'].includes(item?.code) ? item.code : 'package_invalid' })),
+      repair: options.request.kind === 'platform' && value.inspection?.issues?.some(item => item.code === 'platform_source_mismatch')
+        ? '旧版可能不认识新源码白名单；核新旧发行和公开维护桥接条件，不删除白名单或替换历史包。'
+        : '核所选固定包引用、当前组合的实际部署/数据观察及当前 SaaS 权限。' };
     const result = value.plan.result;
     if (result?.ok !== true) return { exitCode: 1, status: 'refused', current, issues: issues(result?.issues) };
     if (!['unchanged', 'candidate', 'migration_required'].includes(result.status) || !Array.isArray(result.migrations)) throw Error('plan');
@@ -209,6 +216,19 @@ async function main(args = process.argv.slice(2)) {
 async function readRunningVersions(environment = process.env) {
   try { return await run({ command: 'status' }, contracts(), environment); }
   catch { return { exitCode: 2, status: 'unknown', current: { state: 'unavailable' } }; }
+}
+async function readRunningLock(environment = process.env) {
+  const api = contracts(), raw = await requestHost(connection(environment), 'catalogue', undefined, fetch);
+  const observed = versions(raw, api);
+  if (observed.state !== 'observed' || [observed.platform, ...observed.cores, ...observed.capabilities]
+    .some(item => item.availability !== 'available' || !item.current) || observed.cores.some(item => !item.registered))
+    throw Error('running_lock_unavailable');
+  const value = raw.versions;
+  for (const entry of [value.platform, ...value.cores, ...(value.dataCapabilities ?? [])])
+    if (!isDeepStrictEqual(entry.current, entry.locked)) throw Error('running_lock_conflict');
+  return api.core.CoreDeploymentLockSchema.parse({ lockVersion: 1, platform: value.platform.current,
+    cores: value.cores.map(item => item.current),
+    ...(value.dataCapabilities === undefined ? {} : { dataCapabilities: value.dataCapabilities.map(item => item.current) }) });
 }
 async function readPreparationReceipt(sha256, environment = process.env) {
   if (!files.HASH.test(sha256 ?? '')) return { exitCode: 2, status: 'unknown' };
@@ -271,5 +291,5 @@ async function readMemberReadiness(selection, scopes, environment = process.env)
     repair: '核本树正式合同、所选 Core 锁、原 API 地址、当前成员会话与显式范围 JSON；不可用目录不是未授权或空业务的证明。' }; }
 }
 if (require.main === module) main().then(code => { process.exitCode = code; });
-module.exports = { argumentsFor, connection, requestHost, versions, preparation, run, readRunningVersions, readPreparationReceipt,
+module.exports = { argumentsFor, connection, requestHost, versions, preparation, run, readRunningVersions, readRunningLock, readPreparationReceipt,
   observeMemberReadiness, readMemberReadiness, main };

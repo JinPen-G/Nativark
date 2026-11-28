@@ -5,6 +5,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { createRequire } = require('node:module');
 const { spawn } = require('node:child_process');
+const { isDeepStrictEqual } = require('node:util');
 const files = require('./platform-doctor-files.cjs');
 const root = path.resolve(__dirname, '../..');
 const host = path.join(root, 'apps/platform-api');
@@ -114,6 +115,56 @@ async function readInstallation(options, environment = process.env) {
   } finally { if (context) await context.close().catch(() => {}); }
 }
 
+/** 旧归档白名单的人工维护窗口桥接。只读两版固定材料、原宿主和目标库，不生成收据或切换进程。 */
+async function inspectBridge(options, previous, environment = process.env) {
+  let context;
+  try {
+    if (options.profile !== 'platform' || !options.lock || !options['platform-package']) throw Error('bridge_selection');
+    const api = load('@rental-os/core-contracts');
+    const baseline = api.CoreDeploymentLockSchema.parse(files.json(previous.lock));
+    const candidate = api.CoreDeploymentLockSchema.parse(files.json(options.lock));
+    if (baseline.cores.length || candidate.cores.length || baseline.dataCapabilities?.length || candidate.dataCapabilities?.length
+      || !['0.2.1', '0.2.2'].includes(baseline.platform.versions.platform)
+      || baseline.platform.versions.contract !== candidate.platform.versions.contract
+      || baseline.platform.versions.node !== candidate.platform.versions.node
+      || !isDeepStrictEqual(baseline.platform.versions.capabilities, candidate.platform.versions.capabilities)
+      || !isDeepStrictEqual(baseline.platform.data, candidate.platform.data)) throw Error('bridge_not_supported');
+    const { inspectCorePackageArtifact } = load('@rental-os/platform-core-host/core-package-preflight');
+    const { readCoreArchive, CORE_ARCHIVE_LIMITS } = load('@rental-os/core-contracts/archive');
+    let source;
+    for (const [file, release] of [[previous.package, baseline.platform], [options['platform-package'], candidate.platform]]) {
+      const bytes = files.read(file, CORE_ARCHIVE_LIMITS.totalBytes);
+      if (!inspectCorePackageArtifact({ kind: 'platform', release, bytes }, undefined, {}).ok) throw Error('bridge_archive');
+      if (file === options['platform-package']) source = readCoreArchive(bytes, release.sha256).files;
+    }
+    // 候选的每份公开源码须为即将使用的同树字节；不接受只改根版本或只替换诊断脚本的目录。
+    for (const [name, bytes] of source) if (!files.read(files.relativeFile(root, name)).equals(Buffer.from(bytes)))
+      throw Error('bridge_candidate_changed');
+    const running = require('./platform-doctor-upgrade.cjs').readRunningLock;
+    const before = await running(environment);
+    if (!isDeepStrictEqual(before, baseline)) throw Error('bridge_running_changed');
+    context = await openInstallation(options, environment);
+    const observation = await context.read();
+    if (observation.state !== 'ready' || observation.initialization.state !== 'initialized' || !observation.data)
+      throw Error('bridge_database_unverified');
+    const plan = api.planCoreUpdate(baseline, { kind: 'platform', release: candidate.platform }, observation.data);
+    if (!plan.ok || plan.status !== 'candidate' || plan.migrations.length || !isDeepStrictEqual(plan.candidate, candidate))
+      throw Error('bridge_version_or_data_conflict');
+    if (!isDeepStrictEqual(await running(environment), before)) throw Error('bridge_running_changed');
+    return { exitCode: 0, status: 'maintenance_bridge_checked', scope: 'zero-core-unchanged-data',
+      previous: { version: baseline.platform.versions.platform, source: files.source(baseline.platform.source), sha256: baseline.platform.sha256 },
+      candidate: { version: candidate.platform.versions.platform, source: files.source(candidate.platform.source), sha256: candidate.platform.sha256 },
+      database: { state: observation.state, initialization: observation.initialization.state, applied: observation.applied, pending: observation.pending },
+      migration: 'not_required', deployment: 'pending', authorization: 'operator-maintenance-window-required',
+      recovery: '保留旧目录/锁/配置，停旧后在新目录重新 status；启动失败先停止新进程，沿同库原账复核旧版可读条件再恢复旧目录。不得并行启动或改迁移账。' };
+  } catch (error) {
+    const known = ['bridge_selection', 'bridge_not_supported', 'bridge_archive', 'bridge_candidate_changed',
+      'bridge_running_changed', 'bridge_database_unverified', 'bridge_version_or_data_conflict'];
+    return { exitCode: 1, status: 'refused', reason: known.includes(error.message) ? error.message : 'bridge_evidence_unavailable',
+      deployment: 'not_checked', repair: '只支持旧 0.2.1/0.2.2 零 Core 同数据链的严格前进版本。核正式归档、两锁、新目录原字节、旧宿主 SaaS 会话和同一原库；其他组合交所属维护者处理。' };
+  } finally { if (context) await context.close().catch(() => {}); }
+}
+
 /** Prisma 原 migrate deploy 负责原账及排他锁。捕获但不转印含目标信息的子进程输出。 */
 async function migrate(context, environment = process.env) {
   assertNoEnvironmentFiles(context.selection.schema);
@@ -139,4 +190,4 @@ async function migrate(context, environment = process.env) {
     child.once('error', () => done(null)); child.once('exit', code => done(code));
   });
 }
-module.exports = { openInstallation, readInstallation, migrate };
+module.exports = { openInstallation, readInstallation, inspectBridge, migrate };
