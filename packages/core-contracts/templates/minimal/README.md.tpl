@@ -83,6 +83,8 @@ npm run dev:admin -w {{PACKAGE_NAME}}
 
 API 默认 3000，`API_PORT` 可显式调整；Web 默认 5177，`ADMIN_PORT` 可调整，开发代理 `API_PROXY_TARGET` 默认 `http://127.0.0.1:3000`。浏览器固定请求同源 `/api`；正式 Web 部署使用同源 API 或受控反向代理。API `TRUST_PROXY_HOPS` 默认 0，只有核定代理跳数的环境才配置。Vite 不读取 `.env`、不公开进程密钥，只向浏览器提供通过包摘要核验的清单。
 
+Web 命令固定使用 Vite 的 `--configLoader runner`，让公共 `@rental-os/platform-admin/vite` 的 TypeScript 配置及其相对导入由同一加载器处理。直接调用 `vite build`、`vite preview` 或开发命令时也须保留此参数；默认 bundle 加载器可能把公共 TS 出口外部化，导致 Node 报 `ERR_MODULE_NOT_FOUND`。不应为此修改底座源码导入或复制公共配置。
+
 启动前会拒绝 Core 标识、版本、源码来源或完整字节与锁不一致的包，以及 Node/合同版本不符的组合。原 `CoreHostPermissionStartup` 在监听前登记四项精确权限目录；登记不是角色授权。[唯一生命周期](host/api/src/lifecycle.ts)等待原权限登记、Guard 和完整处理器结束，HTTP 关闭后释放同一数据库池，客户端断线不取消已派发的事务。
 
 ## 准入、授权、使用和停用
