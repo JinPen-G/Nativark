@@ -6,7 +6,7 @@
 
 ## 来源与使用条件
 
-基线：Zelo `d6ccb0dcad63ee2e06043b71c2651f326c7e8e3a`。按同一固定组合使用 `example-tickets-core` 0.1.5、`mcp-server` 0.1.1、`core-contracts` 0.1.1；内置 AI 接点核对的是 `ai-native-server` 0.2.1。版本来源以各包 metadata、固定源码及实际发行资产为准；此说明不宣布这些源码候选已发布或已安装。
+原读取示例固定于 `c9d6505201fd09786563262e04932673ea94156c`；当前宿主基础为 Zelo `a18d1d763dbe8e98d85e862a83d58ee2ad7cf150`。该组合的 npm 包版本是 `example-tickets-core` 0.1.6、`mcp-server` 0.1.1、`core-contracts` **0.1.0**、`ai-native-server` 0.2.1。Core 接入协议 `CORE_CONTRACT_VERSION` 为 **0.1.1**，与 npm 包版本分别核对，不能将协议号写进依赖映射。版本来源以各包 metadata、固定源码及实际发行资产为准；此说明不宣布这些源码候选已发布或已安装。
 
 [tickets-reads.mts](tickets-reads.mts) 是 ESM 消费者，仅使用包的正式出口。宿主将该源码纳入自己的受控构建，并提供同版依赖及真实权威。禁止深层导入其他包的 `src`、从模型生成的路径调用 API，或用另一个工作树的活动构建产物运行。
 
