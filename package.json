@@ -29,6 +29,7 @@
     "templates/platform-clients/wechat-staff"
   ],
   "scripts": {
+    "prepare:client": "node templates/platform-clients/prepare.cjs",
     "build:client-contracts": "npm run build -w @rental-os/platform-client-contracts",
     "build:client-web": "npm run build -w @rental-os/platform-client-web",
     "build:client-customer-web": "npm run build -w @rental-os/client-template-customer-web",

@@ -21,6 +21,22 @@ Zelo 基线是 `d6ccb0dcad63ee2e06043b71c2651f326c7e8e3a`，客户端候选在 [
 
 原 Rental 工厂曾按 Zelo 合同 `63340342ae46ef545f0078f2a035dfdc62703874` 编写；本候选已用其固定源码核对后继合同、Runtime、Operations 和四端运输的兼容性。源码消费沿正式出口，未把 Rental Controller、DTO 或业务实现复制到 Zelo。
 
+### 单端源码准备入口
+
+在包含本客户端提交的公开 Zelo Git 检出中使用 [prepare.cjs](prepare.cjs)。准备不需要预先安装依赖，只读取指定完整 SHA 的 Git 对象；不采用工作区未提交文件，也不读取 `.env` 或私有 `docs`。先查看选中的源码与依赖：
+
+```powershell
+npm run prepare:client -- --surface customer-web --client-commit <客户端完整SHA> --rental-repo D:/sources/Zelo-rental-core --rental-commit 34baba2cdd50d1a46241069448621e460265cdb5 --plan
+```
+
+将 `--plan` 改为 `--out D:/clients/customer-web` 才写出源码。父目录须已存在，目标目录须不存在；既有目录或链接明确拒绝覆盖。`--surface` 只接受表中四个入口中的一个，其他三个端不会加入输出 workspace 或锁。原公共主题包声明的依赖仍按其正式锁保留；这不启用管理员登录、其他客户端或服务端。
+
+默认公共底座源码来自同一个 `--client-commit`。显式装配另一固定底座时，同时指定 `--platform-repo <Zelo目录> --platform-commit <底座完整SHA>`；准备器只叠加本客户端拥有的包与锁条目，其他公共包仍来自所选底座。Rental SHA、包版本和贡献出口必须与模板已固定来源一致，不能传入浮动分支或同版本的其他提交。该操作仅准备客户端源码，不核定远端 API 的安装、兼容、权限或业务就绪。
+
+输出的 `client.workspace.json` 登记底座、客户端、Rental 完整 SHA、所选 workspace 和原锁摘要。然后在**输出目录**显式执行 `npm ci --ignore-scripts --no-audit --no-fund` 与 `npm run build`；后者只构建三个公共合同、核所选外壳/接线/入口类型并构建该端，不执行全仓构建、Prisma 或 Core 服务端脚本。配置本端 `connection.ts` 后重新构建，产物位于本端的 `dist/`。取消准备或写出失败时只清理本次创建且字节未变的文件；清理受阻会明确报告原位置，不覆盖并发改动。
+
+这份开发源码工作区不是标准发行资产、部署包或业务通过证明。模板还须按下文取得实际宿主与微信证据；零 Core 发行仍独立，安装/生成器收录时可消费这个明确的单端入口，不能默认加入全部客户端。
+
 ## 宿主设置与运行
 
 每端的 `connection.ts` 是明确的非敏感连接设置，默认 `undefined`。在获授权独立宿主填入可信 HTTPS API 来源、原 tenantCode、品牌名；微信客户还需原应用 AppID。不要填密码、token、任意用户提供的 URL 或本地推测的主体范围。例如设置的结构如下，地址和租户只是格式示意，不能当可用环境：
@@ -44,7 +60,7 @@ export const connection: RentalClientHostConfiguration = {
 
 微信深链只使用登记定位，例如 `pages/client/index?route=rental.my-order&orderId=<原订单ID>`；员工服务页使用 `route=rental.service-occurrence&orderId=<原订单ID>&occurrenceId=<原发生项ID>`。原服务仍校验每个参数。微信启动等待安全随机源和正式装配完成，隐藏/卸载页面不采用迟到启动结果；缺少 `wx.getRandomValues` 时保持不可用，开发者须选择支持该 API 的基础库并在真机核对。
 
-客户端源码未进入固定基线的零 Core 归档白名单。最终选装制品需安装/生成器组合按所选端收集包/模板及依赖闭包，投影 workspace、锁与单端命令；不能把八个客户端 workspace 全部强加给零 Core。此片未改发行白名单、生成器或原有 CI；新增的独立客户端 CI 见下文。
+客户端源码未进入固定基线的零 Core 归档白名单。上述单端准备入口提供显式依赖闭包、原锁投影和单端命令；最终发行收录仍需安装/生成器组合固定接入，不把八个客户端 workspace 全部强加给零 Core。此片未改发行白名单、生成器或原有 CI；新增的独立客户端 CI 见下文。
 
 ## 原业务链与隔离
 
@@ -75,7 +91,9 @@ Rental 已有 `clients/staff/context.ts` 的 `createRentalStaffContext`：`loadC
 
 ## 独立 Web 宿主 CI
 
-[zelo-client-ci.yml](../../.github/workflows/zelo-client-ci.yml) 固定 Node `24.13.0`、原 MySQL `8.4` 镜像摘要及 runner 预装的配套 Chrome/ChromeDriver，直接使用 W3C WebDriver，没有新增测试脚本或框架。API 新装输入是 Zelo `e2af5fc4886a70d6298402d8f7925b2172376c7c` 与上述 Rental 固定 SHA；Web 在同一底座源码上仅叠加当前客户端提交的五个所选 workspace 和原锁条目。报告同时登记底座、Rental、客户端完整 SHA，不把任意两条活动分支称作固定组合。
+[zelo-client-ci.yml](../../.github/workflows/zelo-client-ci.yml) 固定 Node `24.13.0`、原 MySQL `8.4` 镜像摘要及 runner 预装的配套 Chrome/ChromeDriver，直接使用 W3C WebDriver，没有新增测试脚本或框架。独立源码 job 沿上述公开准备入口，对四端逐个执行原锁安装、必要类型和构建，每次输出只含一个端；它使用当前客户端提交所含的底座源码，不启动 API、数据库或浏览器，不能计为目标宿主通过。
+
+API 新装输入是 Zelo `e2af5fc4886a70d6298402d8f7925b2172376c7c` 与上述 Rental 固定 SHA。真实宿主 job 的两个 Web 分别调用同一准备器，在所选新底座上叠加当前客户端的必要包和原锁条目，各自构建，不共享可写依赖。报告同时登记底座、Rental、客户端完整 SHA，不把任意两条活动分支称作固定组合。
 
 前检先用正式版本合同读取兼容范围和同源 SDK 选择，再检查客户端固定来源、可选 peer 与 Rental 宿主 SDK 声明。当前 Rental `34baba2` 的底座范围是 `>=0.2.0 <0.3.0`，新装宿主仍声明 `@rental-os/public-ai-data@0.2.3`；它不能与底座 `0.3.0` / SDK `0.2.5` 组成新装候选。因此报告为 `unavailable`，数据库/浏览器 job 不启动。**前检成功运行不表示宿主通过，跳过的宿主没有验收证据。** 原作者提供兼容固定片后，要先同步本端来源/版本并核原 SDK 声明，不能改兼容判断或在 CI 内篡改 Rental 清单来放行。
 

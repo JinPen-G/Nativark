@@ -21,6 +21,84 @@ env:
   CI_DIR: output/.tmp/zelo-client-ci
 
 jobs:
+  selected-source:
+    name: 四个入口分别准备与构建（不是宿主验收）
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: 检出客户端候选
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          path: ${{ env.CI_DIR }}/client
+          persist-credentials: false
+      - name: 检出固定 Rental
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: JinPen-G/Zelo-rental-core
+          ref: ${{ env.RENTAL_COMMIT }}
+          path: ${{ env.CI_DIR }}/rental
+          persist-credentials: false
+      - name: 固定 Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.13.0
+      - name: 沿公开入口单端准备、安装原锁和构建
+        working-directory: ${{ env.CI_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$GITHUB_WORKSPACE/$CI_DIR"
+          test "$(git -C client rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C rental rev-parse HEAD)" = "$RENTAL_COMMIT"
+          for surface in customer-web staff-web wechat-customer wechat-staff; do
+            node client/templates/platform-clients/prepare.cjs --surface "$surface" --client-commit "$GITHUB_SHA" \
+              --rental-repo "$task/rental" --rental-commit "$RENTAL_COMMIT" --out "$task/selected"
+            (
+              cd selected
+              npm ci --include=dev --ignore-scripts --no-audit --no-fund --cache "$task/npm-cache"
+              npm run build
+              node --input-type=module - "$surface" <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync, readdirSync, writeFileSync, appendFileSync } from 'node:fs';
+          const surface = process.argv[2], source = JSON.parse(readFileSync('client.workspace.json'));
+          assert.equal(source.surface, surface);
+          assert.equal(source.client.commit, process.env.GITHUB_SHA);
+          assert.equal(source.platform.commit, process.env.GITHUB_SHA);
+          assert.equal(source.rental.commit, process.env.RENTAL_COMMIT);
+          const entries = source.workspaces.filter(path => /\/(customer-web|staff-web|wechat-customer|wechat-staff)$/.test(path));
+          assert.deepEqual(entries, ['templates/platform-clients/' + surface]);
+          const output = readdirSync(entries[0] + '/dist', { recursive: true });
+          assert(output.includes(surface.startsWith('wechat-') ? 'app.js' : 'index.html'));
+          const report = { ...source, installed: true, built: true, outputFiles: output.length };
+          writeFileSync('../' + surface + '.json', JSON.stringify(report, null, 2));
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- ${surface}：独立原锁安装、类型和构建通过；未运行业务宿主。\n`);
+          NODE
+            )
+            test "$(realpath selected)" = "$task/selected"
+            rm -rf -- selected
+          done
+      - name: 保存单端构建来源
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: zelo-client-selected-source-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.CI_DIR }}/customer-web.json
+            ${{ env.CI_DIR }}/staff-web.json
+            ${{ env.CI_DIR }}/wechat-customer.json
+            ${{ env.CI_DIR }}/wechat-staff.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: 清理独立源码与构建目录
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$GITHUB_WORKSPACE/$CI_DIR"
+          test "$CI_DIR" = output/.tmp/zelo-client-ci
+          test "$(realpath -m "$task")" = "$GITHUB_WORKSPACE/output/.tmp/zelo-client-ci"
+          rm -rf -- "$task"
+          test ! -e "$task"
+
   combination:
     name: 固定组合前检（不是 A03 验收）
     runs-on: ubuntu-24.04
@@ -198,57 +276,32 @@ jobs:
           assert.equal(migrations.length, 18);
           assert.equal(migrations.at(-1), 'post-capability.rental.rental.20261127000000-ai-extension');
           NODE
-      - name: 只为两个 Web 装配所选客户端源码和原锁
+      - name: 两个 Web 分别沿单端入口装配固定底座
         working-directory: ${{ env.CI_DIR }}
         shell: bash
         run: |
           set -euo pipefail
           task="$GITHUB_WORKSPACE/$CI_DIR"
           mkdir web
-          git -C platform archive "$ZELO_COMMIT" | tar -x -C web
-          git -C client archive "$GITHUB_SHA" packages/platform-client-contracts packages/platform-client-web \
-            templates/platform-clients/customer-web templates/platform-clients/staff-web templates/platform-clients/rental | tar -x -C web
-          mkdir web/packages/rental-core
-          git -C rental archive "$RENTAL_COMMIT" package.json LICENSE src clients/contribution tsconfig.client-contribution.json tsconfig.contracts.json | tar -x -C web/packages/rental-core
+          for surface in customer-web staff-web; do
+            node client/templates/platform-clients/prepare.cjs --surface "$surface" --client-commit "$GITHUB_SHA" \
+              --platform-repo "$task/platform" --platform-commit "$ZELO_COMMIT" \
+              --rental-repo "$task/rental" --rental-commit "$RENTAL_COMMIT" --out "$task/web/$surface"
+          done
           node <<'NODE'
-          const assert = require('node:assert/strict'), fs = require('node:fs');
-          const read = file => JSON.parse(fs.readFileSync(file)), root = read('web/package.json'), lock = read('web/package-lock.json');
-          const candidate = read('client/package-lock.json');
-          const selected = ['packages/platform-client-contracts', 'packages/platform-client-web', 'templates/platform-clients/rental',
-            'templates/platform-clients/customer-web', 'templates/platform-clients/staff-web'];
-          for (const directory of selected) {
-            assert(!root.workspaces.includes(directory)); root.workspaces.push(directory);
-            const metadata = read('web/' + directory + '/package.json'), link = 'node_modules/' + metadata.name;
-            assert(candidate.packages[directory] && candidate.packages[link]);
-            assert(!lock.packages[directory] && !lock.packages[link]);
-            lock.packages[directory] = candidate.packages[directory]; lock.packages[link] = candidate.packages[link];
-          }
-          // 原接线包同时提供微信类型，版本/来源/摘要直接取候选锁；没有新增解析或改旧依赖。
-          const wxTypes = 'node_modules/miniprogram-api-typings';
-          if (lock.packages[wxTypes]) assert.deepEqual(lock.packages[wxTypes], candidate.packages[wxTypes]);
-          else lock.packages[wxTypes] = candidate.packages[wxTypes];
-          const core = read('web/packages/rental-core/package.json'); root.workspaces.push('packages/rental-core');
-          lock.packages['packages/rental-core'] = Object.fromEntries(['name', 'version', 'license', 'dependencies', 'peerDependencies', 'peerDependenciesMeta']
-            .filter(key => core[key] !== undefined).map(key => [key, core[key]]));
-          lock.packages['node_modules/@rental-os/rental-core'] = { resolved: 'packages/rental-core', link: true };
-          lock.packages[''].workspaces = root.workspaces;
-          fs.writeFileSync('web/package.json', JSON.stringify(root, null, 2)); fs.writeFileSync('web/package-lock.json', JSON.stringify(lock, null, 2));
+          const fs = require('node:fs');
           for (const [surface, port] of [['customer-web', 5194], ['staff-web', 5195]]) {
             const config = { apiOrigin: `https://127.0.0.1:${port}`, tenantCode: 'client-ci', brand: { name: '客户端 CI 租户' } };
-            fs.writeFileSync(`web/templates/platform-clients/${surface}/connection.ts`, `export const connection = ${JSON.stringify(config)};\n`);
+            fs.writeFileSync(`web/${surface}/templates/platform-clients/${surface}/connection.ts`, `export const connection = ${JSON.stringify(config)};\n`);
           }
           NODE
-          cd web
-          npm ci --include=dev --ignore-scripts --no-audit --no-fund --cache "$task/npm-cache"
-          npm run build -w @rental-os/core-contracts
-          npm run build -w @rental-os/platform-contracts
-          npm run build -w @rental-os/platform-client-contracts
-          npm run lint -w @rental-os/platform-client-web
-          npm run lint -w @rental-os/client-template-rental
-          npm run lint -w @rental-os/client-template-customer-web
-          npm run lint -w @rental-os/client-template-staff-web
-          npm run build -w @rental-os/client-template-customer-web
-          npm run build -w @rental-os/client-template-staff-web
+          for surface in customer-web staff-web; do
+            (
+              cd "web/$surface"
+              npm ci --include=dev --ignore-scripts --no-audit --no-fund --cache "$task/npm-cache"
+              npm run build
+            )
+          done
       - name: 独占 MySQL 初始化及真实客户员工页面
         working-directory: ${{ env.CI_DIR }}/host
         shell: bash
@@ -337,7 +390,7 @@ jobs:
           // 真实 API 只在当前 job 的回环接口。HTTPS 代理保留请求身份/响应，不签发凭据或改写业务结果。
           const servers = [];
           for (const [surface, port] of [['customer-web', 5194], ['staff-web', 5195]]) {
-            const root = resolve(task, 'web/templates/platform-clients', surface, 'dist');
+            const root = resolve(task, 'web', surface, 'templates/platform-clients', surface, 'dist');
             const server = createServer({ key: readFileSync(resolve(task, 'localhost.key')), cert: readFileSync(resolve(task, 'localhost.crt')) }, (request, response) => {
               if (request.url?.startsWith('/api/')) {
                 const upstream = forward(origin + request.url, { method: request.method, headers: request.headers }, result => {
