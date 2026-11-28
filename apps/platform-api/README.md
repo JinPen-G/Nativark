@@ -131,6 +131,8 @@ import {
 
 宿主应在同一次有界读取中返回这些字段，包/锁在读取前后变化时拒绝。只完成基础阶段、只有后置物理结构或缺原账都保持不完整；原后置观察没有独立数据版本声明时，其 `physical.version` 由所属固定计划核定，doctor 不猜测它。当前材料、数据库、初始化分别核验，缺原审计可以是 `not_found`，不得补造历史记录。
 
+完整 v2 运行材料使用 `@rental-os/platform-core-host/core-package-deployment` 的 `readPhasedPlatformRuntimeEvidence` 核原上下文及公共六包，再与所属宿主原选择器的实际 Client/Core/AI 扩展核验合并。它接收完整 v2 锁；原 `readPlatformRuntimeEvidence` 仍只接受 v1。缺公共运行证据或原选择器任一部分时，`installed/runtimeClient` 不能补为已核。[边界及签名](../../packages/platform-core-host/README.md#分阶段新装的只读运行证据)
+
 原因码白名单为 `materials_unavailable`、`runtime_identity_unverified`、`deployment_changed`、`ledger_unavailable`、`ledger_incomplete`、`ledger_mismatch`、`physical_unavailable`、`physical_mismatch`、`initialization_unchecked`、`initialization_required`、`initialization_conflict`、`observation_unavailable`。其他安全代码投影为 `host_prerequisite`，均阻止整体 ready；原异常文字不进入诊断。未知/缺观察退出 2，已知冲突或待初始化退出 1，完整安装观察通过退出 0；整条 doctor 还会综合本地材料与成员检查。
 
 ### 独立 Rental 的公共数据 SDK 映射
