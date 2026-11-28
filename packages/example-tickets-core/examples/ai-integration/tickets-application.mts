@@ -5,7 +5,8 @@ import { randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import type { PlatformAuthService, PlatformPrincipalAuthority, SecretBox, SubscriptionService } from "@rental-os/platform-server";
-import { ChangeTicketStateSchema, TicketError, TicketIdSchema, type TicketAiRouteState } from "@rental-os/example-tickets-core";
+import { TicketError, type TicketAiRouteState } from "@rental-os/example-tickets-core";
+import { TICKETS_AI_TASK_INPUTS } from "@rental-os/example-tickets-core/ai-http";
 import { requestFingerprint as hash } from "@rental-os/platform-contracts/request-fingerprint";
 import { createAiBodyStorageDatabase } from "@rental-os/ai-native-server/runtime/public-rental-adapter-ports";
 import { createPublicTenantTaskAuthority } from "@rental-os/ai-native-server/public-tenant-task-authority";
@@ -17,21 +18,18 @@ import { TICKETS_START_TOOL, type TicketsTransactionHost } from "./tickets-start
 import { TicketsAiAuthority, TicketsAiSceneError, TicketsAiUnknownError, TICKETS_AI_TRANSACTION,
   ticketsAiCreationKey, ticketsAiEntryPermission, ticketsAiPrincipal, type TicketsBoundAuthority } from "./tickets-authority.mjs";
 import { createTicketsAiPublication, TicketsAiPublicationCommandSchema } from "./tickets-publication.mjs";
-import { createTicketsAiApprovals, TicketsAiDecisionSchema } from "./tickets-approval.mjs";
+import { createTicketsAiApprovals } from "./tickets-approval.mjs";
 import { createTicketsAiResultReaders } from "./tickets-results.mjs";
-import { createTicketsAiRunner, TicketsAiRunCommandSchema } from "./tickets-runner.mjs";
+import { createTicketsAiRunner } from "./tickets-runner.mjs";
 import { createTicketsAiStepEvidence } from "./tickets-evidence.mjs";
 
 type Tx = Prisma.TransactionClient;
 const taskRef = z.object({ taskId: z.string().uuid() }).strict(), sourceRef = z.object({ inputRef: z.string().uuid() }).strict();
-const operationRef = z.object({ operationId: TicketIdSchema }).strict();
+const operationRef = TICKETS_AI_TASK_INPUTS.originalInput;
 export const TICKETS_AI_INPUTS = {
-  status: z.object({ ticketId: TicketIdSchema, taskId: z.string().uuid().optional() }).strict(),
+  ...TICKETS_AI_TASK_INPUTS,
   publication: z.object({}).strict(), publish: TicketsAiPublicationCommandSchema,
-  publicationOperation: z.object({ operationId: z.string().uuid() }).strict(),
-  prepareInput: ChangeTicketStateSchema, originalInput: operationRef, createTask: sourceRef, originalTask: sourceRef,
-  prepareApproval: TicketsAiRunCommandSchema, approval: taskRef, decide: TicketsAiDecisionSchema,
-  execute: TicketsAiRunCommandSchema, observeInterrupted: TicketsAiRunCommandSchema, result: taskRef
+  publicationOperation: z.object({ operationId: z.string().uuid() }).strict()
 } as const;
 export type TicketsAiAction = keyof typeof TICKETS_AI_INPUTS;
 export type TicketsAiRequest = { headers: { authorization?: unknown } };

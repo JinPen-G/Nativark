@@ -5,6 +5,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import type { CorePrincipal } from "@rental-os/core-contracts";
 import { ChangeTicketStateSchema, TicketSchema, TicketIdSchema, type TicketsService, type TicketExecutionRequest } from "@rental-os/example-tickets-core";
+import { TicketsStartOriginalSchema, TicketsStartBindingDataSchema } from "@rental-os/example-tickets-core/ai-http";
 import { AI_PROPOSAL_DRAFT_VERSION, type AiProposalPayloadDraft } from "@rental-os/platform-contracts";
 import { requestFingerprint as hash } from "@rental-os/platform-contracts/request-fingerprint";
 import type { AiExecutionContext } from "@rental-os/platform-contracts/ai-gateway";
@@ -16,20 +17,9 @@ import { aiTaskAccessFromContext } from "@rental-os/ai-native-server/runtime/pub
 
 type Tx = Prisma.TransactionClient;
 export const TICKETS_START_TOOL = Object.freeze({ code: "example-tickets.ticket.start", version: "1", scene: "example-tickets.start" });
-export const TicketsStartOriginalSchema = z.object({
-  version: z.literal("example-tickets-start-1"),
-  principal: z.object({ tenantId: TicketIdSchema, subjectId: TicketIdSchema, audience: z.literal("operator") }).strict(),
-  command: ChangeTicketStateSchema,
-  fact: TicketSchema
-}).strict().superRefine((value, context) => {
-  if (value.fact.tenantId !== value.principal.tenantId || value.fact.id !== value.command.ticketId
-    || value.fact.revision !== value.command.expectedRevision)
-    context.addIssue({ code: z.ZodIssueCode.custom, message: "工单原输入与受权事实不一致" });
-});
+export { TicketsStartOriginalSchema } from "@rental-os/example-tickets-core/ai-http";
 export type TicketsStartOriginal = z.infer<typeof TicketsStartOriginalSchema>;
-const snapshot = z.object({ recordId: z.string().uuid(), revision: z.number().int().positive().max(4294967294),
-  contentHash: z.string().regex(/^[a-f0-9]{64}$/u) }).strict();
-export const TicketsStartBindingSchema = z.object({ source: snapshot, original: TicketsStartOriginalSchema }).strict()
+export const TicketsStartBindingSchema = TicketsStartBindingDataSchema
   .refine(value => hash(value.original) === value.source.contentHash, "原输入摘要不一致");
 export type TicketsStartBinding = z.infer<typeof TicketsStartBindingSchema>;
 const unavailable = () => new Error("TICKETS_AI_UNAVAILABLE");

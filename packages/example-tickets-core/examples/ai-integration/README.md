@@ -124,7 +124,7 @@ export function composeTicketsReads(
 
 状态为闭合的 `unconfigured / denied / unpublished / available / pending_approval / reconciliation_required / unavailable`，原因由所属权威归类，异常不返回数据库/凭据细节。原任务状态必须显式提供同一 `taskId`；不根据最近记录或页面缓存猜测。`executionGranted:false` 始终成立，执行时仍走完整原授权。当前内置示例为无模型业务任务，MCP为客户端模型自付的纯读取；两者不检查平台模型连接或云模型财务预算，原Task/工具适用限额仍须核验。将来选择服务端模型路线须另接唯一Gateway和原财务账，不能借用这两条状态。
 
-[工单后台宿主](../../../../apps/example-tickets-admin/src/tickets-ai.tsx)已选用状态区，复用公共查询/按钮/语言与会话隔离，刷新期间或失败时收起旧状态。页面只读状态，不会因进入详情而创建任务、批准或执行。真实内置与MCP装配仍按下面的依赖继续完成。
+[工单后台宿主](../../../../apps/example-tickets-admin/src/tickets-ai.tsx)已选用状态区，复用公共查询/按钮/语言与会话隔离，刷新期间或失败时收起旧状态。已选内置AI宿主时，[原任务区域](../../../../apps/example-tickets-admin/src/tickets-ai-task.tsx)沿`@rental-os/example-tickets-core/ai-http`提供各次显式动作；进入详情不创建、批准或执行任务。原引用按租户/用户/工单保留，刷新只回读，未知请求禁止换键重做。真实内置与MCP运行仍分别验收。
 
 以下均为已核正式出口，不是本目录已经完成的装配。宿主必须固定工单场景、输入 / 对象来源与版本，再接同一 Core 的原方法。
 
@@ -136,9 +136,9 @@ export function composeTicketsReads(
 | 原结果与 unknown | 原 `TicketsService.receipt(principal, operationId)` 与 `/task-persistence`、`/runtime/original-result-reads`、`/runtime/original-task-recovery-read`；保持原 actionId、操作键和结果引用，缺原证据不补成功、不重新派发 |
 | 任务资源与模型 | `/task-resource-ledger`、`/task-runner-resources`、`/task-measured-effects` 保持累计资源；需要服务端模型时接 `/public-tenant-gateway` 和 `/runtime/budget/public-budget-ledger`，恢复不重置账 |
 
-Task/Run聚合提交已使用上述固定正式出口，工单发布、原输入、计划、批准、执行、Step事实、结果与HTTP参加者已提供。可选宿主数据准入已经接到原观察器，页面动作和真实MCP身份/发布/计量/字段权威仍须完成装配与实际验证。工单成功用自身已提交对象及精确原收据证明`committed`，不能伪装成订单/报告事实或`effect:none`；公共仓储继续拥有状态机、CAS、事件与复权。[原批准消费](../../../ai-native-server/src/runtime/approval-consumption-persistence.repository.ts) · [工单事务](../../src/mysql.ts)
+Task/Run聚合提交已使用上述固定正式出口，工单发布、原输入、计划、批准、执行、Step事实、结果与HTTP参加者已提供。可选宿主数据准入已经接到原观察器，页面动作沿同源合同接线；真实MCP身份/发布/计量/字段权威和两条路线的实际运行仍须完成。工单成功用自身已提交对象及精确原收据证明`committed`，不能伪装成订单/报告事实或`effect:none`；公共仓储继续拥有状态机、CAS、事件与复权。[原批准消费](../../../ai-native-server/src/runtime/approval-consumption-persistence.repository.ts) · [工单事务](../../src/mysql.ts)
 
-现有持久MCP OAuth的`OriginalOAuthPrincipalBinding`包含真实workspaceId及空间准入，而工单Core为tenant范围。工单宿主须选择已受支持的原身份参加者；缺匹配参加者时保持未配置，不能捏造空间ID或默认准入。接口通用的资源verifier也不自动提供业务身份映射、持久目标或字段许可。
+MCP的`/service`、`/persistent-oauth-authorization`、`/persistent-oauth-tokens`和`/prisma-oauth-store`提供不限定workspace的通用端口。历史名`createRentalMcpService`不代表必须使用Rental范围；`OriginalOAuthPrincipalBinding`的workspace约束属于现有Rental身份适配器。工单tenant宿主须自行提供来自原平台Auth的当前身份、持久人工同意/grant、精确发布、原计量与字段释放参加者，并在同一Native内复核；不能捏造空间ID或将通用verifier当作完整业务授权。本目录两个reader尚不等于这些参加者已装配。
 
 可用性UI和宿主装配继续沿本端口接线。两个MCP reader只可在真实权威已齐备的宿主选用，缺失时保持`unavailable`，不能把默认未配置当成完整MCP验收。
 

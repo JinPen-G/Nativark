@@ -5,49 +5,16 @@ import { Body, Controller, Header, HttpCode, HttpException, Inject, Module, Para
   type DynamicModule, type FactoryProvider, type ModuleMetadata } from "@nestjs/common";
 import { z } from "zod";
 import { CoreHttpContributionSchema, CoreOpenApiContributionSchema, coreOpenApiSchema } from "@rental-os/core-contracts";
-import { AI_TASK_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT } from "@rental-os/platform-contracts/ai-task";
-import { createTicketsHttpContribution, createTicketsOpenApi, TicketAiRouteStateSchema, TicketError, TicketIdSchema } from "@rental-os/example-tickets-core";
-import { TicketReceiptSchema } from "@rental-os/example-tickets-core/http";
+import { createTicketsHttpContribution, createTicketsOpenApi, TicketError } from "@rental-os/example-tickets-core";
+import { TICKETS_AI_TASK_RESPONSES } from "@rental-os/example-tickets-core/ai-http";
 import { TICKETS_AI_INPUTS, type TicketsAiAction, type TicketsAiRequests, type TicketsAiRequest } from "./tickets-application.mjs";
-import { TicketsStartBindingSchema, TicketsStartOriginalSchema } from "./tickets-start.mjs";
 import { TicketsAiPolicySchema, TicketsAiPublicationReceiptSchema } from "./tickets-publication.mjs";
 
-const ref = z.string().uuid(), revision = z.number().int().min(1).max(4294967295), textHash = z.string().regex(/^[a-f0-9]{64}$/u);
-const originalTask = z.discriminatedUnion("state", [
-  z.object({ state: z.literal("observed"), creationKey: z.string(), retryable: z.literal(false), nextAction: z.literal("read_original_task"),
-    task: z.object({ taskId: ref, runId: ref, status: z.enum(AI_TASK_STATUSES_DRAFT), revision, replayed: z.boolean() }).strict() }).strict(),
-  z.object({ state: z.literal("not_observed"), creationKey: z.string(), retryable: z.literal(false), nextAction: z.literal("reconcile"), task: z.null() }).strict(),
-  z.object({ state: z.literal("unknown"), creationKey: z.string(), retryable: z.literal(false), nextAction: z.literal("reconcile"), task: z.null() }).strict()
-]);
-const approval = z.object({ taskId: ref, proposalId: ref, proposalRevision: z.literal(1), payloadHash: textHash,
-  status: z.enum(["NOT_OBSERVED", "PENDING_CONFIRMATION", "CONFIRMED", "CANCELLED"]), original: TicketsStartOriginalSchema,
-  decision: z.object({ approvalId: ref, decision: z.enum(["approved", "rejected"]), issuedAt: z.string().datetime(), expiresAt: z.string().datetime() }).strict().nullable(),
-  retryable: z.literal(false), executionGranted: z.literal(false) }).strict();
-const counts = { completedSteps: z.number().int().nonnegative(), cleanupFailed: z.number().int().nonnegative() };
-const outcome = z.union([
-  z.object({ status: z.enum(["succeeded", "partially_succeeded", "paused", "cancel_requested", "cancelled", "unknown"]), ...counts }).strict(),
-  z.object({ status: z.literal("unavailable"), ...counts, stopReason: z.literal("input_limit_reached").optional(), nextAction: z.literal("manual_handoff").optional() }).strict(),
-  z.object({ status: z.literal("failed"), ...counts, errorCode: z.string().regex(/^[A-Z][A-Z0-9_]{0,127}$/u) }).strict()
-]);
-const result = z.object({ taskId: ref, runId: ref, taskStatus: z.enum(AI_TASK_STATUSES_DRAFT), taskRevision: revision,
-  runStatus: z.enum(AI_TASK_STATUSES_DRAFT), runRevision: revision,
-  operationId: TicketIdSchema, ticketId: TicketIdSchema,
-  step: z.object({ stepId: ref, status: z.enum(AI_STEP_STATUSES_DRAFT), effect: z.enum(["none", "possible", "committed"]), revision, resultId: ref.nullable() }).strict().nullable(),
-  approvalConsumption: z.enum(["not_observed", "reserved", "committed", "unknown", "failed_no_effect"]), business: z.enum(["committed", "not_confirmed"]), originalReceipt: TicketReceiptSchema.nullable(),
-  resources: z.array(z.object({ kind: z.enum(["steps", "calls", "active_ms", "output_bytes"]), maximum: z.string().regex(/^[1-9][0-9]*$/u),
-    consumed: z.string().regex(/^(0|[1-9][0-9]*)$/u), reserved: z.string().regex(/^(0|[1-9][0-9]*)$/u) }).strict()).length(4).nullable(),
-  retryable: z.literal(false), execution: z.literal("not_invoked"), taskReconciliationRequired: z.boolean(),
-  result: z.object({ resultId: ref, status: z.enum(["succeeded", "failed", "unknown"]), errorCode: z.string().nullable(),
-    completeMeasurement: z.boolean(), observedAt: z.string().datetime() }).strict().nullable() }).strict();
 const responses = {
-  status: TicketAiRouteStateSchema,
+  ...TICKETS_AI_TASK_RESPONSES,
   publication: z.object({ policy: TicketsAiPolicySchema.nullable(), executionGranted: z.literal(false) }).strict(),
   publish: TicketsAiPublicationReceiptSchema,
-  publicationOperation: z.object({ receipt: TicketsAiPublicationReceiptSchema.nullable(), retryable: z.literal(false), absence: z.literal("not_proof_of_no_commit") }).strict(),
-  prepareInput: TicketsStartBindingSchema,
-  originalInput: z.object({ binding: TicketsStartBindingSchema.nullable(), retryable: z.literal(false), absence: z.literal("not_proof_of_no_commit") }).strict(),
-  createTask: originalTask, originalTask, prepareApproval: approval, approval, decide: approval,
-  execute: outcome, observeInterrupted: outcome, result
+  publicationOperation: z.object({ receipt: TicketsAiPublicationReceiptSchema.nullable(), retryable: z.literal(false), absence: z.literal("not_proof_of_no_commit") }).strict()
 } satisfies Record<TicketsAiAction, z.ZodTypeAny>;
 const writes = new Set<TicketsAiAction>(["publish", "prepareInput", "createTask", "prepareApproval", "decide", "execute", "observeInterrupted"]);
 const historical = new Set<TicketsAiAction>(["originalInput", "originalTask", "result", "observeInterrupted"]);

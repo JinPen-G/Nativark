@@ -3,6 +3,7 @@
  */
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
+import { TicketsAiDecisionSchema } from "@rental-os/example-tickets-core/ai-http";
 import { requestFingerprint as hash } from "@rental-os/platform-contracts/request-fingerprint";
 import { createAiProposalBinding, createPublicAiApprovalPersistence, AiProposalRepositoryError, AiApprovalRepositoryError } from "@rental-os/ai-native-server/approval-persistence";
 import { aiStepActionId } from "@rental-os/ai-native-server/task-steps";
@@ -15,8 +16,7 @@ import { TicketsAiAuthority, TicketsAiSceneError, TicketsAiUnknownError, TICKETS
 
 type Tx = Prisma.TransactionClient;
 const ref = z.object({ taskId: z.string().uuid() }).strict();
-export const TicketsAiDecisionSchema = ref.extend({ proposalId: z.string().uuid(), proposalRevision: z.literal(1),
-  reviewedPayloadHash: z.string().regex(/^[a-f0-9]{64}$/u), decision: z.enum(["approved", "rejected"]) }).strict();
+export { TicketsAiDecisionSchema } from "@rental-os/example-tickets-core/ai-http";
 const unavailable = () => new TicketsAiSceneError("original_evidence_unavailable");
 const changed = () => new TicketsAiSceneError("basis_changed", "TICKETS_AI_BASIS_CHANGED");
 const proposalIdFor = (taskId: string, inputRef: string) => {

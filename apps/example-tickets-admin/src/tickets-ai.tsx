@@ -5,6 +5,7 @@ import { TICKETS_HTTP } from "@rental-os/example-tickets-core/http";
 import { Alert, ListSection, QueryState, useCorePageHost, useCoreRequest, useLocale } from "@rental-os/platform-admin/core";
 import { ActionButton } from "@rental-os/platform-admin/ui";
 import type { TicketAiRouteState } from "@rental-os/example-tickets-core";
+import { TicketsAiTask } from "./tickets-ai-task";
 
 const names = {
   unconfigured: ["未配置", "Not configured"], denied: ["当前无权使用", "Access denied"],
@@ -50,6 +51,7 @@ export function TicketAiPanel({ ticketId, ticketRevision }: { ticketId: string; 
     <QueryState loading={query.isPending || query.isFetching} error={query.error} onRetry={reload}>
       {query.data && !query.error && !query.isFetching && <>
         {route(text("内置工单任务", "Built-in ticket task"), query.data.builtin.status)}
+        {query.data.builtin.status.state !== "unconfigured" && <TicketsAiTask ticketId={ticketId} ticketRevision={ticketRevision} state={query.data.builtin.status} />}
         {route(text("外部 MCP 读取", "External MCP reads"), query.data.mcp.status)}
         <p>{text("内置任务示例不调用模型；外部客户端的模型由使用者自付。", "The built-in task example makes no model call. External clients use models paid for by their users.")}</p>
       </>}

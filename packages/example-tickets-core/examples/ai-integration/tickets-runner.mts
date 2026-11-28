@@ -3,7 +3,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { z } from "zod";
+import { TicketsAiRunCommandSchema } from "@rental-os/example-tickets-core/ai-http";
 import { createPersistentAiTaskRunner, snapshotAiTaskRunnerClaimLease,
   type AiTaskRunnerLease, type AiTaskPreparationTicket, type AiTaskRunnerOverheadTicket } from "@rental-os/platform-server/ai-runtime";
 import { createPublicAiTaskMeasuredRunnerPorts } from "@rental-os/ai-native-server/task-measured-effects";
@@ -18,8 +18,7 @@ import type { createTicketsAiApprovals } from "./tickets-approval.mjs";
 import { createTicketsAiPlans, ticketsAiStep, ticketsAiAdmitsTool } from "./tickets-plan.mjs";
 
 type Tx = Prisma.TransactionClient;
-export const TicketsAiRunCommandSchema = z.object({ taskId: z.string().uuid(), runId: z.string().uuid(),
-  expectedRevision: z.number().int().min(1).max(4294967294) }).strict();
+export { TicketsAiRunCommandSchema } from "@rental-os/example-tickets-core/ai-http";
 const unavailable = () => new TicketsAiSceneError("original_evidence_unavailable");
 const conflict = () => new TicketsAiSceneError("basis_changed", "TICKETS_AI_BASIS_CHANGED");
 const leaseInput = ({ runId, holderId, revision, fencingToken }: AiTaskRunnerLease) => ({ runId, holderId, revision, fencingToken });

@@ -35,8 +35,8 @@ export function createTicketsManifest(source: CoreManifest["source"], options: {
       { id: "tickets.initial", file: "migrations/001-tickets.sql", sha256: "d9abd89fed3f18c3c6c6690062b15bc30de53e04eae6f69cf049d310a24e3330" }
     ] },
     requires: [],
-    assets: ["package.json", ...["contracts", "service", "server", "manifest", "mysql", "http", "nest", "openapi", "metadata", "package", "platform-host", "ai-status"].map(name => `dist/${name}.js`),
-      ...["index", "contracts", "service", "server", "manifest", "mysql", "http", "nest", "openapi", "metadata", "package", "platform-host", "ai-status"].map(name => `dist/${name}.d.ts`),
+    assets: ["package.json", ...["contracts", "service", "server", "manifest", "mysql", "http", "nest", "openapi", "metadata", "package", "platform-host", "ai-status", "ai-http"].map(name => `dist/${name}.js`),
+      ...["index", "contracts", "service", "server", "manifest", "mysql", "http", "nest", "openapi", "metadata", "package", "platform-host", "ai-status", "ai-http"].map(name => `dist/${name}.d.ts`),
       ...(options.ai ? ["index", "tickets-application", "tickets-authority", "tickets-approval", "tickets-publication", "tickets-plan",
         "tickets-runner", "tickets-results", "tickets-evidence", "tickets-start", "tickets-http"].flatMap(name =>
         [...(name === "index" ? [] : [`dist-ai/${name}.mjs`]), `dist-ai/${name}.d.mts`]) : [])]

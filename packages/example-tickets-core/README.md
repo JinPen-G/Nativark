@@ -25,6 +25,8 @@
 
 可选`@rental-os/example-tickets-core/ai`提供同源准备、原Task/Run、C05批准、正式开始处理及原结果请求端口。它按当前签名身份与真实权益/发布/额度工作，成功证据核同事务批准消费、原计量artifact和工单精确收据；普通Core无需导入。编译及AI选装标准包用独立`build:ai`、`pack:core:ai`命令，仍待可选宿主全链运行验收。[固定来源、装配与未验边界](examples/ai-integration/README.md)
 
+浏览器只消费`@rental-os/example-tickets-core/ai-http`的闭合任务合同。它与服务端HTTP/OpenAPI同源，包含普通包也可解析的状态/提案/原结果形状，不包含AI Runtime、Node模块或默认授权。原输入摘要和业务执行证据仍由服务端在原事务中核验。[页面动作](../../apps/example-tickets-admin/src/tickets-ai-task.tsx)
+
 执行请求的`purpose`由服务端方法固定为business或original_receipt，不能从HTTP body选择。宿主分别办理普通准入与原收据善后，Core停用/到期后的必要核对仍复用当前身份和原操作范围，不能借此开放普通工单查询或写入。
 
 ## 接入已有宿主

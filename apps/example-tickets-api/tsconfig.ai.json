@@ -7,7 +7,7 @@
     "noEmitOnError": true,
     "paths": { "@prisma/client": ["../platform-api/generated/client/index.d.ts"] }
   },
-  "files": ["src/ai-main.mts"],
+  "files": ["src/ai-main.mts", "src/prepare-ai-deployment.mts"],
   "include": [],
   "exclude": ["dist", "dist-ai"]
 }

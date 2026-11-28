@@ -6,6 +6,7 @@
     "rootDir": "examples/ai-integration",
     "outDir": "dist-ai",
     "declaration": true,
+    "paths": { "@prisma/client": ["../../apps/platform-api/generated/client/index.d.ts"] },
     "types": ["node"],
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,

@@ -43,7 +43,23 @@ SaaS 的四组 Core 包管理 Controller 也从同一[应用工厂](src/assembly
 
 `CORE_DEPLOYMENT_LOCK`须只选择同一工单AI标准包与单个公共`ai-native`数据能力，`PLATFORM_AI_DATA_PACKAGE_DIR`为该数据包的绝对目录。启动核完整包和部署锁，业务请求在同一原事务内复核公共AI原迁移账及物理结构。沿同一公共初始化、部署准入、租户授权、成员分配和工单绑定步骤，不创建默认权益、工具发布、额度或角色。当前示例为无模型的内置业务任务，不要求平台模型连接或云模型预算；原Task累计资源仍适用。[装配入口](src/ai-main.mts) · [完整AI请求与原结果说明](../../packages/example-tickets-core/examples/ai-integration/README.md#完整宿主的接点)
 
-本入口已提供同源HTTP与原数据观察接点。公开AI部署准备、完整页面动作及CI实际运行仍在接续；不能把编译成功当成已经部署。原`package-platform-host.cjs`和`platform-host.context.json`当前只支持普通工单运行证据，因此选装AI组合的包管理“当前材料”不会补造可用收据；其正式运行包证据接点需另行固定。MCP tenant OAuth适配尚未提供时保持未配置，内置AI状态不冒充MCP可用。
+固定源码先用[公共AI准备器](../../scripts/prepare-platform-public-ai.cjs)取得同源SDK、公共数据包和零Core+AI锁。选用者在自己的独占构建目录供给该SDK，按它的组合schema生成本宿主唯一Client，再构建本包与工单AI包。原公共`apps/platform-api/prisma/schema.prisma`保留，不能用组合schema覆盖公共基线。工单`build:ai`明确使用`apps/platform-api/generated/client`；不生成另一Client或依赖其他工作树的产物。
+
+完整工单AI标准包经过原`prepare-install`与`check`后，使用新的正式准备入口。命令均在同一固定源码根执行，下列四个参数必须改为实际绝对路径。
+
+```sh
+npm run build:ai -w @rental-os/example-tickets-core
+npm run build -w @rental-os/example-tickets-api
+npm run build:ai -w @rental-os/example-tickets-api
+node apps/example-tickets-api/dist-ai/prepare-ai-deployment.mjs \
+  /absolute/public-ai/apps/platform-api/prisma-deployment/core.deployment.lock.json \
+  /absolute/public-ai/public-ai-data /absolute/prepared/example-tickets \
+  /absolute/source/apps/platform-api/prisma-deployment-tickets-ai
+```
+
+[准备命令](src/prepare-ai-deployment.mts)核同一完整数据包与工单AI入口、原公共数据基线和兼容范围，输出原公共/Core/AI迁移及同源组合schema，保持原SQL与账名。目标必须为当前`apps/platform-api`下的新目录，以沿原生成器使用同一个Client；已有目录拒绝覆盖。命令不安装、连库或执行DDL，输出只表示`prepared/deployment=pending`。获准部署时对返回的schema执行原`migrate deploy`，按上述同一部署锁、数据包目录、初始化与普通Core授权步骤启动`start:ai`，再显式发布工具和资源限额。历史混合库不能按本新装组合重建。
+
+本入口已提供同源HTTP、原数据观察与页面动作，CI实际运行仍在接续；不能把编译成功当成已经部署。原`package-platform-host.cjs`和`platform-host.context.json`当前只支持普通工单运行证据，因此选装AI组合的包管理“当前材料”不会补造可用收据；其正式运行包证据接点需另行固定。MCP使用公共持久OAuth端口的tenant参加者，不能直接选用Rental的workspace适配器；尚未装配时保持未配置，内置AI状态不冒充MCP可用。
 
 ## 独立后端运行包
 

@@ -28,6 +28,10 @@ export function selectTicketsAiApplication(value: CoreDeploymentLock, directory:
   const { files } = readPlatformDataCapabilityPackage(directory, selected);
   const { contribution } = readPublicAiDataPackage(files, selected);
   const plan = { ...createPublicAiMysqlDataPlan(contribution), capabilityId: selected.id };
+  // 这些模型名来自已逐字节核定的正式schema；不以三个存在的delegate冒充完整所选Client。
+  const delegates = [...contribution.schema.matchAll(/^model\s+([A-Za-z][A-Za-z0-9_]*)\s*\{/gmu)]
+    .map(match => match[1][0].toLowerCase() + match[1].slice(1));
+  if (!delegates.length) throw new Error("公共AI固定schema缺少模型声明");
   return ticketsApplicationModule(lock, {
     capabilities: { http: createTicketsAiHttpContribution(), data: [plan], files: new Map([[selected.id, files]]) },
     openapi: createTicketsAiOpenApi(),
@@ -37,7 +41,8 @@ export function selectTicketsAiApplication(value: CoreDeploymentLock, directory:
         inject: [assembledToken, PlatformDatabaseClient, PLATFORM_AUTH_DATA_STORE, PlatformAuthService, SecretBox, SubscriptionService],
         useFactory: (assembly: TicketsAssembly, database: PlatformDatabaseClient, originalDatabase: object,
           auth: PlatformAuthService, secrets: SecretBox, subscriptions: SubscriptionService) => {
-          if (database !== originalDatabase || !database.aiTask || !database.aiApprovalConsumption || !database.aiTaskExecutionBudget)
+          if (database !== originalDatabase || delegates.some(name => !Object.hasOwn(database, name)
+            || typeof Reflect.get(database, name)?.findFirst !== "function"))
             throw new Error("工单AI须与原Auth共用已选公共AI Client，不能使用另一连接池或普通平台Client");
           return createTicketsAiRequests({ database, auth, secrets, subscriptions, tickets: assembly.tickets,
             principals: assembly.tickets.principals, assertDataAvailable: (tx: Pick<Prisma.TransactionClient, "$queryRaw">) =>
