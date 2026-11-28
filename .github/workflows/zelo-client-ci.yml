@@ -17,7 +17,7 @@ concurrency:
 # 仅按已核固定成果更新；不能用活动分支、修改清单或放宽门禁凑兼容。
 env:
   ZELO_COMMIT: 5a6bbbf7593414a122a060018cb1abd87f1c20bf
-  RENTAL_COMMIT: 268b9bfbf5b753ff8a6c280577dab9aa37f11e22
+  RENTAL_COMMIT: 799150c8707023a36919bf6e0473539be2c03c2a
   CI_DIR: output/.tmp/zelo-client-ci
 
 jobs:
@@ -409,10 +409,6 @@ jobs:
           const role = await api('/api/platform/roles', admin.accessToken, { code: 'CLIENT_CI_STAFF', name: '客户端 CI 普通员工', scope: 'operator',
             enabledBusinessScopes: [], permissions: ['rental-os:order:view', 'rental-os:order:operate'], dataScope: 'all', isActive: true });
           assert.equal(role.fixedAllPermissions, false); assert(!role.permissions.includes('*'));
-          const staff = await api('/api/platform/users/access', admin.accessToken, { account: 'client-staff', displayName: 'CI普通员工', roleIds: [role.id],
-            isPlatformAdmin: false, isActive: true, workspaceAccesses: [{ workspaceId: workspace.id, roleId: role.id,
-              dataScope: 'all', locationScope: { mode: 'all', locationIds: [] }, isActive: true }] });
-          const assignment = await manage('member-assignments', admin.accessToken, { userId: staff.id, state: 'assigned', expectedRevision: 0, operationId: randomUUID() });
           const staffPassword = 'Staff9-' + randomUUID();
           async function createCustomer(owner, tenantCode, phone, name) {
             const initialPassword = 'Member9-' + randomUUID(), password = 'Customer9-' + randomUUID();
@@ -432,9 +428,16 @@ jobs:
           const operator = await rentalApi('fulfillment-operators', { code: 'CLIENT-CI', name: '客户端 CI 经营主体', type: 'self_operated', settlementMode: 'self', status: 'enabled' });
           const location = await rentalApi('locations', { code: 'CLIENT-CI', name: '客户端 CI 门店', type: 'store', operatorId: operator.id,
             capabilities: ['pickup', 'return', 'storage'], timezone: 'Asia/Shanghai', status: 'enabled' });
+          const nextLocation = await rentalApi('locations', { code: 'CLIENT-CI-NEXT', name: '客户端 CI 第二门店', type: 'store', operatorId: operator.id,
+            capabilities: ['pickup', 'return', 'storage'], timezone: 'Asia/Shanghai', status: 'enabled' });
+          const staff = await api('/api/platform/users/access', admin.accessToken, { account: 'client-staff', displayName: 'CI普通员工', roleIds: [role.id],
+            isPlatformAdmin: false, isActive: true, workspaceAccesses: [{ workspaceId: workspace.id, roleId: role.id,
+              dataScope: 'all', locationScope: { mode: 'selected', locationIds: [location.id, nextLocation.id] }, isActive: true }] });
+          const assignment = await manage('member-assignments', admin.accessToken, { userId: staff.id, state: 'assigned', expectedRevision: 0, operationId: randomUUID() });
           const group = await rentalApi('item-groups', { code: 'CLIENT-CI-CHAIR', name: '客户端 CI 露营椅', inventoryMode: 'quantity', unit: '把',
             attributes: { brand: 'CI', model: 'Chair', securityRiskLevel: 'low' }, status: 'enabled' });
           await rentalApi('stock-balances', { itemGroupId: group.id, locationId: location.id, onHandQuantity: 5, maintenanceQuantity: 0 }, 200, 'PUT');
+          await rentalApi('stock-balances', { itemGroupId: group.id, locationId: nextLocation.id, onHandQuantity: 2, maintenanceQuantity: 0 }, 200, 'PUT');
           const pricing = await rentalApi('pricing-groups', { code: 'CLIENT-CI-PRICE', name: '客户端 CI 价格', memberItemGroupIds: [group.id],
             defaultPricingUnit: 'calendar_day', initialRates: [{ unit: 'calendar_day', baseAmount: 60, depositAmount: 100 }], status: 'enabled' });
           const rule = await rentalApi('rule-versions', { changeReason: '独占 CI 新租户的领取时付款规则', config: {
@@ -451,18 +454,19 @@ jobs:
             applicableItemGroupIds: [group.id], applicableFulfillmentModes: ['store_pickup_return'], applicableLocationIds: [location.id],
             customerScope: 'personal', selectionMode: 'optional', requiresCapacity: false, status: 'enabled' });
           const startAt = new Date(Date.now() + 72 * 3600000).toISOString(), endAt = new Date(Date.now() + 96 * 3600000).toISOString();
-          async function createOrder(withService) {
+          async function createOrder(withService, selectedLocation = location) {
             const input = { customerType: 'personal', customerId: member.customerId, bookingIdentity: { bookingIdentity: 'personal' },
-              fulfillmentMode: 'store_pickup_return', fulfillmentLocationId: location.id, returnLocationId: location.id, startAt, endAt,
+              fulfillmentMode: 'store_pickup_return', fulfillmentLocationId: selectedLocation.id, returnLocationId: selectedLocation.id, startAt, endAt,
               lines: [{ pricingGroupId: pricing.id, itemGroupId: group.id, quantity: 1, pricingUnit: 'calendar_day' }] };
             const quote = await rentalApi('quotes', { ...input, ...(withService ? { services: [{ serviceId: service.id, quantity: 1,
-              scheduledStartAt: startAt, scheduledEndAt: endAt, serviceLocationId: location.id }] } : {}) });
+              scheduledStartAt: startAt, scheduledEndAt: endAt, serviceLocationId: selectedLocation.id }] } : {}) });
             assert(quote.id);
             const order = await rentalApi('orders', { ...input, quoteId: quote.id, customerName: 'CI普通客户', contactPhone: '13800000001',
               lines: [{ pricingGroupId: pricing.id, itemGroupId: group.id, quantity: 1 }] });
             assert.equal(order.status, 'draft'); assert.equal(order.customerId, member.customerId); return order;
           }
           const cancelOrder = await createOrder(false), serviceDraft = await createOrder(true);
+          const nextLocationOrder = await createOrder(false, nextLocation);
           await rentalApi(`orders/${serviceDraft.id}/confirm`, {});
           const serviceOrder = await rentalApi(`orders/${serviceDraft.id}/allocate`, {});
           assert.equal(serviceOrder.status, 'ready_for_pickup');
@@ -493,25 +497,35 @@ jobs:
           const executionPath = `/api/staff/v1/rental/v1/orders/${serviceOrder.id}/services/${occurrence.occurrenceId}/execution`;
           let loseCancelResponse = true, cancelDispatches = 0, serviceDispatches = 0, dispatchedCancelKey;
           let holdCustomerRead = false, heldRead, oldReadFinished = false;
+          let holdStaffRead = false, heldStaffRead, oldStaffReadFinished = false;
+          const requestHistory = [];
           for (const [surface, port] of [['customer-web', 5194], ['staff-web', 5195]]) {
             const root = resolve(task, 'web', surface, 'templates/platform-clients', surface, 'dist');
             const server = createServer({ key: readFileSync(resolve(task, 'localhost.key')), cert: readFileSync(resolve(task, 'localhost.crt')) }, (request, response) => {
               if (request.url?.startsWith('/api/')) {
                 const lose = request.method === 'POST' && request.url === cancelPath && loseCancelResponse;
                 const hold = request.method === 'GET' && request.url === `/api/client/v1/orders/${cancelOrder.id}` && holdCustomerRead;
+                const holdStaff = request.method === 'GET' && request.url === `/api/staff/v1/rental/v1/orders/${serviceOrder.id}`
+                  && request.headers['x-rental-location-id'] === location.id && holdStaffRead;
                 if (hold) holdCustomerRead = false;
+                if (holdStaff) holdStaffRead = false;
                 if (request.method === 'POST' && request.url === cancelPath) { cancelDispatches++; dispatchedCancelKey = request.headers['idempotency-key']; }
                 if (request.method === 'POST' && request.url === executionPath) serviceDispatches++;
                 if (lose) loseCancelResponse = false;
                 const upstream = forward(origin + request.url, { method: request.method, headers: request.headers }, result => {
+                  requestHistory.push({ method: request.method, path: request.url, status: result.statusCode });
+                  if (requestHistory.length > 12) requestHistory.shift();
                   // 原服务已返回后丢失一次应答，只模拟网络失联；不伪造成功/收据，不再次派发。
                   if (lose) { result.resume(); result.on('end', () => response.destroy()); return; }
-                  if (hold) {
+                  if (hold || holdStaff) {
                     const chunks = []; result.on('data', chunk => chunks.push(chunk));
-                    result.on('end', () => { heldRead = () => {
-                      oldReadFinished = true;
-                      if (!response.destroyed) { response.writeHead(result.statusCode, result.headers); response.end(Buffer.concat(chunks)); }
-                    }; }); return;
+                    result.on('end', () => {
+                      const release = () => {
+                        if (holdStaff) oldStaffReadFinished = true; else oldReadFinished = true;
+                        if (!response.destroyed) { response.writeHead(result.statusCode, result.headers); response.end(Buffer.concat(chunks)); }
+                      };
+                      if (holdStaff) heldStaffRead = release; else heldRead = release;
+                    }); return;
                   }
                   response.writeHead(result.statusCode, result.headers); result.pipe(response);
                 });
@@ -540,12 +554,19 @@ jobs:
                 '--disable-background-networking', '--disable-component-update', '--no-first-run', '--disable-sync', '--no-proxy-server',
                 '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1', `--user-data-dir=${resolve(task, 'browser-profile')}`] } } } });
             const prefix = '/session/' + browser.sessionId, dom = (script, ...args) => driver(prefix + '/execute/sync', { script, args });
-            async function waitFor(read, label) {
-              const deadline = Date.now() + 15000;
+            async function waitFor(read, label, timeout = 15000) {
+              const deadline = Date.now() + timeout;
               do { const result = await read(); if (result) return result; await new Promise(resolve => setTimeout(resolve, 150)); } while (Date.now() < deadline);
+              // 只记录展示反馈和状态码，不保存页面正文、凭据或请求内容。
+              const feedback = await dom('return [...document.querySelectorAll(".zc-feedback,.zc-status")].map(e => e.innerText)');
+              console.error(JSON.stringify({ label, feedback, cancelDispatches, serviceDispatches, requestHistory }));
               throw new Error('页面等待超时：' + label);
             }
-            const text = value => waitFor(() => dom('return document.body.innerText.includes(arguments[0])', value), value);
+            const text = (value, timeout) => waitFor(() => dom('return document.body.innerText.includes(arguments[0])', value), value, timeout);
+            async function selectScope(value) {
+              const option = await waitFor(() => dom('return [...document.querySelectorAll(".zc-sidebar select option")].find(e => e.value === arguments[0]) ?? null', value), '当前受权范围选项');
+              await driver(`${prefix}/element/${option['element-6066-11e4-a52e-4f735466cecf']}/click`, {});
+            }
             async function click(label) {
               const element = await waitFor(() => dom('return [...document.querySelectorAll("button")].find(e => e.checkVisibility() && !e.disabled && e.innerText.trim() === arguments[0]) ?? null', label), label);
               await driver(`${prefix}/element/${element['element-6066-11e4-a52e-4f735466cecf']}/click`, {});
@@ -586,12 +607,33 @@ jobs:
               assert.equal(observed.status, 200); assert.equal(observed.context.audience, audience);
               assert.equal(observed.context.subjectId, audience === 'client' ? member.customerId : staff.id);
               assert.equal(observed.context.tenantId, tenantId);
+              if (audience === 'staff') {
+                await selectScope('location:' + location.id); await text(order.orderNo);
+                assert(await dom('return document.querySelector(".zc-identity").innerText.includes(arguments[0])', location.name));
+                assert(await dom('return !document.body.innerText.includes(arguments[0])', nextLocationOrder.orderNo));
+                const link = await dom('return [...document.querySelectorAll(".zc-items a")].find(e => e.innerText === arguments[0])', order.orderNo);
+                assert(link); await driver(`${prefix}/element/${link['element-6066-11e4-a52e-4f735466cecf']}/click`, {});
+                await text(service.name); holdStaffRead = true; await click('刷新页面');
+                await waitFor(() => heldStaffRead, '原门店详情已到原服务'); await text('正在加载…');
+                await selectScope('location:' + nextLocation.id); await text(nextLocationOrder.orderNo);
+                heldStaffRead(); assert(oldStaffReadFinished);
+                await click('刷新页面'); await text(nextLocationOrder.orderNo);
+                assert(await dom('return !document.body.innerText.includes(arguments[0]) && !document.querySelector(".zc-receipts")', order.orderNo));
+                // 用当前普通员工原令牌核门店收窄，服务端必须拒绝另一地点的订单详情。
+                const wrongLocation = await driver(prefix + '/execute/async', { script: `const done = arguments[arguments.length - 1];
+                  const credentials = JSON.parse(sessionStorage.getItem(Object.keys(sessionStorage).find(key => key.endsWith(':credentials'))));
+                  fetch(arguments[0], {headers:{Authorization:'Bearer '+credentials.accessToken,'x-rental-location-id':arguments[1]}})
+                    .then(response => done(response.status)).catch(() => done(0));`, args: [`/api/staff/v1/rental/v1/orders/${order.id}`, nextLocation.id] });
+                assert([403, 404].includes(wrongLocation));
+                await selectScope('location:' + location.id); await text(order.orderNo);
+              }
               const orderLink = await dom('return [...document.querySelectorAll(".zc-items a")].find(e => e.innerText === arguments[0])', order.orderNo);
               assert(orderLink);
               await driver(`${prefix}/element/${orderLink['element-6066-11e4-a52e-4f735466cecf']}/click`, {});
               if (audience === 'client') {
                 await click('取消订单'); await fill('textarea[name="reason"]', '客户在独占 CI 中取消本人订单'); await click('确认执行');
-                await text('结果尚未确认，请核对原结果。');
+                // 运输自身有 30 秒等待上限；此处须容纳失应答结束及随后的当前复权。
+                await text('结果尚未确认，请核对原结果。', 45000);
                 const retained = await dom('return Object.keys(localStorage).filter(key => key.includes(":original:")).map(key => JSON.parse(localStorage.getItem(key)))');
                 assert.equal(retained.length, 1); assert.equal(retained[0].operationKey, dispatchedCancelKey); assert.equal(retained[0].targetId, order.id);
                 assert.equal(cancelDispatches, 1);
@@ -639,7 +681,8 @@ jobs:
                 rental: process.env.RENTAL_COMMIT, client: process.env.GITHUB_SHA, surface, databaseChecked: true, browserExecuted: true,
                 evidence: ['original-login', 'core-order-navigation', 'narrow-layout', 'core-disable-direct-route', 'logout',
                   ...(audience === 'client' ? ['customer-cancel-original-receipt', 'single-dispatch-unknown-original-key', 'disabled-core-receipt',
-                    'account-change-inflight-isolation', 'cross-tenant-order-denial'] : ['staff-service-start', 'browser-tablet-touch-input', 'staff-revocation'])],
+                    'account-change-inflight-isolation', 'cross-tenant-order-denial'] : ['staff-service-start', 'browser-tablet-touch-input', 'staff-revocation',
+                    'authorized-location-selection', 'location-change-inflight-isolation', 'selected-location-server-denial'])],
                 a03Accepted: false, releaseApproved: false }, null, 2));
               await driver(prefix + '/window/rect', { width: 1440, height: 1000 });
             }
@@ -647,10 +690,11 @@ jobs:
               client: process.env.GITHUB_SHA, databaseChecked: true, browserExecuted: true,
               evidence: ['original-client-and-staff-login', 'core-order-pages', 'customer-cancel-original-receipt', 'staff-service-start',
                 'single-dispatch-unknown-original-key', 'disabled-core-receipt', 'account-change-inflight-isolation', 'cross-tenant-order-denial',
-                'browser-tablet-touch-input', 'narrow-layout', 'core-disable-direct-route', 'staff-revocation', 'logout'],
-              pending: ['verified-location-selection', 'wechat-devtools', 'wechat-device'],
+                'browser-tablet-touch-input', 'narrow-layout', 'core-disable-direct-route', 'staff-revocation', 'logout',
+                'authorized-location-selection', 'location-change-inflight-isolation', 'selected-location-server-denial'],
+              pending: ['wechat-devtools', 'wechat-device'],
               a03Accepted: false, releaseApproved: false }, null, 2));
-            console.log('真实客户/员工登录、订单页/动作、unknown原收据、换身份在途隔离、跨租户拒绝、浏览器触摸输入与窄屏、停用/撤权及退出通过；门店切换与微信仍未验。');
+            console.log('真实客户/员工登录、订单页/动作、unknown原收据、换身份/门店在途隔离、跨租户及门店范围拒绝、浏览器触摸输入与窄屏、停用/撤权及退出通过；微信仍未验。');
           } finally {
             try { if (browser) await driver('/session/' + browser.sessionId, undefined, 'DELETE'); }
             finally { for (const server of servers) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); } }
