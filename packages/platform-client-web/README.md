@@ -20,7 +20,7 @@ const view = createClientView(runtime, store);
 // 卸载顺序：root.unmount(); view.dispose(); runtime.dispose();
 ```
 
-员工宿主改为 `staff-web`、独立存储命名空间与 `StaffWeb`。连接多个 API 来源时也应分别指定命名空间；Rental 模板已自动包含端、API 来源及 tenantCode。上述变量须由原宿主提供，缺失时不要创建恒真授权或虚构账号。固定 Rental 工厂的完整接线及待补当前页面准入见 [客户端模板](../../templates/platform-clients/README.md)。`brand` 为已核品牌文本和合法十六进制主色；不接受原始 HTML、外链脚本或模型指定地址。
+员工宿主改为 `staff-web`、独立存储命名空间与 `StaffWeb`。连接多个 API 来源时也应分别指定命名空间；Rental 模板已自动包含端、API 来源及 tenantCode。上述变量须由原宿主提供，缺失时不要创建恒真授权或虚构账号。固定 Rental 工厂及其独立页面/动作/收据准入接线见 [客户端模板](../../templates/platform-clients/README.md)。`brand` 为已核品牌文本和合法十六进制主色；不接受原始 HTML、外链脚本或模型指定地址。
 
 ## 页面行为
 

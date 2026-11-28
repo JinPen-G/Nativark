@@ -1,11 +1,11 @@
 /** Rental Web 选装接线：正式贡献工厂 + 单次 HTTP 运输 + 独立凭据槽。没有业务查询或认证替代实现。 */
-import { ClientError, type ClientAccessPort } from "@rental-os/platform-client-contracts";
+import { ClientError } from "@rental-os/platform-client-contracts";
 import { createRentalCustomerClient, createRentalStaffClient, RentalClientHttpError,
   type RentalContributionTransport } from "@rental-os/rental-core/clients/contribution";
-import { connection, credentialProjection, credentialText, rentalAccess, RENTAL_CLIENT_VERSION, type RentalClientHostConfiguration } from "./config";
+import { connection, credentialProjection, credentialText, RENTAL_CLIENT_VERSION, type RentalClientHostConfiguration } from "./config";
 
 export function createRentalWebAssembly(surface: "customer-web" | "staff-web", configuration: RentalClientHostConfiguration | undefined,
-  host: Pick<Window, "fetch" | "sessionStorage" | "crypto">, currentPageAccess?: ClientAccessPort) {
+  host: Pick<Window, "fetch" | "sessionStorage" | "crypto">) {
   if (!configuration) return undefined;
   const selected = connection(configuration, surface), storage = host.sessionStorage;
   const transport: RentalContributionTransport = { async request<T>(input: Parameters<RentalContributionTransport["request"]>[0]): Promise<T> {
@@ -38,6 +38,6 @@ export function createRentalWebAssembly(surface: "customer-web" | "staff-web", c
   const factory = surface === "customer-web" ? createRentalCustomerClient : createRentalStaffClient;
   const rental = factory({ tenantCode: configuration.tenantCode, version: RENTAL_CLIENT_VERSION, clientId: "website",
     transport, credentials, createOperationKey });
-  return { session: rental.session, access: rentalAccess(rental.access, currentPageAccess), contributions: [rental.contribution], brand: configuration.brand,
+  return { session: rental.session, access: rental.access, contributions: [rental.contribution], brand: configuration.brand,
     operationNamespace: selected.key.replace(/:credentials$/u, ":operations") };
 }

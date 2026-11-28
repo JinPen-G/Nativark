@@ -33,7 +33,7 @@ export function createClientView(runtime: ClientRuntime, store?: ClientOperation
     state = { ...state, ...patch };
     for (const listener of listeners) { try { listener(); } catch { /* 一个端的渲染错误不能保留其他旧页面。 */ } }
   }
-  function clear(destination = state.destination, request: ClientPageRequest = { params: {}, search: "" }) {
+  function clear(destination: ClientDestination | undefined, request: ClientPageRequest = { params: {}, search: "" }) {
     generation++; readSequence++;
     for (const key of ["page", "scan", "pending-operations", "prepare-operation", "execute-operation"]) runtime.cancel(key);
     update({ generation, session: runtime.getSnapshot(), destination, request, page: { status: "idle" }, pending: [],
@@ -79,7 +79,10 @@ export function createClientView(runtime: ClientRuntime, store?: ClientOperation
   }
   const unsubscribe = runtime.subscribe(() => {
     // 同步清展示。排队读取时再核代次，旧任务不会在新账号中发起请求。
-    const destination = queuedDestination ?? (state.destination && { routeId: state.destination.routeId });
+    // 身份/范围复核清掉对象定位后回到登记首页，不能留下缺必填参数的详情直达页。
+    // 明确等待登录的深链仍由新会话的当前门禁核对。
+    const destination = queuedDestination ?? (runtime.routes.some(route => route.id === state.destination?.routeId && route.navigation === true)
+      ? { routeId: state.destination!.routeId } : undefined);
     clear(destination, { params: Object.freeze({ ...queuedDestination?.params }), search: "" });
     if (state.session.status === "authenticated") queuedDestination = undefined;
     const expected = generation;

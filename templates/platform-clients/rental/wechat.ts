@@ -1,12 +1,12 @@
 /** 微信端只适配原运输与凭据槽；随机源不可用时拒绝动作接线，不退回时间戳或 Math.random。 */
-import { ClientError, type ClientAccessPort } from "@rental-os/platform-client-contracts";
+import { ClientError } from "@rental-os/platform-client-contracts";
 import { createRentalCustomerClient, createRentalStaffClient, RentalClientHttpError,
   type RentalContributionTransport } from "@rental-os/rental-core/clients/contribution";
-import { connection, credentialProjection, credentialText, rentalAccess, RENTAL_CLIENT_VERSION, type RentalClientHostConfiguration } from "./config";
+import { connection, credentialProjection, credentialText, RENTAL_CLIENT_VERSION, type RentalClientHostConfiguration } from "./config";
 
 type WechatHost = Pick<WechatMiniprogram.Wx, "request" | "getStorageSync" | "setStorageSync" | "removeStorageSync" | "getRandomValues">;
 export async function createRentalWechatAssembly(surface: "wechat-customer" | "wechat-staff",
-  configuration: RentalClientHostConfiguration | undefined, host: WechatHost, currentPageAccess?: ClientAccessPort) {
+  configuration: RentalClientHostConfiguration | undefined, host: WechatHost) {
   if (!configuration) return undefined;
   const selected = connection(configuration, surface);
   const seed = await new Promise<string>((resolve, reject) => {
@@ -54,6 +54,6 @@ export async function createRentalWechatAssembly(surface: "wechat-customer" | "w
   const factory = surface === "wechat-customer" ? createRentalCustomerClient : createRentalStaffClient;
   const rental = factory({ tenantCode: configuration.tenantCode, version: RENTAL_CLIENT_VERSION,
     clientId: `miniprogram:${configuration.appId ?? ""}`, transport, credentials, createOperationKey });
-  return { session: rental.session, access: rentalAccess(rental.access, currentPageAccess), contributions: [rental.contribution], brand: configuration.brand,
+  return { session: rental.session, access: rental.access, contributions: [rental.contribution], brand: configuration.brand,
     operationNamespace: selected.key.replace(/:credentials$/u, ":operations") };
 }

@@ -1,5 +1,5 @@
 /** 显式宿主设置，不是业务权限。凭据由 Rental 原会话工厂签发/采用/撤销。 */
-import { ClientError, type ClientAccessPort, type ClientSurface } from "@rental-os/platform-client-contracts";
+import { ClientError, type ClientSurface } from "@rental-os/platform-client-contracts";
 import type { RentalClientCredentials } from "@rental-os/rental-core/clients/contribution";
 
 export interface RentalClientHostConfiguration {
@@ -9,23 +9,8 @@ export interface RentalClientHostConfiguration {
   /** 微信客户必须填原应用 AppID，用于原渠道 clientId；不作为授权。 */
   readonly appId?: string;
 }
-export const RENTAL_CLIENT_SOURCE = "e078ec95b5fbdd2c8be126665ddd3de073a29c67";
+export const RENTAL_CLIENT_SOURCE = "34baba2cdd50d1a46241069448621e460265cdb5";
 export const RENTAL_CLIENT_VERSION = "0.2.1";
-
-/** 固定贡献的 page 使用历史读门禁；普通页面还需原服务的当前 Core/端发布准入。
- * 缺失时不能以历史可读代替启用。原收据仍由 Rental 独立裁定，不受普通页开关替代。
- */
-export function rentalAccess(original: ClientAccessPort, currentPageAccess?: ClientAccessPort): ClientAccessPort {
-  return { async authorize(input, lifetime) {
-    if (input.purpose === "page") {
-      if (!currentPageAccess) return { status: "unavailable" };
-      const current = await currentPageAccess.authorize(input, lifetime);
-      lifetime.assertCurrent();
-      if (current.status !== "allowed") return current;
-    }
-    return original.authorize(input, lifetime);
-  } };
-}
 
 export function connection(configuration: RentalClientHostConfiguration, surface: ClientSurface) {
   const origin = configuration.apiOrigin.replace(/\/$/u, "");

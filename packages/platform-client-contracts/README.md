@@ -19,7 +19,7 @@
 
 `signIn/signOut/selectScope/refresh` 委托原会话端口并立即隐藏旧业务。切换候选只能由 `scopeChoices` 的原服务提供，采用后以原会话观察为准。外部撤权/停用事件由原宿主更新会话修订或调用 `invalidate`；每次业务和返回前仍检查真实权威。退出调用的原适配必须同步清本机私有数据，之后才等远端撤销，不能让旧撤销结束清掉新登录。
 
-原会话复核抛出 `ClientError("anonymous")` 时回到登录入口；其他缺权威或服务错误保持不可用，用户可委托原退出后重新登录。此处理不创建身份或采用未经原服务验证的凭据。
+原会话复核抛出 `ClientError("anonymous")` 时回到登录入口；其他缺权威或服务错误保持不可用，用户可委托原退出后重新登录。会话/范围复核清除对象定位后回到登记首页，不留下缺参数的详情页；明确等待登录的深链仍由新会话复权。此处理不创建身份或采用未经原服务验证的凭据。
 
 `createClientOperations(runtime, store)` 在准备前复权，Core 提供原键和绑定后的 `execute`。先持久保存定位，再只派发一次；同一范围/动作存在待核引用时禁止再次准备。`unknown` 只保留原引用，`readReceipt` 只调用所属 Core 的原读取，不换键或执行。来源改变、未保存输入或状态修订冲突由 Core 拒绝，界面不重算业务事实。原结果已观察但本地定位清理失败不会把 recorded 改成 unknown。
 
@@ -31,4 +31,4 @@
 
 本包为可选源码候选，根 workspace/lock 已显式登记；单独准备同版依赖后使用 `npm run build` 或 `npm run lint`，不隐式安装依赖、启动服务或迁移。本包构建配置包含 DOM 类型以核对上游公共合同源码，运行代码不读取 window、AbortController、Storage 或 wx。
 
-Zelo 接入基线为 `d6ccb0dcad63ee2e06043b71c2651f326c7e8e3a`，首个固定业务贡献为独立 Rental `e078ec95b5fbdd2c8be126665ddd3de073a29c67`。实际接线与当前缺口见[客户端模板](../../templates/platform-clients/README.md)；业务页面/API 不复制到本包。类型和进程内宿主替身不能代替真实 Auth、撤权、数据库、微信开发者工具或真机验收。
+Zelo 接入基线为 `d6ccb0dcad63ee2e06043b71c2651f326c7e8e3a`，首个固定业务贡献为独立 Rental `34baba2cdd50d1a46241069448621e460265cdb5`。实际接线与当前缺口见[客户端模板](../../templates/platform-clients/README.md)；业务页面/API 不复制到本包。类型和进程内宿主替身不能代替真实 Auth、撤权、数据库、微信开发者工具或真机验收。
