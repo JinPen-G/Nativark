@@ -16,8 +16,8 @@ concurrency:
 
 # 仅按已核固定成果更新；不能用活动分支、修改清单或放宽门禁凑兼容。
 env:
-  ZELO_COMMIT: 6d46f4943f7a0538f04e7ee2d908827d8345a666
-  RENTAL_COMMIT: 5b008083b7cf76c2127216d163f529e5526136a6
+  ZELO_COMMIT: 5a6bbbf7593414a122a060018cb1abd87f1c20bf
+  RENTAL_COMMIT: 268b9bfbf5b753ff8a6c280577dab9aa37f11e22
   CI_DIR: output/.tmp/zelo-client-ci
 
 jobs:
@@ -375,7 +375,9 @@ jobs:
           }
           const saas = await operatorLogin('platform', 'admin', process.env.SEED_PLATFORM_PASSWORD);
           const admission = await manage('deployment-admission/read', saas.accessToken, {});
-          await manage('deployment-admission', saas.accessToken, { state: 'accepting', expectedRevision: admission.revision, operationId: randomUUID() });
+          // 本 job 的空库尚未登记准入；unknown 不含 revision，首次显式登记使用原合同的 0。
+          assert.equal(admission.state, 'unknown');
+          await manage('deployment-admission', saas.accessToken, { state: 'accepting', expectedRevision: 0, operationId: randomUUID() });
           const tenant = await api('/api/platform/tenant-bootstrap', saas.accessToken, { tenantCode: 'client-ci', tenantName: '客户端 CI 租户',
             categoryCode: 'camping', adminAccount: 'setup', adminDisplayName: 'CI准备管理员' });
           const admin = await operatorLogin('client-ci', 'setup', tenant.temporaryPassword);

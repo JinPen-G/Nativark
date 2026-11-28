@@ -6,7 +6,7 @@
 
 ## 固定来源与选装
 
-客户端从 Zelo 基线 `d6ccb0dcad63ee2e06043b71c2651f326c7e8e3a` 开发，已普通合入宿主所需固定底座 `6d46f4943f7a0538f04e7ee2d908827d8345a666`，候选在 [PR #14](https://github.com/JinPen-G/Zelo/pull/14)。运行组合必须再锁定所选 PR 提交的完整 SHA。业务依赖固定为 [Rental 5b008083b7cf76c2127216d163f529e5526136a6](https://github.com/JinPen-G/Zelo-rental-core/commit/5b008083b7cf76c2127216d163f529e5526136a6)，基于 Rental main `1ca7374a64db65bada538254cc95aba7950ea588`；对应 [Rental PR #4](https://github.com/JinPen-G/Zelo-rental-core/pull/4)。
+客户端从 Zelo 基线 `d6ccb0dcad63ee2e06043b71c2651f326c7e8e3a` 开发，已普通合入宿主所需固定底座 `5a6bbbf7593414a122a060018cb1abd87f1c20bf`，候选在 [PR #14](https://github.com/JinPen-G/Zelo/pull/14)。运行组合必须再锁定所选 PR 提交的完整 SHA。业务依赖固定为 [Rental 268b9bfbf5b753ff8a6c280577dab9aa37f11e22](https://github.com/JinPen-G/Zelo-rental-core/commit/268b9bfbf5b753ff8a6c280577dab9aa37f11e22)，基于 Rental main `1ca7374a64db65bada538254cc95aba7950ea588`；对应 [Rental PR #4](https://github.com/JinPen-G/Zelo-rental-core/pull/4)。
 
 | 选择 | 独立入口 | 在已准备锁定依赖的组合中构建 |
 | --- | --- | --- |
@@ -26,7 +26,7 @@
 在包含本客户端提交的公开 Zelo Git 检出中使用 [prepare.cjs](prepare.cjs)。准备不需要预先安装依赖，只读取指定完整 SHA 的 Git 对象；不采用工作区未提交文件，也不读取 `.env` 或私有 `docs`。先查看选中的源码与依赖：
 
 ```powershell
-npm run prepare:client -- --surface customer-web --client-commit <客户端完整SHA> --rental-repo D:/sources/Zelo-rental-core --rental-commit 5b008083b7cf76c2127216d163f529e5526136a6 --plan
+npm run prepare:client -- --surface customer-web --client-commit <客户端完整SHA> --rental-repo D:/sources/Zelo-rental-core --rental-commit 268b9bfbf5b753ff8a6c280577dab9aa37f11e22 --plan
 ```
 
 将 `--plan` 改为 `--out D:/clients/customer-web` 才写出源码。父目录须已存在，目标目录须不存在；既有目录或链接明确拒绝覆盖。`--surface` 只接受表中四个入口中的一个，其他三个端不会加入输出 workspace 或锁。原公共主题包声明的依赖仍按其正式锁保留；这不启用管理员登录、其他客户端或服务端。
@@ -83,7 +83,7 @@ export const connection: RentalClientHostConfiguration = {
 
 ## 待补的 Rental 接点
 
-固定 `5b008083` 保留 `34baba2` 原客户端贡献和上下文字节，并组合支持底座 `0.3.0` 的 `0.2.2` 候选及完整 v2 安装观察。普通页面只读准入、原取消收据、员工服务开始与原收据及生命周期感知会话均由原贡献提供。本端直接复用原 `access`，不再请求另一套业务工厂。
+固定 `268b9bfb` 保留 `34baba2` 原客户端贡献和上下文字节，并组合支持底座 `0.3.0` 的 `0.2.2` 候选及完整 v2 安装观察；该后继只更新完整底座的配对说明与 CI。普通页面只读准入、原取消收据、员工服务开始与原收据及生命周期感知会话均由原贡献提供。本端直接复用原 `access`，不再请求另一套业务工厂。
 
 剩余**可验证的门店范围观察与切换**：`src/contracts.ts` 区分经营空间 `BusinessWorkspace` 和履约地点 `RentalFulfillmentLocation`，不能把切空间作为切门店证据。`src/client-contribution-context.ts` 目前只返回 workspace；`src/http-staff-auth.controller.ts` 将原 locationScope 编入权限指纹，但没有已选 `locationId/locationName`。`clients/contribution/session.ts` 的选择列表/切换也只提供 workspace。
 
@@ -95,7 +95,7 @@ Rental 已有 `clients/staff/context.ts` 的 `createRentalStaffContext`：`loadC
 
 [zelo-client-ci.yml](../../.github/workflows/zelo-client-ci.yml) 固定 Node `24.13.0`、原 MySQL `8.4` 镜像摘要及 runner 预装的配套 Chrome/ChromeDriver，直接使用 W3C WebDriver，没有新增测试脚本或框架。独立源码 job 沿上述公开准备入口，对四端逐个执行原锁安装、必要类型和构建，每次输出只含一个端；它使用当前客户端提交所含的底座源码，不启动 API、数据库或浏览器，不能计为目标宿主通过。
 
-API 新装输入是 Zelo `6d46f4943f7a0538f04e7ee2d908827d8345a666` 与上述 Rental 固定 SHA。真实宿主 job 的两个 Web 分别调用同一准备器，在所选新底座上叠加当前客户端的必要包和原锁条目，各自构建，不共享可写依赖。报告同时登记底座、Rental、客户端完整 SHA，不把任意两条活动分支称作固定组合。
+API 新装输入是 Zelo `5a6bbbf7593414a122a060018cb1abd87f1c20bf` 与上述 Rental 固定 SHA。真实宿主 job 的两个 Web 分别调用同一准备器，在所选新底座上叠加当前客户端的必要包和原锁条目，各自构建，不共享可写依赖。报告同时登记底座、Rental、客户端完整 SHA，不把任意两条活动分支称作固定组合。
 
 前检沿原内存编译入口消费固定源码的正式 `@rental-os/rental-core/manifest` 工厂，再用正式版本合同检查兼容范围、同源 SDK、客户端贡献出口、固定来源及可选 peer。仓库根 `core.manifest.json` 是历史发行发现快照，不代替新候选工厂；前检没有制成发行归档，也不修改历史清单。当前 Rental 候选声明底座范围 `>=0.2.0 <0.4.0`、新装 SDK `0.2.5`，与所选底座一致。任何缺项仍报告 `unavailable` 并阻止宿主启动；齐备只表示可以尝试真实宿主。**前检成功不表示宿主或 A03 通过，跳过的宿主没有验收证据。**
 
@@ -125,6 +125,6 @@ API 新装输入是 Zelo `6d46f4943f7a0538f04e7ee2d908827d8345a666` 与上述 Re
 
 必要离线流程使用固定 Rental 源码与显式运输替身，覆盖原登录、只读页不借动作权、停用直达拒绝、一次派发失应答保留原键、停用时原收据、退出及清除详情后返回首页；它不包含真实 Auth/HTTP/数据库，没有新测试脚本或测试框架。
 
-A03 仍需兼容的固定运行组合、明确门店映射、合法订单样本及实际宿主结果。CI 独占 MySQL 与浏览器窗口已明确；目前完成的是装配源码，尚无该新组合的真实客户/员工页面、动作、身份/范围切换隔离、撤权/Core 停用、跨租户拒绝或 unknown 原收据证据。
+当前固定组合已通过正式工厂兼容前检及四端分别安装/类型/构建。首轮 [宿主 CI 46123198202](https://github.com/JinPen-G/Zelo/actions/runs/46123198202) 成功制备完整 v2 包、执行原 18 份迁移、平台/Rental 初始化和 SaaS 登录，随后 CI 首次准入请求漏传修订得到 400；现按原合同先核空库 `unknown`，再以修订 `0` 显式登记。A03 仍需明确门店映射、合法订单样本及实际宿主结果，不能将已通过的准备阶段当客户/员工页面、动作、身份/范围切换隔离、撤权/Core 停用、跨租户拒绝或 unknown 原收据证据。
 
 Web 桌面、平板触屏、手机窄屏均未取得实页证据；此前 `file:` 离线预览被浏览器策略拒绝，没有换入口绕过。微信还需客户/员工各自已授权 AppID、开发者工具权限、合法域名与测试宿主，分别记录开发者工具及真机证据。`wx` 替身、Web 浏览器和 Vite 构建不能互相代替这些验收。本片没有真实环境调用、迁移、部署、原生 App、收银硬件或离线业务写入。
