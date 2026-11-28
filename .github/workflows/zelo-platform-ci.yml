@@ -139,8 +139,19 @@ jobs:
           node node_modules/@prisma/engines/scripts/postinstall.js
           npm run db:generate
           npm run build
+          if [[ "$CI_PROFILE" == public-ai ]]; then
+            export CORE_DEPLOYMENT_LOCK_FILE="$PWD/apps/platform-api/prisma-deployment/core.deployment.lock.json"
+            export PLATFORM_AI_DATA_PACKAGE_DIR="$PWD/public-ai-data" PLATFORM_AI_PROFILE_ID=ci-public-profile
+          fi
+          approval=$(node scripts/ops/platform-doctor-install.cjs status --profile "$CI_PROFILE" |
+            node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{const r=JSON.parse(s);if(r.state!=="empty")process.exit(1);process.stdout.write(r.migrationApproval)})')
+          node scripts/ops/platform-doctor-install.cjs migrate --profile "$CI_PROFILE" --approve "$approval"
           npm run db:migrate:deploy
+          node scripts/ops/platform-doctor-install.cjs initialize --profile "$CI_PROFILE"
           npm run db:initialize
+          node scripts/ops/platform-doctor-install.cjs status --profile "$CI_PROFILE" |
+            node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{const r=JSON.parse(s);if(r.state!=="ready"||r.initialization.state!=="initialized"||r.initialization.receipt!=="recorded")process.exit(1)})'
+          SEED_PLATFORM_PASSWORD=RepeatCheck9 node scripts/ops/platform-doctor-install.cjs initialize --profile "$CI_PROFILE"
           # The selected AI host may use its local database. The smoke has no provider or supplier credentials.
           if [[ "$CI_PROFILE" == public-ai ]]; then
             export CORE_DEPLOYMENT_LOCK_FILE="$PWD/apps/platform-api/prisma-deployment/core.deployment.lock.json"
