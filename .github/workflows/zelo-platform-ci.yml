@@ -495,7 +495,8 @@ jobs:
           git fetch --no-tags --depth=1 origin "$CORE_AI_PLATFORM_COMMIT"
           test "$(git rev-parse "$CORE_AI_PLATFORM_COMMIT^{commit}")" = "$CORE_AI_PLATFORM_COMMIT"
           git -C "$CORE_AI_ROOT/rental" init --quiet
-          git -C "$CORE_AI_ROOT/rental" fetch --no-tags --depth=1 https://github.com/JinPen-G/Zelo-rental-core.git "$CORE_AI_RENTAL_COMMIT"
+          git -C "$CORE_AI_ROOT/rental" remote add origin https://github.com/JinPen-G/Zelo-rental-core.git
+          git -C "$CORE_AI_ROOT/rental" fetch --no-tags --depth=1 origin "$CORE_AI_RENTAL_COMMIT"
           git -C "$CORE_AI_ROOT/rental" checkout --detach FETCH_HEAD
           test "$(git -C "$CORE_AI_ROOT/rental" rev-parse HEAD)" = "$CORE_AI_RENTAL_COMMIT"
           (
