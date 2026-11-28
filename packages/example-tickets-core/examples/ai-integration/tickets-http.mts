@@ -3,19 +3,23 @@
  */
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Module, Param, Post, Req,
   type DynamicModule, type FactoryProvider, type ModuleMetadata } from "@nestjs/common";
-import { z } from "zod";
+import { createRequire } from "node:module";
+import type { ZodTypeAny, infer as ZodInfer } from "zod";
 import { CoreHttpContributionSchema, CoreOpenApiContributionSchema, coreOpenApiSchema } from "@rental-os/core-contracts";
 import { createTicketsHttpContribution, createTicketsOpenApi, TicketError } from "@rental-os/example-tickets-core";
 import { TicketsStartOriginalSchema, TICKETS_AI_TASK_RESPONSES } from "@rental-os/example-tickets-core/ai-http";
 import { TICKETS_AI_INPUTS, type TicketsAiAction, type TicketsAiRequests, type TicketsAiRequest } from "./tickets-application.mjs";
 import { TicketsAiPolicySchema, TicketsAiPublicationReceiptSchema } from "./tickets-publication.mjs";
 
+// 正式Core/OpenAPI为CJS；固定同一Zod实例，避免ESM双入口令instanceof漏认同源schema。
+const { z } = createRequire(import.meta.url)("zod") as typeof import("zod");
+
 const responses = {
   ...TICKETS_AI_TASK_RESPONSES,
   publication: z.object({ policy: TicketsAiPolicySchema.nullable(), executionGranted: z.literal(false) }).strict(),
   publish: TicketsAiPublicationReceiptSchema,
   publicationOperation: z.object({ receipt: TicketsAiPublicationReceiptSchema.nullable(), retryable: z.literal(false), absence: z.literal("not_proof_of_no_commit") }).strict()
-} satisfies Record<TicketsAiAction, z.ZodTypeAny>;
+} satisfies Record<TicketsAiAction, ZodTypeAny>;
 const writes = new Set<TicketsAiAction>(["publish", "prepareInput", "createTask", "prepareApproval", "decide", "execute", "observeInterrupted"]);
 const historical = new Set<TicketsAiAction>(["originalInput", "originalTask", "result", "observeInterrupted"]);
 const descriptions: Record<TicketsAiAction, string> = { status: "读取工单内置任务当前可用性", publication: "读取精确工具发布及累计限额",
@@ -30,12 +34,12 @@ export const TICKETS_AI_HTTP = Object.fromEntries(Object.entries(TICKETS_AI_INPU
     purpose: historical.has(action) ? "original_receipt" as const : "business" as const, summary: descriptions[action] }];
 })) as { [Action in TicketsAiAction]: { path: string; method: "POST"; body: typeof TICKETS_AI_INPUTS[Action]; response: typeof responses[Action];
   write: boolean; permission: "read" | "start"; purpose: "business" | "original_receipt"; summary: string } };
-export type TicketsAiResponses = { [Action in TicketsAiAction]: z.infer<typeof responses[Action]> };
+export type TicketsAiResponses = { [Action in TicketsAiAction]: ZodInfer<typeof responses[Action]> };
 
 /** 仅补此HTTP合同的联合/null与原事实跨字段约束；标量仍由正式转换器校验。
  * OpenAPI 3.0不能表达字段相等，明确登记该约束；运行时继续使用同一个superRefine。
  */
-function describeAiSchema(schema: z.ZodTypeAny): Record<string, unknown> {
+function describeAiSchema(schema: ZodTypeAny): Record<string, unknown> {
   if (schema === TicketsStartOriginalSchema) return { ...describeAiSchema(TicketsStartOriginalSchema.innerType()),
     "x-field-equalities": ["fact.tenantId=principal.tenantId", "fact.id=command.ticketId", "fact.revision=command.expectedRevision"] };
   if (schema instanceof z.ZodOptional) return describeAiSchema(schema.unwrap());
@@ -51,7 +55,7 @@ function describeAiSchema(schema: z.ZodTypeAny): Record<string, unknown> {
   if (schema instanceof z.ZodObject) {
     if (!(schema._def.catchall instanceof z.ZodNever) || schema._def.unknownKeys !== "strict")
       throw new Error("工单AI文档只接受闭合对象");
-    const entries = Object.entries(schema.shape) as [string, z.ZodTypeAny][];
+    const entries = Object.entries(schema.shape) as [string, ZodTypeAny][];
     return { type: "object", additionalProperties: false,
       properties: Object.fromEntries(entries.map(([key, value]) => [key, describeAiSchema(value)])),
       required: entries.filter(([, value]) => !(value instanceof z.ZodOptional)).map(([key]) => key) };

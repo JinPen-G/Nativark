@@ -2,8 +2,8 @@
  * 缺数据/事务/执行证据就拒绝装配，不创建模型配置、默认发布或后台工作者。
  */
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { z } from "zod";
 import type { PlatformAuthService, PlatformPrincipalAuthority, SecretBox, SubscriptionService } from "@rental-os/platform-server";
 import { TicketError, type TicketAiRouteState } from "@rental-os/example-tickets-core";
 import { TICKETS_AI_TASK_INPUTS } from "@rental-os/example-tickets-core/ai-http";
@@ -24,6 +24,7 @@ import { createTicketsAiRunner } from "./tickets-runner.mjs";
 import { createTicketsAiStepEvidence } from "./tickets-evidence.mjs";
 
 type Tx = Prisma.TransactionClient;
+const { z } = createRequire(import.meta.url)("zod") as typeof import("zod");
 const taskRef = z.object({ taskId: z.string().uuid() }).strict(), sourceRef = z.object({ inputRef: z.string().uuid() }).strict();
 const operationRef = TICKETS_AI_TASK_INPUTS.originalInput;
 export const TICKETS_AI_INPUTS = {

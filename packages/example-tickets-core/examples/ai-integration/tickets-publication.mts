@@ -2,7 +2,7 @@
  * 不创建默认权限、权益或额度；发布并不批准/执行任务，读取也不补建scope或policy。
  */
 import type { PrismaClient } from "@prisma/client";
-import { z } from "zod";
+import { createRequire } from "node:module";
 import type { CorePrincipal } from "@rental-os/core-contracts";
 import type { AiExecutionContext } from "@rental-os/platform-contracts/ai-gateway";
 import { AI_CONTRACT_DRAFT_VERSION } from "@rental-os/platform-contracts/ai-gateway";
@@ -16,6 +16,7 @@ import { TICKETS_START_TOOL } from "./tickets-start.mjs";
 import { TICKETS_AI_TOOLS, TICKETS_AI_TRANSACTION, TICKETS_AI_RETENTION_MS, TicketsAiSceneError, TicketsAiUnknownError } from "./tickets-authority.mjs";
 
 type Tx = Prisma.TransactionClient;
+const { z } = createRequire(import.meta.url)("zod") as typeof import("zod");
 const revision = z.number().int().min(1).max(4294967294);
 export const TicketsAiPolicySchema = z.object({ revision, enabled: z.boolean(), expiresAt: z.string().datetime({ offset: true }), limits: aiTaskRunnerLimitsSchema }).strict();
 const policySchema = TicketsAiPolicySchema;
