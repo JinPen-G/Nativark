@@ -283,7 +283,7 @@ function inspectSelection(options, environment, receipt, report, add) {
   } catch { add('deployment-lock', 'invalid', '部署锁不可读、结构未知或路径不安全。', CONTRACT_GUIDE); return; }
   const projection = (item, id) => ({ id, version: files.version(item?.version ?? item?.versions?.platform),
     source: files.source(item?.source), sha256: typeof item?.sha256 === 'string' && files.HASH.test(item.sha256) ? item.sha256 : null });
-  report.selection = { evidence: 'lock-declarations-only', lockVersion: input.lockVersion,
+  report.selection = { evidence: 'lock-declarations-only', lockVersion: input.lockVersion, lockSha256,
     platform: projection(lock.platform, 'platform'),
     cores: lock.cores.map((pin, index) => ({ ...projection({ ...pin.manifest, sha256: pin.sha256 },
       files.ID.test(pin.manifest?.id ?? '') && pin.manifest.id.length <= 64 ? pin.manifest.id : 'invalid-' + index) })),
@@ -459,12 +459,13 @@ async function main(args = process.argv.slice(2)) {
       report.scope = options.database ? 'explicit-database-and-service-read-only' : 'explicit-service-read-only';
       // v1 catalogue/receipt 不包含后置扩展；不能只匹配 v2.base 就证明完整 v2 已运行或已准备。
       const phased = report.selection?.lockVersion === 2;
-      const observed = phased ? { exitCode: 2, current: { state: 'unavailable', reason: 'phased_runtime_observation_unavailable' } }
+      const observed = phased ? await require('./platform-doctor-upgrade.cjs').readPhasedInstallation(options.lock, report.selection.lockSha256)
         : await require('./platform-doctor-upgrade.cjs').readRunningVersions();
       report.runtime.versions = observed.current ?? { state: 'unavailable' };
       let matches = false;
       const current = observed.current;
-      if (current?.state === 'observed' && report.selection) {
+      if (phased) matches = observed.selectionMatches === true && observed.runtimeIdentityVerified === true;
+      else if (current?.state === 'observed' && report.selection) {
         const same = (declared, actual) => Boolean(actual) && declared.sha256 === actual.sha256
           && declared.version === actual.version && isDeepStrictEqual(declared.source, actual.source);
         const members = (declared, actual) => declared.length === actual.length && declared.every(item =>
@@ -472,12 +473,34 @@ async function main(args = process.argv.slice(2)) {
         matches = same(report.selection.platform, current.platform.current) && members(report.selection.cores, current.cores)
           && members(report.selection.capabilities, current.capabilities);
       }
-      report.runtime.version = matches && observed.exitCode === 0 ? 'observed' : 'unknown';
+      const versionsVerified = phased ? matches : matches && observed.exitCode === 0;
+      report.runtime.version = versionsVerified ? 'observed' : 'unknown';
       report.checks.push({ id: 'service:versions', required: true,
-        state: observed.exitCode === 0 && matches ? 'pass' : current?.state === 'observed' && report.selection && !matches ? 'invalid' : 'not_checked',
-        message: matches ? '原宿主当前包/数据观察与本地所选完整组合一致。' : '当前版本读取缺少权威，或与本地所选组合不一致。',
+        state: versionsVerified ? 'pass' : observed.state === 'selection_conflict'
+          || !phased && current?.state === 'observed' && report.selection && !matches ? 'invalid' : 'not_checked',
+        message: versionsVerified ? '原宿主当前包身份与本地所选完整组合一致；数据及账号另列。' : '当前版本读取缺少权威，或与本地所选组合不一致。',
         repair: phased ? '所选 v2 组合须由原宿主提供完整锁、实际包及后置扩展的原账/物理观察；v1 catalogue 不能代替。'
           : '核 PLATFORM_DOCTOR_API_URL、当前 SaaS 会话及原宿主部署观察；使用同一固定锁，Core＋AI 由所属宿主供给。' });
+      if (phased) {
+        report.runtime.phasedInstallation = observed;
+        report.database = observed.database;
+        report.runtime.initialization = observed.database.initialization.state;
+        report.runtime.freshPreparation = observed.preparation ?? 'not_checked';
+        const dbCheck = report.checks.find(item => item.id === 'database');
+        Object.assign(dbCheck, { required: true, state: observed.database.state === 'ready' ? 'pass'
+          : ['incompatible', 'migration_incomplete'].includes(observed.database.state) ? 'invalid' : 'not_checked',
+          message: '原宿主完整 v2 原账与物理观察：' + observed.database.state, repair: observed.repair });
+        for (const [id, verified] of [['host:assembly', observed.runtimeIdentityVerified], ['client', observed.runtimeClient === 'verified']]) {
+          const check = report.checks.find(item => item.id === id);
+          if (check && verified) Object.assign(check, { state: 'pass', message: '原宿主已核同一完整 v2 材料及实际运行接线。' });
+        }
+        const phasedCheck = report.checks.find(item => item.id === 'lock:phased');
+        if (phasedCheck && observed.selectionMatches) Object.assign(phasedCheck, { state: 'pass',
+          message: '原宿主观察包含同一完整 v2 锁；不作为 v1 升级放行。' });
+        report.checks.push({ id: 'service:phased-installation', required: true,
+          state: observed.exitCode === 0 ? 'pass' : observed.exitCode === 1 ? 'missing' : 'not_checked',
+          message: '完整分阶段安装观察：' + observed.state, repair: observed.repair });
+      }
       if (options.prepared) {
         const receipt = phased ? { exitCode: 2, status: 'unknown', sha256: options.prepared,
           reason: 'phased_preparation_receipt_unavailable' }

@@ -23,6 +23,8 @@ function contracts() {
   const resolver = createRequire(path.join(root, 'package.json'));
   const load = name => resolver(files.localDependency(root, resolver.resolve(name)));
   return { core: load('@rental-os/core-contracts'),
+    deployment: load('@rental-os/core-contracts/deployment'),
+    phased: load('@rental-os/core-contracts/phased-installation'),
     preflight: load('@rental-os/platform-core-host/core-package-preflight'),
     preparation: load('@rental-os/platform-core-host/core-package-preparation'),
     fingerprint: load('@rental-os/platform-contracts/request-fingerprint').requestFingerprint };
@@ -217,6 +219,117 @@ async function readRunningVersions(environment = process.env) {
   try { return await run({ command: 'status' }, contracts(), environment); }
   catch { return { exitCode: 2, status: 'unknown', current: { state: 'unavailable' } }; }
 }
+
+/** 校验一次原宿主观察，输出白名单字段。v1 base 仅核其原数据子集，完整判定还须所有 v2 后置事实。 */
+function projectPhasedInstallation(value, expected, api) {
+  expected = api.deployment.CorePhasedMigrationLockSchema.parse(expected);
+  const observed = api.phased.CorePhasedInstallationObservationSchema.parse(value);
+  const phasedReasons = new Set(api.phased.CORE_PHASED_INSTALLATION_ISSUE_CODES);
+  const result = { exitCode: 2, state: 'unknown', authority: 'original-phased-host-observation',
+    observedAt: observed.observedAt, selectionMatches: false, preparation: 'not_checked',
+    current: { state: 'unavailable' }, runtimeClient: 'not_checked',
+    database: { state: 'unknown', checked: false, applied: null, pending: null, initialization: { state: 'not_checked' } },
+    initialization: { platform: { state: 'not_checked', receipt: 'not_checked' }, cores: [] },
+    postCapability: [], issues: observed.issues.map(item => ({ scope: item.scope,
+      code: phasedReasons.has(item.code) ? item.code : 'host_prerequisite' })),
+    upgrade: 'not_supported_by_v1', business: 'not_checked',
+    repair: '核同一完整 v2 锁、原宿主包/Client、各阶段原账和物理观察；初始化、授权及业务操作仍须显式办理。' };
+  if (observed.status === 'unavailable') return result;
+  if (!isDeepStrictEqual(observed.lock, expected)) return { ...result, exitCode: 1, state: 'selection_conflict',
+    issues: [...result.issues, { scope: 'materials', code: 'deployment_changed' }] };
+  result.selectionMatches = true;
+  const base = expected.base, installed = observed.installed;
+  const sameSet = (left, right, key) => left.length === right.length
+    && new Set(right.map(key)).size === right.length && left.every(item => right.some(other => key(item) === key(other)
+      && isDeepStrictEqual(item, other)));
+  const registrationMatches = sameSet(base.cores.map(pin => api.core.coreRegisteredSummary(pin.manifest)), observed.registered, item => item.id);
+  const packagesMatch = installed && isDeepStrictEqual(installed.platform, base.platform)
+    && sameSet(base.cores, installed.cores, pin => pin.manifest.id)
+    && sameSet(base.dataCapabilities ?? [], installed.dataCapabilities, item => item.id)
+    && isDeepStrictEqual(installed.postCapability, expected.postCapability);
+  const member = (locked, current, kind) => ({ locked: releaseSummary(locked, kind),
+    current: current ? releaseSummary(current, kind) : null, availability: 'not_checked', issues: [] });
+  if (installed) result.current = { state: 'observed', authority: result.authority,
+    platform: member(base.platform, installed.platform, 'platform'),
+    cores: base.cores.map(pin => ({ id: pin.manifest.id,
+      registered: observed.registered.some(item => isDeepStrictEqual(item, api.core.coreRegisteredSummary(pin.manifest))),
+      ...member(pin, installed.cores.find(item => item.manifest.id === pin.manifest.id), 'core') })),
+    capabilities: (base.dataCapabilities ?? []).map(release => ({ id: release.id,
+      ...member(release, installed.dataCapabilities.find(item => item.id === release.id), 'platform-capability') })) };
+  if (!packagesMatch || !registrationMatches) result.issues.push({ scope: 'materials', code: installed ? 'runtime_identity_unverified' : 'materials_unavailable' });
+  result.runtimeIdentityVerified = Boolean(packagesMatch && registrationMatches && observed.runtimeClient);
+  result.runtimeClient = observed.runtimeClient ? 'verified' : 'not_checked';
+  if (!observed.runtimeClient) result.issues.push({ scope: 'materials', code: 'runtime_identity_unverified' });
+  result.preparation = observed.preparation ? 'prepared' : 'not_checked';
+  result.initialization = observed.initialization;
+  result.database.initialization = observed.initialization.platform;
+
+  const data = observed.database.base;
+  // 原 planCoreUpdate 的 unchanged 分支只校验基础阶段原链；不生成候选、不把它作为完整 v2 升级基线。
+  const basePlan = data ? api.core.planCoreUpdate(base, { kind: 'platform', release: base.platform }, data) : undefined;
+  const baseStates = data ? [data.platform, ...data.cores, ...(data.dataCapabilities ?? [])] : [];
+  const baseReady = basePlan?.ok && basePlan.status === 'unchanged'
+    && baseStates.every(item => item.execution?.state === 'ready')
+    && sameSet(base.cores.map(pin => pin.manifest.id), data.cores.map(item => item.coreId), item => item)
+    && sameSet((base.dataCapabilities ?? []).map(item => item.id), (data.dataCapabilities ?? []).map(item => item.capabilityId), item => item);
+  const key = item => item.coreId + ':' + (item.migrationId ?? item.migration.id);
+  if (new Set(observed.database.postCapability.map(key)).size !== observed.database.postCapability.length
+    || observed.database.postCapability.some(item => !expected.postCapability.some(post => key(item) === key(post))))
+    throw Error('phased_observation_members');
+  result.postCapability = expected.postCapability.map(post => {
+    const actual = observed.database.postCapability.find(item => key(item) === key(post));
+    const applied = actual?.appliedMigration && isDeepStrictEqual(actual.appliedMigration,
+      { id: post.migration.id, sha256: post.migration.sha256 });
+    return { coreId: post.coreId, migration: { id: post.migration.id, sha256: post.migration.sha256, source: files.source(post.migration.source) },
+      ledgerName: api.deployment.corePostCapabilityPrismaMigrationName(post.coreId, post.migration.id),
+      state: applied && actual.execution?.state === 'ready' && actual.physical ? 'ready' : 'not_checked',
+      applied: applied ? 'observed' : actual?.appliedMigration ? 'conflict' : 'not_checked',
+      execution: actual?.execution?.state ?? 'not_checked', physical: actual?.physical ?? null };
+  });
+  const databaseReady = Boolean(baseReady && result.postCapability.every(item => item.state === 'ready')
+    && !result.issues.some(item => item.scope === 'database'));
+  const interrupted = baseStates.some(item => item.execution && item.execution.state !== 'ready')
+    || result.postCapability.some(item => ['failed', 'running', 'unknown'].includes(item.execution));
+  const conflict = basePlan?.ok === false && basePlan.issues.some(item => ['migration_history', 'data_observation_conflict', 'data_version'].includes(item.code))
+    || result.postCapability.some(item => item.applied === 'conflict');
+  Object.assign(result.database, { checked: databaseReady || Boolean(interrupted || conflict),
+    state: databaseReady ? 'ready' : conflict ? 'incompatible' : interrupted ? 'migration_incomplete' : 'unknown' });
+  if (databaseReady) Object.assign(result.database, { applied: baseStates.reduce((total, item) => total + item.appliedMigrations.length, 0)
+    + result.postCapability.length, pending: 0 });
+  if (!databaseReady) result.issues.push({ scope: 'database', code: conflict ? 'ledger_mismatch' : interrupted ? 'ledger_incomplete' : 'observation_unavailable' });
+  const coreInitializations = observed.initialization.cores;
+  if (new Set(coreInitializations.map(item => item.coreId)).size !== coreInitializations.length
+    || coreInitializations.some(item => !base.cores.some(pin => pin.manifest.id === item.coreId))) throw Error('phased_initialization_members');
+  const initialized = observed.initialization.platform.state === 'initialized'
+    && base.cores.every(pin => coreInitializations.some(item => item.coreId === pin.manifest.id && item.state === 'initialized'));
+  const initializationStates = [observed.initialization.platform, ...coreInitializations].map(item => item.state);
+  const initializationConflict = initializationStates.includes('conflict'), initializationRequired = initializationStates.includes('uninitialized');
+  if (!initialized) result.issues.push({ scope: 'initialization', code: initializationConflict ? 'initialization_conflict'
+    : initializationRequired ? 'initialization_required' : 'initialization_unchecked' });
+  if (result.current.state === 'observed') for (const item of [result.current.platform, ...result.current.cores, ...result.current.capabilities])
+    item.availability = databaseReady && result.runtimeIdentityVerified ? 'available' : 'not_checked';
+  const ready = result.runtimeIdentityVerified && databaseReady && initialized && result.issues.length === 0;
+  result.state = ready ? 'ready' : conflict ? 'incompatible' : 'incomplete';
+  result.exitCode = ready ? 0 : conflict || interrupted || initializationConflict || initializationRequired ? 1 : 2;
+  return result;
+}
+
+async function readPhasedInstallation(lockFile, lockSha256, environment = process.env) {
+  try {
+    const api = contracts(), bytes = files.read(lockFile);
+    if (files.hash(bytes) !== lockSha256) throw Error('selection_changed');
+    const expected = api.deployment.CorePhasedMigrationLockSchema.parse(JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/u, '')));
+    const value = await requestJson(connection(environment), api.phased.PHASED_INSTALLATION_HTTP.path, undefined, fetch);
+    if (files.hash(files.read(lockFile)) !== lockSha256) throw Error('selection_changed');
+    return projectPhasedInstallation(value, expected, api);
+  } catch (error) {
+    return { exitCode: [401, 403].includes(error.statusCode) ? 1 : 2, state: 'unknown',
+      reason: error.statusCode === 404 ? 'phased_endpoint_unavailable' : [401, 403].includes(error.statusCode) ? 'current_access_refused'
+        : 'phased_observation_unavailable', selectionMatches: false, current: { state: 'unavailable' },
+      database: { checked: false, state: 'unknown', applied: null, pending: null, initialization: { state: 'not_checked' } },
+      repair: '核原宿主完整 v2 只读接口、当前 SaaS 权限和本地固定锁；未取得可靠观察时不初始化、迁移或启用业务。' };
+  }
+}
 async function readRunningLock(environment = process.env) {
   const api = contracts(), raw = await requestHost(connection(environment), 'catalogue', undefined, fetch);
   const observed = versions(raw, api);
@@ -292,4 +405,5 @@ async function readMemberReadiness(selection, scopes, environment = process.env)
 }
 if (require.main === module) main().then(code => { process.exitCode = code; });
 module.exports = { argumentsFor, connection, requestHost, versions, preparation, run, readRunningVersions, readRunningLock, readPreparationReceipt,
+  projectPhasedInstallation, readPhasedInstallation,
   observeMemberReadiness, readMemberReadiness, main };

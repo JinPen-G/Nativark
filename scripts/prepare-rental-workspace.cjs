@@ -10,7 +10,7 @@ const { createHash } = require('node:crypto');
 const { createRequire } = require('node:module');
 const { readBuildSnapshot, snapshotFromFiles, assertSourcePath } = require('./rental-build-snapshot.cjs');
 const { projectWorkspaceLock, mergeSourceLocks, lockedDependency, retentionSdk, retentionSdkLock,
-  isRetentionSdkDependency, publicDataSdk, publicDataSdkLock, isPublicDataSdkDependency } = require('./rental-host-lock.cjs');
+  isRetentionSdkDependency, publicDataSdk, publicDataSdkFor, publicDataSdkLock, isPublicDataSdkDependency } = require('./rental-host-lock.cjs');
 const root = path.resolve(__dirname, '..');
 const slash = file => path.resolve(file).split(path.sep).join('/');
 const json = value => Buffer.from(JSON.stringify(value, null, 2) + '\n');
@@ -407,6 +407,7 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
     || publicRetention.sha256 !== sha256(publicRetention.bytes)))
     throw Error('公共保留只接受同次固定 SDK 的 18 条新装组合');
   const publicAiDataSdk = options.freshAi ? (options.publicAiDataSdk ?? compilePublicAiReaderSdk(options, platform)) : undefined;
+  const readerDefinition = publicAiDataSdk ? publicDataSdkFor(publicAiDataSdk.metadata) : undefined;
   if (options.publicAiDataSdk && !options.freshAi) throw Error('公共数据读取器只用于显式新装 AI');
   if (publicAiDataSdk && (publicAiReaderBuilds.get(publicAiDataSdk) !== readerBuildIdentity(publicAiDataSdk)
     || publicAiDataSdk.source.commit !== platform.source.commit
@@ -493,9 +494,9 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
       '@rental-os/rental-ai-adapters': '0.1.0' };
     if (directory === publicDataSdk.owner) {
       if (publicAiDataSdk) {
-        if (metadata.peerDependencies?.[publicDataSdk.name] !== publicDataSdk.declaration)
+        if (metadata.peerDependencies?.[publicDataSdk.name] !== readerDefinition.declaration)
           throw Error('宿主没有声明本版公共数据读取器');
-        metadata.dependencies = { ...metadata.dependencies, [publicDataSdk.name]: publicDataSdk.spec };
+        metadata.dependencies = { ...metadata.dependencies, [publicDataSdk.name]: readerDefinition.spec };
       }
       delete metadata.peerDependencies?.[publicDataSdk.name];
       delete metadata.peerDependenciesMeta?.[publicDataSdk.name];
@@ -583,7 +584,7 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
     const lock = publicDataSdkLock(publicAiDataSdk.metadata, publicAiDataSdk.bytes);
     if (JSON.stringify(lock) !== JSON.stringify(publicAiDataSdk.lock)) throw Error('公共数据 SDK 字节与锁不一致');
     mergedLock = { ...mergedLock, packages: { ...mergedLock.packages, [publicDataSdk.install]: lock } };
-    files.set(publicDataSdk.archive, publicAiDataSdk.bytes);
+    files.set(readerDefinition.archive, publicAiDataSdk.bytes);
   }
   const semverPin = mergedLock.packages['node_modules/semver'];
   const deps = path.resolve(options.deps ?? path.join(options.repo, 'node_modules'));
@@ -646,7 +647,7 @@ function projectRentalDevelopmentWorkspace(options, platform, rental, api) {
   }
   const generated = new Set(['README.md', 'package.json', 'package-lock.json', 'platform.source.json']);
   if (publicRetention) generated.add(retentionSdk.archive);
-  if (publicAiDataSdk) generated.add(publicDataSdk.archive);
+  if (publicAiDataSdk) generated.add(readerDefinition.archive);
   const describe = (file, bytes) => ({ path: file, bytes: bytes.length, sha256: sha256(bytes) });
   const declaration = file => describe(file, files.get(file));
   files.set('development.workspace.json', json({
@@ -695,8 +696,7 @@ function compilePublicAiReaderSdk(options, platform) {
     build.compile('packages/' + name + '/tsconfig.json');
   const emitted = build.compile(directory + '/tsconfig.public.json').emitted;
   const metadata = JSON.parse(fixed.files.get(absolute(directory + '/package.public.json')));
-  if (metadata.name !== publicDataSdk.packageName || metadata.version !== publicDataSdk.version)
-    throw Error('固定底座没有本版公共数据 SDK');
+  const definition = publicDataSdkFor(metadata);
   const files = new Map([['package.json', fixed.files.get(absolute(directory + '/package.public.json'))]]);
   for (const [file, bytes] of fixed.files) {
     const relative = file.slice(absolute(directory).length + 1);
@@ -714,8 +714,8 @@ function compilePublicAiReaderSdk(options, platform) {
     throw Error('公共数据 SDK 归档回读不一致');
   const lock = publicDataSdkLock(metadata, bytes), source = platform.source;
   const sdk = { files, metadata, bytes, sha256, lock, source, projects: build.stages,
-    receipt: { name: metadata.name, alias: publicDataSdk.name, version: metadata.version, source,
-      archive: publicDataSdk.archive, install: publicDataSdk.install, sha256, integrity: lock.integrity } };
+    receipt: { name: metadata.name, alias: definition.name, version: metadata.version, source,
+      archive: definition.archive, install: definition.install, sha256, integrity: lock.integrity } };
   publicAiReaderBuilds.set(sdk, readerBuildIdentity(sdk));
   return sdk;
 }

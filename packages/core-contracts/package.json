@@ -20,6 +20,9 @@
       "deployment": [
         "dist/deployment.d.ts"
       ],
+      "phased-installation": [
+        "dist/phased-installation.d.ts"
+      ],
       "prisma": [
         "dist/prisma.d.ts"
       ],
@@ -66,6 +69,10 @@
     "./deployment": {
       "types": "./dist/deployment.d.ts",
       "default": "./dist/deployment.js"
+    },
+    "./phased-installation": {
+      "types": "./dist/phased-installation.d.ts",
+      "default": "./dist/phased-installation.js"
     },
     "./prisma": {
       "types": "./dist/prisma.d.ts",
