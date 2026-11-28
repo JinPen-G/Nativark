@@ -2,11 +2,14 @@
  * pending 文件由部署者继续构建、迁移和注册，租户使用权沿原授权入口管理。 */
 import { z } from "zod";
 import { CoreArtifactHashSchema, CoreDeploymentLockSchema, CorePackagePathSchema } from "@rental-os/core-contracts";
+import { GitHubCoreReleasePinSchema } from "@rental-os/core-contracts/github";
 import {
   CorePackageArtifactSchema, CorePackageInspectRequestSchema, CorePackageUpdatePlanRequestSchema,
   type CorePackageArtifact
 } from "../core-package-preflight/ports";
 import type { CorePackageReadFailure } from "../core-package-ports";
+import type { PlatformCoreTransaction } from "../ports";
+import type { CorePackageDeploymentOperationStore } from "./deployment-ports";
 
 export const CorePackagePreparationRequestSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("install"), package: CorePackageInspectRequestSchema }).strict(),
@@ -27,11 +30,16 @@ export const CorePackagePreparationPlanSchema = z.object({
   format: z.literal("core-preparation-1"), deployment: z.literal("pending"),
   request: CorePackagePreparationRequestSchema,
   artifact: artifactSummary,
+  privateRelease: GitHubCoreReleasePinSchema.optional(),
   base: CoreDeploymentLockSchema,
   candidate: CoreDeploymentLockSchema,
   files: z.array(z.object({ file: filePath, sizeBytes: z.number().int().safe().nonnegative(), sha256: CoreArtifactHashSchema }).strict())
     .refine(files => new Set(files.map(file => file.file.toLowerCase())).size === files.length, "候选文件路径须唯一")
-}).strict();
+}).strict().refine(plan => !plan.privateRelease || plan.privateRelease.visibility === "private" && plan.artifact.kind === "core"
+  && plan.privateRelease.coreId === plan.artifact.pin.manifest.id && plan.privateRelease.version === plan.artifact.pin.manifest.version
+  && plan.privateRelease.sha256 === plan.artifact.pin.sha256
+  && plan.privateRelease.repository === plan.artifact.pin.manifest.source.repository
+  && plan.privateRelease.commit === plan.artifact.pin.manifest.source.commit, "私有候选须绑定同一原发行和包身份");
 export const CorePackagePreparationRecordSchema = z.object({
   sha256: CoreArtifactHashSchema, preparedAt: z.string().datetime(), plan: CorePackagePreparationPlanSchema
 }).strict();
@@ -64,7 +72,7 @@ export interface CorePackagePreparationBundle {
   artifact: CorePackageArtifact;
   files: ReadonlyMap<string, Uint8Array>;
 }
-export interface CorePackagePreparationStore {
+export interface CorePackagePreparationStore extends Partial<CorePackageDeploymentOperationStore> {
   prepare(bundle: CorePackagePreparationBundle): CorePackagePreparationResult;
   read(sha256: string): CorePackagePreparationRead;
 }
@@ -72,5 +80,10 @@ export interface CorePackagePreparationApplication {
   preview(input: unknown): Promise<CorePackagePreparationPreview>;
   prepare(input: unknown): Promise<CorePackagePreparationResult>;
   receipt(input: unknown): Promise<CorePackagePreparationRead>;
+}
+/** 仅供服务端原部署器在真正派发前调用；不是浏览器命令、持久授权或新的部署执行器。 */
+export interface CorePackageDeploymentSourceGuard {
+  withAccess<T>(sha256: string, dispatch: (record: CorePackagePreparationRecord, transaction: PlatformCoreTransaction,
+    revalidate: () => Promise<void>) => Promise<T>): Promise<T>;
 }
 export { CORE_PACKAGE_PREPARATION_HTTP } from "./protocol";

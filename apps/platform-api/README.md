@@ -326,7 +326,11 @@ SaaS管理员通过 `POST /api/platform/tenants` 创建公共租户与首个管�
 
 标准Core管理位于 `/api/platform/core-host`，当前组合已登记管理、本人Core目录和范围HTTP，默认本人目录为空。真正选中Core时提供固定服务、业务HTTP、真实订阅和数据观察；SaaS授权、成员分配与绑定分别成立。[标准宿主用法](../../packages/platform-core-host/README.md)
 
-Core 包管理位于 `/api/platform/core-packages`，包含目录、发现、仓库、包检查、安装 / 更新预检、固定发行预览 / 保存 / 回读，以及候选预览 / 准备 / 回读十二个接口。四组 Controller 使用同一公共主体和数据库，原 Guard 的唯一 Core HTTP provider 合并标准管理与包管理政策。访问要求当前 SaaS 管理身份及 `system:tenant:manage` 或 `*`，保存与准备在原事务写入提交意图审计。[接口及状态](../../packages/platform-core-host/src/core-packages/README.md)
+Core 包管理位于 `/api/platform/core-packages`，包含目录、发现、仓库、包检查、安装 / 更新预检、固定发行预览 / 保存 / 回读，以及候选预览 / 准备 / 回读和私有来源配置。Controller 使用同一公共主体和数据库，原 Guard 的唯一 Core HTTP provider 合并标准管理与包管理政策。访问要求当前 SaaS 管理身份及 `system:tenant:manage` 或 `*`，保存与准备在原事务写入提交意图审计。[接口及状态](../../packages/platform-core-host/src/core-packages/README.md)
+
+公共宿主为私有来源装配原 `SecretBox(config)`，凭据仍加密保存在原集成表。生产须配置原 `INTEGRATION_ENCRYPTION_KEY` 及按需密钥环；来源 token 通过平台 SaaS 管理页面配置、轮换和撤销，不通过运行环境或 Git 凭据自动读取。只支持显式 GitHub.com 私有固定 Release，允许仓库与凭据均在服务端复权。管理读取默认归档索引时使用带来源复权的适配，活动版本/数据观察仍消费原本地字节，不因取包失权停现有服务。[配置和授权职责](../../packages/platform-core-host/README.md#githubcom-私有固定发行)
+
+默认公共 API 不注入部署执行器，`dispatch-deployment` 返回 `deployment_executor_unavailable`。目标宿主在受控装配显式提供 `deploymentExecutor` 后，才能沿当前 SaaS 身份、原批准引用、候选摘要及唯一派发 ID 进行有界提交；`deployment-receipt` 读取同 ID 的真实目标结果，提交失应答不能自动重发。此适配不扩展官方 Rental 自动更新器的来源或权限。[正式执行端口和恢复边界](../../packages/platform-core-host/src/core-package-preparation/README.md#私有候选与实际部署接点)
 
 发行引用与候选存储读取进程配置 `CORE_PACKAGE_STORAGE_ROOT`。部署方指定绝对根，并预先建立 `releases`、`candidates` 普通子目录及服务账户访问权。留空时相应存储返回 `unavailable`，目录与父路径由原文件存储核查。准备结果保持 `pending`，发布后结果不明沿原引用或 SHA 读取原记录。[实际配置供给](src/core-assembly.ts) · [存储边界](../../packages/platform-core-host/src/core-package-preparation/README.md)
 

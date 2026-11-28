@@ -18,6 +18,7 @@ import { canManagePublicResource } from "../../application-access";
 import { createCorePackagesApi } from "./client";
 import { CorePackagePreparationDialog, type CorePackagePreparationTarget, type CorePackageUpdateTarget } from "./CorePackagePreparationDialog";
 import { useCorePackagePreparation } from "./useCorePackagePreparation";
+import { CorePackagePrivateSource } from "./CorePackagePrivateSource";
 
 type PackageApi = ReturnType<typeof createCorePackagesApi>;
 type VersionRow = {
@@ -277,7 +278,8 @@ function CorePackagesContent({ brandName }: { brandName: string }) {
     <Tabs activeKey={view} onChange={setView} items={[
       { key: "catalogue", label: en ? "Registered Cores" : "当前目录" },
       { key: "discover", label: en ? "Discover" : "发现 Core" },
-      { key: "versions", label: en ? "Versions" : "独立版本" }
+      { key: "versions", label: en ? "Versions" : "独立版本" },
+      { key: "private", label: en ? "Private source" : "私有来源" }
     ]} />
     {preparation.pending && <Alert type="warning" title={en ? "The original operation needs confirmation" : "原操作等待核对"}
       description={preparation.pending.kind === "release" ? preparation.pending.reference : preparation.pending.sha256}
@@ -297,7 +299,8 @@ function CorePackagesContent({ brandName }: { brandName: string }) {
           update: installed ? { kind: "core", coreId: selected.release.coreId } : undefined });
       }}>{en ? "Continue preparation" : "继续准备"}</Button>} />}
     <ContentTransition value={view}>
-    {view === "discover" ? <Discovery api={api} epoch={epoch} blocked={blocked}
+    {view === "private" ? <CorePackagePrivateSource api={api} epoch={epoch} blocked={blocked}
+      onSelect={release => showPreparation({ kind: "release", release })} /> : view === "discover" ? <Discovery api={api} epoch={epoch} blocked={blocked}
       onSelect={release => showPreparation({ kind: "release", release })} /> : <QueryState loading={catalogue.isPending} error={catalogue.error}
       onRetry={refresh}>
       {catalogue.data && (view === "versions" ? <Versions data={catalogue.data} busy={catalogue.isFetching} refresh={refresh} blocked={blocked}

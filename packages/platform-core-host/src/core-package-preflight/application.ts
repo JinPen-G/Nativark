@@ -208,7 +208,11 @@ export function composePlatformCorePackagePreflight<Tx extends PlatformCoreTrans
   > {
     if (!input.artifacts) return { read: unavailable("artifact_source_unavailable", "当前宿主尚未登记安装包读取来源") };
     let value: CorePackageArtifact | undefined;
-    try { value = await input.artifacts.read(reference); }
+    try {
+      const lease = await input.artifacts.authorize?.(reference);
+      try { value = await input.artifacts.read(reference); }
+      finally { await lease?.revalidate(); }
+    }
     catch (error) {
       if (error instanceof CoreAccessError) throw error;
       return { read: unavailable("artifact_read_failed", "固定安装包读取失败，请核对原来源") };

@@ -5,6 +5,7 @@ import { isDeepStrictEqual } from "node:util";
 import { readCoreArchive } from "@rental-os/core-contracts/archive";
 import { createCoreMigrationDeployment } from "@rental-os/core-contracts/deployment";
 import { CoreDeploymentLockSchema, type CoreDeploymentLock } from "@rental-os/core-contracts";
+import type { GitHubCoreReleasePin } from "@rental-os/core-contracts/github";
 import { requestFingerprint } from "@rental-os/platform-contracts/request-fingerprint";
 import type { CorePackageArtifact } from "../core-package-preflight/ports";
 import type { CorePackageLegacyApiRoutes } from "../core-package-ports";
@@ -20,6 +21,7 @@ export async function createCorePackagePreparationBundle(input: {
   candidate: CoreDeploymentLock;
   materials: CorePackagePreparationMaterialsSource;
   legacyApiRoutes?: CorePackageLegacyApiRoutes;
+  privateRelease?: GitHubCoreReleasePin;
 }): Promise<CorePackagePreparationBundle> {
   const legacyApiRoutes = structuredClone(input.legacyApiRoutes ?? {});
   const source = await input.materials.read();
@@ -56,6 +58,7 @@ export async function createCorePackagePreparationBundle(input: {
   const { bytes: _bytes, ...summary } = artifact;
   const plan = CorePackagePreparationPlanSchema.parse({
     format: "core-preparation-1", deployment: "pending", request: input.request, artifact: summary,
+    ...(input.privateRelease ? { privateRelease: input.privateRelease } : {}),
     base: input.base, candidate: input.candidate,
     files: [...files].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
       .map(([file, bytes]) => ({ file, sizeBytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") }))

@@ -16,6 +16,8 @@ import {
   type CorePackagePreparationQuery, type CorePackagePreparationRead
 } from "@rental-os/platform-core-host/core-package-preparation/protocol";
 import { canManagePublicResource } from "../../application-access";
+import { CORE_PACKAGE_SOURCE_HTTP, type CorePackageSourceSettings, type CorePackageSourceSettingsRequest
+} from "@rental-os/platform-core-host/core-package-source-protocol";
 import type { AdminRequestOptions, AdminRuntime } from "../../runtime";
 
 export type CorePackagesApi = ReturnType<typeof createCorePackagesApi>;
@@ -37,6 +39,9 @@ export function createCorePackagesApi(runtime: AdminRuntime) {
     return result;
   }
   return {
+    privateSource: (signal: AbortSignal) => send<CorePackageSourceSettings>(CORE_PACKAGE_SOURCE_HTTP.read, signal),
+    savePrivateSource: (input: CorePackageSourceSettingsRequest, signal: AbortSignal) =>
+      send<CorePackageSourceSettings>(CORE_PACKAGE_SOURCE_HTTP.save, signal, input, { retryAuthentication: false }),
     catalogue: (signal: AbortSignal) => send<CorePackageCatalogue>(CORE_PACKAGE_HTTP.catalogue, signal),
     discover: (input: CorePackageDiscoveryRequest, signal: AbortSignal) => send<GitHubCoreDiscoveryResult>(CORE_PACKAGE_HTTP.discover, signal,
       { query: GitHubCoreDiscoveryQuerySchema.parse(input.query), refresh: input.refresh ?? false }),

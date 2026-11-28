@@ -71,6 +71,24 @@ Rental 与工单的普通双 Core 开发使用[独立 `multi-core` 工作区](ht
 
 GitHub 传输复用正式 `@rental-os/core-contracts/github-http`。本模块通过 `@rental-os/platform-core-host/core-package-preparation` 导出，公共 API 使用统一装配供给 Guard、OpenAPI 和宿主文件配置。新候选的存储派发前缺少来源、材料或存储适配时返回 unavailable。源码类型、受控运输/文件 fixture 与真实 GitHub、文件系统、HTTP 和部署验证分别记录。[公共宿主](../../../../apps/platform-api/README.md)
 
+## 私有候选与实际部署接点
+
+私有发行沿[平台来源配置](../../README.md#githubcom-私有固定发行)取得服务端瞬时凭据。新下载与缓存命中分别复核远端固定 pin 和当前配置；缓存仅按当前主体、会话及配置修订共用。预检继续调用来源 `authorize(reference)`，候选发布前在原主体事务内锁原配置并复验。私有候选的 `plan.privateRelease` 绑定同一包身份、原仓库 ID、Tag、提交、资产与摘要，并参与原候选指纹。公开候选省略该字段，原格式与摘要不变。凭据、密文、配置修订和签名下载地址不进入这些记录。
+
+私有候选只交给提供这些正式出口的同版宿主和部署器。旧版严格 schema 会拒绝新增字段，不能删除 `privateRelease`、重算摘要或修改原记录来降级消费；先升级受控工具并保留原候选。
+
+`composePlatformCorePackagePreparation` 和统一装配均提供 `deploymentSourceGuard.withAccess<T>(sha256, dispatch): Promise<T>`。这是仅服务端可用的原部署派发围栏：先回读同一候选全部文件，再以原请求重做当前来源/缓存、预检、材料和计划核对，最后在原管理事务中锁主体与私有配置、核当前部署和原候选，才调用 `dispatch(record, transaction, revalidate)`。宿主批准检查后、持久提交前再次调用 `revalidate()`，过期事务、变化的来源或候选不能继续派发。不暴露接受任意命令的 HTTP 接口，也不返回可缓存的授权票据。
+
+可信宿主在 `composePlatformCorePackageAssembly` 显式注入 `deploymentExecutor`，其正式类型为 `CorePackageDeploymentExecutor`，由 `@rental-os/platform-core-host/core-package-preparation` 导出。`id` 固定目标身份；`authorize(transaction, operation, record)` 必须沿同一身份事务核当前部署权、软件许可及原维护批准；`submit(operation, record)` 办理真正的有界提交；`observe(operation)` 按原 ID 读取该目标的实际结果。缺执行器或持久意图存储时返回 `deployment_executor_unavailable`，平台没有默认部署许可。目标不能来自请求路径、任意命令、包内代码或凭据字段。
+
+正式入口为 `POST /api/platform/core-packages/dispatch-deployment`，请求只有 `sha256`、UUID `dispatchId` 和原 `approvalReference`。UUID 在正式合同中统一为小写，大小写写法不能形成另一派发身份。宿主 API 使用原 SaaS 身份及 `system:tenant:manage`，目标许可仍由执行器再核。准备相同候选不会产生新的部署许可。`POST /api/platform/core-packages/deployment-receipt` 只接收同一 `sha256`、`dispatchId`；两条路径及类型由 `.../core-package-preparation/deployment-protocol` 同源导出。
+
+应用把真实 `submit` 放进上述围栏，在原候选目录旁以独占文件 `.deployment-<sha256>.json` 及 `.deployment-id-<dispatchId>.json` 持久绑定候选、派发 ID、原主体、执行器及批准引用，两份绑定写完并同步后才提交。文件不包含凭据。候选与派发 ID 双向唯一；并发或重启后的同 ID 请求只核原结果，换候选、ID、主体、批准或执行器不能重派。原文件缺损、单边绑定、部分写入或提交失应答保留 `unknown`／冲突，不能删除意图再试。真正重新执行须交目标执行器的原恢复流程，不由此入口自动重做。
+
+`submit` 返回不代表部署成功。`observe` 的成功必须带同一 ID、摘要、原收据引用及实际候选锁；明确失败须证实当前仍为原组合，部分切换或观察不明保持 `unknown`。等待构建、迁移、进程切换、健康观察和恢复沿原执行器生命周期进行，不占用这段 30 秒主体事务。源失权发生在新派发前时不调用执行器，保留当前组合；已有意图的原结果读取独立于取包凭据。
+
+默认公共 API 未注入部署执行器，私有部署保持不可用。官方 `hourly-update.py` 只消费原固定 Rental 配对镜像，不接任意私有 Core。私有候选不能直接套用上面的公开手工交包步骤跳过来源复权；目标宿主显式接入此适配及原许可/维护批准并验证后，才能宣称该目标支持私有部署。受控 CI 安装目标与最终环境切换分别验收。已有运行包观察和原候选 `receipt` 不调用取包凭据：来源撤销后，当前平台管理员仍能核原结果，原运行、租户授权、成员分配与业务数据保持各自权威。
+
 读取及删除前核对当前路径、原文件身份、长度、修改时间和实际字节；候选存储保留原准备失败与清理失败。打开描述符后、写入内容前再次核对普通父目录及描述符对应路径，发现目录替换立即停止内容写入。Windows的wx打开可能先创建空文件，程序不会据此删除根外或并行文件。
 
 安装准备事务使用独立的30秒期限，用于锁内核对当前完整安装材料和发布前后授权。普通业务事务沿原设置；超过准备期限时停止并沿原SHA核对unknown，不自动重发。

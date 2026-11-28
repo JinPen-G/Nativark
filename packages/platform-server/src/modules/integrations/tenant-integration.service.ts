@@ -177,7 +177,7 @@ export class TenantIntegrationService {
   async catalog(tenantId = requireRequestTenantId()): Promise<TenantIntegrationCatalogResponse> {
     const [configs, currency] = await Promise.all([
       this.prisma.tenantIntegrationConfig.findMany({
-        where: { tenantId },
+        where: { tenantId, OR: TENANT_INTEGRATION_PROVIDERS.map(({ capability, provider }) => ({ capability, provider })) },
         orderBy: [{ capability: "asc" }, { provider: "asc" }]
       }),
       this.resolveTenantSettlementCurrency(tenantId)

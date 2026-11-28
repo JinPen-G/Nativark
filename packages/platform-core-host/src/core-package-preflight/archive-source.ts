@@ -5,6 +5,9 @@ import { join, parse, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import { CorePackagePathSchema } from "@rental-os/core-contracts";
 import { CORE_ARCHIVE_LIMITS } from "@rental-os/core-contracts/archive";
+import { GitHubCoreReadError, GitHubCoreReleasePinSchema, verifyGitHubCoreRelease,
+  type GitHubCoreReleasePin } from "@rental-os/core-contracts/github";
+import type { CorePackagePrivateSourceAccess } from "../core-package-source-access";
 import {
   CorePackageArtifactReferenceSchema, CorePackageArtifactSchema,
   type CorePackageArtifact, type CorePackageArtifactSource, type CorePackageArtifactSummary
@@ -18,7 +21,8 @@ const artifactSummary = z.discriminatedUnion("kind", [
 export const CorePackageArchiveIndexSchema = z.object({
   format: z.literal("core-package-archives-1"),
   artifacts: z.array(z.object({
-    reference: CorePackageArtifactReferenceSchema, file: CorePackagePathSchema, artifact: artifactSummary
+    reference: CorePackageArtifactReferenceSchema, file: CorePackagePathSchema, artifact: artifactSummary,
+    privateRelease: GitHubCoreReleasePinSchema.optional()
   }).strict()).max(1000).refine(items => new Set(items.map(item => item.reference)).size === items.length, "本地安装包引用须唯一")
 }).strict();
 
@@ -61,50 +65,71 @@ export async function readCorePackageOrdinaryFile(file: string, maxBytes: number
 
 export function createPlatformCorePackageArchiveSource(input: {
   directory: string;
-  artifacts: ReadonlyMap<string, CorePackageArtifactSummary & { file: string }>;
+  artifacts: ReadonlyMap<string, CorePackageArtifactSummary & { file: string; privateRelease?: GitHubCoreReleasePin }>;
+  privateAccess?: CorePackagePrivateSourceAccess;
+  fetcher?: typeof fetch;
 }): CorePackageArtifactSource {
   const directory = resolve(input.directory);
-  const artifacts = new Map<string, CorePackageArtifactSummary & { file: string }>();
+  const artifacts = new Map<string, CorePackageArtifactSummary & { file: string; privateRelease?: GitHubCoreReleasePin }>();
   for (const [reference, item] of input.artifacts) {
     CorePackageArtifactReferenceSchema.parse(reference);
-    const { file: registeredFile, ...summary } = item;
+    const { file: registeredFile, privateRelease, ...summary } = item;
     const file = CorePackagePathSchema.parse(registeredFile);
     if (!file.endsWith(".tgz") || file.split("/").some(part => /^(?:\.git|node_modules)$/i.test(part) || /^\.env(?:\.|$)/i.test(part)))
       throw new Error("安装包登记须使用受管目录内的 tgz 文件");
     const artifact = CorePackageArtifactSchema.parse({ ...summary, bytes: new Uint8Array() });
     const { bytes: _bytes, ...validated } = artifact;
-    artifacts.set(reference, { ...validated, file });
+    if (privateRelease) {
+      const release = GitHubCoreReleasePinSchema.parse(privateRelease);
+      if (release.visibility !== "private" || artifact.kind !== "core" || artifact.pin.sha256 !== release.sha256
+        || artifact.pin.manifest.id !== release.coreId || artifact.pin.manifest.version !== release.version
+        || artifact.pin.manifest.source.repository !== release.repository || artifact.pin.manifest.source.commit !== release.commit)
+        throw new Error("本地私有资产须绑定原固定发行和包身份");
+      artifacts.set(reference, { ...validated, file, privateRelease: release });
+    } else artifacts.set(reference, { ...validated, file });
   }
   return {
+    async authorize(reference) {
+      const release = artifacts.get(reference)?.privateRelease;
+      if (!release) return undefined;
+      if (!input.privateAccess) throw new GitHubCoreReadError("source_denied", "本地私有包缺少当前来源复权");
+      const lease = await input.privateAccess.acquire(release.repository);
+      try { await verifyGitHubCoreRelease(release, input.fetcher ?? fetch, lease.credential); }
+      finally { await lease.revalidate(); }
+      return { privateRelease: structuredClone(release), revalidate: transaction => lease.revalidate(transaction) };
+    },
     async read(reference) {
       const item = artifacts.get(reference);
       if (!item) return undefined;
       const file = resolve(directory, item.file);
       const bytes = await readCorePackageOrdinaryFile(file, CORE_ARCHIVE_LIMITS.totalBytes);
-      const { file: _file, ...summary } = item;
+      // 运行观察只核原字节。新获取/准备调用 authorize，凭据失效不误停已安装组合。
+      const { file: _file, privateRelease: _private, ...summary } = item;
       return { ...structuredClone(summary), bytes } satisfies CorePackageArtifact;
     }
   };
 }
 
 /** 首次使用时读取宿主管理的本地登记，成功后固定本进程引用，实际归档每次核查。 */
-export function createPlatformCorePackageArchiveIndexSource(input: { directory: string }): CorePackageArtifactSource {
+export function createPlatformCorePackageArchiveIndexSource(input: { directory: string;
+  privateAccess?: CorePackagePrivateSourceAccess; fetcher?: typeof fetch }): CorePackageArtifactSource {
   const directory = resolve(input.directory);
   let registered: Promise<CorePackageArtifactSource> | undefined;
-  return {
-    async read(value) {
-      const reference = CorePackageArtifactReferenceSchema.parse(value);
-      if (!registered) {
-        const reading = readCorePackageOrdinaryFile(join(directory, "index.json"), CORE_ARCHIVE_LIMITS.fileBytes).then(bytes => {
-          const index = CorePackageArchiveIndexSchema.parse(JSON.parse(bytes.toString("utf8")));
-          return createPlatformCorePackageArchiveSource({ directory, artifacts: new Map(index.artifacts.map(item =>
-            [item.reference, { ...item.artifact, file: item.file }])) });
-        });
-        registered = reading;
-        // 失败后下一请求可重新读取，成功登记保持原引用，避免在途请求被新索引重新解释。
-        void reading.catch(() => { if (registered === reading) registered = undefined; });
-      }
-      return (await registered).read(reference);
+  async function source() {
+    if (!registered) {
+      const reading = readCorePackageOrdinaryFile(join(directory, "index.json"), CORE_ARCHIVE_LIMITS.fileBytes).then(bytes => {
+        const index = CorePackageArchiveIndexSchema.parse(JSON.parse(bytes.toString("utf8")));
+        return createPlatformCorePackageArchiveSource({ ...input, directory, artifacts: new Map(index.artifacts.map(item =>
+          [item.reference, { ...item.artifact, file: item.file, ...(item.privateRelease ? { privateRelease: item.privateRelease } : {}) }])) });
+      });
+      registered = reading;
+      // 失败后下一请求可重新读取，成功登记保持原引用，避免在途请求被新索引重新解释。
+      void reading.catch(() => { if (registered === reading) registered = undefined; });
     }
+    return registered;
+  }
+  return {
+    async read(value) { return (await source()).read(CorePackageArtifactReferenceSchema.parse(value)); },
+    async authorize(value) { return (await source()).authorize?.(CorePackageArtifactReferenceSchema.parse(value)); }
   };
 }

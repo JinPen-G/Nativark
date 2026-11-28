@@ -139,6 +139,9 @@ jobs:
           node node_modules/@prisma/engines/scripts/postinstall.js
           npm run db:generate
           npm run build
+          if [[ "$CI_PROFILE" == public-ai ]]; then
+            (cd "$task/source" && npm run build -w @rental-os/example-tickets-core)
+          fi
           for tool in platform-doctor platform-doctor-install platform-doctor-upgrade; do
             node "scripts/ops/$tool.cjs" --help > /dev/null
           done
@@ -197,15 +200,33 @@ jobs:
           fi
           node "$entry" > "$task/api.log" 2>&1 &
           api_pid=$!
-          trap 'kill "$api_pid" ${web_pid:+"$web_pid"} 2>/dev/null || true; wait || true' EXIT
+          cleanup_services() {
+            kill "$api_pid" ${web_pid:+"$web_pid"} 2>/dev/null || true
+            if [[ -n "${driver_pid:-}" ]]; then kill -- "-$driver_pid" 2>/dev/null || true; fi
+            wait || true
+            test "$task" = "$GITHUB_WORKSPACE/$CI_DIR"
+            rm -rf -- "$task/distribution" "$task/private-source-browser"
+          }
+          trap cleanup_services EXIT
           node node_modules/vite/bin/vite.js preview apps/platform-admin --host 127.0.0.1 --port 5191 --strictPort "${web_args[@]}" > "$task/web.log" 2>&1 &
           web_pid=$!
           if ! curl -fsS --retry 15 --retry-connrefused --max-time 5 http://127.0.0.1:5191/api/health -o "$task/health.json"; then
             tail -n 30 "$task/api.log" "$task/web.log"
             exit 1
           fi
+          if [[ "$CI_PROFILE" == public-ai ]]; then
+            google-chrome --version
+            "$CHROMEWEBDRIVER/chromedriver" --version
+            setsid "$CHROMEWEBDRIVER/chromedriver" --port=9515 --allowed-ips=127.0.0.1 > "$task/browser.log" 2>&1 &
+            driver_pid=$!
+            curl -fsS --retry 10 --retry-connrefused --max-time 5 http://127.0.0.1:9515/status -o "$task/browser-status.json"
+          fi
           node --input-type=module <<'NODE'
           import { strict as assert } from 'node:assert';
+          import { createRequire } from 'node:module';
+          import { randomBytes, randomUUID } from 'node:crypto';
+          import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
+          import { join, resolve } from 'node:path';
           const web = 'http://127.0.0.1:5191';
           async function request(path, init) {
             const response = await fetch(web + path, { ...init, signal: AbortSignal.timeout(8000) });
@@ -232,6 +253,232 @@ jobs:
               body: JSON.stringify({ currentPassword: process.env.SEED_PLATFORM_PASSWORD,
                 newPassword: `${process.env.SEED_PLATFORM_PASSWORD}-New8!` }) });
             const headers = { ...json, Authorization: `Bearer ${changed.accessToken}` };
+            // 仅在既有独占库核来源配置，不访问 GitHub；合成 token 不具有外部获取权限。
+            const sourcePath = '/api/platform/core-packages/private-source', repositories = ['https://github.com/zelo-ci/private-source-smoke'];
+            const sourceToken = 'ghs_ci_' + randomBytes(384).toString('base64url') + '.ci.signature';
+            const saveSource = value => body(sourcePath, { method: 'POST', headers, body: JSON.stringify(value) });
+            const beforeSource = await body(sourcePath, { headers });
+            const configured = await saveSource({ expectedRevision: beforeSource.revision, enabled: true, repositories, token: sourceToken });
+            assert.equal(configured.credentialConfigured, true);
+            assert.deepEqual(Object.keys(configured).sort(), ['credentialConfigured', 'enabled', 'provider', 'repositories', 'revision']);
+            const { PrismaClient } = createRequire(process.cwd() + '/package.json')('./apps/platform-api/generated/client');
+            const sourceDatabase = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
+            try {
+              const stored = await sourceDatabase.tenantIntegrationConfig.findUnique({ where: {
+                tenantId_capability_provider: { tenantId: 'tenant_platform', capability: 'core-package', provider: 'github' } } });
+              assert(stored?.credentialsEncrypted?.startsWith('v2:') && !stored.credentialsEncrypted.includes(sourceToken), '来源凭据须以原加密信封保存');
+            } finally { await sourceDatabase.$disconnect(); }
+            const rotated = await saveSource({ expectedRevision: configured.revision, enabled: true, repositories, token: 'github_pat_ci_' + randomBytes(24).toString('hex') });
+            assert.notEqual(rotated.revision, configured.revision);
+            const revoked = await saveSource({ expectedRevision: rotated.revision, enabled: false, repositories, revokeToken: true });
+            assert.equal(revoked.enabled, false); assert.equal(revoked.credentialConfigured, false);
+            assert.deepEqual(await body(sourcePath, { headers }), revoked);
+            console.log('私有来源：原 SaaS HTTP、独占 MySQL 加密配置、轮换/撤销与脱敏回读通过；未访问真实私有源');
+            const task = resolve(process.env.GITHUB_WORKSPACE, process.env.CI_DIR), installation = join(task, 'distribution');
+            const require = createRequire(process.cwd() + '/package.json'), sourceRequire = createRequire(join(task, 'source/package.json'));
+            const contracts = require('@rental-os/core-contracts');
+            const { packTicketsPackage } = sourceRequire('@rental-os/example-tickets-core/package');
+            const platformSource = JSON.parse(readFileSync('public-ai.workspace.json', 'utf8')).platform;
+            assert.equal(platformSource.source.commit, process.env.GITHUB_SHA);
+            const pack = packTicketsPackage({ directory: join(task, 'source/packages/example-tickets-core'),
+              source: { repository: repositories[0], commit: process.env.GITHUB_SHA }, sourceDirectory: 'packages/example-tickets-core',
+              platformSource: platformSource.source, platformTask: readFileSync(join(task, 'source/packages/core-contracts/README.md'), 'utf8') });
+            const { composePlatformCorePackageAssembly } = require('@rental-os/platform-core-host/core-package-assembly');
+            const { createEmptyCoreCatalogue } = require('@rental-os/platform-core-host');
+            const { createPlatformCorePackageAudit } = require('@rental-os/platform-core-host/core-package-audit');
+            const { createMysqlCoreDeploymentObservation } = require('@rental-os/core-host/mysql-deployment');
+            const { createPublicPlatformDataPlan } = require('./apps/platform-api/dist/platform-data.js');
+            const { runWithRequestIdentity } = require('@rental-os/platform-server/request-identity');
+            const { PlatformIdentityRepository } = require('@rental-os/platform-server/identity');
+            const { PlatformAuthenticationRepository } = require('@rental-os/platform-server/authentication');
+            const { PlatformAuthService } = require('@rental-os/platform-server/auth');
+            const { SecretBox } = require('@rental-os/platform-server/secret-box');
+            const { TenantIntegrationService } = require('@rental-os/platform-server/tenant-integration');
+            const { PlatformOperationLogService } = require('@rental-os/platform-server/operation-log');
+            const { ConfigService } = require('@nestjs/config');
+            const { prepareCoreInstall, requireCorePackagePin } = require('@rental-os/core-contracts/install');
+            const config = new ConfigService({ AUTH_TOKEN_SECRET: process.env.AUTH_TOKEN_SECRET });
+            const db = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL }), users = new PlatformIdentityRepository(db);
+            const auth = new PlatformAuthService(new PlatformAuthenticationRepository(db), config, undefined, undefined, db);
+            const access = await auth.resolveAccessContext(headers.Authorization); assert(access?.tenantUser.isSaasAdmin);
+            const identity = { tenantId: access.tenantUser.tenantId, userId: access.tenantUser.id, audience: 'operator', accessSession: access.accessSession };
+            const platformData = createPublicPlatformDataPlan();
+            // 选装归档与标准底座包不同；受控安装目标沿同源工作区回执的原底座 pin。
+            const base = contracts.CoreDeploymentLockSchema.parse({ lockVersion: 1, cores: [], platform: platformSource });
+            assert.deepEqual(base.platform.data, platformData.data);
+            for (const part of ['releases', 'candidates', 'archives', 'installed', 'results']) mkdirSync(join(installation, part), { recursive: true });
+            const activeFile = join(installation, 'active.json'), read = path => JSON.parse(readFileSync(path, 'utf8'));
+            writeFileSync(activeFile, JSON.stringify(base), { flag: 'wx' });
+            const snapshot = async transaction => { const lock = read(activeFile); return { lock,
+              installed: { platform: lock.platform, cores: lock.cores },
+              data: await createMysqlCoreDeploymentObservation({ database: transaction, platform: platformData, cores: [] }).read() }; };
+            let submissions = 0, rejectSubmission = true, redirected = 0;
+            const fetcher = async (url, options) => {
+              const path = new URL(url).pathname, authorization = new Headers(options.headers).get('authorization');
+              if (new URL(url).hostname === 'release-assets.githubusercontent.com') {
+                assert.equal(authorization, null); redirected++; return new Response(pack.bytes);
+              }
+              assert.equal(new URL(url).origin, 'https://api.github.com'); assert(authorization === `Bearer ${sourceToken}`, '原仓库 API 须使用当前来源凭据');
+              const prefix = '/repos/zelo-ci/private-source-smoke'; let value;
+              if (path === prefix) value = { id: 1001, private: true, archived: false, html_url: repositories[0], full_name: 'zelo-ci/private-source-smoke' };
+              else if (path === `${prefix}/releases/tags/v${pack.manifest.version}`) value = { id: 1002, tag_name: `v${pack.manifest.version}`,
+                draft: false, prerelease: false, published_at: new Date().toISOString(), assets: [{ id: 1003, name: `${pack.manifest.id}-${pack.manifest.version}.tgz`,
+                  state: 'uploaded', size: pack.bytes.length, digest: `sha256:${pack.sha256}` }] };
+              else if (path === `${prefix}/git/ref/tags/v${pack.manifest.version}`) value = { ref: `refs/tags/v${pack.manifest.version}`,
+                object: { type: 'commit', sha: process.env.GITHUB_SHA } };
+              else if (path === `${prefix}/releases/assets/1003`) return new Response(null, { status: 302,
+                headers: { location: 'https://release-assets.githubusercontent.com/ci-private-asset' } });
+              else throw Error('受控 GitHub 传输出现未登记路径');
+              return Response.json(value);
+            };
+            const executor = { id: 'ci-local-install',
+              async authorize(transaction, operation, record) {
+                const approval = await transaction.operationLog.findUnique({ where: { id: operation.approvalReference } });
+                assert.equal(approval?.action, 'ci.core.deployment.approved'); assert.equal(approval.tenantId, identity.tenantId);
+                assert.equal(approval.userId, identity.userId); assert.equal(approval.detail.sha256, record.sha256);
+                assert.equal(approval.detail.executorId, operation.executorId);
+              },
+              async submit(operation, record) {
+                submissions++;
+                const result = { sha256: record.sha256, dispatchId: operation.dispatchId, receipt: operation.dispatchId };
+                if (rejectSubmission) {
+                  writeFileSync(join(installation, 'results', operation.dispatchId + '.json'), JSON.stringify({ ...result, status: 'failed' }), { flag: 'wx' }); return;
+                }
+                const installed = prepareCoreInstall(pack.bytes, pack.sha256, join(installation, 'installed'),
+                  contracts.coreDeploymentHostVersions(record.plan.candidate), pack.manifest);
+                requireCorePackagePin(installed.directory, record.plan.artifact.pin, contracts.coreDeploymentHostVersions(record.plan.candidate));
+                writeFileSync(activeFile + '.next', JSON.stringify(record.plan.candidate), { flag: 'wx' }); renameSync(activeFile + '.next', activeFile);
+                writeFileSync(join(installation, 'results', operation.dispatchId + '.json'), JSON.stringify({ ...result, status: 'succeeded', directory: installed.directory }), { flag: 'wx' });
+                throw Error('受控安装已提交后失应答');
+              },
+              async observe(operation) {
+                const result = read(join(installation, 'results', operation.dispatchId + '.json')), current = read(activeFile);
+                if (result.status === 'succeeded') requireCorePackagePin(result.directory, current.cores[0], contracts.coreDeploymentHostVersions(current));
+                return { status: result.status, sha256: result.sha256, dispatchId: result.dispatchId, receipt: result.receipt, current };
+              } };
+            const compose = () => composePlatformCorePackageAssembly({ database: db, users, audit: createPlatformCorePackageAudit(),
+              catalogue: createEmptyCoreCatalogue(), storageDirectory: installation, sourceVault: new SecretBox(config), fetcher, deploymentExecutor: executor,
+              deployment: { read: () => snapshot(db), readInTransaction: snapshot }, materials: { async read() { return { base,
+                platform: base.platform.data.migrations.map(migration => ({ name: migration.file.split('/')[2], sql: readFileSync(join('apps/platform-api', migration.file)) })), cores: new Map() }; } } });
+            try { await runWithRequestIdentity(identity, async () => {
+              let packages = compose();
+              const settings = await packages.sources.read();
+              await packages.sources.save({ expectedRevision: settings.revision, enabled: true, repositories, token: sourceToken });
+              const integrations = await new TenantIntegrationService(db, new SecretBox(config), new PlatformOperationLogService(db)).catalog(identity.tenantId);
+              assert(!integrations.configs.some(row => row.capability === 'core-package' || row.provider === 'github'), '私有来源不得投影进租户集成目录');
+              const selection = await packages.releases.preview({ repository: repositories[0], coreId: pack.manifest.id,
+                version: pack.manifest.version, tag: `v${pack.manifest.version}`, visibility: 'private' });
+              assert.equal(selection.status, 'inspected'); await packages.releases.select({ release: selection.release });
+              const request = { operation: 'install', package: { reference: selection.reference } };
+              const preview = await packages.preparation.preview(request); assert.equal(preview.status, 'ready');
+              assert.equal((await packages.preparation.prepare({ request, expectedSha256: preview.sha256 })).status, 'prepared');
+              const approval = await db.operationLog.create({ data: { tenantId: identity.tenantId, userId: identity.userId,
+                action: 'ci.core.deployment.approved', detail: { sha256: preview.sha256, executorId: executor.id } } });
+              const command = { sha256: preview.sha256, dispatchId: randomUUID(), approvalReference: approval.id };
+              const defaultResponse = await body('/api/platform/core-packages/dispatch-deployment', { method: 'POST', headers, body: JSON.stringify(command) });
+              assert.equal(defaultResponse.status, 'unavailable'); assert.equal(defaultResponse.error.code, 'deployment_executor_unavailable');
+              const deniedSource = await packages.sources.read();
+              await packages.sources.save({ expectedRevision: deniedSource.revision, enabled: false, repositories, revokeToken: true });
+              await assert.rejects(packages.deployment.dispatch(command)); assert.equal(submissions, 0); assert.deepEqual(read(activeFile), base);
+              const restoreSource = await packages.sources.read();
+              await packages.sources.save({ expectedRevision: restoreSource.revision, enabled: true, repositories, token: sourceToken });
+              assert.equal((await packages.deployment.dispatch(command)).status, 'failed'); assert.deepEqual(read(activeFile), base);
+              assert.equal((await packages.deployment.dispatch({ ...command, dispatchId: command.dispatchId.toUpperCase() })).status, 'failed'); assert.equal(submissions, 1);
+              // 失败原意图不重做。另一个实际候选请求仍沿原文件存储，不能换 ID 重派原摘要。
+              await assert.rejects(packages.deployment.dispatch({ ...command, dispatchId: randomUUID() }));
+              const privateIndex = { format: 'core-package-archives-1', artifacts: [{ reference: 'private-local', file: 'tickets.tgz',
+                artifact: { kind: 'core', pin: { manifest: pack.manifest, sha256: pack.sha256 } }, privateRelease: selection.release }] };
+              writeFileSync(join(installation, 'archives/tickets.tgz'), pack.bytes, { flag: 'wx' });
+              writeFileSync(join(installation, 'archives/index.json'), JSON.stringify(privateIndex), { flag: 'wx' });
+              const nextRequest = { operation: 'install', package: { reference: 'private-local' } }, next = await packages.preparation.preview(nextRequest);
+              assert.equal(next.status, 'ready'); await packages.preparation.prepare({ request: nextRequest, expectedSha256: next.sha256 });
+              const nextApproval = await db.operationLog.create({ data: { tenantId: identity.tenantId, userId: identity.userId,
+                action: 'ci.core.deployment.approved', detail: { sha256: next.sha256, executorId: executor.id } } });
+              const successful = { sha256: next.sha256, dispatchId: randomUUID(), approvalReference: nextApproval.id };
+              assert.equal((await packages.deployment.dispatch({ ...successful, dispatchId: command.dispatchId.toUpperCase() })).status, 'unknown');
+              assert.equal(submissions, 1, '原派发 ID 不得绑定另一候选再次执行');
+              rejectSubmission = false;
+              assert.equal((await packages.deployment.dispatch(successful)).status, 'unknown'); assert.equal(submissions, 2);
+              packages = compose(); // 重新打开原存储，同 ID 只读真实安装结果。
+              assert.equal((await packages.deployment.receipt({ sha256: next.sha256, dispatchId: successful.dispatchId })).status, 'succeeded');
+              const finalSource = await packages.sources.read();
+              await packages.sources.save({ expectedRevision: finalSource.revision, enabled: false, repositories, revokeToken: true });
+              await assert.rejects(packages.preflight.inspect({ reference: selection.reference }));
+              await assert.rejects(packages.preflight.inspect({ reference: 'private-local' }));
+              assert.equal((await packages.deployment.dispatch(successful)).status, 'succeeded'); assert.equal(submissions, 2);
+              assert.deepEqual(read(activeFile), next.plan.candidate); assert(redirected > 0);
+              assert.equal((await packages.preparation.receipt({ sha256: next.sha256 })).status, 'recorded');
+            }); } finally { await db.$disconnect(); }
+            console.log('私有受控链：正式工单包、真实原身份/SQL、缓存/本地材料复权、显式宿主批准、实际安装提交及原ID恢复通过；未验证真实GitHub或最终环境');
+            const driver = async (path, value, method = 'POST') => {
+              const response = await fetch('http://127.0.0.1:9515' + path, { method,
+                ...(value === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) }),
+                signal: AbortSignal.timeout(45000) });
+              const result = await response.json();
+              if (!response.ok || result.value?.error) {
+                const reason = ['element click intercepted', 'element not interactable', 'stale element reference', 'no such element'].includes(result.value?.error)
+                  ? result.value.error : 'webdriver_error';
+                throw Error('Chrome 操作未完成：' + path.split('/').at(-1) + ' / ' + reason);
+              }
+              return result.value;
+            };
+            let browser;
+            try {
+              browser = await driver('/session', { capabilities: { alwaysMatch: { browserName: 'chrome',
+                'goog:chromeOptions': { args: ['--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1440,1000',
+                  '--disable-background-networking', '--disable-component-update', '--no-first-run', '--disable-sync', '--no-proxy-server',
+                  '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1', `--user-data-dir=${join(task, 'private-source-browser')}`] } } } });
+              const prefix = '/session/' + browser.sessionId, elementId = 'element-6066-11e4-a52e-4f735466cecf';
+              const dom = (script, ...args) => driver(prefix + '/execute/sync', { script, args });
+              async function waitFor(read, label) {
+                const deadline = Date.now() + 30000;
+                do { if (await read()) return; await new Promise(resolve => setTimeout(resolve, 150)); } while (Date.now() < deadline);
+                throw Error('私有来源页面等待超时：' + label);
+              }
+              const element = async selector => (await driver(prefix + '/element', { using: 'css selector', value: selector }))[elementId];
+              const fill = async (selector, text) => { const id = await element(selector);
+                await driver(prefix + '/element/' + id + '/clear', {}); await driver(prefix + '/element/' + id + '/value', { text }); };
+              // 原 UIArc 同时保留可见字形和读屏标签；不把两份 DOM 文字当一个按钮名称。
+              const buttonReady = text => dom('return [...document.querySelectorAll("button")].some(e=>!e.disabled && e.getAttribute("aria-disabled")!=="true" && (!e.hasAttribute("data-rental-arc-action") || e.getAttribute("data-state")==="idle") && (e.textContent.trim()===arguments[0] || [...e.querySelectorAll("span")].some(s=>s.textContent.trim()===arguments[0])))', text);
+              const clickText = async text => {
+                await waitFor(() => buttonReady(text), text);
+                const result = await driver(prefix + '/element', { using: 'xpath', value: `//button[not(@disabled) and not(@aria-disabled='true') and (not(@data-rental-arc-action) or @data-state='idle') and (normalize-space(.)='${text}' or .//span[normalize-space(.)='${text}'])]` });
+                await dom('arguments[0].scrollIntoView({block:"center",inline:"nearest"})', result);
+                let previousBox;
+                await waitFor(async () => {
+                  const box = await dom('const e=arguments[0],r=e.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2); return !e.disabled && !e.closest("[inert]") && (hit===e||e.contains(hit)) ? [r.x,r.y,r.width,r.height].map(v=>Math.round(v*10)) : null', result);
+                  const stable = box && JSON.stringify(box) === JSON.stringify(previousBox); previousBox = box; return stable;
+                }, text + '可点击位置');
+                await driver(prefix + '/element/' + result[elementId] + '/click', {});
+              };
+              await driver(prefix + '/url', { url: web + '/login' });
+              await waitFor(() => dom('return !!document.querySelector("#account")'), '登录表单');
+              await fill('#tenantCode', 'platform'); await fill('#account', 'admin'); await fill('#password', `${process.env.SEED_PLATFORM_PASSWORD}-New8!`);
+              await clickText('进入工作台'); await waitFor(() => dom('return !location.pathname.includes("login")'), '正式登录');
+              await driver(prefix + '/url', { url: web + '/platform/core-packages' });
+              await waitFor(() => buttonReady('私有来源'), '包管理页');
+              await clickText('私有来源'); await waitFor(() => dom('return !!document.querySelector("#repositories")'), '私有来源表单');
+              const uiToken = 'github_pat_ui_' + randomBytes(32).toString('hex');
+              await fill('#repositories', repositories[0]); await fill('input[autocomplete="new-password"]', uiToken);
+              await driver(prefix + '/element/' + await element('#enabled') + '/click', {});
+              await clickText('保存来源');
+              await waitFor(async () => (await body(sourcePath, { headers })).enabled, '首次保存');
+              await waitFor(() => dom('return document.querySelector("input[autocomplete=new-password]")?.value === ""'), '凭据清空');
+              await waitFor(() => buttonReady('保存来源'), '表单重开');
+              const firstRevision = (await body(sourcePath, { headers })).revision;
+              const rotatedUiToken = 'ghs_ui_' + randomBytes(384).toString('base64url') + '.ci.signature';
+              await fill('input[autocomplete="new-password"]', rotatedUiToken);
+              await clickText('保存来源');
+              await waitFor(async () => (await body(sourcePath, { headers })).revision !== firstRevision, '轮换');
+              await waitFor(() => dom('return document.querySelector("input[autocomplete=new-password]")?.value === ""'), '轮换清空');
+              for (const token of [uiToken, rotatedUiToken]) assert.equal(await dom('return document.body.innerText.includes(arguments[0]) || Object.values(localStorage).some(v=>v.includes(arguments[0])) || Object.values(sessionStorage).some(v=>v.includes(arguments[0]))', token), false);
+              await waitFor(() => buttonReady('撤销凭据'), '撤销入口');
+              await clickText('撤销凭据'); await waitFor(() => buttonReady('确认'), '二次确认');
+              await clickText('确认'); await waitFor(async () => !(await body(sourcePath, { headers })).credentialConfigured, '撤销回读');
+              await driver(prefix + '/window/rect', { width: 390, height: 844 });
+              await waitFor(() => dom('return !!document.querySelector("#repositories") && document.documentElement.scrollWidth <= innerWidth + 2'), '窄屏布局');
+              console.log('实际 Chrome：正式登录、私有来源保存/轮换/撤销、输入清空/浏览器存储脱敏、窄屏可见通过');
+            } finally { if (browser) await driver('/session/' + browser.sessionId, undefined, 'DELETE'); }
             const operationKey = 'ci-public-model-save', id = process.env.PLATFORM_AI_PROFILE_ID;
             const provider = '/api/platform/ai/providers/' + id;
             const result = await body(provider, { method: 'PUT', headers, body: JSON.stringify({

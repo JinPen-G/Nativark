@@ -7,13 +7,17 @@ import {
   coreOpenApiSchema, type CoreOpenApiContribution, type PlatformOpenApiDocument
 } from "@rental-os/core-contracts";
 import { GitHubCoreDiscoveryQuerySchema } from "@rental-os/core-contracts/github-discovery";
-import { GitHubCoreReleasePinSchema, GitHubCoreReleaseSelectionSchema, GitHubCoreRepositorySchema } from "@rental-os/core-contracts/github";
+import { GitHubCoreReleasePinSchema, GitHubCoreReleaseSelectionSchema, GitHubCoreRepositorySchema, GitHubPrivateTokenSchema } from "@rental-os/core-contracts/github";
 import { CORE_PACKAGE_HTTP, CORE_PACKAGE_HTTP_BASE } from "../core-package-ports";
 import { CORE_PACKAGE_PREFLIGHT_HTTP, CorePackageInspectRequestSchema, CorePackageUpdatePlanRequestSchema } from "../core-package-preflight/ports";
 import { CORE_PACKAGE_SELECTION_HTTP } from "../core-package-selection/protocol";
 import { CorePackageReleaseReceiptRequestSchema, CorePackageReleaseReferenceSchema } from "../core-package-selection/ports";
 import { CORE_PACKAGE_PREPARATION_HTTP } from "../core-package-preparation/protocol";
 import { CorePackagePreparationRequestSchema, CorePackagePrepareRequestSchema, CorePackagePreparationQuerySchema } from "../core-package-preparation/ports";
+import { CORE_PACKAGE_SOURCE_HTTP } from "../core-package-source-protocol";
+import { CORE_PACKAGE_DEPLOYMENT_HTTP } from "../core-package-preparation/deployment-protocol";
+import { CorePackageDeploymentDispatchIdInputSchema, CorePackageDeploymentRequestSchema,
+  CorePackageDeploymentQuerySchema } from "../core-package-preparation/deployment-ports";
 
 type Schema = Record<string, unknown>;
 const namespace = "PlatformCorePackage";
@@ -35,6 +39,10 @@ const extend = (base: Schema, properties: Record<string, Schema>, required = Obj
 
 function schemas(): CoreOpenApiContribution["schemas"] {
   const sha256 = coreOpenApiSchema(CoreArtifactHashSchema);
+  // 原转换器不执行大小写归一，显式投影同源输入约束和运行时规则。
+  const dispatchId = { ...coreOpenApiSchema(CorePackageDeploymentDispatchIdInputSchema), "x-normalization": "lowercase" };
+  const deploymentRequest = extend(coreOpenApiSchema(CorePackageDeploymentRequestSchema.omit({ dispatchId: true })), { dispatchId });
+  const deploymentQuery = extend(coreOpenApiSchema(CorePackageDeploymentQuerySchema.omit({ dispatchId: true })), { dispatchId });
   const version = coreOpenApiSchema(CoreReleaseVersionSchema);
   const coreId = coreOpenApiSchema(CoreIdSchema);
   const range = { ...coreOpenApiSchema(CoreVersionRangeSchema.innerType()),
@@ -93,7 +101,7 @@ function schemas(): CoreOpenApiContribution["schemas"] {
   const releasePin = extend(coreOpenApiSchema(GitHubCoreReleasePinSchema.innerType().omit({ repository: true })), {
     repository: ref("RepositoryURL")
   });
-  releasePin.description = "固定 Tag、解析后的提交、Release/资产 ID、包长度和 SHA-256。Tag 与版本的关联沿原发行合同核验。";
+  releasePin.description = "固定 Tag、解析后的提交、Release/资产 ID、包长度和 SHA-256。私有发行同时要求 visibility=private 及实际 repositoryId，公开发行省略两字段；关联沿原发行合同核验。";
   const query = extend(coreOpenApiSchema(GitHubCoreDiscoveryQuerySchema.omit({ text: true })), {
     text: { type: "string", maxLength: 80, default: "", "x-normalization": "trim",
       description: "原 Unicode 关键词合同接受文字、数字、空格及 . _ -，拒绝 GitHub 查询表达式。" }
@@ -153,10 +161,11 @@ function schemas(): CoreOpenApiContribution["schemas"] {
   selected.description = "reference 由完整 Release pin 的原确定性指纹生成，同一引用只追加同一发行记录。";
   const preparationPlan = object({ format: values("core-preparation-1"), deployment: values("pending"),
     request: ref("PreparationRequest"), artifact: ref("Artifact"), base: ref("DeploymentLock"), candidate: ref("DeploymentLock"),
+    privateRelease: { ...ref("ReleasePin"), description: "仅私有候选携带，与选中包身份及原固定发行一致；不是当前获取或部署授权。" },
     files: list(object({ file: { type: "string", minLength: 1, maxLength: 1024,
       description: "原候选路径合同逐段校验受控相对路径，排除 .git、node_modules 和实际环境配置。大小写归一后的文件路径唯一。" },
       sizeBytes: { ...integer, minimum: 0, maximum: Number.MAX_SAFE_INTEGER }, sha256 }))
-  });
+  }, ["format", "deployment", "request", "artifact", "base", "candidate", "files"]);
   const preparationRecord = object({ sha256, preparedAt: timestamp, plan: ref("PreparationPlan") });
   preparationRecord.description = "sha256 对应完整候选 plan 的原确定性指纹，回读同时核对候选锁和全部文件字节。";
   return {
@@ -221,11 +230,24 @@ function schemas(): CoreOpenApiContribution["schemas"] {
     [`${namespace}.ReleaseReceiptRequest`]: coreOpenApiSchema(CorePackageReleaseReceiptRequestSchema),
     [`${namespace}.PreparationRequest`]: coreOpenApiSchema(CorePackagePreparationRequestSchema),
     [`${namespace}.PrepareRequest`]: coreOpenApiSchema(CorePackagePrepareRequestSchema),
-    [`${namespace}.PreparationQuery`]: coreOpenApiSchema(CorePackagePreparationQuerySchema)
+    [`${namespace}.PreparationQuery`]: coreOpenApiSchema(CorePackagePreparationQuerySchema),
+    [`${namespace}.DeploymentRequest`]: deploymentRequest,
+    [`${namespace}.DeploymentQuery`]: deploymentQuery,
+    [`${namespace}.DeploymentResult`]: variants(ref("Unavailable"),
+      extend(deploymentQuery, { status: values("pending", "unknown") }),
+      extend(deploymentQuery, { status: values("succeeded", "failed"),
+        receipt: text, current: ref("DeploymentLock") })),
+    [`${namespace}.PrivateSource`]: object({ provider: values("github"), enabled: flag,
+      repositories: { ...list(ref("RepositoryURL")), maxItems: 100, uniqueItems: true }, credentialConfigured: flag,
+      revision: { ...timestamp, nullable: true } }),
+    [`${namespace}.SavePrivateSource`]: object({ expectedRevision: { ...timestamp, nullable: true }, enabled: flag,
+      repositories: { ...list(ref("RepositoryURL")), maxItems: 100, uniqueItems: true },
+      token: { ...coreOpenApiSchema(GitHubPrivateTokenSchema), writeOnly: true }, revokeToken: { ...flag, default: false }
+    }, ["expectedRevision", "enabled", "repositories"])
   };
 }
 
-/** 四组模块全部登记后由宿主组合此片段，记录与实体结果沿原 requestId 包装。 */
+/** 所有包管理 Controller 同版登记后组合此片段，记录与实体结果沿原 requestId 包装。 */
 export function createCorePackageOpenApi(): CoreOpenApiContribution {
   const operations: Array<{ id: string; route: { method: string; path: string }; summary: string;
     request?: string; response: string; effect: "read" | "write" }> = [
@@ -240,14 +262,19 @@ export function createCorePackageOpenApi(): CoreOpenApiContribution {
     { id: "releaseReceipt", route: CORE_PACKAGE_SELECTION_HTTP.receipt, summary: "读取同一原发行引用", request: "ReleaseReceiptRequest", response: "ReleaseReferenceRead", effect: "read" },
     { id: "previewPreparation", route: CORE_PACKAGE_PREPARATION_HTTP.preview, summary: "预览完整待部署候选", request: "PreparationRequest", response: "PreparationPreview", effect: "read" },
     { id: "prepare", route: CORE_PACKAGE_PREPARATION_HTTP.prepare, summary: "按原预览摘要准备待部署文件", request: "PrepareRequest", response: "PreparationResult", effect: "write" },
-    { id: "preparationReceipt", route: CORE_PACKAGE_PREPARATION_HTTP.receipt, summary: "读取同一原候选摘要与全部文件证据", request: "PreparationQuery", response: "PreparationRead", effect: "read" }
+    { id: "preparationReceipt", route: CORE_PACKAGE_PREPARATION_HTTP.receipt, summary: "读取同一原候选摘要与全部文件证据", request: "PreparationQuery", response: "PreparationRead", effect: "read" },
+    { id: "dispatchDeployment", route: CORE_PACKAGE_DEPLOYMENT_HTTP.dispatch, summary: "向已批准的可信宿主单次提交固定候选", request: "DeploymentRequest", response: "DeploymentResult", effect: "write" },
+    { id: "deploymentReceipt", route: CORE_PACKAGE_DEPLOYMENT_HTTP.receipt, summary: "按同一派发 ID 读取宿主真实部署结果", request: "DeploymentQuery", response: "DeploymentResult", effect: "read" },
+    { id: "privateSource", route: CORE_PACKAGE_SOURCE_HTTP.read, summary: "读取 SaaS 私有来源脱敏配置", response: "PrivateSource", effect: "read" },
+    { id: "savePrivateSource", route: CORE_PACKAGE_SOURCE_HTTP.save, summary: "配置轮换或撤销私有来源凭据", request: "SavePrivateSource", response: "PrivateSource", effect: "write" }
   ];
   const definitions = schemas(), paths: CoreOpenApiContribution["paths"] = {};
   const content = (schema: Schema) => ({ "application/json": { schema } });
   for (const operation of operations) {
     const name = `${operation.id}.Response`;
     definitions[`${namespace}.${name}`] = object({ data: ref(operation.response), requestId: text });
-    paths[`/api/${CORE_PACKAGE_HTTP_BASE}/${operation.route.path}`] = { [operation.route.method.toLowerCase()]: {
+    const path = `/api/${CORE_PACKAGE_HTTP_BASE}/${operation.route.path}`;
+    paths[path] = { ...paths[path], [operation.route.method.toLowerCase()]: {
       operationId: `${namespace}.${operation.id}`, summary: operation.summary, tags: ["Core packages"], security: [{ bearerAuth: [] }],
       "x-requiredPermissions": ["system:tenant:manage"], "x-core-management-audience": "saas", "x-effect": operation.effect,
       description: "需要原 operator 签名会话、当前 SaaS 管理身份和对应权限，返回前复验当前主体。发行元数据、包校验、待部署、注册和租户/成员授权分别成立。unknown 继续沿原引用或 SHA-256 读取，准备结果始终 pending。",

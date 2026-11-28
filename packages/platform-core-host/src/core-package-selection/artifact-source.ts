@@ -2,8 +2,9 @@
  * 保留一个已下载包并合并同发行在途读取，宿主原本地引用继续由原来源供给。 */
 import { isDeepStrictEqual } from "node:util";
 import { CoreAccessError } from "@rental-os/core-host";
-import { inspectGitHubCoreRelease } from "@rental-os/core-contracts/github";
+import { GitHubCoreReadError, inspectGitHubCoreRelease, verifyGitHubCoreRelease } from "@rental-os/core-contracts/github";
 import type { CorePackageLegacyApiRoutes } from "../core-package-ports";
+import type { CorePackagePrivateSourceAccess } from "../core-package-source-access";
 import {
   CorePackageArtifactReferenceSchema, type CorePackageArtifactSource
 } from "../core-package-preflight/ports";
@@ -14,13 +15,27 @@ import {
 } from "./ports";
 
 /** 宿主显式提供公开网络适配，构造时只准备依赖，读取有完整请求期限。 */
-export function createPlatformCorePackageReleaseSource(fetcher: typeof fetch = fetch): CorePackageReleaseSource {
+export function createPlatformCorePackageReleaseSource(fetcher: typeof fetch = fetch,
+  privateAccess?: CorePackagePrivateSourceAccess): CorePackageReleaseSource {
+  async function access(repository: string) {
+    if (!privateAccess) throw new GitHubCoreReadError("source_denied", "宿主尚未提供私有来源当前权限");
+    return privateAccess.acquire(repository);
+  }
   return {
-    inspect(selection) {
+    async inspect(selection) {
       const deadline = AbortSignal.timeout(90_000);
-      return inspectGitHubCoreRelease(selection, (url, options) => fetcher(url, {
+      const lease = selection.visibility === "private" ? await access(selection.repository) : undefined;
+      try { return await inspectGitHubCoreRelease(selection, (url, options) => fetcher(url, {
         ...options, signal: options?.signal ? AbortSignal.any([options.signal, deadline]) : deadline
-      }));
+      }), lease?.credential); }
+      finally { await lease?.revalidate(); }
+    },
+    async authorize(release) {
+      if (release.visibility !== "private") return undefined;
+      const lease = await access(release.repository);
+      try { await verifyGitHubCoreRelease(release, fetcher, lease.credential); }
+      finally { await lease.revalidate(); }
+      return { privateRelease: structuredClone(release), revalidate: transaction => lease.revalidate(transaction) };
     }
   };
 }
@@ -30,6 +45,7 @@ export function createPlatformCorePackageSelectedArtifactSource(input: {
   local?: CorePackageArtifactSource;
   legacyApiRoutes?: CorePackageLegacyApiRoutes;
   fetcher?: typeof fetch;
+  privateAccess?: CorePackagePrivateSourceAccess;
 }): CorePackageArtifactSource {
   const legacyApiRoutes = structuredClone(input.legacyApiRoutes ?? {});
   const pending = new Map<string, CorePackageArtifactSource>();
@@ -48,7 +64,16 @@ export function createPlatformCorePackageSelectedArtifactSource(input: {
     return parsed.data;
   }
 
+  const releases = createPlatformCorePackageReleaseSource(input.fetcher, input.privateAccess);
   return {
+    async authorize(reference) {
+      if (!CorePackageReleaseReferenceSchema.safeParse(reference).success) return input.local?.authorize?.(reference);
+      const original = record(reference);
+      if (!original) return input.local?.authorize?.(reference);
+      const lease = await releases.authorize!(original.release);
+      if (!isDeepStrictEqual(record(reference), original)) throw new CoreAccessError("operation_conflict", "私有来源复权期间发行引用变化");
+      return lease;
+    },
     async read(value) {
       const reference = CorePackageArtifactReferenceSchema.parse(value);
       if (!CorePackageReleaseReferenceSchema.safeParse(reference).success) return input.local?.read(reference);
@@ -57,7 +82,7 @@ export function createPlatformCorePackageSelectedArtifactSource(input: {
       let source = downloaded?.reference === reference ? downloaded.source : pending.get(reference);
       if (!source) {
         source = createPlatformCorePackageGitHubSource({ releases: new Map([[reference, original.release]]),
-          legacyApiRoutes, fetcher: input.fetcher });
+          legacyApiRoutes, fetcher: input.fetcher, privateAccess: input.privateAccess });
         pending.set(reference, source);
       }
       try {

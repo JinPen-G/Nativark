@@ -87,6 +87,14 @@
       "types": "./dist/core-package-ports.d.ts",
       "default": "./dist/core-package-ports.js"
     },
+    "./core-package-source-protocol": {
+      "types": "./dist/core-package-source-protocol.d.ts",
+      "default": "./dist/core-package-source-protocol.js"
+    },
+    "./core-package-source-settings": {
+      "types": "./dist/core-package-source-settings.d.ts",
+      "default": "./dist/core-package-source-settings.js"
+    },
     "./core-package-selection/protocol": {
       "types": "./dist/core-package-selection/protocol.d.ts",
       "default": "./dist/core-package-selection/protocol.js"
@@ -94,6 +102,10 @@
     "./core-package-preparation/protocol": {
       "types": "./dist/core-package-preparation/protocol.d.ts",
       "default": "./dist/core-package-preparation/protocol.js"
+    },
+    "./core-package-preparation/deployment-protocol": {
+      "types": "./dist/core-package-preparation/deployment-protocol.d.ts",
+      "default": "./dist/core-package-preparation/deployment-protocol.js"
     },
     "./core-package-http": {
       "types": "./dist/core-package-http.d.ts",
@@ -191,11 +203,20 @@
       "core-package-ports": [
         "dist/core-package-ports.d.ts"
       ],
+      "core-package-source-protocol": [
+        "dist/core-package-source-protocol.d.ts"
+      ],
+      "core-package-source-settings": [
+        "dist/core-package-source-settings.d.ts"
+      ],
       "core-package-selection/protocol": [
         "dist/core-package-selection/protocol.d.ts"
       ],
       "core-package-preparation/protocol": [
         "dist/core-package-preparation/protocol.d.ts"
+      ],
+      "core-package-preparation/deployment-protocol": [
+        "dist/core-package-preparation/deployment-protocol.d.ts"
       ],
       "core-package-http": [
         "dist/core-package-http.d.ts"

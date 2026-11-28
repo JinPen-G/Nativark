@@ -160,8 +160,8 @@ export function useCorePackagePreparation(api: CorePackagesApi) {
     return run("preview-release", pinned, async signal => {
       requireIdle();
       update({ release: undefined, selected: undefined, preview: undefined, prepared: undefined });
-      const { repository, coreId, version, tag } = pinned;
-      const result = await api.previewRelease({ repository, coreId, version, tag }, signal);
+      const { repository, coreId, version, tag, visibility } = pinned;
+      const result = await api.previewRelease({ repository, coreId, version, tag, ...(visibility ? { visibility } : {}) }, signal);
       controller(signal);
       if (result.status === "unavailable") throw new Error(result.error.message);
       if (!/^github-[a-f0-9]{64}$/.test(result.reference)

@@ -16,6 +16,7 @@ export type CorePackagePreparationTarget = { kind: "release"; release: GitHubCor
   | { kind: "receipt" };
 
 function Candidate({ plan, hash, en }: { plan: CorePackagePreparationPlan; hash: string; en: boolean }) {
+  const manifest = plan.artifact.kind === "core" ? plan.artifact.pin.manifest : undefined;
   const rows = [{ id: "platform", name: en ? "Platform" : "底座", current: plan.base.platform.versions.platform,
     candidate: plan.candidate.platform.versions.platform, data: plan.candidate.platform.data.version }, ...plan.candidate.cores.map(core => ({
     id: `core:${core.manifest.id}`, name: core.manifest.name,
@@ -31,8 +32,16 @@ function Candidate({ plan, hash, en }: { plan: CorePackagePreparationPlan; hash:
       { key: "state", label: en ? "Deployment" : "部署状态", value: <DataTableStatus tone="warning">{en ? "Pending deployment" : "待部署"}</DataTableStatus> },
       { key: "operation", label: en ? "Operation" : "操作", value: plan.request.operation === "install" ? en ? "Install Core" : "安装 Core" : en ? "Update module" : "更新模块" },
       { key: "reference", label: en ? "Package reference" : "包引用", value: plan.request.package.reference, wide: true },
-      { key: "hash", label: en ? "Candidate SHA-256" : "候选 SHA-256", value: hash, wide: true }
+      { key: "hash", label: en ? "Candidate SHA-256" : "候选 SHA-256", value: hash, wide: true },
+      ...(manifest ? [
+        { key: "author", label: en ? "Declared author" : "声明作者", value: manifest.author },
+        { key: "license", label: en ? "Declared license" : "声明许可", value: manifest.license },
+        { key: "source", label: en ? "Package source" : "包来源", value: manifest.source.repository, wide: true },
+        { key: "sourceCommit", label: en ? "Source commit" : "源码提交", value: manifest.source.commit, wide: true }
+      ] : [])
     ]} />
+    {manifest && <p>{en ? "Package declarations are shown for review. Confirm the license and deployment approval before installation."
+      : "以上为包内声明。安装前须核实许可及部署批准。"}</p>}
     <ListSection title={en ? "Candidate combination" : "候选组合"}>
       <Table rowKey="id" dataSource={rows} pagination={false} columns={[
         { key: "module", title: en ? "Module" : "模块", render: (_, row) => <DataTableText primary={row.name} secondary={row.id} /> },
@@ -101,6 +110,8 @@ export function CorePackagePreparationDialog({ target, open, catalogue, controls
     {fixed && <>
       <RecordFacts items={[
         { key: "review", label: en ? "Review" : "审核", value: <DataTableStatus tone="warning">{en ? "Unreviewed" : "未审核"}</DataTableStatus> },
+        { key: "visibility", label: en ? "Source access" : "来源范围", value: fixed.visibility === "private" ? en ? "Private" : "私有" : en ? "Public" : "公开" },
+        ...(fixed.visibility === "private" ? [{ key: "repositoryId", label: en ? "GitHub repository ID" : "GitHub 仓库 ID", value: fixed.repositoryId }] : []),
         { key: "repository", label: en ? "Repository" : "仓库", value: fixed.repository, wide: true },
         { key: "tag", label: "Tag", value: fixed.tag },
         { key: "commit", label: en ? "Release commit" : "发行提交", value: fixed.commit, wide: true },

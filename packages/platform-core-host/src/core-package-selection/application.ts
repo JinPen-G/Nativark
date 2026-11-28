@@ -90,6 +90,8 @@ export function composePlatformCorePackageSelection<Tx extends PlatformCoreTrans
       const parsed = CorePackageReleaseReferenceRecordSchema.safeParse(result.record);
       if (!parsed.success || parsed.data.reference !== reference)
         throw new CoreAccessError("operation_conflict", "原发行引用记录与固定内容不一致");
+      if (parsed.data.release.visibility === "private" && getRequestIdentity()?.tenantId !== "tenant_platform")
+        throw new CoreAccessError("denied", "私有发行原结果只向平台管理主体开放");
       return { status: "recorded", record: parsed.data };
     }
     if (result.status === "absent" && result.reference !== reference)
@@ -111,20 +113,28 @@ export function composePlatformCorePackageSelection<Tx extends PlatformCoreTrans
       const { release } = CorePackageReleaseSelectRequestSchema.parse(value), original = identityReference();
       const reference = corePackageReleaseReference(release), existing = await locked(original, () => read(reference));
       if (existing.status === "unavailable") return existing;
-      if (existing.status === "recorded") return { status: "already_selected", record: existing.record };
-      const { repository, coreId, version, tag } = release;
-      const inspected = await inspect({ repository, coreId, version, tag });
+      if (existing.status === "recorded" && release.visibility !== "private") return { status: "already_selected", record: existing.record };
+      const { repository, coreId, version, tag, visibility } = release;
+      const inspected = await inspect({ repository, coreId, version, tag, ...(visibility ? { visibility } : {}) });
+      if (visibility === "private" && !input.releases?.authorize)
+        return unavailable("source_denied", "宿主缺少私有来源的提交复权接点");
+      const sourceLease = visibility === "private" && inspected.status === "inspected"
+        ? await input.releases!.authorize!(release) : undefined;
+      if (visibility === "private" && inspected.status === "inspected" && !sourceLease)
+        return unavailable("source_denied", "私有来源未取得当前提交权限");
       let dispatched = false;
       return locked(original, async (transaction, revalidate) => {
         if (inspected.status === "unavailable") return inspected;
         if (!isDeepStrictEqual(release, inspected.release))
           return unavailable("release_changed", "Release、Tag 提交或资产与原预览不同，请核对原引用");
+        await sourceLease?.revalidate(transaction);
         const current = read(reference);
         if (current.status === "unavailable") return current;
         if (current.status === "recorded") return { status: "already_selected" as const, record: current.record };
         if (input.audit) {
           await input.audit.recordPublicationAttempt(transaction, { kind: "release", reference });
           await revalidate();
+          await sourceLease?.revalidate(transaction);
         }
         let result: CorePackageReleaseSelectResult;
         dispatched = true;

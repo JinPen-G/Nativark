@@ -6,6 +6,7 @@ import {
   type CoreDataContract, type CoreDeploymentLock, type CoreUpdateIssue, type CoreUpdateResult
 } from "@rental-os/core-contracts";
 import type { CorePackageInspection } from "@rental-os/core-contracts/package";
+import type { CoreHostSqlTransaction } from "@rental-os/core-host/mysql";
 import type { CorePackageReadFailure } from "../core-package-ports";
 
 export const CorePackageArtifactReferenceSchema = z.string().min(1).max(128)
@@ -31,6 +32,14 @@ export type CorePackageArtifactSummary =
 export interface CorePackageArtifactSource {
   /** 原来源按当前宿主政策供给固定包。缺包返回 undefined，失败向上返回，字节留在服务端。 */
   read(reference: string): Promise<CorePackageArtifact | undefined>;
+  /** 私有材料在发布/部署前重新读取远端取包资格；返回的瞬时复验函数只留服务端。
+   * 公共/本地来源可以无此接点，私有来源必须由自身拒绝缺少权限适配。 */
+  authorize?(reference: string): Promise<CorePackageArtifactAccess | undefined>;
+}
+export interface CorePackageArtifactAccess {
+  /** 原私有来源随候选摘要固定；这里只投影身份，不含服务器凭据或临时下载地址。 */
+  privateRelease?: import("@rental-os/core-contracts/github").GitHubCoreReleasePin;
+  revalidate(transaction?: CoreHostSqlTransaction): Promise<void>;
 }
 export interface CorePackageInspectedArtifact {
   status: "inspected";

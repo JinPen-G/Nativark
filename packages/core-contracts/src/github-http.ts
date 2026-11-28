@@ -1,10 +1,15 @@
-/** 公开GitHub只读传输；地址由适配器生成，正文有界，异常不输出响应体或签名URL。 */
+/** GitHub只读传输；地址由适配器生成，正文有界，异常不输出响应体、凭据或签名URL。
+ * 私有凭据仅用于明确仓库的首次 API 请求，所有跳转均重新构造无凭据请求。 */
 export class GitHubCoreReadError extends Error {
-  constructor(readonly code: "network" | "rate_limited" | "http" | "response_invalid" | "release_changed", message: string,
+  constructor(readonly code: "network" | "rate_limited" | "http" | "response_invalid" | "release_changed" | "source_denied", message: string,
     readonly retryAfterSeconds?: number, readonly status?: number) { super(message); this.name = "GitHubCoreReadError"; }
 }
 
 export type GitHubFetcher = typeof fetch;
+/** 仅服务端瞬时使用；不得放入 pin、索引、浏览器协议或操作日志。 */
+export interface GitHubPrivateCredential { repository: string; token: string }
+// GitHub 安装 token 支持更长的 ghs_ 前缀 JWT；有界接收，不解析或替它授予权限。
+export const GITHUB_PRIVATE_TOKEN_PATTERN = /^[A-Za-z0-9_.-]{20,4096}$(?![\s\S])/;
 export const GITHUB_API = "https://api.github.com";
 const headers = { "User-Agent": "Zelo-Core", "X-GitHub-Api-Version": "2026-03-10" };
 const downloadHosts = new Set(["api.github.com", "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"]);
@@ -28,13 +33,25 @@ async function discard(body: ReadableStream<Uint8Array> | null): Promise<void> {
 }
 
 async function readResponse(url: string, binary: boolean, limit: number, fetcher: GitHubFetcher,
-  verifiedMetadataRedirect?: string): Promise<Uint8Array> {
+  verifiedMetadataRedirect?: string, credential?: GitHubPrivateCredential): Promise<Uint8Array> {
+  let authorization: string | undefined;
+  if (credential) {
+    const repository = /^https:\/\/github\.com\/([a-zA-Z0-9][a-zA-Z0-9-]*\/[a-zA-Z0-9_.-]+)$(?![\s\S])/.exec(credential.repository);
+    const target = URL.canParse(url) ? new URL(url) : undefined;
+    const prefix = repository && `/repos/${repository[1]}`;
+    if (!prefix || !target || target.origin !== GITHUB_API || target.username || target.password || target.hash
+      || target.search || target.pathname !== prefix && !target.pathname.startsWith(`${prefix}/`)
+      || !GITHUB_PRIVATE_TOKEN_PATTERN.test(credential.token))
+      throw new GitHubCoreReadError("source_denied", "私有来源凭据或请求范围不符合已核定 GitHub 仓库");
+    authorization = `Bearer ${credential.token}`;
+  }
   const signal = AbortSignal.timeout(binary ? 120_000 : 30_000);
   for (let redirects = 0; redirects <= 3; redirects++) {
     let response: Response;
     try {
       response = await fetcher(url, {
-        headers: { ...headers, Accept: binary ? "application/octet-stream" : "application/vnd.github+json" },
+        headers: { ...headers, Accept: binary ? "application/octet-stream" : "application/vnd.github+json",
+          ...(redirects === 0 && authorization ? { Authorization: authorization } : {}) },
         redirect: "manual", signal
       });
     } catch { throw new GitHubCoreReadError("network", "GitHub读取未完成；已安装组合不受影响，请稍后重新获取"); }
@@ -62,7 +79,7 @@ async function readResponse(url: string, binary: boolean, limit: number, fetcher
         throw new GitHubCoreReadError("rate_limited", "GitHub请求已限流；保留当前组合，稍后手动重试",
           retry && /^\d+$/.test(retry) ? Number(retry) : undefined);
       }
-      throw new GitHubCoreReadError("http", `GitHub返回HTTP ${response.status}；请核对公开仓库、Tag和Release资产`, undefined, response.status);
+      throw new GitHubCoreReadError("http", `GitHub返回HTTP ${response.status}；请核对来源权限、Tag和Release资产`, undefined, response.status);
     }
     if (!response.body) throw new GitHubCoreReadError("response_invalid", "GitHub响应缺少内容");
     const reader = response.body.getReader(), chunks: Uint8Array[] = [];
@@ -87,18 +104,20 @@ async function readResponse(url: string, binary: boolean, limit: number, fetcher
   throw new GitHubCoreReadError("response_invalid", "Release下载跳转次数超过上限");
 }
 
-export function readGitHubResponse(url: string, binary: boolean, limit: number, fetcher: GitHubFetcher): Promise<Uint8Array> {
-  return readResponse(url, binary, limit, fetcher);
+export function readGitHubResponse(url: string, binary: boolean, limit: number, fetcher: GitHubFetcher,
+  credential?: GitHubPrivateCredential): Promise<Uint8Array> {
+  return readResponse(url, binary, limit, fetcher, undefined, credential);
 }
 
-async function readJson(path: string, fetcher: GitHubFetcher, verifiedMetadataRedirect?: string): Promise<unknown> {
-  const bytes = await readResponse(GITHUB_API + path, false, 4 * 1024 * 1024, fetcher, verifiedMetadataRedirect);
+async function readJson(path: string, fetcher: GitHubFetcher, verifiedMetadataRedirect?: string,
+  credential?: GitHubPrivateCredential): Promise<unknown> {
+  const bytes = await readResponse(GITHUB_API + path, false, 4 * 1024 * 1024, fetcher, verifiedMetadataRedirect, credential);
   try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
   catch { throw new GitHubCoreReadError("response_invalid", "GitHub返回的资料不是有效JSON"); }
 }
 
-export async function readGitHubJson(path: string, fetcher: GitHubFetcher): Promise<unknown> {
-  return readJson(path, fetcher);
+export async function readGitHubJson(path: string, fetcher: GitHubFetcher, credential?: GitHubPrivateCredential): Promise<unknown> {
+  return readJson(path, fetcher, undefined, credential);
 }
 
 /** Verify both public name lookups. Only the exact original numeric redirect

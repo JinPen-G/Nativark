@@ -12,7 +12,7 @@ import { requestFingerprint } from "@rental-os/platform-contracts/request-finger
 import { PlatformPrincipalAuthority } from "@rental-os/platform-server/principal";
 import { getRequestIdentity } from "@rental-os/platform-server/request-identity";
 import type { CorePackageDeploymentSource, CorePackageLegacyApiRoutes } from "../core-package-ports";
-import { CorePackageArtifactSchema, type CorePackageArtifact, type CorePackageArtifactSource } from "../core-package-preflight/ports";
+import { CorePackageArtifactSchema, type CorePackageArtifact, type CorePackageArtifactAccess, type CorePackageArtifactSource } from "../core-package-preflight/ports";
 import { composePlatformCorePackagePreflight } from "../core-package-preflight/application";
 import type { PlatformCoreTransaction, PlatformCoreUsers } from "../ports";
 import type { CorePackagePublicationAudit } from "../core-package-audit";
@@ -22,7 +22,7 @@ import {
   CorePackagePreparationRecordSchema,
   type CorePackagePreparationApplication, type CorePackagePreparationBundle, type CorePackagePreparationMaterialsSource,
   type CorePackagePreparationRequest, type CorePackagePreparationResult, type CorePackagePreparationStore,
-  type CorePackagePreparationUnavailable
+  type CorePackagePreparationUnavailable, type CorePackageDeploymentSourceGuard
 } from "./ports";
 
 type Snapshot = Awaited<ReturnType<CorePackageDeploymentSource["read"]>>;
@@ -57,16 +57,17 @@ export function composePlatformCorePackagePreparation<Tx extends PlatformCoreTra
   store?: CorePackagePreparationStore;
   legacyApiRoutes?: CorePackageLegacyApiRoutes;
   now?: () => number;
-}): CorePackagePreparationApplication {
+}): CorePackagePreparationApplication & { deploymentSourceGuard: CorePackageDeploymentSourceGuard } {
   const principals = new PlatformPrincipalAuthority<Tx>(input.users, input.now ?? Date.now);
   const legacyApiRoutes = structuredClone(input.legacyApiRoutes ?? {});
 
   async function build(request: CorePackagePreparationRequest): Promise<CorePackagePreparationUnavailable
-    | { status: "ready"; bundle: CorePackagePreparationBundle; snapshot: NonNullable<Snapshot>; principal: ReturnType<typeof identityReference> }> {
+    | { status: "ready"; bundle: CorePackagePreparationBundle; snapshot: NonNullable<Snapshot>;
+      principal: ReturnType<typeof identityReference>; sourceLease?: CorePackageArtifactAccess }> {
     const principal = identityReference();
     let artifact: CorePackageArtifact | undefined, snapshot: Snapshot, sourceFailure: unknown;
     const preflight = composePlatformCorePackagePreflight({ ...input, legacyApiRoutes,
-      artifacts: input.artifacts && { async read(reference) {
+      artifacts: input.artifacts && { authorize: reference => input.artifacts!.authorize?.(reference) ?? Promise.resolve(undefined), async read(reference) {
         try {
           const value = await input.artifacts!.read(reference), parsed = CorePackageArtifactSchema.safeParse(value);
           if (parsed.success && parsed.data.bytes.length <= CORE_ARCHIVE_LIMITS.totalBytes)
@@ -90,17 +91,19 @@ export function composePlatformCorePackagePreparation<Tx extends PlatformCoreTra
     const result = checked.plan.result;
     if (!result.ok) return unavailable("preflight_rejected", result.issues.map(issue => `[${issue.owner}] ${issue.message}`).join("。"));
     if (!artifact || !snapshot) return unavailable("preparation_unavailable", "缺少原包字节或当前部署材料");
+    const sourceLease = await input.artifacts?.authorize?.(request.package.reference);
     if (!input.materials) return unavailable("materials_unavailable", "宿主尚未提供原平台迁移及实际 Core 包材料");
     let bundle: CorePackagePreparationBundle;
     try {
       bundle = await createCorePackagePreparationBundle({ request, artifact, base: snapshot.lock, candidate: result.candidate,
-        materials: input.materials, legacyApiRoutes });
+        materials: input.materials, legacyApiRoutes, privateRelease: sourceLease?.privateRelease });
     } catch (error) {
       if (error instanceof CoreAccessError) throw error;
       return unavailable("materials_invalid", "原包、迁移或目录映射与固定候选不一致，请核对原版本及摘要");
     }
     if (!isDeepStrictEqual(principal, identityReference())) throw new CoreAccessError("denied", "候选准备的原主体或会话已变化");
-    return { status: "ready", bundle, snapshot, principal };
+    await sourceLease?.revalidate();
+    return { status: "ready", bundle, snapshot, principal, sourceLease };
   }
 
   async function locked<T>(work: (transaction: Tx, revalidate: () => Promise<void>) => Promise<T>): Promise<T> {
@@ -127,12 +130,45 @@ export function composePlatformCorePackagePreparation<Tx extends PlatformCoreTra
   }
 
   return {
+    deploymentSourceGuard: {
+      async withAccess(sha256, dispatch) {
+        const query = CorePackagePreparationQuerySchema.parse({ sha256 });
+        const original = await locked(async () => {
+          if (!input.store) throw new CoreAccessError("core_unavailable", "缺少原候选存储，不能派发部署");
+          const result = input.store.read(query.sha256);
+          const record = result.status === "recorded" && verifiedRecord(query.sha256, result.record);
+          if (!record) throw new CoreAccessError("core_unavailable", "原候选及全部文件不可核定，不能派发部署");
+          return record;
+        });
+        // 沿原预检重建同一计划：新权限、缓存、来源、当前组合与全部材料分别复核。
+        const built = await build(original.plan.request);
+        if (built.status !== "ready") throw new CoreAccessError("core_unavailable", "当前候选或来源不满足部署前置，请保留原运行组合");
+        if (built.bundle.sha256 !== query.sha256 || !isDeepStrictEqual(built.bundle.plan, original.plan))
+          throw new CoreAccessError("revision_conflict", "原候选或私有来源已变化，不能使用旧准备结果部署");
+        return locked(async (transaction, revalidate) => {
+          const check = async () => {
+            if (!isDeepStrictEqual(built.principal, identityReference())) throw new CoreAccessError("denied", "部署原主体或会话已变化");
+            await revalidate();
+            await sameSnapshot(transaction, built.snapshot);
+            const current = input.store!.read(query.sha256);
+            if (current.status !== "recorded" || !isDeepStrictEqual(current.record, original))
+              throw new CoreAccessError("operation_conflict", "派发前原候选记录或文件已变化");
+            await built.sourceLease?.revalidate(transaction);
+          };
+          await check();
+          // 回调由原受权执行器供给，须自行核部署/许可、记录原派发并处理 unknown/恢复。
+          // 此处不运行包代码、不切换实例、不自动重试；保持本地权限锁直到原派发返回。
+          return dispatch(structuredClone(original), transaction, check);
+        });
+      }
+    },
     async preview(value) {
       const request = CorePackagePreparationRequestSchema.parse(value), built = await build(request);
       if (built.status !== "ready") return built;
       return locked(async transaction => {
         if (!isDeepStrictEqual(built.principal, identityReference())) throw new CoreAccessError("denied", "预览的原主体或会话已变化");
         await sameSnapshot(transaction, built.snapshot);
+        await built.sourceLease?.revalidate(transaction);
         return { status: "ready" as const, sha256: built.bundle.sha256, plan: built.bundle.plan };
       });
     },
@@ -146,10 +182,12 @@ export function composePlatformCorePackagePreparation<Tx extends PlatformCoreTra
       return locked(async (transaction, revalidate) => {
         if (!isDeepStrictEqual(built.principal, identityReference())) throw new CoreAccessError("denied", "准备的原主体或会话已变化");
         await sameSnapshot(transaction, built.snapshot);
+        await built.sourceLease?.revalidate(transaction);
         if (input.audit) {
           await input.audit.recordPublicationAttempt(transaction, { kind: "preparation", sha256: request.expectedSha256 });
           await sameSnapshot(transaction, built.snapshot);
           await revalidate();
+          await built.sourceLease?.revalidate(transaction);
         }
         let result: CorePackagePreparationResult;
         dispatched = true;
@@ -190,6 +228,8 @@ export function composePlatformCorePackagePreparation<Tx extends PlatformCoreTra
         if (result.status !== "recorded") return result;
         const record = verifiedRecord(query.sha256, result.record);
         if (!record) throw new CoreAccessError("operation_conflict", "原候选记录与请求摘要或计划指纹不一致");
+        if (record.plan.privateRelease && getRequestIdentity()?.tenantId !== "tenant_platform")
+          throw new CoreAccessError("denied", "私有候选原结果只向平台管理主体开放");
         return { status: "recorded" as const, record };
       });
     }
