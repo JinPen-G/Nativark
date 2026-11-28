@@ -1,16 +1,42 @@
 /** MCP人工同意、字段绑定与原账回读；没有自动批准、写重试或模型调用。
  * 会话范围变化重挂局部状态；只保留原引用和已发送标记，code/token不进存储或页面文本。
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import type { infer as ZodInfer } from "zod";
 import { TICKETS_MCP_HTTP, TICKETS_MCP_RESPONSES, TICKETS_MCP_READ_NAMES, type TicketsMcpAction } from "@rental-os/example-tickets-core/mcp-http";
 import { Alert, CorePage, Form, Input, ListSection, QueryState, Select, useCoreRequest, useLocale } from "@rental-os/platform-admin/core";
 import { ActionButton, ConfirmAction } from "@rental-os/platform-admin/ui";
+import type { createBrowserAdminSession } from "@rental-os/platform-admin/runtime";
 import { ticketAiReasons } from "./tickets-ai";
 
 type Consent = ZodInfer<typeof TICKETS_MCP_RESPONSES.prepareConsent>;
 type Grant = NonNullable<ZodInfer<typeof TICKETS_MCP_RESPONSES.grant>["grant"]>;
+/** 只在当前标签的一次登录期间保留固定人工页入口；不保存凭据或从URL决定身份/任意跳转。 */
+export function createTicketsMcpLoginBridge(session: Pick<ReturnType<typeof createBrowserAdminSession>, "getSnapshot" | "subscribe">) {
+  const path = "/cores/example-tickets/mcp-authorization", current = new URL(window.location.href);
+  let initial: { pathname: string; hash: string } | undefined;
+  if (current.pathname === path && current.hash.length <= 32768) {
+    try {
+      const authorization = new URL(new URLSearchParams(current.hash.slice(1)).get("authorization") ?? "");
+      if (authorization.protocol === "https:" && authorization.origin === current.origin && authorization.pathname === "/oauth/authorize"
+        && !authorization.username && !authorization.password && !authorization.hash) initial = { pathname: path, hash: current.hash };
+    } catch { /* 原页面/服务端仍负责拒绝无效授权请求。 */ }
+  }
+  return function TicketsMcpLoginBridge() {
+    const pending = useRef(initial), location = useLocation(), navigate = useNavigate();
+    const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
+    useEffect(() => {
+      if (!pending.current || !state.ready || !state.sessionVerified || !state.user || state.user.mustChangePassword) return;
+      if (location.pathname === path) { pending.current = undefined; return; }
+      // 原登录先完成自己的成功导航，再回到这一固定页面；不与登录表单的回调争用路由。
+      if (location.pathname === "/login" || location.pathname.startsWith("/login/")) return;
+      navigate(pending.current, { replace: true });
+    }, [location.pathname, navigate, state]);
+    return null;
+  };
+}
 function McpAuthorization() {
   const { request, queryKey } = useCoreRequest(), { locale } = useLocale(), en = locale === "en-US";
   const text = (zh: string, english: string) => en ? english : zh;

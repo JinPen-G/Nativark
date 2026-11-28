@@ -82,41 +82,49 @@ export function createTicketsAiRunner(input: { database: PrismaClient; scene: Ti
       return once(async () => {
         let lease: AiTaskRunnerLease;
         try { lease = snapshotAiTaskRunnerClaimLease(request, await measured.tasks.claimRun(request)); }
-        catch { throw new TicketsAiUnknownError(); }
+        catch (error) { throw new TicketsAiUnknownError("claim", error); }
         let preparation: AiTaskPreparationTicket | undefined, overhead: AiTaskRunnerOverheadTicket | undefined;
         const resources = measured.resources.preparation!, time = measured.resources.overhead!;
         let preparationMeasured = false, overheadMeasured = false;
+        let phase: ConstructorParameters<typeof TicketsAiUnknownError>[0] = "start";
         try {
           const started = await outcome.start!({ taskId: before.task.id, taskRevision: before.task.revision, lease });
           lease = started.lease;
+          phase = "preparation";
           preparation = await resources.begin(lease, definition, 15000, scene.signal);
           if (preparation.prepared || !preparation.remainingMs || preparation.remainingMs < 1) throw new TicketsAiUnknownError();
+          phase = "plan";
           const { bindingHash: _hash, ...plan } = definition;
           await measured.plans.savePlan({ ...plan, taskRevision: started.taskRevision }, lease,
             (tx, scopeId) => plans.publishInput(tx, scopeId, before.task.id, before.run.id));
           scene.active();
           // 原计量工厂原子交接准备与登记区间，不能把数据库等待留成免费的间隙。
+          phase = "handoff";
           overhead = await resources.handoff!(preparation, lease, false, false);
           preparationMeasured = true;
           const within = () => { scene.active(); if (time.remaining!(overhead!, lease) < 1) throw new TicketsAiUnknownError(); };
           within();
+          phase = "registration";
           const registered = await ports.steps.register(ticketsAiStep(before.source.row.id), lease);
           if (registered.replayed || registered.runRevision !== lease.revision + 1 || registered.existingStatus !== "pending") throw new TicketsAiUnknownError();
           lease = { ...lease, revision: registered.runRevision };
           within();
+          phase = "proposal";
           const result = await approvals.prepare(before.task.id);
           within();
+          phase = "release";
           const revision = (await tasks.readMetadata(before.task.id)).revision;
           const released = await measured.tasks.releaseRun({ taskId: lease.taskId, runId: lease.runId, holderId: lease.holderId,
             expectedTaskRevision: revision, expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken });
+          phase = "settlement";
           await time.completeAfterRelease!(overhead, lease, released);
           overheadMeasured = true;
           bound.assertCurrent(); scene.active(); return result;
-        } catch {
+        } catch (error) {
           // 只处理本进程已取得的原计量ticket；不猜提交是否成功、不换lease、不自动释放未知工作。
           if (preparation && !preparationMeasured) await resources.abandon(preparation, lease).catch(() => undefined);
           if (overhead && !overheadMeasured) await time.abandon(overhead, lease).catch(() => undefined);
-          throw new TicketsAiUnknownError();
+          throw new TicketsAiUnknownError(phase, error);
         }
       });
     },

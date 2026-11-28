@@ -404,7 +404,15 @@ jobs:
           node "$runtime/apps/platform-api/dist/initialize.js"
           node "$runtime/apps/example-tickets-api/dist-ai/ai-main.mjs" > "$task/tickets-ai-api.log" 2>&1 &
           api_pid=$!
-          trap 'kill "$api_pid" ${web_pid:+"$web_pid"} ${driver_pid:+"$driver_pid"} 2>/dev/null || true; wait || true' EXIT
+          finish_ai() {
+            result=$?
+            if [ "$result" -ne 0 ]; then
+              node -e 'const fs=require("node:fs"); for(const line of fs.readFileSync(process.argv[1],"utf8").split("\n")){const match=/\{"event":"tickets-ai-failure"[^\n]*\}/.exec(line);if(match)console.error(match[0]);}' "$task/tickets-ai-api.log" || true
+            fi
+            kill "$api_pid" ${web_pid:+"$web_pid"} ${driver_pid:+"$driver_pid"} 2>/dev/null || true
+            wait || true
+          }
+          trap finish_ai EXIT
           node node_modules/vite/bin/vite.js preview apps/example-tickets-admin --config apps/example-tickets-admin/vite.config.ts --host 127.0.0.1 --port 5193 --strictPort > "$task/tickets-ai-web.log" 2>&1 &
           web_pid=$!
           if ! curl -fsS --retry 30 --retry-delay 1 --retry-max-time 60 --retry-connrefused --max-time 5 http://127.0.0.1:5193/api/health -o "$task/tickets-ai-health.json"; then
@@ -614,6 +622,10 @@ jobs:
           set -euo pipefail
           task="$GITHUB_WORKSPACE/$CI_DIR"
           # 前一宿主已在EXIT排空；本组合重生唯一公共Client，不使用AI数据或模型。
+          # AI后台曾供给完整标准包；README是固定链接投影，另三份是生成材料。
+          # 本job独占源码无作者稿，只恢复这些已知投影，再由原打包器复核全部来源。
+          git restore --source="$GITHUB_SHA" --worktree -- packages/example-tickets-core/README.md
+          rm -- packages/example-tickets-core/core.manifest.json packages/example-tickets-core/openapi.json packages/example-tickets-core/CORE_GUIDE.md
           npm run prisma:generate -w @rental-os/platform-api
           npm run build -w @rental-os/example-tickets-api
           npm run build -w @rental-os/mcp-server
@@ -777,10 +789,11 @@ jobs:
                 '--disable-background-networking', '--disable-component-update', '--no-first-run', '--disable-sync', '--no-proxy-server',
                 '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1', `--user-data-dir=${resolve(process.env.GITHUB_WORKSPACE, process.env.CI_DIR, 'tickets-mcp-browser-profile')}`] } } } });
             session = '/session/' + browser.sessionId;
-            await driver(session + '/url', { url: origin + '/login' });
+            await driver(session + '/url', { url: authorization.href });
+            await waitFor(() => dom('return location.pathname === "/login"'), '原登录入口');
             await fill('#tenantCode', 'mcp-tickets-one'); await fill('#account', 'reader'); await fill('#password', actor.password); await click('进入工作台');
-            await waitFor(() => dom('return location.pathname !== "/login"'), '登录完成');
-            await driver(session + '/url', { url: authorization.href }); await text('客户端授权请求');
+            await waitFor(() => dom('return location.pathname === "/cores/example-tickets/mcp-authorization"'), '登录后原授权入口');
+            await text('客户端授权请求');
             await click('核对授权范围'); await text(clientId); await click('同意读取范围'); await text('已同意所示范围');
             const grantId = await dom('return document.querySelector("input[aria-label=原授权编号]").value'); assert.match(grantId, /^[a-f0-9-]{36}$/);
             await click('读取原授权与用量'); await text('原授权记录可读'); await fill('input[aria-label=工单编号]', ticketId);

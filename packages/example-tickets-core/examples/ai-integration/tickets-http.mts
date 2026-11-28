@@ -1,7 +1,7 @@
 /** 工单可选AI的闭合HTTP合同、原Guard贡献与Nest适配；不启动服务或产生默认授权。
  * 公开请求只接原引用/操作键与业务输入，所有响应沿原平台信封，错误不外发存储细节。
  */
-import { Body, Controller, Header, HttpCode, HttpException, Inject, Module, Param, Post, Req,
+import { Body, Controller, Header, HttpCode, HttpException, Inject, Logger, Module, Param, Post, Req,
   type DynamicModule, type FactoryProvider, type ModuleMetadata } from "@nestjs/common";
 import { createRequire } from "node:module";
 import type { ZodTypeAny, infer as ZodInfer } from "zod";
@@ -10,6 +10,7 @@ import { createTicketsHttpContribution, createTicketsOpenApi, TicketError } from
 import { TicketsStartOriginalSchema, TICKETS_AI_TASK_RESPONSES } from "@rental-os/example-tickets-core/ai-http";
 import { TICKETS_AI_INPUTS, type TicketsAiAction, type TicketsAiRequests, type TicketsAiRequest } from "./tickets-application.mjs";
 import { TicketsAiPolicySchema, TicketsAiPublicationReceiptSchema } from "./tickets-publication.mjs";
+import { TicketsAiUnknownError } from "./tickets-authority.mjs";
 
 // 正式Core/OpenAPI为CJS；固定同一Zod实例，避免ESM双入口令instanceof漏认同源schema。
 const { z } = createRequire(import.meta.url)("zod") as typeof import("zod");
@@ -101,18 +102,31 @@ export async function withTicketsAiRequest<T>(request: TicketsAiHttpRequest, wor
 const token = Symbol("example-tickets.ai-requests");
 @Controller("cores/example-tickets/ai")
 class TicketsAiController {
+  private readonly logger = new Logger("TicketsAi");
   constructor(@Inject(token) private readonly requests: TicketsAiRequests) {}
   @Post(":action") @HttpCode(200) @Header("Cache-Control", "no-store")
   async consume(@Param("action") name: string, @Req() request: TicketsAiHttpRequest, @Body() body: unknown) {
     const selected = Object.entries(TICKETS_AI_HTTP).find(([, route]) => route.path === `ai/${name}`);
     if (!selected) throw new HttpException({ code: "AI_INVALID_INPUT", retryable: false }, 400);
     const action = selected[0] as TicketsAiAction, route = selected[1];
-    let called = false;
+    let called = false, phase: "input" | "request" | "response" = "input";
     try {
-      const command = route.body.parse(body); called = true;
-      return await withTicketsAiRequest(request, async signal => route.response.parse(await this.requests.consume(action, request, command, signal)));
+      const command = route.body.parse(body); called = true; phase = "request";
+      return await withTicketsAiRequest(request, async signal => {
+        const result = await this.requests.consume(action, request, command, signal);
+        phase = "response"; return route.response.parse(result);
+      });
     } catch (error) {
       if (!called && error instanceof z.ZodError) throw new HttpException({ code: "AI_INVALID_INPUT", retryable: false }, 400);
+      if (called && route.write) {
+        // 只记服务端固定阶段与有限错误码，不记输入、身份、SQL、堆栈或凭据；保留原HTTP错误映射。
+        const original = error instanceof TicketsAiUnknownError && error.cause ? error.cause : error;
+        const cause = original instanceof Error && "code" in original ? original.code : undefined;
+        const allowed = ["AI_RESULT_UNKNOWN", "AI_ACCESS_DENIED", "AI_RESOURCE_UNAVAILABLE", "AI_STORAGE_UNAVAILABLE",
+          "AI_INVALID_INPUT", "AI_REVISION_CONFLICT", "AI_RUN_LIMIT", "P2024", "P2028", "P2034"];
+        this.logger.warn(JSON.stringify({ event: "tickets-ai-failure", action, phase: error instanceof TicketsAiUnknownError ? error.phase ?? phase : phase,
+          cause: typeof cause === "string" && allowed.includes(cause) ? cause : "unclassified" }));
+      }
       const code = error instanceof Error && "code" in error ? error.code : null;
       const safe = error instanceof TicketError ? error.code === "denied" || error.code === "not_found" ? "AI_ACCESS_DENIED" : "AI_PROPOSAL_STALE"
         : code === "AI_ACCESS_DENIED" || code === "FORBIDDEN" ? "AI_ACCESS_DENIED"

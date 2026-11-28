@@ -69,6 +69,8 @@ SaaS管理员沿同源OpenAPI的`/api/cores/example-tickets/mcp-clients/{read,sa
 
 外部客户端从正式`/oauth/authorize`发起PKCE S256请求，服务检查原注册后跳转同源`/cores/example-tickets/mcp-authorization`。用户沿原登录进入，核对范围后明确同意或拒绝；同意只保存grant，不执行工单。用户读取原grant，在页面审核实际待外发字段并绑定原工单，然后选择“返回原客户端”，由原AS签发一次code。客户端沿`/oauth/token`换取受限凭据，再调用`/mcp`。字段审核、调用与返回都复核当前权限、发布及原计量，客户端模型自付，不需要平台AI权益或模型预算。
 
+未登录时，工单宿主用公共`RouterBridge`在当前标签内保留这个固定人工页的请求，原登录成功后返回同一入口，不自动准备或同意。该导航暂存不包含code/token，也不跨标签或账号保存；若在登录期间刷新或关闭了标签，请从原客户端重新打开授权入口。已提交的同意仍按原记录回读，不能据入口丢失推断未授权。
+
 [显式宿主](src/mcp-main.mts) · [人工页面](../example-tickets-admin/src/tickets-mcp.tsx) · [同源控制面合同](../../packages/example-tickets-core/src/mcp-http.ts) · [原目标/额度及未验边界](../../packages/example-tickets-core/examples/ai-integration/README.md#tenant-mcp-参加者)
 
 ## 可选工单AI宿主

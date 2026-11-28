@@ -38,7 +38,8 @@ export class TicketsAiSceneError extends Error {
 }
 export class TicketsAiUnknownError extends Error {
   readonly code = "AI_RESULT_UNKNOWN"; readonly retryable = false;
-  constructor() { super("AI_RESULT_UNKNOWN"); }
+  constructor(readonly phase?: "claim" | "start" | "preparation" | "plan" | "handoff" | "registration" | "proposal" | "release" | "settlement",
+    readonly cause?: unknown) { super("AI_RESULT_UNKNOWN"); }
 }
 const unavailable = () => new TicketsAiSceneError("original_evidence_unavailable");
 const changed = () => new TicketsAiSceneError("basis_changed", "TICKETS_AI_BASIS_CHANGED");

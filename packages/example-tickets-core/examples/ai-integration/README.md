@@ -122,6 +122,8 @@ OpenAPI从同一输入/输出schema投影，联合状态和仅null分支使用Op
 
 请求顺序是`prepareInput`保存受权事实 → `createTask`创建原任务 → `prepareApproval`计量准备并释放租约 → `approval`展示原提案 → `decide`记录人类决定 → `execute`明确执行 → `result`读取原收据。写请求失败、断线或超时后只用`originalInput`、`originalTask`、`approval`、`result`核对原引用，不换操作键或自动重发。`observeInterrupted`仅接原Runner的恢复观察，不能证明未消耗或重新派发工具。发布也有独立的`publicationOperation`原结果读口。
 
+准备链结果不明时，服务端`TicketsAi`日志只记录固定阶段和有限错误码，便于定位原租约、计量、计划或批准参加者；不记录输入、身份、SQL、堆栈或凭据。阶段诊断不证明回滚，HTTP仍返回原`AI_RESULT_UNKNOWN`，只能按原引用核对。
+
 显式宿主见[可选AI装配](../../../../apps/example-tickets-api/src/ai-main.mts)及[运行说明](../../../../apps/example-tickets-api/README.md#可选工单ai宿主)。它与普通HTTP共用原Auth、Guard、数据库和生命周期；公共AI数据包须由同一部署锁固定，并在原事务中核迁移及物理状态。包构建/HTTP合同和宿主接线不等于真库、浏览器或完整A04通过。
 
 普通 HTTP 已提供 `GET /api/cores/example-tickets/tickets/:ticketId/ai-status`，单源schema和OpenAPI沿[工单HTTP](../../src/http.ts)。`createTicketsAiStatus({ service, builtin?, mcp? })` 接受宿主的真实只读状态参加者，并复用普通工单详情权限与返回前版本检查；`TicketsHttpModule.registerFactory` 的 `aiStatus` 注入该服务，缺省两条路线均明确 `unconfigured/host_not_selected`。这个默认值只说明尚未装配，不能作为完整AI验收。
