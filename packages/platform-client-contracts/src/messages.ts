@@ -20,6 +20,7 @@ export const CLIENT_ENGLISH = {
   "找不到此页面，请从导航重新进入。": "Page not found. Choose a page from the navigation.",
   "此操作仍待核对，请先读取原结果。": "This action still needs checking. Read its original result first.",
   "请补全必填信息并核对输入长度。": "Complete required fields and check input length.",
+  "重新登录": "Sign in again",
 } as const;
 export type ClientMessage = keyof typeof CLIENT_ENGLISH;
 export function clientText(message: ClientMessage, locale: ClientLocale): string {

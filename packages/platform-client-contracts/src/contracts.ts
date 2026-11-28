@@ -132,6 +132,7 @@ export interface ClientRoute {
   readonly id: string;
   readonly label: ClientText;
   readonly searchable?: boolean;
+  /** 仅显式 true 进入导航；详情页由登记目标及参数进入。 */
   readonly navigation?: boolean;
   load(request: ClientPageRequest, scope: ClientScope, lifetime: ClientLifetime): Promise<ClientPageData>;
   readonly actions?: readonly ClientAction[];

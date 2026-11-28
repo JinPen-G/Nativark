@@ -71,7 +71,7 @@ export function ClientShell({ view, brand, initialLocale = "zh-CN", initialDark 
         {state.scopeChoices.length > 0 && <label>{t("切换工作范围")}<select value="" onChange={event => { if (event.target.value) void view.selectScope(event.target.value); }}>
           <option value="">{t("选择已授权范围")}</option>{state.scopeChoices.map(choice => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
         </select></label>}
-        <nav aria-label={t("导航")}>{view.runtime.routes.filter(item => item.navigation !== false).map(item =>
+        <nav aria-label={t("导航")}>{view.runtime.routes.filter(item => item.navigation === true).map(item =>
           <a key={item.id} href={clientHash({ routeId: item.id })} aria-current={route?.id === item.id ? "page" : undefined}>{item.label[locale]}</a>)}</nav>
         <button type="button" className="zc-signout" onClick={() => { void view.signOut(); }}>{t("退出登录")}</button>
       </aside>
@@ -116,7 +116,8 @@ export function ClientShell({ view, brand, initialLocale = "zh-CN", initialDark 
           {view.runtime.session.loginFields.map(field => <label key={field.name} htmlFor={`login-${field.name}`}>{field.label[locale]}<input id={`login-${field.name}`} name={field.name} type={field.kind} autoComplete={field.autocomplete} required /></label>)}
           <button type="submit" className="zc-primary">{t("登录")}</button>
         </form></> : <p role="status">{t(session.status === "loading" ? "正在核对会话…" : "当前登录服务不可用。")}</p>}
-      {session.status === "unavailable" && <button type="button" onClick={() => { void view.refreshSession(); }}>{t("重新连接")}</button>}
+      {session.status === "unavailable" && <div className="zc-controls"><button type="button" onClick={() => { void view.refreshSession(); }}>{t("重新连接")}</button>
+        <button type="button" onClick={() => { void view.signOut(); }}>{t("重新登录")}</button></div>}
       {feedback?.status === "error" && <p role="alert">{clientErrorText(feedback.code, locale)}</p>}
     </main>}
   </div>;

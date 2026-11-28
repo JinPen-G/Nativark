@@ -23,6 +23,7 @@
     "packages/platform-server",
     "templates/platform-clients/customer-web",
     "templates/platform-clients/staff-web",
+    "templates/platform-clients/rental",
     "templates/platform-clients/wechat",
     "templates/platform-clients/wechat-customer",
     "templates/platform-clients/wechat-staff"

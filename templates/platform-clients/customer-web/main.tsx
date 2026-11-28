@@ -7,12 +7,14 @@ import { assembleCustomer } from "./assembly";
 
 const element = document.getElementById("root");
 if (!element) throw new Error("缺少客户端挂载节点");
-const root = createRoot(element), assembly = assembleCustomer();
+const root = createRoot(element);
+let assembly: ReturnType<typeof assembleCustomer>;
+try { assembly = assembleCustomer(); } catch { assembly = undefined; }
 if (!assembly) root.render(<main style={{ padding: 32 }}><h1>客户服务暂不可用</h1><p>请稍后重新打开。</p></main>);
 else {
   const runtime = createClientRuntime({ ...assembly, surface: "customer-web" });
   let store;
-  try { store = createBrowserOperationStore(window.localStorage, "customer-web"); } catch { /* 存储不可用仍可读取，写动作保持禁用。 */ }
+  try { store = createBrowserOperationStore(window.localStorage, assembly.operationNamespace); } catch { /* 存储不可用仍可读取，写动作保持禁用。 */ }
   const view = createClientView(runtime, store);
   root.render(<CustomerWebsite view={view} brand={assembly.brand} />);
   void view.refreshSession();

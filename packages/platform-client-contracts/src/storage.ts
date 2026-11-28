@@ -9,9 +9,10 @@ export interface ClientReferenceStorage {
   remove(key: string): void;
 }
 export function createClientOperationStore(storage: ClientReferenceStorage, namespace: string): ClientOperationStore {
-  if (!/^[a-z][a-z0-9.-]{0,63}$/.test(namespace)) throw new ClientError("unavailable");
+  if (typeof namespace !== "string" || !namespace || namespace.length > 2048 || /[\u0000-\u001f\u007f]/u.test(namespace)) throw new ClientError("unavailable");
+  const partition = encodeURIComponent(namespace);
   const prefix = (owner: Parameters<ClientOperationStore["read"]>[0]) =>
-    `${namespace}:original:${encodeURIComponent(clientOperationOwnerKey(owner))}:`;
+    `${partition}:original:${encodeURIComponent(clientOperationOwnerKey(owner))}:`;
   function project(value: unknown): ClientOperationReference {
     if (!value || typeof value !== "object") throw new ClientError("unavailable");
     const candidate = value as ClientOperationReference;

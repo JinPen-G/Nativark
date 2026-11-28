@@ -4,26 +4,31 @@ import { ClientError, clientText, clientErrorText, createClientRuntime, createCl
 import { getArcPalette } from "@rental-os/platform-admin/source/app/arcTokens";
 import { ADMIN_FONT_FAMILY } from "@rental-os/platform-admin/source/app/designTokens";
 
-export interface WechatClientAssembly extends Omit<ClientRuntimeOptions, "surface"> { readonly brand: { readonly name: string; readonly primaryColor?: string } }
+export interface WechatClientAssembly extends Omit<ClientRuntimeOptions, "surface"> {
+  readonly brand: { readonly name: string; readonly primaryColor?: string };
+  readonly operationNamespace?: string;
+}
 export interface WechatClientApp {
   readonly surface: "wechat-customer" | "wechat-staff";
   readonly view?: ClientView;
   readonly brandName: string;
   readonly primaryColor?: string;
+  readonly ready?: Promise<void>;
 }
-export function createWechatClientApp(surface: WechatClientApp["surface"], assemble: () => WechatClientAssembly | undefined) {
+export function createWechatClientApp(surface: WechatClientApp["surface"], assemble: () => WechatClientAssembly | undefined | Promise<WechatClientAssembly | undefined>) {
   let view: ClientView | undefined;
   return {
-    surface, brandName: "", primaryColor: undefined as string | undefined, view: undefined as ClientView | undefined,
-    onLaunch(this: WechatClientApp & { view?: ClientView; brandName: string; primaryColor?: string }) {
-      const assembly = assemble();
-      if (!assembly) return;
-      const runtime = createClientRuntime({ ...assembly, surface });
-      const store = createClientOperationStore({ keys: () => wx.getStorageInfoSync().keys,
-        get: key => { const value: unknown = wx.getStorageSync(key); return typeof value === "string" && value ? value : null; },
-        set: (key, value) => wx.setStorageSync(key, value), remove: key => wx.removeStorageSync(key),
-      }, surface);
-      view = createClientView(runtime, store); this.view = view; this.brandName = assembly.brand.name; this.primaryColor = assembly.brand.primaryColor;
+    surface, brandName: "", primaryColor: undefined as string | undefined, view: undefined as ClientView | undefined, ready: Promise.resolve(),
+    onLaunch(this: WechatClientApp & { view?: ClientView; brandName: string; primaryColor?: string; ready: Promise<void> }) {
+      this.ready = Promise.resolve().then(assemble).then(assembly => {
+        if (!assembly) return;
+        const runtime = createClientRuntime({ ...assembly, surface });
+        const store = createClientOperationStore({ keys: () => wx.getStorageInfoSync().keys,
+          get: key => { const value: unknown = wx.getStorageSync(key); return typeof value === "string" && value ? value : null; },
+          set: (key, value) => wx.setStorageSync(key, value), remove: key => wx.removeStorageSync(key),
+        }, assembly.operationNamespace ?? surface);
+        view = createClientView(runtime, store); this.view = view; this.brandName = assembly.brand.name; this.primaryColor = assembly.brand.primaryColor;
+      }).catch(() => { /* 缺真实装配/安全随机源保持不可用，页面不得以弱随机或空成功继续。 */ });
     },
     onHide() { view?.suspend(); },
   };
@@ -35,7 +40,7 @@ interface PageHandle { setData(data: Record<string, unknown>): void }
 export function createWechatClientPage(getClient: () => WechatClientApp) {
   let view: ClientView | undefined, unsubscribe: (() => void) | undefined, page: PageHandle | undefined;
   let locale: ClientLocale = "zh-CN", state: ClientViewState | undefined, lastGeneration = -1, active = false, dark = false;
-  let actionId: string | undefined, scanValue = "", searchValue = "";
+  let actionId: string | undefined, scanValue = "", searchValue = "", showAttempt = 0;
   let initialDestination: { routeId: string; params: Record<string, string> } | undefined;
   const t = (text: ClientMessage) => clientText(text, locale);
   function render() {
@@ -55,7 +60,7 @@ export function createWechatClientPage(getClient: () => WechatClientApp) {
       unavailable: !session || session.status === "unavailable", generation: lastGeneration,
       identity: authenticated ? [session.displayName, session.tenantName, session.workspaceName, session.locationName].filter(Boolean).join(" / ") : "",
       loginFields: view?.runtime.session.loginFields.map(field => ({ ...field, label: field.label[locale], value: "" })) ?? [],
-      navigation: view?.runtime.routes.filter(item => item.navigation !== false).map(item => ({ id: item.id, label: item.label[locale], current: item.id === route?.id })) ?? [],
+      navigation: view?.runtime.routes.filter(item => item.navigation === true).map(item => ({ id: item.id, label: item.label[locale], current: item.id === route?.id })) ?? [],
       scopeChoices: state?.scopeChoices ?? [], title: state?.page.data?.title ?? route?.label[locale] ?? t("暂时没有可用服务。"),
       description: state?.page.data?.description ?? "", items: state?.page.status === "ready" ? state.page.data?.items ?? [] : [],
       pageReady: state?.page.status === "ready", pageLoading: state?.page.status === "loading",
@@ -69,7 +74,7 @@ export function createWechatClientPage(getClient: () => WechatClientApp) {
       pending: state?.pending.map(reference => ({ ...reference, label: route?.actions?.find(item => item.id === reference.actionId)?.label[locale] ?? reference.actionId })) ?? [],
       receiptError: state?.receiptError ? t("原结果暂时无法核对，请稍后重试读取。") : "",
       feedback: feedback?.status === "error" ? clientErrorText(feedback.code, locale) : feedback?.status === "unknown" ? t("结果尚未确认，请核对原结果。") : feedback?.message ?? "",
-      copy: { login: t("登录"), logout: t("退出登录"), reconnect: t("重新连接"), loadingSession: t("正在核对会话…"),
+      copy: { login: t("登录"), logout: t("退出登录"), reconnect: t("重新连接"), relogin: t("重新登录"), loadingSession: t("正在核对会话…"),
         unavailable: t("当前登录服务不可用。"), scopes: t("切换工作范围"), search: t("搜索"), searchLabel: t("搜索当前页面"),
         scan: t("扫描二维码"), scanLabel: t("扫码或输入编号"), open: t("打开"), refresh: t("刷新页面"), loading: t("正在加载…"),
         confirm: t("确认执行"), cancel: t("取消"), actionHint: t("此操作将提交到当前页面所示的业务对象。"),
@@ -85,14 +90,19 @@ export function createWechatClientPage(getClient: () => WechatClientApp) {
       if (options.route) initialDestination = { routeId: options.route,
         params: Object.fromEntries(Object.entries(options).filter((entry): entry is [string, string] => entry[0] !== "route" && typeof entry[1] === "string")) };
     },
-    onShow() {
-      active = true; unsubscribe?.(); unsubscribe = view?.subscribe(render);
+    async onShow() {
+      active = true; const attempt = ++showAttempt;
+      page?.setData({ loadingSession: true, unavailable: false, surfaceTitle: t(getClient().surface === "wechat-staff" ? "门店工作台" : "客户服务"),
+        copy: { loadingSession: t("正在核对会话…") } });
+      await getClient().ready;
+      if (!active || attempt !== showAttempt) return;
+      view = getClient().view; unsubscribe?.(); unsubscribe = view?.subscribe(render);
       if (view) { void view.resume(); if (initialDestination || !view.getSnapshot().destination) view.navigate(initialDestination); }
       initialDestination = undefined; render();
     },
-    onHide() { active = false; unsubscribe?.(); unsubscribe = undefined; actionId = undefined; scanValue = ""; searchValue = "";
+    onHide() { active = false; showAttempt++; unsubscribe?.(); unsubscribe = undefined; actionId = undefined; scanValue = ""; searchValue = "";
       page?.setData({ authenticated: false, identity: "", items: [], pending: [], action: null, loginFields: [], feedback: "" }); view?.suspend(); },
-    onUnload() { active = false; unsubscribe?.(); unsubscribe = undefined; page = undefined; },
+    onUnload() { active = false; showAttempt++; unsubscribe?.(); unsubscribe = undefined; page = undefined; },
     changeLanguage() { locale = locale === "zh-CN" ? "en-US" : "zh-CN"; render(); },
     changeTheme() {
       dark = !dark; const palette = getArcPalette(dark, getClient().primaryColor);

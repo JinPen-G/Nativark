@@ -1,7 +1,4 @@
-import type { ClientRuntimeOptions } from "@rental-os/platform-client-contracts";
-
-/** 复制到独立 Core 宿主后，仅在这里导入该 Core 的正式客户贡献/会话工厂。 */
-export function assembleCustomer(): (Omit<ClientRuntimeOptions, "surface"> & { brand: { name: string; primaryColor?: string } }) | undefined {
-  // 正式适配尚未装配；不以示例数据、管理员会话或恒真准入替代。
-  return undefined;
-}
+import { createRentalWebAssembly } from "@rental-os/client-template-rental/browser";
+import { connection } from "./connection";
+/** 首个 Core 的正式接线；更换 Core 时只替换本装配模块。 */
+export function assembleCustomer() { return createRentalWebAssembly("customer-web", connection, window); }

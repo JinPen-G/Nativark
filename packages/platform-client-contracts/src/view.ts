@@ -65,8 +65,8 @@ export function createClientView(runtime: ClientRuntime, store?: ClientOperation
     catch { /* 无当前候选时不显示可猜测的租户/地点输入。 */ }
   }
   function navigate(destination?: ClientDestination) {
-    const target = destination ?? (runtime.routes.find(route => route.navigation !== false)
-      ? { routeId: runtime.routes.find(route => route.navigation !== false)!.id } : undefined);
+    const target = destination ?? (runtime.routes.find(route => route.navigation === true)
+      ? { routeId: runtime.routes.find(route => route.navigation === true)!.id } : undefined);
     queuedDestination = state.session.status === "authenticated" ? undefined : target;
     clear(target && { routeId: target.routeId, params: Object.freeze({ ...target.params }) },
       { params: Object.freeze({ ...target?.params }), search: "" });

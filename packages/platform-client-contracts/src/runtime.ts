@@ -117,7 +117,7 @@ export function createClientRuntime(options: ClientRuntimeOptions) {
       override = undefined; sync();
     } catch (error) {
       if (attempt !== transition || disposed) throw new ClientError("stale");
-      override = { status: kind === "anonymous" ? "anonymous" : "unavailable" }; changed();
+      override = { status: kind === "anonymous" || error instanceof ClientError && error.code === "anonymous" ? "anonymous" : "unavailable" }; changed();
       throw error instanceof ClientError ? error : new ClientError("unavailable");
     }
   }

@@ -7,7 +7,7 @@
       <button form-type="submit" class="primary">{{copy.login}}</button>
     </form>
     <view wx:if="{{loadingSession}}" class="status">{{copy.loadingSession}}</view>
-    <view wx:if="{{unavailable}}" class="status">{{copy.unavailable}}<button bindtap="reconnect">{{copy.reconnect}}</button></view>
+    <view wx:if="{{unavailable}}" class="status">{{copy.unavailable}}<button bindtap="reconnect">{{copy.reconnect}}</button><button bindtap="signOut">{{copy.relogin}}</button></view>
     <view aria-role="alert">{{feedback}}</view>
   </view>
   <block wx:else>
