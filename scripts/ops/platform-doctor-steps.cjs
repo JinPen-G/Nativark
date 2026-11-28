@@ -95,6 +95,18 @@ function installationSteps(report, { rootCommands, host }) {
     publicAi ? '沿显式 grant:ai 选择 SaaS 角色和 view/manage，再以当前会话回读权限与设置；默认启动和初始化不授权。'
       : '按所属 Core＋AI 宿主核数据、已发布能力、当前权限及政策；普通业务不因未配置模型而失效。',
     '保留原授权与操作结果；纯读取 MCP 不要求平台模型配置或云预算，委托服务端模型才走原 Gateway 与模型账。'));
+  const member = report.runtime.member;
+  if (member?.state === 'observed') {
+    for (const [id, field, ready] of [['core-admission', 'deploymentAdmission', 'accepting'],
+      ['tenant-grant', 'tenantGrant', 'enabled'], ['member-assignment', 'memberAssignment', 'assigned'],
+      ['binding', 'binding', 'bound'], ['business', 'businessReadiness', 'ready']]) {
+      const item = steps.find(step => step.id === id);
+      if (!item) continue;
+      item.state = member.cores.every(core => core[field] === ready) ? 'observed' : 'needs-observation-or-action';
+      item.observation = member.cores.map(core => ({ id: core.id, state: core[field] }));
+      if (id === 'business') item.actionVerified = false;
+    }
+  }
   return { scope: 'guidance-only', executes: false,
     localPrerequisitesChecked: localIssues.length === 0, databaseObserved: Boolean(report.database.checked),
     missingRuntimeEvidence: ['目标环境与执行权', '原迁移账与物理结构', '实际账号/会话', '实际部署与业务结果'],

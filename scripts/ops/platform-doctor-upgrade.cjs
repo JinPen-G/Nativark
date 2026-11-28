@@ -60,11 +60,15 @@ function connection(environment) {
 }
 
 async function requestHost(connection, route, body, fetcher) {
-  const response = await fetcher(connection.origin + '/api/platform/core-packages/' + route, {
+  return requestJson(connection, 'platform/core-packages/' + route, body, fetcher);
+}
+// route 只由上述固定包路径或下方正式 Core HTTP 常量给出，不接收用户 URL/路径。
+async function requestJson(connection, route, body, fetcher) {
+  const response = await fetcher(connection.origin + '/api/' + route, {
     method: body === undefined ? 'GET' : 'POST', redirect: 'error', signal: AbortSignal.timeout(45000),
     headers: { Authorization: 'Bearer ' + connection.token, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-  if (!response.ok) { await response.body?.cancel(); throw Error('host_refused'); }
+  if (!response.ok) { await response.body?.cancel(); throw Object.assign(Error('host_refused'), { statusCode: response.status }); }
   const reader = response.body?.getReader();
   if (!reader) throw Error('empty_response');
   const parts = []; let length = 0;
@@ -211,5 +215,61 @@ async function readPreparationReceipt(sha256, environment = process.env) {
   try { return await run({ command: 'receipt', sha256 }, contracts(), environment); }
   catch { return { exitCode: 2, status: 'unknown', sha256 }; }
 }
+
+/** 当前成员事实与 SaaS 包目录分读。只消费原会话及 Core 范围读口，不代办授权/绑定/初始化。 */
+async function observeMemberReadiness(selection, scopes, api, environment = process.env, fetcher = fetch) {
+  if (!selection?.cores?.length || [...scopes.keys()].some(id => !selection.cores.some(core => core.id === id)))
+    throw Error('member_selection');
+  const connected = connection({ ...environment, PLATFORM_DOCTOR_ACCESS_TOKEN: environment.PLATFORM_DOCTOR_MEMBER_ACCESS_TOKEN });
+  const queries = new Map();
+  for (const [id, file] of scopes) {
+    const query = api.CORE_SCOPE_HTTP.request.parse(JSON.parse(files.read(file, 16384).toString('utf8')));
+    if (query.coreId !== id) throw Error('member_scope');
+    queries.set(id, query);
+  }
+  const session = async () => api.CORE_SESSION_HTTP.response.parse(await requestJson(connected, api.CORE_SESSION_HTTP.path, undefined, fetcher));
+  const before = await session(), cores = [];
+  for (const selected of selection.cores) {
+    const entry = before.cores.find(item => item.core.id === selected.id);
+    const result = { id: selected.id, access: entry ? 'assigned' : 'not_available_to_member',
+      version: entry ? files.version(entry.core.version) : null, versionMatches: entry?.core.version === selected.version,
+      deploymentAdmission: entry?.admission.state ?? 'not_checked', tenantGrant: entry?.grant.state ?? 'not_checked',
+      memberAssignment: entry?.assignment.state ?? 'not_checked', permissionCount: entry?.permissions.length ?? null,
+      binding: 'not_checked', businessReadiness: 'not_checked' };
+    cores.push(result);
+    if (!entry || !result.versionMatches || entry.admission.state !== 'accepting') continue;
+    const query = queries.get(selected.id) ?? { coreId: selected.id };
+    if (!api.matchesCoreScope(entry.core.scope, query.container)) { result.reason = 'explicit_container_required'; continue; }
+    try {
+      const observed = api.CORE_SCOPE_HTTP.response.parse(await requestJson(connected, api.CORE_SCOPE_HTTP.path, query, fetcher));
+      if (observed.status === 'bound') {
+        if (observed.binding.coreId !== selected.id || observed.binding.tenantId !== before.tenantId
+          || !isDeepStrictEqual(observed.binding.container, query.container)) throw Error('scope_mismatch');
+        result.businessReadiness = observed.readiness.status;
+        if (observed.readiness.status === 'configuration_required') result.missingConfigurationCount = observed.readiness.missing.length;
+        // 自由文本/主体/容器/原业务引用不进入公共诊断，详细缺项在当前成员原页面处理。
+      }
+      result.binding = observed.status;
+    } catch (error) {
+      result.reason = [401, 403].includes(error.statusCode) ? 'current_access_refused'
+        : error.statusCode === 409 ? 'scope_changed' : 'scope_observation_unavailable';
+    }
+  }
+  // Scope 在自己的原授权事务中读取；前后会话事实变化不能拼接成一次成功观察。
+  const after = await session();
+  const identity = value => ({ tenantId: value.tenantId, subjectId: value.subjectId,
+    cores: selection.cores.map(selected => value.cores.find(entry => entry.core.id === selected.id) ?? null) });
+  if (!isDeepStrictEqual(identity(before), identity(after))) return { exitCode: 2, state: 'unknown', reason: 'member_context_changed' };
+  const ready = cores.every(item => item.versionMatches && item.deploymentAdmission === 'accepting'
+    && item.binding === 'bound' && item.businessReadiness === 'ready');
+  return { exitCode: ready ? 0 : 1, state: 'observed', authority: 'current-member-session-and-core-scope', cores,
+    businessAction: 'not_checked', repair: '按本成员原目录/范围页核授权、角色权限、绑定和 Core 配置；诊断不授予权限或重放业务初始化。' };
+}
+async function readMemberReadiness(selection, scopes, environment = process.env) {
+  try { return await observeMemberReadiness(selection, scopes, contracts().core, environment); }
+  catch { return { exitCode: 2, state: 'unknown', reason: 'member_observation_unavailable',
+    repair: '核本树正式合同、所选 Core 锁、原 API 地址、当前成员会话与显式范围 JSON；不可用目录不是未授权或空业务的证明。' }; }
+}
 if (require.main === module) main().then(code => { process.exitCode = code; });
-module.exports = { argumentsFor, connection, requestHost, versions, preparation, run, readRunningVersions, readPreparationReceipt, main };
+module.exports = { argumentsFor, connection, requestHost, versions, preparation, run, readRunningVersions, readPreparationReceipt,
+  observeMemberReadiness, readMemberReadiness, main };

@@ -28,6 +28,10 @@ node scripts/ops/platform-doctor.cjs --profile selected-core --root <组合目�
 
 已准备候选时可加 `--service --prepared <原sha256>`，在同一报告读取原 `preparation-receipt`，比较候选与本地所选组合；`candidatePreparation: recorded` 只表示原候选及其文件核定。候选尚未运行时，当前版本仍按实际宿主显示，不会因为有准备回执改成已部署。
 
+所选 Core 还可加 `--member`，通过同一 API 地址和单独的 `PLATFORM_DOCTOR_MEMBER_ACCESS_TOKEN` 读取原本人 `session-context` 及 `scope/read`。使用要验收的当前租户成员会话；`--service` 的 SaaS 会话不代替它。报告逐 Core 显示所选版本是否相符、原准入、租户授权、成员分配、权限数量、绑定及业务就绪，不输出租户/用户/容器标识、自由文本或业务内容。没有出现在本人目录中的 Core 标为 `not_available_to_member`，其具体授权原因仍未核定，不推断授权行不存在。
+
+租户级范围直接读本人原范围；容器型 Core 需 `--scope <Core-ID=绝对范围JSON>`。JSON 沿原 `CoreScopeBindingQuerySchema`，例如 `{"coreId":"example-tickets","container":{"type":"workspace","id":"实际已获权空间"}}`；字段只定位范围，实际访问权由原服务端核定。每个 Core 可传一份，未选择的 Core 或多余字段拒绝。会话事实在范围读取前后变化时返回未知。`runtime.member` 的状态与包版本、数据库分别记录：业务就绪不表示任意动作已获权，仍须完成实际页面/读写验收。
+
 修复命令仅供使用者按自己的环境许可显式办理。后续初始化见下方五步；实际 Core 准入和授权见[公共宿主](../../packages/platform-core-host/README.md#部署准入与存量切换)，升级与中断恢复沿[原固定来源及升级预检](../../packages/core-contracts/README.md#分别更新底座或一个-core)。缺失应答按原操作和收据核对，不重跑初始化、迁移或业务动作。
 
 ## 从诊断到初始化与就绪

@@ -139,6 +139,9 @@ jobs:
           node node_modules/@prisma/engines/scripts/postinstall.js
           npm run db:generate
           npm run build
+          for tool in platform-doctor platform-doctor-install platform-doctor-upgrade; do
+            node "scripts/ops/$tool.cjs" --help > /dev/null
+          done
           if [[ "$CI_PROFILE" == public-ai ]]; then
             export CORE_DEPLOYMENT_LOCK_FILE="$PWD/apps/platform-api/prisma-deployment/core.deployment.lock.json"
             export PLATFORM_AI_DATA_PACKAGE_DIR="$PWD/public-ai-data" PLATFORM_AI_PROFILE_ID=ci-public-profile

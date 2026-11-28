@@ -18,30 +18,33 @@ node scripts/ops/platform-doctor.cjs [--root <源码或解包目录>] [--profile
   [--host <目标根下的宿主目录>] [--lock <绝对JSON路径>]
   [--core <Core-ID=绝对包目录>] [--capability <能力-ID=绝对包目录>]
   [--platform-package <绝对tgz路径>] [--steps] [--database] [--service [--prepared <原候选摘要>]] [--json]
+  [--member [--scope <Core-ID=绝对范围JSON>]]
 
 默认 platform：零 Core。public-ai：零 Core + 公共 AI。selected-core：由锁选择 Core 及可选能力，须提供 --host。
 默认仅检查本地材料和进程配置。--database 须显式 --profile，在工具同树读取所选数据库的原账/结构/账号。
 不读 .env，不下载、安装、迁移、初始化、授权或启服务。selected-core 的数据库观察须由所属宿主提供。
 --service 显式读取进程指定的原包管理 catalogue，使用当前 SaaS 会话；运行组合须与本地所选锁一致。
+--member 仅用于 selected-core，另用 PLATFORM_DOCTOR_MEMBER_ACCESS_TOKEN 读取本人目录/范围就绪；不输出主体或业务数据。
 退出 0：所检查的本地前置无缺项；1：缺项/冲突；2：用法错误或本地检查不完整。
 未选 --database 时库与账号保持未检查；数据库就绪不表示运行、登录、授权或业务可用。`;
 
 function parseArguments(args) {
-  const options = { root: toolRoot, profile: 'platform', cores: new Map(), capabilities: new Map() };
+  const options = { root: toolRoot, profile: 'platform', cores: new Map(), capabilities: new Map(), scopes: new Map() };
   const seen = new Set();
   for (let index = 0; index < args.length; index++) {
     const flag = args[index];
-    if (['--json', '--help', '--steps', '--database', '--service'].includes(flag)) {
+    if (['--json', '--help', '--steps', '--database', '--service', '--member'].includes(flag)) {
       if (seen.has(flag)) throw Error('usage');
       options[flag.slice(2)] = true; seen.add(flag); continue;
     }
-    if (!['--root', '--profile', '--host', '--lock', '--core', '--capability', '--platform-package', '--prepared'].includes(flag)
+    if (!['--root', '--profile', '--host', '--lock', '--core', '--capability', '--scope', '--platform-package', '--prepared'].includes(flag)
         || !args[index + 1] || args[index + 1].startsWith('--')) throw Error('usage');
     const value = args[++index];
-    if (flag === '--core' || flag === '--capability') {
+    if (['--core', '--capability', '--scope'].includes(flag)) {
       const split = value.indexOf('='), id = value.slice(0, split), directory = value.slice(split + 1);
-      const collection = flag === '--core' ? options.cores : options.capabilities;
+      const collection = flag === '--core' ? options.cores : flag === '--scope' ? options.scopes : options.capabilities;
       if (split < 1 || !files.ID.test(id) || id.length > 64 || !path.isAbsolute(directory) || collection.has(id)) throw Error('usage');
+      if (flag === '--scope' && !directory.toLowerCase().endsWith('.json')) throw Error('usage');
       collection.set(id, directory);
     } else {
       if (seen.has(flag)) throw Error('usage');
@@ -54,6 +57,7 @@ function parseArguments(args) {
   if (options.host) files.relativeFile(options.root, options.host);
   if ((options.database || options.service) && !seen.has('--profile')) throw Error('usage');
   if (options.prepared && (!options.service || !files.HASH.test(options.prepared))) throw Error('usage');
+  if (options.member && options.profile !== 'selected-core' || options.scopes.size && !options.member) throw Error('usage');
   for (const key of ['lock', 'platform-package']) if (options[key] && !path.isAbsolute(options[key])) throw Error('usage');
   return options;
 }
@@ -445,8 +449,6 @@ async function main(args = process.argv.slice(2)) {
           : report.database.state === 'unknown' ? 'not_checked' : 'missing',
         message: '显式读取的原账、物理结构和账号：' + report.database.state + ' / ' + report.database.initialization.state,
         repair: 'node scripts/ops/platform-doctor-install.cjs status --profile ' + options.profile + '；按公开安装入口核缺项，未知时不执行。' });
-      if (report.nextSteps) report.nextSteps = installationSteps(report, { host: options.host ?? 'apps/platform-api',
-        rootCommands: /local-dev-preflight\.cjs/u.test(files.json(path.join(options.root, 'package.json')).scripts?.dev ?? '') });
       finish(report);
     }
     if (options.service) {
@@ -486,6 +488,20 @@ async function main(args = process.argv.slice(2)) {
       }
       finish(report);
     }
+    if (options.member) {
+      report.scope = options.service ? 'explicit-service-and-member-read-only' : 'explicit-member-read-only';
+      const observed = report.checks.some(item => item.id === 'deployment-lock' && item.state === 'pass')
+        ? await require('./platform-doctor-upgrade.cjs').readMemberReadiness(report.selection, options.scopes)
+        : { exitCode: 2, state: 'unknown', reason: 'selection_unverified', repair: '先通过正式部署锁解析，再读取所选 Core 的当前成员事实。' };
+      report.runtime.member = observed;
+      report.checks.push({ id: 'member:readiness', required: true,
+        state: observed.exitCode === 0 ? 'pass' : observed.state === 'observed' ? 'missing' : 'not_checked',
+        message: observed.exitCode === 0 ? '当前成员的原授权、准入、绑定及 Core 就绪已读取；具体业务动作仍须原权限核验。'
+          : '当前成员读口未取得全部所选 Core 的就绪依据。', repair: observed.repair });
+      finish(report);
+    }
+    if (report.nextSteps) report.nextSteps = installationSteps(report, { host: options.host ?? 'apps/platform-api',
+      rootCommands: /local-dev-preflight\.cjs/u.test(files.json(path.join(options.root, 'package.json')).scripts?.dev ?? '') });
     console.log(options.json ? JSON.stringify(report, null, 2) : formatReport(report));
     return report.exitCode;
   } catch {
