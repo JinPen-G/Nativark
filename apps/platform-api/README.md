@@ -2,6 +2,30 @@
 
 这个宿主只装配公共 SaaS 服务和公共 schema，不依赖 `apps/api`、`@rental-os/shared`、Rental 或工单源码。默认不安装任何 Core。当前提供公共初始化、登录 / 本人 / 会话 / 改密、租户与人员角色 / 组织管理、安全配置、账户与租户外观、完整订阅办理、字典与编号、邀请 / 寄件 / 客服邮件、健康和 OpenAPI，基础集成、官方日历来源及标准 Core 管理也已接公共模块。独立运行包和标准 Core 组合已有正式入口，真实运行验收分别记录。[Core 接入手册](../../packages/core-contracts/README.md#五步快速接入)
 
+## 安装组合只读诊断
+
+源码检出可以先运行 [platform-doctor](../../scripts/ops/platform-doctor.cjs)。入口仅使用 Node 内置模块收集本地前置；已有同树 `@rental-os/core-contracts` 构建产物时，包、部署锁和兼容检查复用其正式出口。缺依赖时给出缺项，不安装依赖或借用父目录的 `node_modules`。
+
+```sh
+node scripts/ops/platform-doctor.cjs
+node scripts/ops/platform-doctor.cjs --profile public-ai --root <公共AI解包目录> --json
+node scripts/ops/platform-doctor.cjs --profile selected-core --root <组合目录> --host apps/example-tickets-api --lock <绝对锁路径> --core example-tickets=<绝对标准包目录> --platform-package <绝对底座tgz路径> --json
+```
+
+| 选择 | 检查对象与前置 |
+| --- | --- |
+| `platform`（默认） | 零 Core、无选装数据能力；检查根清单/npm v3 锁、宿主依赖、公共 Client 与启动产物。完整仓库根启动检查 `ZELO_PLATFORM_DATABASE_URL`，源码发行按其实际根命令检查 `DATABASE_URL` |
+| `public-ai` | 零 Core＋单个 `ai-native` 数据包；检查组合来源回执、所选 schema/Client、`start:ai` 产物及配置。沿用 `CORE_DEPLOYMENT_LOCK_FILE`、`PLATFORM_AI_DATA_PACKAGE_DIR`、`PLATFORM_AI_PROFILE_ID`；不要求付费模型调用 |
+| `selected-core` | `--lock` 固定所选 Core 和可选公共能力，`--host` 指定目标目录内宿主；每个 Core 传 `--core ID=<绝对包目录>`，每个能力传 `--capability ID=<绝对包目录>`。Core＋AI 的包组合可以诊断，但实际接线及 Client 必须沿所属宿主核验；公共 `start:ai` 不能直接用作有 Core 的宿主 |
+
+`--root` 默认是工具所在源码根。`--lock` 显式参数优先；所选 Core 模式必须显式提供它，不猜测业务宿主的环境变量。传入锁后，使用 `--platform-package` 提供同一底座原归档。只报告锁声明的版本、固定来源与摘要，未经检查的来源地址隐藏；不将候选包或源码版本标成已运行版本。v2 分阶段新装锁通过正式合同识别，仍保留专属宿主/旧库兼容待核状态。
+
+报告逐项包含状态、依据和具体处理入口。`pass` 只说明本项本地检查通过；启动产物存在也只标为 `file-present-only`。退出 `1` 表示缺项或冲突，`2` 表示用法错误或本地检查不完整，`0` 表示所检查的本地前置无缺项。依赖检查覆盖所选宿主的 dependencies/devDependencies，选装和 peer 依赖继续由原构建与启动核验。源码回执的文件摘要一致只证明本地字节与回执一致，发行真实性须另核固定来源及实际归档。当前源码发行器的脚本白名单尚未携带此入口：本片从 Git 源码运行诊断，可用 `--root` 检查解包目录。
+
+**数据库始终为 `unknown / 未检查`。** 该命令不读取 `.env`、原迁移账、账号或真实服务，不输出连接串、密钥、初始化口令或底层异常，不执行下载、生成、初始化、Seed、迁移、授权或启动。空库、兼容已初始化库与未知旧库必须取得实际读取许可后，沿原宿主迁移账和物理结构读取器区分；未知旧库停止初始化与迁移。首次账号、当前执行权、部署准入、租户授权、成员分配、绑定及业务就绪分别保留未检查。
+
+修复命令仅供使用者按自己的环境许可显式办理。后续初始化见下方五步；实际 Core 准入和授权见[公共宿主](../../packages/platform-core-host/README.md#部署准入与存量切换)，升级与中断恢复沿[原固定来源及升级预检](../../packages/core-contracts/README.md#分别更新底座或一个-core)。缺失应答按原操作和收据核对，不重跑初始化、迁移或业务动作。
+
 ## 默认零 Core 的五步
 
 在所选源码根目录执行以下步骤。workspace 命令同时适用于完整源码检出和零 Core 源码发行，实际依赖采用该发行的 npm v3 锁文件。开发环境使用 Node.js 22.12 或更新的受支持 LTS、Prisma 5.22.0 与独立 MySQL，独立 Linux 运行包的固定 Node 版本见下方打包说明。
