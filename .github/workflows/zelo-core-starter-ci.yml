@@ -1,0 +1,332 @@
+name: Zelo 生成 Core 独立运行
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zelo-core-starter-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core-starter:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      mysql:
+        image: mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb
+        env:
+          MYSQL_ROOT_PASSWORD: zelo_ci_root_only
+          MYSQL_DATABASE: zelo_core_starter_ci
+          MYSQL_USER: zelo_ci
+          MYSQL_PASSWORD: zelo_ci_database_only
+        ports:
+          - 127.0.0.1:3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 --silent"
+          --health-interval=5s --health-timeout=3s --health-retries=30
+    env:
+      DATABASE_URL: mysql://zelo_ci:zelo_ci_database_only@127.0.0.1:3306/zelo_core_starter_ci?connection_limit=1
+      CI_DIR: output/.tmp/zelo-core-starter-ci
+    steps:
+      - name: 检出固定源码
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          path: ${{ env.CI_DIR }}/source
+          persist-credentials: false
+      - name: 固定 Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.13.0
+      - name: 从固定提交导出干净公开底座
+        working-directory: ${{ env.CI_DIR }}/source
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$GITHUB_WORKSPACE/$CI_DIR"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          npm ci --workspace @rental-os/core-contracts --include-workspace-root --ignore-scripts --no-audit --no-fund --cache "$task/npm-cache"
+          npm run build -w @rental-os/core-contracts
+          node packages/core-contracts/dist/export-platform.js --repo . --repository https://github.com/JinPen-G/Nativark \
+            --commit "$GITHUB_SHA" --out "$task/platform.tgz" > "$task/platform-export.json"
+          mkdir "$task/platform"
+          tar -xzf "$task/platform.tgz" -C "$task/platform"
+          test ! -e "$task/platform/docs"
+          test ! -e "$task/platform/packages/example-tickets-core"
+      - name: 生成并按公开说明扩展一个 Core
+        working-directory: ${{ env.CI_DIR }}/platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$GITHUB_WORKSPACE/$CI_DIR"
+          npm ci --ignore-scripts --no-audit --no-fund --cache "$task/npm-cache"
+          npm run build -w @rental-os/core-contracts
+          node -e 'const fs=require("node:fs"); fs.writeFileSync(process.argv[1],JSON.stringify(require("./platform.source.json").source),{flag:"wx"});' "$task/platform-identity.json"
+          node packages/core-contracts/dist/create.js --workspace . --target packages/ci-notes-core --id ci-notes --package @starter/ci-notes \
+            --platform-source "$task/platform-identity.json"
+          before=$(sha256sum packages/ci-notes-core/core.scaffold.json)
+          if node packages/core-contracts/dist/create.js --workspace . --target packages/ci-notes-core --id ci-notes --package @starter/ci-notes \
+            --platform-source "$task/platform-identity.json" 2> "$task/repeat.log"; then exit 1; fi
+          grep -q target_not_empty "$task/repeat.log"
+          test "$before" = "$(sha256sum packages/ci-notes-core/core.scaffold.json)"
+          node <<'NODE'
+          const fs = require('node:fs'), assert = require('node:assert/strict');
+          const pkg = JSON.parse(fs.readFileSync('package.json'));
+          pkg.workspaces.push('packages/ci-notes-core'); fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          // 公开README的三文件小扩展；不改底座或迁移，后续HTTP同时核筛选的正文与总数。
+          function edit(file, before, after) {
+            const name = 'packages/ci-notes-core/' + file, text = fs.readFileSync(name, 'utf8');
+            assert(text.includes(before), '公开扩展位置已变化：' + file); fs.writeFileSync(name, text.replace(before, after));
+          }
+          edit('src/contracts.ts', 'export const ListQuerySchema = z.object({',
+            'export const ListQuerySchema = z.object({ description: z.string().trim().max(160).optional(),');
+          edit('src/mysql.ts', '${query.state ? sql`AND state = ${query.state}` : empty}',
+            '${query.description ? sql`AND LOCATE(${query.description}, description) > 0` : empty} ${query.state ? sql`AND state = ${query.state}` : empty}');
+          edit('admin/index.tsx', 'const [title, setTitle] = useState("");',
+            'const [title, setTitle] = useState(""); const [description, setDescription] = useState("");');
+          edit('admin/index.tsx', 'state, title.trim()]', 'state, title.trim(), description.trim()]');
+          edit('admin/index.tsx', 'title: title.trim() || undefined', 'title: title.trim() || undefined, description: description.trim() || undefined');
+          edit('admin/index.tsx', '<Select allowClear aria-label={t("条目状态")}',
+            '<Input allowClear aria-label={t("说明包含")} placeholder={t("搜索说明")} maxLength={160} value={description} onChange={event => { setDescription(event.target.value); setOffset(0); }} /><Select allowClear aria-label={t("条目状态")}');
+          NODE
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund --cache "$task/npm-cache"
+          npm ci --ignore-scripts --no-audit --no-fund --cache "$task/npm-cache"
+          node node_modules/@prisma/engines/scripts/postinstall.js
+          npm run prisma:generate -w @rental-os/platform-api
+          npm run build -w @rental-os/platform-api
+          npm run build -w @starter/ci-notes
+          npm run lint -w @starter/ci-notes
+          npm run lint:admin -w @starter/ci-notes
+          git -C packages/ci-notes-core init -b ci-fixture
+          git -C packages/ci-notes-core add -- .gitattributes .gitignore LICENSE README.md package.json tsconfig.json core.scaffold.json src admin host migrations scripts
+          git -C packages/ci-notes-core -c user.name='Zelo CI' -c user.email='ci@example.invalid' commit -m '固定生成Core的公开扩展样本'
+          core_sha=$(git -C packages/ci-notes-core rev-parse HEAD)
+          # CI样本只固定在本job的Git中，不将它声称为公开发行或推送该临时提交。
+          node packages/ci-notes-core/scripts/package.cjs https://github.com/example/ci-notes "$core_sha" \
+            "$PWD/packages/core-contracts/README.md" "$task/core.tgz" > "$task/core-package.json"
+          node <<'NODE'
+          const fs = require('node:fs'), path = require('node:path');
+          const { CorePlatformReleaseSchema, CORE_CONTRACT_VERSION } = require('@rental-os/core-contracts');
+          const { createPublicPlatformDataPlan } = require('@rental-os/platform-api/data-plan');
+          const task = path.resolve(process.env.GITHUB_WORKSPACE, process.env.CI_DIR);
+          const source = JSON.parse(fs.readFileSync(path.join(task, 'platform-export.json')));
+          const release = CorePlatformReleaseSchema.parse({ source: source.source, sha256: source.sha256,
+            versions: { platform: source.version, contract: CORE_CONTRACT_VERSION, node: process.versions.node, capabilities: {} },
+            data: createPublicPlatformDataPlan().data });
+          fs.writeFileSync(path.join(task, 'platform-release.json'), JSON.stringify(release), { flag: 'wx' });
+          fs.writeFileSync(path.join(task, 'host.json'), JSON.stringify(release.versions), { flag: 'wx' });
+          NODE
+          core_hash=$(node -p "require(process.argv[1]).sha256" "$task/core-package.json")
+          node packages/core-contracts/dist/prepare-install.js "$task/core.tgz" "$core_hash" "$PWD/packages" "$task/host.json" > "$task/prepared.json"
+          selected=$(node -p "require(process.argv[1]).directory" "$task/prepared.json")
+          node packages/core-contracts/dist/check.js "$selected" --host "$task/host.json" --json
+          node packages/ci-notes-core/host/api/dist/prepare-deployment.js "$task/platform-release.json" "$selected" "$task/deployment"
+          mv -- "$PWD/packages/ci-notes-core" "$task/generated-source"
+          node <<'NODE'
+          const fs = require('node:fs'), path = require('node:path');
+          const task = path.resolve(process.env.GITHUB_WORKSPACE, process.env.CI_DIR), prepared = JSON.parse(fs.readFileSync(path.join(task, 'prepared.json')));
+          const pkg = JSON.parse(fs.readFileSync('package.json'));
+          pkg.workspaces = pkg.workspaces.filter(name => name !== 'packages/ci-notes-core');
+          pkg.workspaces.push(path.relative(process.cwd(), prepared.directory).split(path.sep).join('/'));
+          fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          NODE
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund --cache "$task/npm-cache"
+          npm ci --ignore-scripts --no-audit --no-fund --cache "$task/npm-cache"
+      - name: 同包宿主迁移、授权、页面和持久化冒烟
+        working-directory: ${{ env.CI_DIR }}/platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$GITHUB_WORKSPACE/$CI_DIR"
+          export CORE_DEPLOYMENT_LOCK="$task/deployment/core.deployment.lock.json"
+          export AUTH_TOKEN_SECRET="$(openssl rand -hex 32)" SEED_PLATFORM_PASSWORD="CoreCi9-$(openssl rand -hex 12)"
+          export API_PORT=3092 API_PROXY_TARGET=http://127.0.0.1:3092 ADMIN_PORT=5192 DATABASE_CONNECT_ON_START=true
+          node node_modules/@prisma/engines/scripts/postinstall.js
+          node node_modules/prisma/build/index.js migrate deploy --schema "$task/deployment/schema.prisma"
+          npm run initialize -w @rental-os/platform-api
+          npm run build:admin -w @starter/ci-notes
+          selected=$(node -p "require(process.argv[1]).directory" "$task/prepared.json")
+          node "$selected/host/api/dist/main.js" > "$task/api.log" 2>&1 &
+          api_pid=$!
+          trap 'kill "$api_pid" ${web_pid:+"$web_pid"} ${driver_pid:+"$driver_pid"} 2>/dev/null || true; wait || true' EXIT
+          node node_modules/vite/bin/vite.js preview --configLoader runner --config "$selected/host/admin/vite.config.mts" --host 127.0.0.1 --port 5192 --strictPort > "$task/web.log" 2>&1 &
+          web_pid=$!
+          curl -fsS --retry 30 --retry-delay 1 --retry-max-time 60 --retry-connrefused --max-time 5 http://127.0.0.1:5192/api/health -o "$task/health.json"
+          # 复用runner预装且相互匹配的浏览器/驱动，仅开本job临时profile；不引入测试包或runner。
+          google-chrome --version
+          "$CHROMEWEBDRIVER/chromedriver" --version
+          "$CHROMEWEBDRIVER/chromedriver" --port=9515 --allowed-ips=127.0.0.1 > "$task/browser.log" 2>&1 &
+          driver_pid=$!
+          curl -fsS --retry 10 --retry-delay 1 --retry-connrefused --max-time 5 http://127.0.0.1:9515/status -o "$task/browser-status.json"
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { randomUUID } from 'node:crypto';
+          import { writeFileSync } from 'node:fs';
+          import { resolve } from 'node:path';
+          const origin = 'http://127.0.0.1:5192', coreId = 'ci-notes', api = '/api/cores/ci-notes', management = '/api/platform/core-host/', passwords = new Map();
+          async function request(path, token, data, expected = 200, method = data === undefined ? 'GET' : 'POST') {
+            const response = await fetch(origin + path, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+              ...(data === undefined ? {} : { body: JSON.stringify(data) }), signal: AbortSignal.timeout(15000) });
+            assert.equal(response.status, expected, `${method} ${path}: HTTP ${response.status}`);
+            const json = await response.json(); return json.data ?? json;
+          }
+          const post = (route, token, data) => request(management + route, token, { coreId, ...data });
+          async function login(code, account, password) {
+            const session = await request('/api/auth/login', undefined, { tenantCode: code, account, password }, 201);
+            const newPassword = `Core9-${randomUUID()}`;
+            const changed = await request('/api/auth/change-password', session.accessToken, { currentPassword: password, newPassword }, 201);
+            passwords.set(`${code}/${account}`, newPassword);
+            return changed.accessToken;
+          }
+          const html = await (await fetch(origin + '/login')).text(), entry = /<script\b[^>]*\bsrc="(\/assets\/[^"/]+\.js)"/.exec(html)?.[1];
+          assert(entry); assert.match((await fetch(origin + entry)).headers.get('content-type') ?? '', /javascript/);
+          const document = await request('/api/openapi.json');
+          assert(document.paths[api + '/items'].get.parameters.some(item => item.name === 'description'));
+          const saas = await login('platform', 'admin', process.env.SEED_PLATFORM_PASSWORD);
+          assert.equal((await post('deployment-admission/read', saas, {})).state, 'unknown');
+          const admission = await post('deployment-admission', saas, { state: 'accepting', expectedRevision: 0, operationId: randomUUID() });
+          assert.equal(admission.state, 'accepting');
+          async function tenant(code) {
+            const result = await request('/api/platform/tenants', saas, { tenantCode: code, tenantName: code, adminAccount: 'admin', adminDisplayName: 'CI管理员' }, 201);
+            const token = await login(code, 'admin', result.temporaryPassword), tenantId = result.tenant.tenantId;
+            const grant = await post('tenant-grants', saas, { tenantId, state: 'enabled', expectedRevision: 0, operationId: randomUUID() });
+            await post('member-assignments', token, { userId: result.admin.id, state: 'assigned', expectedRevision: 0, operationId: randomUUID() });
+            const binding = await post('bindings', token, { expectedRevision: 0, operationId: randomUUID() });
+            return { token, tenantId, grant, binding, code };
+          }
+          const first = await tenant('starter-one'), second = await tenant('starter-two');
+          const permissions = ['read', 'create', 'update', 'archive'].map(action => `${coreId}:item:${action}`);
+          const role = await request('/api/platform/roles', first.token, { code: 'ITEM_EDITOR', name: '条目编辑', scope: 'operator',
+            enabledBusinessScopes: [], permissions, dataScope: 'own', isActive: true }, 201);
+          assert.equal(role.fixedAllPermissions, false); assert(!role.permissions.includes('*'));
+          const user = await request('/api/platform/users', first.token, { account: 'editor', displayName: 'CI编辑成员', roleIds: [role.id], isPlatformAdmin: false, isActive: true }, 201);
+          const editor = await login(first.code, 'editor', user.temporaryPassword);
+          await request(api + '/items', editor, undefined, 403); // 精确业务角色本身不产生Core成员权。
+          const assigned = await post('member-assignments', first.token, { userId: user.id, state: 'assigned', expectedRevision: 0, operationId: randomUUID() });
+          const input = { operationId: randomUUID(), title: '公开模板', description: '独立样本' };
+          const created = await request(api + '/items', editor, input);
+          assert.equal('tenantId' in created.item, false);
+          assert.deepEqual(await request(api + '/items', editor, input), created);
+          const updated = await request(api + `/items/${created.item.id}/update`, editor, { operationId: randomUUID(), expectedRevision: 1, title: '已编辑', description: '扩展命中' });
+          assert.equal(updated.item.revision, 2);
+          assert.equal((await request(api + '/items?description=扩展命中', editor)).total, 1);
+          assert.equal((await request(api + '/items?description=不匹配', editor)).total, 0);
+          await request(api + `/items/${created.item.id}`, second.token, undefined, 404);
+          await request(api + '/items', undefined, undefined, 401);
+          const archived = await request(api + `/items/${created.item.id}/archive`, editor, { operationId: randomUUID(), expectedRevision: 2 });
+          assert.equal(archived.item.state, 'archived');
+          assert.equal((await request(api + `/operations/${archived.operationId}`, editor)).status, 'recorded');
+          const revoked = await post('member-assignments', first.token, { userId: user.id, state: 'revoked', expectedRevision: assigned.revision, operationId: randomUUID() });
+          await request(api + '/items', editor, undefined, 403);
+          const disabled = await post('tenant-grants', saas, { tenantId: first.tenantId, state: 'disabled', expectedRevision: first.grant.revision, operationId: randomUUID() });
+          await request(api + '/items', first.token, undefined, 403);
+          await post('tenant-grants', saas, { tenantId: first.tenantId, state: 'enabled', expectedRevision: disabled.revision, operationId: randomUUID() });
+          await request(api + '/items', editor, undefined, 403); // 重开不得恢复撤回的成员。
+          assert.equal((await post('bindings/read', first.token, {})).binding.bindingId, first.binding.bindingId);
+          assert.equal((await post('member-assignments/read', first.token, { userId: user.id })).assignment.state, 'revoked');
+          await post('member-assignments', first.token, { userId: user.id, state: 'assigned', expectedRevision: revoked.revision, operationId: randomUUID() });
+          assert.equal((await request(api + `/items/${created.item.id}`, editor)).revision, 3);
+
+          // W3C WebDriver直接驱动同一正式页面；只轮询DOM读取，不重发页面写动作。
+          function redact(value) {
+            let message = String(value ?? '');
+            for (const secret of [saas, editor, first.token, second.token, ...passwords.values(), process.env.AUTH_TOKEN_SECRET, process.env.SEED_PLATFORM_PASSWORD])
+              if (secret) message = message.replaceAll(secret, '[redacted]');
+            return message.slice(0, 800);
+          }
+          async function driver(path, data, method = data === undefined ? 'GET' : 'POST') {
+            const response = await fetch('http://127.0.0.1:9515' + path, { method, headers: { 'Content-Type': 'application/json' },
+              ...(data === undefined ? {} : { body: JSON.stringify(data) }), signal: AbortSignal.timeout(30000) });
+            const { value } = await response.json();
+            assert(response.ok && !value?.error, `浏览器 ${path}: ${value?.error ?? response.status} ${redact(value?.message)}`); return value;
+          }
+          const browser = await driver('/session', { capabilities: { alwaysMatch: { browserName: 'chrome',
+            'goog:chromeOptions': { args: ['--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1440,1000', '--lang=zh-CN',
+              '--disable-background-networking', '--disable-component-update', '--no-first-run', '--disable-sync', '--no-proxy-server',
+              '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1', `--user-data-dir=${resolve(process.env.GITHUB_WORKSPACE, process.env.CI_DIR, 'browser-profile')}`] },
+            'goog:loggingPrefs': { browser: 'ALL' } } } });
+          const sessionPath = '/session/' + browser.sessionId;
+          const dom = (script, ...args) => driver(sessionPath + '/execute/sync', { script, args });
+          async function waitFor(read, label) {
+            const until = Date.now() + 15000;
+            do { const value = await read(); if (value) return value; await new Promise(resolve => setTimeout(resolve, 150)); } while (Date.now() < until);
+            throw new Error('页面等待超时：' + label);
+          }
+          const element = selector => waitFor(() => dom('return [...document.querySelectorAll(arguments[0])].find(e => e.checkVisibility({visibilityProperty:true,opacityProperty:true}) && !e.disabled) ?? null', selector), selector);
+          async function fill(selector, text) {
+            const field = (await element(selector))['element-6066-11e4-a52e-4f735466cecf'];
+            await driver(`${sessionPath}/element/${field}/clear`, {});
+            await driver(`${sessionPath}/element/${field}/value`, { text });
+          }
+          async function click(label) {
+            const button = await waitFor(async () => {
+              const candidates = await dom('return [...document.querySelectorAll("button")].filter(e => e.checkVisibility({visibilityProperty:true,opacityProperty:true}) && !e.disabled && e.getAttribute("aria-disabled") !== "true")');
+              // 原动效按钮同时保留视觉字形和读屏文案，按浏览器计算的可访问名称定位。
+              for (const candidate of candidates) if (await driver(`${sessionPath}/element/${candidate['element-6066-11e4-a52e-4f735466cecf']}/computedlabel`) === label) return candidate;
+              return undefined;
+            }, label);
+            await driver(`${sessionPath}/element/${button['element-6066-11e4-a52e-4f735466cecf']}/click`, {});
+          }
+          const text = label => waitFor(() => dom('return document.body.innerText.includes(arguments[0])', label), label);
+          try {
+            await driver(sessionPath + '/url', { url: origin + '/login' });
+            await fill('#tenantCode', first.code); await fill('#account', 'editor'); await fill('#password', passwords.get(`${first.code}/editor`));
+            await click('进入工作台'); await waitFor(() => dom('return location.pathname !== "/login"'), '登录完成');
+            await driver(sessionPath + '/url', { url: origin + '/cores/ci-notes/items' });
+            await text('已编辑'); await click('新建条目');
+            await fill('#title', '页面创建'); await fill('#description', '页面说明'); await click('创建条目');
+            await text('条目已创建'); await click('查看条目'); await text('页面说明'); await click('编辑条目');
+            await fill('#title', '页面编辑'); await fill('#description', '页面扩展命中'); await click('保存条目');
+            await text('页面编辑'); await click('归档条目'); await click('确认'); await text('已归档');
+            await click('返回条目'); await fill('[aria-label="说明包含"]', '页面扩展命中');
+            await waitFor(() => dom('return document.body.innerText.includes("页面编辑") && !document.body.innerText.includes("已编辑")'), '公开说明筛选');
+            const persisted = await request(api + '/items?description=页面扩展命中', editor);
+            assert.equal(persisted.total, 1); assert.equal(persisted.rows[0].state, 'archived'); assert.equal(persisted.rows[0].revision, 3);
+            const errors = (await driver(sessionPath + '/log', { type: 'browser' })).filter(entry => entry.level === 'SEVERE' && /(?:Uncaught|TypeError|ReferenceError)/.test(entry.message));
+            assert.equal(errors.length, 0, '正式页面存在未处理脚本错误');
+            console.log('预装Chrome真实页面：登录、列表、新建、详情、编辑、确认归档及公开说明筛选通过，同库HTTP回读一致');
+          } catch (error) {
+            try { console.error(JSON.stringify({ page: await dom('return location.pathname'), visible: redact(await dom('return document.body.innerText')),
+              errors: (await driver(sessionPath + '/log', { type: 'browser' })).filter(entry => entry.level === 'SEVERE').slice(-5).map(entry => redact(entry.message)) })); }
+            catch { console.error('浏览器诊断不可读，保留原失败'); }
+            throw error;
+          } finally { await driver(sessionPath, undefined, 'DELETE'); }
+          // 仅保存本job的短期会话，供重启回读；不打印、不上传，always清理。
+          writeFileSync(resolve(process.env.GITHUB_WORKSPACE, process.env.CI_DIR, 'restart.json'), JSON.stringify({ editor, itemId: created.item.id, operationId: archived.operationId }), { mode: 0o600, flag: 'wx' });
+          console.log('生成Core：同包启动、显式准入/授权/分配/绑定、持久读写、公开扩展、权限拒绝及停用重开通过');
+          NODE
+          kill "$api_pid"
+          stopped=0
+          wait "$api_pid" || stopped=$?
+          test "$stopped" -eq 0 || test "$stopped" -eq 143
+          node "$selected/host/api/dist/main.js" > "$task/api-restart.log" 2>&1 &
+          api_pid=$!
+          curl -fsS --retry 30 --retry-delay 1 --retry-max-time 60 --retry-connrefused --max-time 5 http://127.0.0.1:5192/api/health -o "$task/restarted-health.json"
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          import { resolve } from 'node:path';
+          const state = JSON.parse(readFileSync(resolve(process.env.GITHUB_WORKSPACE, process.env.CI_DIR, 'restart.json')));
+          for (const [path, verify] of [[`items/${state.itemId}`, data => data.revision === 3 && data.state === 'archived'],
+            [`operations/${state.operationId}`, data => data.status === 'recorded' && data.receipt.item.revision === 3]]) {
+            const response = await fetch('http://127.0.0.1:5192/api/cores/ci-notes/' + path, { headers: { Authorization: `Bearer ${state.editor}` }, signal: AbortSignal.timeout(15000) });
+            assert.equal(response.status, 200); assert(verify((await response.json()).data));
+          }
+          console.log('API持久重启后条目修订与原操作回执保持');
+          NODE
+      - name: 清理本 job 临时材料
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          task="$GITHUB_WORKSPACE/$CI_DIR"
+          test "$CI_DIR" = output/.tmp/zelo-core-starter-ci
+          test "$(realpath -m "$task")" = "$GITHUB_WORKSPACE/output/.tmp/zelo-core-starter-ci"
+          rm -rf -- "$task"
+          test ! -e "$task"

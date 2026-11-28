@@ -186,6 +186,7 @@
     "src/task-runner-resources.ts",
     "src/task-steps.ts",
     "src/task-transactions.ts",
+    "src/task-transitions.ts",
     "src/tenant-configuration-transactions.ts",
     "src/work-center/application.ts",
     "src/work-center/contract.ts",

@@ -32,6 +32,9 @@
       "development": [
         "dist/development.d.ts"
       ],
+      "scaffold": [
+        "dist/scaffold.d.ts"
+      ],
       "github-repository": [
         "dist/github-repository.d.ts"
       ],
@@ -86,6 +89,10 @@
       "types": "./dist/development.d.ts",
       "default": "./dist/development.js"
     },
+    "./scaffold": {
+      "types": "./dist/scaffold.d.ts",
+      "default": "./dist/scaffold.js"
+    },
     "./github-repository": {
       "types": "./dist/github-repository.d.ts",
       "default": "./dist/github-repository.js"
@@ -112,6 +119,7 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "node --test test/core-contracts.test.cjs",
     "check": "node dist/check.js",
+    "create": "node dist/create.js",
     "capabilities": "node dist/capabilities.js",
     "export:platform": "node dist/export-platform.js"
   },
