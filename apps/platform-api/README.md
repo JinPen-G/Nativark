@@ -20,9 +20,9 @@ node scripts/ops/platform-doctor.cjs --profile selected-core --root <组合目�
 
 `--root` 默认是工具所在源码根。`--lock` 显式参数优先；所选 Core 模式必须显式提供它，不猜测业务宿主的环境变量。传入锁后，使用 `--platform-package` 提供同一底座原归档。只报告锁声明的版本、固定来源与摘要，未经检查的来源地址隐藏；不将候选包或源码版本标成已运行版本。v2 分阶段新装锁通过正式合同识别，仍保留专属宿主/旧库兼容待核状态。
 
-报告逐项包含状态、依据和具体处理入口。`pass` 只说明本项本地检查通过；启动产物存在也只标为 `file-present-only`。退出 `1` 表示缺项或冲突，`2` 表示用法错误或本地检查不完整，`0` 表示所检查的本地前置无缺项。依赖检查覆盖所选宿主的 dependencies/devDependencies，选装和 peer 依赖继续由原构建与启动核验。源码回执的文件摘要一致只证明本地字节与回执一致，发行真实性须另核固定来源及实际归档。当前源码发行器的脚本白名单尚未携带此入口：本片从 Git 源码运行诊断，可用 `--root` 检查解包目录。
+报告逐项包含状态、依据和具体处理入口。`pass` 只说明本项检查通过；启动产物存在只标为 `file-present-only`。退出 `1` 表示缺项或冲突，`2` 表示用法错误或检查不完整，`0` 表示所检查的前置无缺项。依赖检查覆盖所选宿主的 dependencies/devDependencies，选装和 peer 依赖继续由原构建与启动核验。源码回执的文件摘要一致只证明本地字节与回执一致，发行真实性须另核固定来源及实际归档。正式源码归档携带这些工具，并投影 `npm run doctor`、`npm run platform:install --`、`npm run platform:upgrade --`；完整仓库可直接运行同一 Node 文件。
 
-**数据库始终为 `unknown / 未检查`。** 该命令不读取 `.env`、原迁移账、账号或真实服务，不输出连接串、密钥、初始化口令或底层异常，不执行下载、生成、初始化、Seed、迁移、授权或启动。空库、兼容已初始化库与未知旧库必须取得实际读取许可后，沿原宿主迁移账和物理结构读取器区分；未知旧库停止初始化与迁移。首次账号、当前执行权、部署准入、租户授权、成员分配、绑定及业务就绪分别保留未检查。
+**默认数据库为 `unknown / 未检查`。** 默认命令不读取原迁移账、账号或真实服务。获准读取所选库后，可在工具同树显式使用 `--profile platform|public-ai --database`，把[真实安装观察](#显式安装与真实就绪)合入报告。工具不读取 `.env`、不输出连接串、密钥、初始化口令或底层异常；诊断不执行下载、生成、初始化、Seed、迁移、授权或启动。部署准入、租户授权、成员分配、绑定和业务就绪仍由所属权威提供，数据库就绪不会代替这些状态。
 
 修复命令仅供使用者按自己的环境许可显式办理。后续初始化见下方五步；实际 Core 准入和授权见[公共宿主](../../packages/platform-core-host/README.md#部署准入与存量切换)，升级与中断恢复沿[原固定来源及升级预检](../../packages/core-contracts/README.md#分别更新底座或一个-core)。缺失应答按原操作和收据核对，不重跑初始化、迁移或业务动作。
 
@@ -46,11 +46,60 @@ node scripts/ops/platform-doctor.cjs --profile public-ai --root <公共AI解包�
 
 数据库观察必须区分：没有任何对象的空库、迁移和结构已兼容但账号尚未核定的库、原账号可用的已初始化库，以及原账未知/不兼容/执行未完的库。后者停止初始化和迁移，沿原所有者升级或恢复入口处理。`db:migrate:status` 只读迁移与结构，不能判定账号、租户、权限或业务已经可用；读失败也不是空库。
 
-首次初始化的 `SEED_PLATFORM_PASSWORD` 至少 8 位且含字母和数字，只通过受控进程配置提供。[原初始化服务](../../packages/platform-server/src/modules/platform/platform-initialization.ts)在同一 Serializable 事务创建主体，重复显式执行保留既有口令、角色及授权，只补录公共权限定义。现有接口仍要求提供符合规则的初始化口令，但它不用于登录或核对旧账号；无需索取旧租户密码。既有平台管理员不可用时返回冲突，不重置或恢复该账号。失应答时须由原管理/部署入口核主体和初始化审计；当前没有通用的无口令初始化状态命令，不能用再次初始化冒充只读核对。
+首次初始化的 `SEED_PLATFORM_PASSWORD` 至少 8 位且含字母和数字，只通过受控进程配置提供。[原初始化服务](../../packages/platform-server/src/modules/platform/platform-initialization.ts)在同一 Serializable 事务创建主体，重复显式执行保留既有口令、角色及授权，只补录公共权限定义。执行初始化仍要求提供符合规则的初始口令，但它不用于登录或核对旧账号；无需索取旧租户密码。既有平台管理员不可用时返回冲突，不重置或恢复该账号。失应答先执行下方不需要口令的 `status`，读取原主体和初始化审计。
 
 Core 步骤复用[唯一管理合同](../../packages/core-contracts/README.md#core-管理-http-合同)：先读取当前准入/授权/分配/绑定及修订，写入使用原 `operationId` 与版本条件，失应答继续查对应原操作。已有 `stopped`、撤回分配和业务配置保持原事实；重启或重开不重放 Seed。安装者、SaaS 管理员和租户管理员即使是同一人，也须在各入口使用适用的当前身份与权限。
 
 真正收口还需要在指定环境完成零 Core 新装登录、所选 Core＋公共 AI 状态回读、重复初始化保留账号，以及必要的拒绝和恢复冒烟。`--steps` 的指导、静态检查、既有 CI 和本地依赖状态都不代替这些运行证据。
+
+## 显式安装与真实就绪
+
+[安装命令](../../scripts/ops/platform-doctor-install.cjs)要求显式选择 `platform` 或 `public-ai`，只使用工具同树的宿主、依赖、生成 Client 和原迁移。先按下方五步完成依赖、Client 和构建；公共 AI 先取得正式选装源码，并配置下文的锁和数据包。完整仓库的零 Core 使用 `ZELO_PLATFORM_DATABASE_URL`，继续限制为回环独立 `zelo_platform_*` 库；解包发行使用进程 `DATABASE_URL`。存在会被 Prisma 发现的 `.env` 时拒绝办理，不读取内容。
+
+```sh
+node scripts/ops/platform-doctor-install.cjs status --profile platform
+node scripts/ops/platform-doctor-install.cjs migrate --profile platform --approve <本次status的migrationApproval>
+node scripts/ops/platform-doctor-install.cjs initialize --profile platform
+node scripts/ops/platform-doctor.cjs --profile platform --database --steps
+```
+
+公共 AI 将 `--profile platform` 替换为 `--profile public-ai`，并提供 `CORE_DEPLOYMENT_LOCK_FILE` 和 `PLATFORM_AI_DATA_PACKAGE_DIR`，或显式 `--lock` / `--capability ai-native=<绝对包目录>`。执行前后须使用同一选择。`selected-core` 暂不执行通用迁移或账号编排，继续由所属固定宿主提供数据和生命周期；材料诊断仍支持 Core＋AI。
+
+| 原库观察 | 含义与可继续入口 |
+| --- | --- |
+| `unknown` | 未取得完整元数据可见性、连接/结构读取失败，或 AI 部分迁移需所属数据所有者恢复；停止写入 |
+| `empty` | 已实际读取并确认没有数据库对象；可审核本次原迁移链后显式 migrate |
+| `migration_pending` | 原账与已应用公共迁移前缀的物理结构一致；待迁移数量单列，可在核定执行范围后 migrate |
+| `migration_incomplete` | 原账有未结束或失败收据；返回原迁移 ID/摘要，不重放、不执行 migrate resolve |
+| `incompatible` | 原账缺失、历史摘要/顺序改变、出现未选对象或物理结构不符；沿旧库/所属数据恢复流程处理 |
+| `ready` | 完整原迁移账与所属物理读取器核同；初始化状态另列，服务、登录及业务仍未检查 |
+
+空库判定前核数据库账号的库级元数据可见性。当前支持显式库级/全局权限声明，须能读全部表、视图、事件、触发器及过程元数据；仅表级权限、角色间接授权或部分撤权无法可靠核定时返回 `metadata_visibility_unverified`，不会推断空库。工具只查询，不自行授予权限。所有数据库读取由[安装观察模块](src/installation.ts)在有界事务内办理并断开连接，沿原 `_prisma_migrations` 和物理结构读取器，不另建迁移账。
+
+`migrationApproval` 绑定本次目标和所选 schema/锁/迁移摘要，是部署者核对执行范围的确认值，不是权限凭证。须先取得当前环境迁移许可、备份及停机条件，再传给 `migrate`；工具重新观察原库，仅对已核空库或公共前缀调用原 Prisma `migrate deploy`，完整链直接返回 `already_applied`。原 Prisma 排他锁与原迁移账保持；失败或失应答为 `unknown`，随后只读 `status` 核原阶段。工具不会从网络补引擎、覆盖 Client 或自动恢复 DDL。实际使用库的并发迁移/运行切换仍由部署窗口管理。
+
+`initialization.state` 分为 `not_checked`、`uninitialized`、`initialized`、`conflict`。账号就绪复用原仓储的启用主体、租户、SaaS 身份和必要管理权限；只输出状态、首次改密标记以及 `platform.initialized` 审计是否存在。没有审计不补造历史收据。`initialize` 先核完整数据状态，再调用原初始化服务；旧的 `db:initialize`/workspace 命令保留。未知响应不自动重发，先用 `status` 判断原事务结果。账号存在不证明实际密码登录成功。
+
+安装 `status` 退出 `0` 表示本次观察完成（可能仍为空库或待迁移），`1` 表示已知冲突，`2` 表示未知或用法错误。执行命令退出 `0` 表示本步骤完成，`1` 表示前置拒绝，`2` 表示结果未核定；不能只看退出码判定整套服务就绪。
+
+## 单对象升级与中断接续
+
+[升级命令](../../scripts/ops/platform-doctor-upgrade.cjs)消费正在运行的原 `/api/platform/core-packages` 接口，使用当前 SaaS 会话和宿主版本观察。先通过原登录入口取得会话，通过受控进程配置提供 `PLATFORM_DOCTOR_API_URL`（HTTPS origin 或回环 HTTP origin）和 `PLATFORM_DOCTOR_ACCESS_TOKEN`。令牌不放命令参数，不进入输出；请求禁止跳转和自动重试。包引用必须已由原发行/本地归档入口登记，命令不凭任意 URL 下载包。
+
+```sh
+node scripts/ops/platform-doctor-upgrade.cjs status
+node scripts/ops/platform-doctor-upgrade.cjs plan --kind platform --reference <候选固定包引用>
+node scripts/ops/platform-doctor-upgrade.cjs prepare --kind platform --reference <同一引用> --sha256 <预览返回的摘要>
+node scripts/ops/platform-doctor-upgrade.cjs receipt --sha256 <同一摘要>
+```
+
+只更新 Core 时使用 `--kind core --id <Core-ID>`；只更新公共数据能力时使用 `--kind platform-capability --id <能力-ID>`。`status` 分别投影锁定与实际底座/Core/能力版本、固定来源和可用状态。宿主没有真实包/原账/物理观察时保持 `unavailable`，不把传入锁当运行版本。零 Core＋AI 和 Core＋AI 是否可用由各自宿主实际供给决定。
+
+`plan` 调用原 `plan-update` 和 `preview-preparation`，复用正式 `planCoreUpdate` 的来源、不可变历史、可读范围和单对象更新约束，显示当前/候选及迁移差异。`prepare` 是显式写入原候选存储的操作，服务端重新核当前身份、原运行组合、材料和预期摘要，保留原提交意图审计；结果仍为 `deployment: pending`。准备不应用 SQL、不切换应用、不更改配置、租户授权或成员分配。
+
+中断后保留原摘要并执行 `receipt`，核 `recorded` 原记录；没有原收据或读取失败保持 `unavailable/unknown`，不能以超时判定未执行或换摘要重发。迁移未批准时不继续执行；迁移中断看原账和真实物理状态，不重放 Seed。候选的 `baseAtPreparation` 只说明准备时基线，运行切换前须重新 `status`，再按[原固定部署、CI 与配对恢复入口](../../scripts/ops/deployment/README.md)办理。工具不自动调用服务器更新器或借用旧服务器授权。
+
+切换后重新观察版本，并通过原登录/设置/授权入口核配置和权限保持。应用回退要求旧应用仍可读取当前数据；数据回填/结构已前进时，按所属迁移与已批准备份恢复方案处理，不能只换旧镜像或改原账。升级退出 `0` 只表示本次查询/候选办理有确定结果，`1` 为拒绝/缺项，`2` 为未知或用法错误，均不代替实际切换验收。
 
 ## 默认零 Core 的五步
 

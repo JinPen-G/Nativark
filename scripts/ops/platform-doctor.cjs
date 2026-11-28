@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-/** 安装组合的只读诊断。聚合本地来源、前置与正式合同检查，不启动宿主或读取数据库。
+/** 安装组合的只读诊断。默认只聚合本地来源、前置与正式合同；显式 --database 才读取原库。
  * 包、候选、部署、授权与业务状态分开；缺少权威始终未检查，不执行修复命令。
  */
 const path = require('node:path');
@@ -17,19 +17,20 @@ const HELP = `Zelo 安装组合只读诊断
 node scripts/ops/platform-doctor.cjs [--root <源码或解包目录>] [--profile platform|public-ai|selected-core]
   [--host <目标根下的宿主目录>] [--lock <绝对JSON路径>]
   [--core <Core-ID=绝对包目录>] [--capability <能力-ID=绝对包目录>]
-  [--platform-package <绝对tgz路径>] [--steps] [--json]
+  [--platform-package <绝对tgz路径>] [--steps] [--database] [--json]
 
 默认 platform：零 Core。public-ai：零 Core + 公共 AI。selected-core：由锁选择 Core 及可选能力，须提供 --host。
-仅检查本地材料和当前进程配置的存在/格式；不读 .env，不联网、安装、迁移、初始化、授权或启服务。
+默认仅检查本地材料和进程配置。--database 须显式 --profile，在工具同树读取所选数据库的原账/结构/账号。
+不读 .env，不下载、安装、迁移、初始化、授权或启服务。selected-core 的数据库观察须由所属宿主提供。
 退出 0：所检查的本地前置无缺项；1：缺项/冲突；2：用法错误或本地检查不完整。
-数据库、运行版本、初始化及业务状态始终单独显示未检查，退出 0 不表示运行可用。`;
+未选 --database 时库与账号保持未检查；数据库就绪不表示运行、登录、授权或业务可用。`;
 
 function parseArguments(args) {
   const options = { root: toolRoot, profile: 'platform', cores: new Map(), capabilities: new Map() };
   const seen = new Set();
   for (let index = 0; index < args.length; index++) {
     const flag = args[index];
-    if (['--json', '--help', '--steps'].includes(flag)) {
+    if (['--json', '--help', '--steps', '--database'].includes(flag)) {
       if (seen.has(flag)) throw Error('usage');
       options[flag.slice(2)] = true; seen.add(flag); continue;
     }
@@ -50,6 +51,7 @@ function parseArguments(args) {
   if (!['platform', 'public-ai', 'selected-core'].includes(options.profile)) throw Error('usage');
   if (options.profile === 'selected-core' ? !options.host : options.host) throw Error('usage');
   if (options.host) files.relativeFile(options.root, options.host);
+  if (options.database && !seen.has('--profile')) throw Error('usage');
   for (const key of ['lock', 'platform-package']) if (options[key] && !path.isAbsolute(options[key])) throw Error('usage');
   return options;
 }
@@ -412,9 +414,10 @@ function formatReport(report) {
   }
   lines.push('来源：' + JSON.stringify(report.sources));
   if (report.selection) lines.push('锁声明（非运行版本）：' + JSON.stringify(report.selection));
-  lines.push('数据库：unknown / 未检查；初始化、运行版本、授权与业务就绪：未检查。');
+  lines.push('数据库：' + JSON.stringify(report.database));
+  lines.push('运行、初始化及业务状态：' + JSON.stringify(report.runtime));
   if (report.nextSteps) {
-    lines.push('后续步骤（仅说明，不执行；未读取数据库，不产生放行结论）：');
+    lines.push('后续步骤（仅说明，不执行；各状态以所属观察为准）：');
     for (const step of report.nextSteps.steps) {
       lines.push(`[${step.state}] ${step.title} / ${step.actor}`, '  前置：' + step.condition, '  入口：' + step.entry);
       if (step.commands?.length) lines.push('  授权后显式办理：' + step.commands.join(' → '));
@@ -423,13 +426,27 @@ function formatReport(report) {
   }
   return lines.join('\n');
 }
-function main(args = process.argv.slice(2)) {
+async function main(args = process.argv.slice(2)) {
   let options;
   try { options = parseArguments(args); }
   catch { console.error('诊断参数无效、重复或缺值。运行 --help 查看用法。'); return 2; }
   if (options.help) { console.log(HELP); return 0; }
   try {
     const report = diagnose(options);
+    if (options.database) {
+      report.scope = 'explicit-database-read-only';
+      report.database = await require('./platform-doctor-runtime.cjs').readInstallation(options);
+      report.runtime.initialization = report.database.initialization.state;
+      const check = report.checks.find(item => item.id === 'database');
+      Object.assign(check, { required: true,
+        state: report.database.state === 'ready' && report.database.initialization.state === 'initialized' ? 'pass'
+          : report.database.state === 'unknown' ? 'not_checked' : 'missing',
+        message: '显式读取的原账、物理结构和账号：' + report.database.state + ' / ' + report.database.initialization.state,
+        repair: 'node scripts/ops/platform-doctor-install.cjs status --profile ' + options.profile + '；按公开安装入口核缺项，未知时不执行。' });
+      if (report.nextSteps) report.nextSteps = installationSteps(report, { host: options.host ?? 'apps/platform-api',
+        rootCommands: /local-dev-preflight\.cjs/u.test(files.json(path.join(options.root, 'package.json')).scripts?.dev ?? '') });
+      finish(report);
+    }
     console.log(options.json ? JSON.stringify(report, null, 2) : formatReport(report));
     return report.exitCode;
   } catch {
@@ -437,5 +454,5 @@ function main(args = process.argv.slice(2)) {
     console.error('本地诊断未完成：材料读取或正式检查器失败；未执行任何修复。'); return 2;
   }
 }
-if (require.main === module) process.exitCode = main();
+if (require.main === module) main().then(code => { process.exitCode = code; });
 module.exports = { parseArguments, diagnose, formatReport, main };

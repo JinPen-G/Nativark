@@ -33,12 +33,11 @@ function installationSteps(report, { rootCommands, host }) {
         commands: [entries.generate, entries.build].filter(Boolean) }),
     step('database-observation', '部署者', '确认目标库与原迁移账',
       '已明确目标环境、读取权限、所选数据所有者及该组合的物理观察入口。',
-      selectedCore ? host + '/README.md' : publicAi ? API + '#选装公共-ai-管理'
-        : 'scripts/ops/local-dev-preflight.cjs / publicDatabaseState（零 Core 根入口）',
+      selectedCore ? host + '/README.md' : API + '#显式安装与真实就绪',
       '区分空库、已迁移且兼容、未完成迁移和未知旧库；账号是否存在仍单独核验。',
       '读失败、旧账未知或物理结构不符时停止；不以文件、锁或进程存在判空库。',
-      { state: 'awaiting-environment-observation', databaseState: report.database.state,
-        commands: rootCommands && !publicAi && !selectedCore ? ['npm run db:migrate:status'] : [] }),
+      { state: report.database.checked ? report.database.state : 'awaiting-environment-observation', databaseState: report.database.state,
+        commands: selectedCore ? [] : ['node scripts/ops/platform-doctor-install.cjs status --profile ' + report.profile] }),
     step('migration', '部署者', '显式应用已批准迁移',
       '目标库已经实际核定；所选组合原迁移链、备份及执行范围已批准。',
       selectedCore ? host + '/README.md' : API + (publicAi ? '#选装公共-ai-管理' : '#默认零-core-的五步'),
@@ -50,7 +49,8 @@ function installationSteps(report, { rootCommands, host }) {
       selectedCore ? host + '/README.md' : 'apps/platform-api/src/initialize.ts',
       '原命令返回 initialized:true 表示创建 platform/admin；initialized:false 表示核过既有主体。该结果不创建业务租户或 Core 授权。',
       '重复执行保留原口令、角色与授权，仅补录权限目录；主体异常时停止，不恢复账号。失应答先核原主体和审计，不自动重试。',
-      { commands: entries.initialize ? [entries.initialize] : [] }),
+      { state: report.database.initialization?.state ?? 'not_checked',
+        commands: selectedCore ? [] : ['node scripts/ops/platform-doctor-install.cjs initialize --profile ' + report.profile] }),
     step('platform-login', 'SaaS 管理员', '启动并验证平台登录',
       '运行配置、唯一 Client、数据与账号已核定，且已取得该环境启动许可。',
       selectedCore ? host + '/README.md' : 'apps/platform-admin/README.md#本地使用',
@@ -96,7 +96,7 @@ function installationSteps(report, { rootCommands, host }) {
       : '按所属 Core＋AI 宿主核数据、已发布能力、当前权限及政策；普通业务不因未配置模型而失效。',
     '保留原授权与操作结果；纯读取 MCP 不要求平台模型配置或云预算，委托服务端模型才走原 Gateway 与模型账。'));
   return { scope: 'guidance-only', executes: false,
-    localPrerequisitesChecked: localIssues.length === 0, databaseObserved: false,
+    localPrerequisitesChecked: localIssues.length === 0, databaseObserved: Boolean(report.database.checked),
     missingRuntimeEvidence: ['目标环境与执行权', '原迁移账与物理结构', '实际账号/会话', '实际部署与业务结果'],
     steps };
 }
