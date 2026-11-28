@@ -413,7 +413,11 @@ jobs:
                 ...(value === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) }),
                 signal: AbortSignal.timeout(45000) });
               const result = await response.json();
-              if (!response.ok || result.value?.error) throw Error('Chrome 操作未完成：' + path.split('/').at(-1));
+              if (!response.ok || result.value?.error) {
+                const reason = ['element click intercepted', 'element not interactable', 'stale element reference', 'no such element'].includes(result.value?.error)
+                  ? result.value.error : 'webdriver_error';
+                throw Error('Chrome 操作未完成：' + path.split('/').at(-1) + ' / ' + reason);
+              }
               return result.value;
             };
             let browser;
@@ -437,6 +441,12 @@ jobs:
               const clickText = async text => {
                 await waitFor(() => buttonReady(text), text);
                 const result = await driver(prefix + '/element', { using: 'xpath', value: `//button[not(@disabled) and not(@aria-disabled='true') and (not(@data-rental-arc-action) or @data-state='idle') and (normalize-space(.)='${text}' or .//span[normalize-space(.)='${text}'])]` });
+                await dom('arguments[0].scrollIntoView({block:"center",inline:"nearest"})', result);
+                let previousBox;
+                await waitFor(async () => {
+                  const box = await dom('const e=arguments[0],r=e.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2); return !e.disabled && !e.closest("[inert]") && (hit===e||e.contains(hit)) ? [r.x,r.y,r.width,r.height].map(v=>Math.round(v*10)) : null', result);
+                  const stable = box && JSON.stringify(box) === JSON.stringify(previousBox); previousBox = box; return stable;
+                }, text + '可点击位置');
                 await driver(prefix + '/element/' + result[elementId] + '/click', {});
               };
               await driver(prefix + '/url', { url: web + '/login' });
