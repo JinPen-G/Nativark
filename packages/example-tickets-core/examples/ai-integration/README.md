@@ -140,7 +140,20 @@ OpenAPI从同一输入/输出schema投影，联合状态和仅null分支使用Op
 
 Task/Run聚合提交已使用上述固定正式出口，工单发布、原输入、计划、批准、执行、Step事实、结果与HTTP参加者已提供。可选宿主数据准入已经接到原观察器，页面动作沿同源合同接线；真实MCP身份/发布/计量/字段权威和两条路线的实际运行仍须完成。工单成功用自身已提交对象及精确原收据证明`committed`，不能伪装成订单/报告事实或`effect:none`；公共仓储继续拥有状态机、CAS、事件与复权。[原批准消费](../../../ai-native-server/src/runtime/approval-consumption-persistence.repository.ts) · [工单事务](../../src/mysql.ts)
 
-MCP的`/service`、`/persistent-oauth-authorization`、`/persistent-oauth-tokens`和`/prisma-oauth-store`提供不限定workspace的通用端口。历史名`createRentalMcpService`不代表必须使用Rental范围；`OriginalOAuthPrincipalBinding`的workspace约束属于现有Rental身份适配器。工单tenant宿主须自行提供来自原平台Auth的当前身份、持久人工同意/grant、精确发布、原计量与字段释放参加者，并在同一Native内复核；不能捏造空间ID或将通用verifier当作完整业务授权。本目录两个reader尚不等于这些参加者已装配。
+MCP的`/service`、`/persistent-oauth-authorization`、`/persistent-oauth-tokens`和`/prisma-oauth-store`提供不限定workspace的通用端口。历史名`createRentalMcpService`不代表必须使用Rental范围；`OriginalOAuthPrincipalBinding`的workspace约束属于现有Rental身份适配器。工单tenant参加者沿这些通用端口接入原平台Auth，不捏造空间ID。
+
+## tenant MCP 参加者
+
+`npm run build:mcp -w @rental-os/example-tickets-core`单独编译`/mcp`出口。普通构建、AI入口与普通标准包不加载它。[tenant参加者](tickets-mcp-tenant.mts)提供显式发布、持久人工同意/grant与原授权撤回；[读取宿主参加者](tickets-mcp-read-host.mts)提供两个工具的同事务业务权限、固定字段投影、原持久计量和原账回读。此阶段尚未提供可启动的MCP宿主，不能将这些工厂的存在标为业务可用。
+
+- 浏览器控制面须先经原Guard建ALS，再由`withBrowser`重核签名会话。OAuth身份取该已核会话的持久定位，随后同Native锁定并复核原账号、租户、角色与Core准入；没有客户端自报tenant或workspace。
+- `prepareConsent`核原客户端注册、PKCE和精确回调，保存请求及已阅摘要。`decide`只消费同一持久待决记录，批准与grant及审计一起提交。发布政策使用当前`system:params:manage`、精确client修订、scopes、有效期和显式discovery限额，无默认允许值。
+- `preview`与`authorizeRead`由已登录的人类明确选择原工单或原操作，复核事实及已阅摘要后登记读取目标/输入绑定；工具调用只定位既有绑定。tenant/user唯一目标不随token、grant或进程重建，原20次/300000ms/2并发账沿正式`createPrismaMcpReadAccounting`执行。更换grant或目标依据必须拒绝；当前未提供新目标接续，不能删除旧记录重置额度。
+- 协议发现使用原`consumeRateLimitBucket`和`platform_api_rate_buckets`，计数键固定tenant/user/协议操作，超额也在同Native提交原计数后拒绝，不占用业务读取账。调用中的原计量事务另用连接，宿主数据库池至少保留两条连接；不能让外层身份锁和内层原目标账争用单连接。
+- 工单外发仅`id/subject/state/revision`；原收据仅原operationId及对象`id/state/revision`，保持`historicalSnapshot:true`。不外发tenant/user、说明或受派者。
+- `original(grantId)`只给当前原Auth确认的本人回读原目标、预算和调用状态。撤回授权或原签名到期后，新合法登录仍可查看本人的原账；这不恢复工具权限。`reserved/unknown`保留占用、原callId与`retryable:false`，不因TTL或缺行退款/重发，也不把`returned`当作客户端收到或业务提交证明。
+
+[选装SQL材料](migrations/001-tenant-mcp.sql)只定义工单自有的政策、同意、grant、目标及绑定五表；不修改原MCP五份SQL，不包含账号/业务Seed或token明文。它须通过宿主显式后置迁移接入同一数据计划，当前尚未登记到标准包/安装贡献，不可直接执行作为安装替代。服务装配、人工同意页面、当前可用性与真实OAuth往返仍待完成；本阶段仅核内存类型、原生ESM装包加载及缺原身份拒绝，未验真实数据库。
 
 可用性UI和宿主装配继续沿本端口接线。两个MCP reader只可在真实权威已齐备的宿主选用，缺失时保持`unavailable`，不能把默认未配置当成完整MCP验收。
 

@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "rootDir": "examples/ai-integration",
+    "outDir": "dist-mcp",
+    "declaration": true,
+    "paths": { "@prisma/client": ["../../apps/platform-api/generated/client/index.d.ts"] },
+    "types": ["node"],
+    "noEmitOnError": true
+  },
+  "files": ["examples/ai-integration/index-mcp.mts"],
+  "include": []
+}

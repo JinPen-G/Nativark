@@ -34,6 +34,9 @@
       ],
       "ai": [
         "dist-ai/index.d.mts"
+      ],
+      "mcp": [
+        "dist-mcp/index-mcp.d.mts"
       ]
     }
   },
@@ -74,12 +77,17 @@
     "./ai": {
       "types": "./dist-ai/index.d.mts",
       "default": "./dist-ai/index.mjs"
+    },
+    "./mcp": {
+      "types": "./dist-mcp/index-mcp.d.mts",
+      "default": "./dist-mcp/index-mcp.mjs"
     }
   },
   "scripts": {
     "prebuild": "npm run build -w @rental-os/platform-core-host",
     "build": "tsc -p tsconfig.json",
     "build:ai": "tsc -p tsconfig.ai.json",
+    "build:mcp": "tsc -p tsconfig.mcp.json",
     "prelint": "npm run build -w @rental-os/platform-core-host",
     "lint": "tsc -p tsconfig.json --noEmit",
     "prepack:core": "npm run build",
@@ -107,7 +115,8 @@
     "@rental-os/platform-contracts": "0.1.0",
     "@rental-os/core-host": "0.1.0",
     "@rental-os/platform-admin": "0.1.0",
-    "@rental-os/ai-native-server": "0.2.1"
+    "@rental-os/ai-native-server": "0.2.1",
+    "@rental-os/mcp-server": "0.1.1"
   },
   "peerDependenciesMeta": {
     "@prisma/client": {
@@ -138,6 +147,9 @@
       "optional": true
     },
     "@rental-os/ai-native-server": {
+      "optional": true
+    },
+    "@rental-os/mcp-server": {
       "optional": true
     }
   }
