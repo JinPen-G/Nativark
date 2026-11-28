@@ -56,7 +56,7 @@ export const connection: RentalClientHostConfiguration = {
 
 所有模板使用 `envDir: false`，构建不读 `.env`；没有默认服务器或 HTTP 代理。Web build 输出各模板 `dist/`，由实际宿主托管。跨来源时由原 API 明确允许该网站来源及 `Authorization` / `Idempotency-Key`，不能让模板代理绕过服务端策略。Web hash 只携带登记路由与对象定位，不携带身份。
 
-微信 build 输出独立 `dist/app.js`、`dist/pages/client/index.js`、共享代码及原生视图资产。用微信开发者工具分别导入 `wechat-customer` 和 `wechat-staff`，两份 `project.config.json` 均指向自己的 `dist/`。在本机 `project.private.config.json` 配置各自真实 AppID，合法域名校验保持开启，并在原应用配置所用 API 的 request 合法域名。客户连接设置的 AppID 必须与导入的应用一致。客户、员工是两个独立应用/会话，不用管理员登录替代。
+微信 build 输出独立 `dist/app.js`、`dist/pages/client/index.js`、共享代码及原生视图资产。用微信开发者工具分别导入 `wechat-customer` 和 `wechat-staff`，两份 `project.config.json` 均指向自己的 `dist/`。导入时分别填写已获授权的真实 AppID；开发者工具写入的应用设置保留在各自选装工作区，不复制已有业务应用配置冒充本模板授权。合法域名校验保持开启，并在原应用配置所用 API 的 request 合法域名。客户连接设置的 AppID 必须与导入的应用一致。客户、员工是两个独立应用/会话，不用管理员登录替代。
 
 微信深链只使用登记定位，例如 `pages/client/index?route=rental.my-order&orderId=<原订单ID>`；员工服务页使用 `route=rental.service-occurrence&orderId=<原订单ID>&occurrenceId=<原发生项ID>`。原服务仍校验每个参数。微信启动等待安全随机源和正式装配完成，隐藏/卸载页面不采用迟到启动结果；缺少 `wx.getRandomValues` 时保持不可用，开发者须选择支持该 API 的基础库并在真机核对。
 
@@ -79,7 +79,7 @@ export const connection: RentalClientHostConfiguration = {
 
 微信页面的 `onHide` 与 `onUnload` 均结束当前页面寿命。即使卸载前没有收到隐藏事件，仍阻止原键持久化或动作准备的迟到完成继续派发；已保存的原引用保留，后续只按原收据核对。
 
-写入前必须持久保存原引用。Web 与微信运输均只发送一次，微信运输超时为 30 秒；超时、取消或断线不能证明未提交。`unknown` 保留原键，仅重读原收据，不换键重试。安全随机源或存储失败时拒绝派发。原收据复权独立于普通页面开关；当前对象状态不替代原收据。
+写入前必须持久保存原引用。Web 与微信运输均只发送一次，等待超时为 30 秒；Web 在结束时释放计时器和取消监听。超时、取消或断线不能证明未提交，`unknown` 保留原键，仅重读原收据，不换键重试。安全随机源或存储失败时拒绝派发。原收据复权独立于普通页面开关；当前对象状态不替代原收据。
 
 ## 待补的 Rental 接点
 

@@ -11,6 +11,7 @@ export function createRentalWebAssembly(surface: "customer-web" | "staff-web", c
   const transport: RentalContributionTransport = { async request<T>(input: Parameters<RentalContributionTransport["request"]>[0]): Promise<T> {
     input.lifetime?.assertCurrent();
     const abort = new AbortController(), unsubscribe = input.lifetime?.onCancel(() => abort.abort());
+    const timeout = globalThis.setTimeout(() => abort.abort(), 30000);
     try {
       const response = await host.fetch(selected.url(input.path), { method: input.method,
         headers: { "Content-Type": "application/json", ...input.headers, ...(input.authorization ? { Authorization: input.authorization } : {}) },
@@ -21,7 +22,7 @@ export function createRentalWebAssembly(surface: "customer-web" | "staff-web", c
       const result = responseBody<T>(await response.json());
       input.lifetime?.assertCurrent();
       return result;
-    } finally { unsubscribe?.(); }
+    } finally { globalThis.clearTimeout(timeout); unsubscribe?.(); }
   } };
   const credentials = {
     read: () => credentialProjection(storage.getItem(selected.key)),
